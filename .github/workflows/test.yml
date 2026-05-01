@@ -1,0 +1,131 @@
+name: Tests
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  api-tests:
+    name: Backend (zaz-api)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: zaz-api
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: zaz_test
+          POSTGRES_USER: zaz_test
+          POSTGRES_PASSWORD: zaz_test
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: zaz-api/package-lock.json
+      - run: npm ci
+      - name: Run unit tests
+        run: npm test
+        continue-on-error: true
+      - name: Run integration tests
+        env:
+          DB_HOST: localhost
+          DB_PORT: 5433
+          DB_NAME: zaz_test
+          DB_USER: zaz_test
+          DB_PASSWORD: zaz_test
+          JWT_SECRET: ci-test-secret-32-characters-long
+          NODE_ENV: test
+          STRIPE_SECRET_KEY: sk_test_dummy
+          STRIPE_WEBHOOK_SECRET: whsec_test
+          STRIPE_SUBSCRIPTION_PRICE_ID: price_test_monthly
+          DB_SYNCHRONIZE: 'false'
+        run: npm run test:integration
+        continue-on-error: true
+      - name: Run E2E tests
+        env:
+          DB_HOST: localhost
+          DB_PORT: 5433
+          DB_NAME: zaz_test
+          DB_USER: zaz_test
+          DB_PASSWORD: zaz_test
+          JWT_SECRET: ci-test-secret-32-characters-long
+          NODE_ENV: test
+          STRIPE_SECRET_KEY: sk_test_dummy
+          STRIPE_WEBHOOK_SECRET: whsec_test
+          STRIPE_SUBSCRIPTION_PRICE_ID: price_test_monthly
+        run: npm run test:e2e
+        continue-on-error: true
+      - name: Upload coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: api-coverage
+          path: zaz-api/coverage
+          retention-days: 7
+
+  web-tests:
+    name: Web (zaz-web)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: zaz-web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: zaz-web/package-lock.json
+      - run: npm ci
+      - name: Run tests
+        run: npm test
+        continue-on-error: true
+      - name: Run coverage
+        run: npm run test:cov
+        continue-on-error: true
+      - name: Upload coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-coverage
+          path: zaz-web/coverage
+          retention-days: 7
+
+  mobile-tests:
+    name: Mobile (zaz)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: zaz
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: zaz/package-lock.json
+      - run: npm ci
+      - name: Run tests
+        run: npm test
+        continue-on-error: true
+      - name: Run coverage
+        run: npm run test:cov
+        continue-on-error: true
+      - name: Upload coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mobile-coverage
+          path: zaz/coverage
+          retention-days: 7

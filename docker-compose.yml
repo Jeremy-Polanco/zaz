@@ -1,0 +1,93 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: zaz-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-zaz}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-zaz_dev}
+      POSTGRES_DB: ${POSTGRES_DB:-zaz_db}
+    ports:
+      - "${POSTGRES_HOST_PORT:-5433}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-zaz} -d ${POSTGRES_DB:-zaz_db}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - zaz-net
+
+  adminer:
+    image: adminer:latest
+    container_name: zaz-adminer
+    restart: unless-stopped
+    ports:
+      - "${ADMINER_PORT:-8080}:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - zaz-net
+
+  api:
+    build:
+      context: ./zaz-api
+      target: dev
+    container_name: zaz-api
+    restart: unless-stopped
+    environment:
+      NODE_ENV: development
+      API_PORT: 3001
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: ${POSTGRES_USER:-zaz}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-zaz_dev}
+      DB_NAME: ${POSTGRES_DB:-zaz_db}
+      DB_SYNCHRONIZE: "true"
+      JWT_SECRET: ${JWT_SECRET:-change-me-in-prod-please-and-thank-you}
+      JWT_ACCESS_TTL: ${JWT_ACCESS_TTL:-1h}
+      JWT_REFRESH_TTL: ${JWT_REFRESH_TTL:-7d}
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:5173}
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
+      TWILIO_ACCOUNT_SID: ${TWILIO_ACCOUNT_SID:-}
+      TWILIO_API_KEY_SID: ${TWILIO_API_KEY_SID:-}
+      TWILIO_API_KEY_SECRET: ${TWILIO_API_KEY_SECRET:-}
+      TWILIO_FROM_NUMBER: ${TWILIO_FROM_NUMBER:-}
+    ports:
+      - "${API_HOST_PORT:-3001}:3001"
+    volumes:
+      - ./zaz-api:/app
+      - /app/node_modules
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - zaz-net
+
+  web:
+    build:
+      context: ./zaz-web
+      target: dev
+    container_name: zaz-web
+    restart: unless-stopped
+    environment:
+      VITE_API_URL: ${VITE_API_URL:-http://localhost:3001/api}
+    ports:
+      - "${WEB_HOST_PORT:-5173}:5173"
+    volumes:
+      - ./zaz-web:/app
+      - /app/node_modules
+    depends_on:
+      - api
+    networks:
+      - zaz-net
+
+volumes:
+  postgres_data:
+
+networks:
+  zaz-net:
+    driver: bridge

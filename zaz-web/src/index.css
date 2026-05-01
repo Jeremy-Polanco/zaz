@@ -1,0 +1,233 @@
+@import "tailwindcss";
+
+@theme {
+  /* --- ZAZ palette (purple + lightning yellow) --- */
+  --color-paper: #FAFAFC;
+  --color-paper-deep: #F0F0F5;
+  --color-paper-elev: #FFFFFF;
+  --color-ink: #1A1530;
+  --color-ink-soft: #4A4566;
+  --color-ink-muted: #6B6488;
+  --color-ink-faint: rgba(26, 21, 48, 0.15);
+  --color-ink-hair: rgba(26, 21, 48, 0.10);
+  --color-line: #1A1530;
+
+  --color-brand: #220247;
+  --color-brand-dark: #15012E;
+  --color-brand-light: #E8E0F5;
+
+  --color-accent: #F5E447;
+  --color-accent-dark: #D4C12E;
+  --color-accent-light: #FFF9D6;
+
+  --color-ok: #2f7d5b;
+  --color-warn: #7d5500;
+  --color-bad: #a83232;
+
+  /* --- Typography --- */
+  --font-sans: "Inter Tight", ui-sans-serif, system-ui, -apple-system,
+    "Segoe UI", sans-serif;
+
+  /* --- Radius --- */
+  --radius-xs: 2px;
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 10px;
+
+  /* --- Shadows (hairline border, minimal) --- */
+  --shadow-paper: 0 0 0 1px rgba(26, 21, 48, 0.08);
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  font-family: var(--font-sans);
+  background-color: var(--color-paper);
+  color: var(--color-ink);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+/* Tabular numbers for prices, totals, tables */
+.nums {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1, "lnum" 1;
+}
+
+/* Display type utility (single-font, modern) */
+.display {
+  font-family: var(--font-sans);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+/* Eyebrow / overline */
+.eyebrow {
+  font-family: var(--font-sans);
+  font-size: 0.7rem;
+  font-weight: 500;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--color-ink-muted);
+}
+
+/* Hairline — thin ink divider */
+.hairline {
+  height: 1px;
+  background-color: var(--color-ink);
+  opacity: 0.12;
+}
+
+/* Page enter animation */
+@keyframes page-rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.page-rise {
+  animation: page-rise 400ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+
+@keyframes page-rise-delayed {
+  0%,
+  30% {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.page-rise-2 {
+  animation: page-rise-delayed 700ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+
+/* Marquee (landing banner) */
+@keyframes marquee {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+
+.marquee-track {
+  animation: marquee 38s linear infinite;
+}
+
+/* ── ZAZ design system additions ────────────────────────── */
+
+/* Tabular numerals — alias of .nums for design-system parity */
+.tabnum {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+
+/* Label — small uppercase tracker */
+.label {
+  font-size: 10px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.10em;
+}
+
+/* Subtitle — under display headings */
+.subtitle {
+  font-size: 15px;
+  color: var(--color-ink-soft);
+  line-height: 1.4;
+}
+
+/* Italic emphasis inside display headings ("Mi suscripción.") */
+.display em {
+  font-style: italic;
+  font-weight: 600;
+}
+
+/* Striped placeholder image — for product/category covers without real assets */
+.placeholder-img {
+  background:
+    repeating-linear-gradient(
+      135deg,
+      var(--color-paper-deep),
+      var(--color-paper-deep) 6px,
+      color-mix(in srgb, var(--color-ink) 6%, var(--color-paper-deep)) 6px,
+      color-mix(in srgb, var(--color-ink) 6%, var(--color-paper-deep)) 12px
+    );
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: ui-monospace, "SF Mono", monospace;
+  font-size: 9px;
+  color: var(--color-ink-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  border: 1px solid var(--color-ink-faint);
+}
+
+/* Hide scrollbars on horizontal chip/scroll rows */
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { scrollbar-width: none; }
+
+/* ── Animations from design system ──────────────────────── */
+.fade-in { animation: fadeIn 0.22s ease; }
+@keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+
+.slide-in-right { animation: slideRight 0.28s cubic-bezier(0.2, 0.8, 0.2, 1); }
+@keyframes slideRight { from { transform: translateX(20px); opacity: 0; } to { transform: none; opacity: 1; } }
+
+.slide-up { animation: slideUp 0.32s cubic-bezier(0.2, 0.8, 0.2, 1); }
+@keyframes slideUp { from { transform: translateY(40px); opacity: 0; } to { transform: none; opacity: 1; } }
+
+.slide-in-up { animation: slideInUp 0.24s cubic-bezier(0.2, 0.8, 0.2, 1); }
+@keyframes slideInUp { from { transform: translateY(12px); opacity: 0; } to { transform: none; opacity: 1; } }
+
+/* Status pill dot pulse animation */
+@keyframes pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.4; transform: scale(0.7); }
+}
+.pulse-dot { animation: pulse 1.6s ease-in-out infinite; }
+
+/* Focus ring — ink, not blue blurry browser default */
+:focus-visible {
+  outline: 2px solid var(--color-ink);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+/* Selection */
+::selection {
+  background-color: var(--color-accent);
+  color: var(--color-paper);
+}
+
+/* Scrollbar — keep it quiet */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(26, 21, 48, 0.22);
+  border-radius: 999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(26, 21, 48, 0.38);
+}

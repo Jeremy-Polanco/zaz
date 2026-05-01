@@ -1,0 +1,135 @@
+# DigitalOcean App Platform spec for Zaz API + managed Postgres.
+#
+# Apply this once via:
+#   doctl apps create --spec .do/app.yaml
+#
+# Or import it from the DO dashboard: Apps → Create App → "Import App Spec".
+#
+# After the first deploy:
+#   - Hit /api/health to confirm DB connectivity.
+#   - Set the rest of the secrets (Stripe, Twilio, Sentry, JWT_SECRET) in the
+#     DO dashboard under each component's Environment Variables.
+#   - Configure the Stripe webhook in your Stripe dashboard pointing to:
+#       https://<your-app>.ondigitalocean.app/api/payments/stripe/webhook
+
+name: zaz
+region: nyc
+
+services:
+  - name: api
+    github:
+      branch: main
+      deploy_on_push: true
+      repo: Jeremy-Polanco/zaz
+    source_dir: zaz-api
+    dockerfile_path: zaz-api/Dockerfile
+    # Multi-stage Dockerfile — target the prod stage which only contains
+    # dist + production deps.
+    build_command: ""
+    http_port: 3001
+    instance_count: 1
+    instance_size_slug: basic-xxs
+    health_check:
+      http_path: /api/health
+      initial_delay_seconds: 15
+      period_seconds: 30
+      timeout_seconds: 5
+      success_threshold: 1
+      failure_threshold: 3
+    routes:
+      - path: /api
+    envs:
+      # Runtime
+      - key: NODE_ENV
+        scope: RUN_AND_BUILD_TIME
+        value: production
+      - key: API_PORT
+        scope: RUN_AND_BUILD_TIME
+        value: "3001"
+      # DB — bound from the managed-database resource below.
+      - key: DB_HOST
+        scope: RUN_TIME
+        value: ${zaz-db.HOSTNAME}
+      - key: DB_PORT
+        scope: RUN_TIME
+        value: ${zaz-db.PORT}
+      - key: DB_USER
+        scope: RUN_TIME
+        value: ${zaz-db.USERNAME}
+      - key: DB_PASSWORD
+        scope: RUN_TIME
+        value: ${zaz-db.PASSWORD}
+        type: SECRET
+      - key: DB_NAME
+        scope: RUN_TIME
+        value: ${zaz-db.DATABASE}
+      - key: DB_SSL
+        scope: RUN_TIME
+        value: "true"
+      - key: DB_SYNCHRONIZE
+        scope: RUN_TIME
+        value: "false"
+      # Auth — set via DO dashboard. Min 32 chars.
+      - key: JWT_SECRET
+        scope: RUN_TIME
+        value: REPLACE_VIA_DO_DASHBOARD_MIN_32_CHARS
+        type: SECRET
+      - key: JWT_ACCESS_TTL
+        scope: RUN_TIME
+        value: "1h"
+      - key: JWT_REFRESH_TTL
+        scope: RUN_TIME
+        value: "30d"
+      # CORS — comma-separated list of allowed origins (no trailing slash).
+      - key: CORS_ORIGIN
+        scope: RUN_TIME
+        value: REPLACE_WITH_VERCEL_URL
+      - key: PUBLIC_WEB_URL
+        scope: RUN_TIME
+        value: REPLACE_WITH_VERCEL_URL
+      # Stripe — TEST keys for now.
+      - key: STRIPE_SECRET_KEY
+        scope: RUN_TIME
+        value: REPLACE_WITH_STRIPE_TEST_KEY
+        type: SECRET
+      - key: STRIPE_WEBHOOK_SECRET
+        scope: RUN_TIME
+        value: REPLACE_WITH_STRIPE_WEBHOOK_SECRET
+        type: SECRET
+      - key: STRIPE_SUBSCRIPTION_PRICE_ID
+        scope: RUN_TIME
+        value: REPLACE_WITH_STRIPE_PRICE_ID
+      # Twilio — production credentials.
+      - key: TWILIO_ACCOUNT_SID
+        scope: RUN_TIME
+        value: REPLACE_WITH_TWILIO_PROD_SID
+        type: SECRET
+      - key: TWILIO_API_KEY_SID
+        scope: RUN_TIME
+        value: REPLACE_WITH_TWILIO_PROD_KEY_SID
+        type: SECRET
+      - key: TWILIO_API_KEY_SECRET
+        scope: RUN_TIME
+        value: REPLACE_WITH_TWILIO_PROD_KEY_SECRET
+        type: SECRET
+      - key: TWILIO_FROM_NUMBER
+        scope: RUN_TIME
+        value: REPLACE_WITH_TWILIO_PROD_PHONE
+      # Sentry — paste DSN from the API project in Sentry.
+      - key: SENTRY_DSN
+        scope: RUN_TIME
+        value: REPLACE_WITH_SENTRY_API_DSN
+        type: SECRET
+      - key: SENTRY_TRACES_SAMPLE_RATE
+        scope: RUN_TIME
+        value: "0.1"
+
+databases:
+  - name: zaz-db
+    engine: PG
+    version: "16"
+    production: false
+    cluster_name: zaz-db
+    db_name: zaz
+    db_user: zaz
+    size: db-s-dev-database
