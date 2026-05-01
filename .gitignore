@@ -36,9 +36,12 @@ pnpm-debug.log*
 
 # ── Claude Code / agent workspace state ────────────────────────────────────
 # Local-only LLM tooling state (huge, transient). The committable part of
-# .claude/ — like CLAUDE.md and skills/ — is whitelisted below.
+# .claude/ — like CLAUDE.md — is whitelisted below.
 .claude/projects/
 .claude/settings.local.json
+# .claude/skills/ are symlinks pointing into .agents/ (which is gitignored),
+# so they're broken everywhere except this laptop. Don't track them.
+**/.claude/skills/
 .agents/
 .atl/
 
