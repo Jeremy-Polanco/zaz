@@ -22,6 +22,9 @@ services:
       deploy_on_push: true
       repo: Jeremy-Polanco/zaz
     source_dir: zaz-api
+    # NOTE: dockerfile_path is relative to the REPO ROOT (not to source_dir).
+    # source_dir sets the build context; dockerfile_path locates the Dockerfile
+    # in the git tree. Both must be specified independently.
     dockerfile_path: zaz-api/Dockerfile
     # Multi-stage Dockerfile — target the prod stage which only contains
     # dist + production deps.
@@ -129,7 +132,7 @@ databases:
     engine: PG
     version: "16"
     production: false
-    cluster_name: zaz-db
-    db_name: zaz
-    db_user: zaz
     size: db-s-dev-database
+    # Dev tier auto-generates db_name and db_user. DO exposes them via the
+    # ${zaz-db.DATABASE} / ${zaz-db.USERNAME} / ${zaz-db.PASSWORD} / etc.
+    # bindings already wired in the api component above.
