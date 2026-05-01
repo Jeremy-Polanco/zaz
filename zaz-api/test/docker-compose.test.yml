@@ -1,0 +1,16 @@
+services:
+  postgres-test:
+    image: postgres:16-alpine
+    ports:
+      - "5433:5432"
+    environment:
+      POSTGRES_DB: zaz_test
+      POSTGRES_USER: zaz_test
+      POSTGRES_PASSWORD: zaz_test
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U zaz_test -d zaz_test"]
+      interval: 1s
+      timeout: 5s
+      retries: 30

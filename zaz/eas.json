@@ -1,0 +1,33 @@
+{
+  "cli": {
+    "version": ">= 16.0.0"
+  },
+  "build": {
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal",
+      "env": {
+        "EXPO_PUBLIC_API_URL": "http://localhost:3002/api",
+        "EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY": "pk_test_51TNgYHFn1dRnuWEYTHrbdEQPtHRpuOC0qcy9Zv5PLjh8isy8mIyhe14KxZcStldGu3g1aiu3ZkGS0t0WoIxsDoyP00VvhnVrSX"
+      }
+    },
+    "preview": {
+      "distribution": "internal",
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://api-staging.zaz.com/api",
+        "EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY": "pk_test_51TNgYHFn1dRnuWEYTHrbdEQPtHRpuOC0qcy9Zv5PLjh8isy8mIyhe14KxZcStldGu3g1aiu3ZkGS0t0WoIxsDoyP00VvhnVrSX"
+      }
+    },
+    "production": {
+      "distribution": "store",
+      "autoIncrement": true,
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://api.zaz.com/api",
+        "EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY": "pk_live_replace_with_eas_secret"
+      }
+    }
+  },
+  "submit": {
+    "production": {}
+  }
+}
