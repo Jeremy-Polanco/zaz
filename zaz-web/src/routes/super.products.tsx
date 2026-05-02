@@ -1092,35 +1092,26 @@ function SuperProductsPage() {
   const editingOrCreating = editing !== null || creating
 
   return (
-    <div className="page-rise mx-auto max-w-6xl px-6 py-12">
-      <SectionHeading
-        eyebrow="Panel · Catálogo"
-        title={
-          <>
-            Catálogo <span className="italic text-brand">global.</span>
-          </>
-        }
-        subtitle={`${products?.length ?? 0} producto${products?.length === 1 ? '' : 's'}.`}
-        action={
-          !editingOrCreating ? (
-            <Button variant="accent" onClick={() => setCreating(true)}>
-              + Nuevo producto
-            </Button>
-          ) : undefined
-        }
-      />
-
-      {editingOrCreating ? (
-        <ProductForm
-          editing={editing}
-          onDone={() => {
-            setEditing(null)
-            setCreating(false)
-          }}
+    <>
+      <div className="page-rise mx-auto max-w-6xl px-6 py-12">
+        <SectionHeading
+          eyebrow="Panel · Catálogo"
+          title={
+            <>
+              Catálogo <span className="italic text-brand">global.</span>
+            </>
+          }
+          subtitle={`${products?.length ?? 0} producto${products?.length === 1 ? '' : 's'}.`}
+          action={
+            !editingOrCreating ? (
+              <Button variant="accent" onClick={() => setCreating(true)}>
+                + Nuevo producto
+              </Button>
+            ) : undefined
+          }
         />
-      ) : null}
 
-      <div className="flex flex-col gap-4">
+        <div className="flex flex-col gap-4">
         {(products ?? []).map((p) => {
           const cat = p.categoryId ? categoryById.get(p.categoryId) : null
           return (
@@ -1199,15 +1190,29 @@ function SuperProductsPage() {
           )
         })}
 
-        {(products ?? []).length === 0 && !editingOrCreating ? (
-          <div className="flex flex-col items-center gap-4 border border-dashed border-ink/20 py-20 text-center">
-            <span className="eyebrow">Sin productos</span>
-            <p className="display text-2xl text-ink-muted">
-              Agrega el primer producto global.
-            </p>
-          </div>
-        ) : null}
+          {(products ?? []).length === 0 && !editingOrCreating ? (
+            <div className="flex flex-col items-center gap-4 border border-dashed border-ink/20 py-20 text-center">
+              <span className="eyebrow">Sin productos</span>
+              <p className="display text-2xl text-ink-muted">
+                Agrega el primer producto global.
+              </p>
+            </div>
+          ) : null}
+        </div>
       </div>
-    </div>
+
+      {/* Rendered as a sibling of .page-rise — its `transform` animation
+          would otherwise become the containing block for any fixed-position
+          descendant, trapping the modal inside the max-w-6xl column. */}
+      {editingOrCreating ? (
+        <ProductForm
+          editing={editing}
+          onDone={() => {
+            setEditing(null)
+            setCreating(false)
+          }}
+        />
+      ) : null}
+    </>
   )
 }
