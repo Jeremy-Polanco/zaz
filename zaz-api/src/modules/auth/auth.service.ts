@@ -105,16 +105,14 @@ export class AuthService {
       throw new UnauthorizedException('Código inválido');
     }
 
-    await this.otps.update(otp.id, { consumedAt: new Date() });
-
-    // Borrado pasivo de OTPs vencidos del mismo teléfono
-    await this.otps.delete({ phone, expiresAt: LessThan(new Date()) });
-
     let user = await this.users.findOne({ where: { phone } });
     let isNewUser = false;
 
     if (!user) {
       if (!dto.fullName) {
+        // Don't consume the OTP yet — the client will resubmit with the name
+        // using the same still-valid code. Consuming here would force the
+        // user to request a brand new SMS for what is really one login flow.
         throw new BadRequestException(
           'Es tu primer ingreso — mandá también tu nombre',
         );
@@ -142,6 +140,11 @@ export class AuthService {
       );
       isNewUser = true;
     }
+
+    // OTP is consumed only after we're committed to issuing tokens, so any
+    // earlier validation failure leaves the code reusable within its TTL.
+    await this.otps.update(otp.id, { consumedAt: new Date() });
+    await this.otps.delete({ phone, expiresAt: LessThan(new Date()) });
 
     const tokens = await this.issueTokens(user);
     return { ...tokens, isNewUser };
