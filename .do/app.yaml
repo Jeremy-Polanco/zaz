@@ -40,7 +40,12 @@ services:
       success_threshold: 1
       failure_threshold: 3
     routes:
+      # preserve_path_prefix=true so DO does NOT strip /api before forwarding.
+      # main.ts uses app.setGlobalPrefix('api'), so the container expects to
+      # receive /api/* paths intact. Without this, requests to /api/health
+      # would arrive at the container as /health and 404.
       - path: /api
+        preserve_path_prefix: true
     envs:
       # Runtime
       - key: NODE_ENV
