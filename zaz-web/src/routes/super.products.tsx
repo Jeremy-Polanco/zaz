@@ -1,6 +1,6 @@
 import { createFileRoute, isRedirect, redirect } from '@tanstack/react-router'
 import { useEffect, useMemo, useState } from 'react'
-import { Button, FieldError, Input, Label, SectionHeading, Select, Textarea } from '../components/ui'
+import { Button, FieldError, Input, Label, SectionHeading, Textarea } from '../components/ui'
 import {
   useAdminProducts,
   useCategories,
@@ -240,7 +240,7 @@ function ProductForm({
             stock !== (editing.stock ?? 0)
       if (needsInventorySync) {
         await updateInventory.mutateAsync({
-          productId: saved.id,
+          id: saved.id,
           isAvailable: state.isAvailable,
           stock,
         })

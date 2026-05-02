@@ -183,6 +183,13 @@ export function useUsers() {
   })
 }
 
+export function useCurrentUser() {
+  return useQuery<AuthUser>({
+    queryKey: ['auth', 'me'],
+    queryFn: async () => (await api.get<AuthUser>('/auth/me')).data,
+  })
+}
+
 export type CreateProductInput = {
   name: string
   description?: string
