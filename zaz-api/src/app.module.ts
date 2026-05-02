@@ -72,6 +72,15 @@ import { RequestLoggerMiddleware } from './common/middleware/request-logger.midd
         TWILIO_API_KEY_SID: Joi.string().required(),
         TWILIO_API_KEY_SECRET: Joi.string().required(),
         TWILIO_FROM_NUMBER: Joi.string().required(),
+        // Auth bypass — comma-separated list of E.164 phones that skip the
+        // Twilio call and accept AUTH_BYPASS_OTP_CODE as their OTP. Temporary
+        // workaround until A2P 10DLC is registered or Twilio Verify is wired in.
+        // LEAVE EMPTY in production once Verify is live.
+        AUTH_BYPASS_PHONES: Joi.string().allow('').default(''),
+        AUTH_BYPASS_OTP_CODE: Joi.string().length(6).default('000000'),
+        // Comma-separated phones that get SUPER_ADMIN_DELIVERY role on FIRST
+        // creation. Existing users are NOT auto-promoted — change roles in DB.
+        AUTH_BOOTSTRAP_ADMIN_PHONES: Joi.string().allow('').default(''),
         // App
         CORS_ORIGIN: Joi.string().default('http://localhost:5173'),
         API_PORT: Joi.number().default(3001),

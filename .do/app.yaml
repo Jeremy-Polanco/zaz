@@ -123,6 +123,19 @@ services:
       - key: TWILIO_FROM_NUMBER
         scope: RUN_TIME
         value: REPLACE_WITH_TWILIO_PROD_PHONE
+      # Auth bypass — temporary while A2P 10DLC is being registered.
+      # Comma-separated E.164 phones that skip Twilio entirely.
+      - key: AUTH_BYPASS_PHONES
+        scope: RUN_TIME
+        value: "+19172541473"
+      - key: AUTH_BYPASS_OTP_CODE
+        scope: RUN_TIME
+        value: "000000"
+      # Phones bootstrapped as SUPER admin on first login. Lets seed a real
+      # admin account without needing psql access.
+      - key: AUTH_BOOTSTRAP_ADMIN_PHONES
+        scope: RUN_TIME
+        value: "+19172541473"
       # Sentry — paste DSN from the API project in Sentry.
       - key: SENTRY_DSN
         scope: RUN_TIME

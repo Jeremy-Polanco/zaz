@@ -64,7 +64,10 @@ export class AuthService {
       }
     }
 
-    const code = this.generateOtpCode();
+    const isBypass = this.isBypassPhone(phone);
+    const code = isBypass
+      ? this.config.get<string>('AUTH_BYPASS_OTP_CODE', '000000')
+      : this.generateOtpCode();
     const codeHash = await bcrypt.hash(code, BCRYPT_ROUNDS);
     const expiresAt = new Date(Date.now() + OTP_TTL_MINUTES * 60 * 1000);
 
@@ -72,12 +75,35 @@ export class AuthService {
       this.otps.create({ phone, codeHash, expiresAt, attempts: 0 }),
     );
 
-    await this.twilio.sendSms(
-      phone,
-      `Tu código Zaz es ${code}. Vence en ${OTP_TTL_MINUTES} min.`,
-    );
+    if (isBypass) {
+      this.logger.warn(
+        `[AUTH_BYPASS] OTP send skipped for ${phone}; client should submit AUTH_BYPASS_OTP_CODE`,
+      );
+    } else {
+      await this.twilio.sendSms(
+        phone,
+        `Tu código Zaz es ${code}. Vence en ${OTP_TTL_MINUTES} min.`,
+      );
+    }
 
     return { sent: true, expiresAt: expiresAt.toISOString() };
+  }
+
+  private isBypassPhone(phone: string): boolean {
+    return this.parsePhoneList('AUTH_BYPASS_PHONES').includes(phone);
+  }
+
+  private isBootstrapAdminPhone(phone: string): boolean {
+    return this.parsePhoneList('AUTH_BOOTSTRAP_ADMIN_PHONES').includes(phone);
+  }
+
+  private parsePhoneList(envKey: string): string[] {
+    const list = this.config.get<string>(envKey, '');
+    if (!list) return [];
+    return list
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
   }
 
   async verifyOtp(dto: VerifyOtpDto) {
@@ -129,16 +155,24 @@ export class AuthService {
         referredById = promoter.id;
       }
 
+      const isBootstrapAdmin = this.isBootstrapAdminPhone(phone);
       user = await this.users.save(
         this.users.create({
           phone,
           fullName: dto.fullName,
           email: null,
-          role: UserRole.CLIENT,
+          role: isBootstrapAdmin
+            ? UserRole.SUPER_ADMIN_DELIVERY
+            : UserRole.CLIENT,
           referredById,
         }),
       );
       isNewUser = true;
+      if (isBootstrapAdmin) {
+        this.logger.warn(
+          `[AUTH_BOOTSTRAP] new user ${phone} provisioned as SUPER_ADMIN_DELIVERY`,
+        );
+      }
     }
 
     // OTP is consumed only after we're committed to issuing tokens, so any
