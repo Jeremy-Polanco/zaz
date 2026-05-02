@@ -248,7 +248,8 @@ function SuperPromoterDetailPage() {
   }
 
   return (
-    <div className="page-rise mx-auto max-w-6xl px-6 py-12">
+    <>
+      <div className="page-rise mx-auto max-w-6xl px-6 py-12">
       <SectionHeading
         eyebrow="Promotor · Detalle"
         title={
@@ -407,6 +408,10 @@ function SuperPromoterDetailPage() {
         </div>
       </div>
 
+      </div>
+
+      {/* Modal hoisted out of .page-rise — its `transform` animation creates
+          a containing block that traps `position: fixed` descendants. */}
       {modalOpen ? (
         <PayoutModal
           promoterName={promoter.fullName}
@@ -419,6 +424,6 @@ function SuperPromoterDetailPage() {
           errorMsg={errorMsg}
         />
       ) : null}
-    </div>
+    </>
   )
 }

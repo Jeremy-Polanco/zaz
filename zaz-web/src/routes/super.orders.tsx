@@ -271,46 +271,50 @@ function SuperOrdersPage() {
   }
 
   return (
-    <div className="page-rise mx-auto max-w-7xl px-6 py-12">
-      <SectionHeading
-        eyebrow="Panel · Reparto"
-        title={
-          <>
-            Ruta de <span className="italic text-brand">entrega</span>
-          </>
-        }
-        subtitle={`${pendingRoute.length} pedido${pendingRoute.length === 1 ? '' : 's'} en ruta · ${orders?.length ?? 0} totales hoy.`}
-      />
+    <>
+      <div className="page-rise mx-auto max-w-7xl px-6 py-12">
+        <SectionHeading
+          eyebrow="Panel · Reparto"
+          title={
+            <>
+              Ruta de <span className="italic text-brand">entrega</span>
+            </>
+          }
+          subtitle={`${pendingRoute.length} pedido${pendingRoute.length === 1 ? '' : 's'} en ruta · ${orders?.length ?? 0} totales hoy.`}
+        />
 
-      <div className="mb-10 grid grid-cols-2 gap-4 sm:grid-cols-5">
-        <Metric
-          label="Por cotizar"
-          value={pendingQuote}
-          accent={pendingQuote > 0}
+        <div className="mb-10 grid grid-cols-2 gap-4 sm:grid-cols-5">
+          <Metric
+            label="Por cotizar"
+            value={pendingQuote}
+            accent={pendingQuote > 0}
+          />
+          <Metric
+            label="Pendientes de confirmar"
+            value={pendingConfirm}
+            accent={pendingConfirm > 0}
+          />
+          <Metric label="Listos para salir" value={readyToGo} accent={readyToGo > 0} />
+          <Metric label="En camino" value={inRoute} />
+          <Metric label="Entregados hoy" value={delivered} />
+        </div>
+
+        <DataTable
+          data={orders ?? []}
+          columns={columns}
+          filterPlaceholder="Buscar por cliente, colmado o dirección…"
+          emptyMessage="No hay pedidos en ruta."
         />
-        <Metric
-          label="Pendientes de confirmar"
-          value={pendingConfirm}
-          accent={pendingConfirm > 0}
-        />
-        <Metric label="Listos para salir" value={readyToGo} accent={readyToGo > 0} />
-        <Metric label="En camino" value={inRoute} />
-        <Metric label="Entregados hoy" value={delivered} />
       </div>
 
-      <DataTable
-        data={orders ?? []}
-        columns={columns}
-        filterPlaceholder="Buscar por cliente, colmado o dirección…"
-        emptyMessage="No hay pedidos en ruta."
-      />
-
+      {/* Drawer rendered as sibling of .page-rise — its `transform` animation
+          would otherwise become the containing block for the fixed overlay. */}
       {quotingOrder && (
         <QuoteDrawer
           order={quotingOrder}
           onClose={() => setQuotingOrder(null)}
         />
       )}
-    </div>
+    </>
   )
 }
