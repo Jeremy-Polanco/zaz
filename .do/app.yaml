@@ -1,16 +1,43 @@
 # DigitalOcean App Platform spec for Zaz API + managed Postgres.
 #
-# Apply this once via:
+# ┌─────────────────────────────────────────────────────────────────────┐
+# │ ⚠️  DO NOT run `doctl apps update --spec .do/app.yaml` lightly.     │
+# │                                                                     │
+# │ DO replaces ALL env vars with what's in this spec. Anything NOT in  │
+# │ here gets WIPED from the dashboard. Anything in here OVERWRITES     │
+# │ what the dashboard has — including encrypted secrets.               │
+# │                                                                     │
+# │ This file ONLY declares non-secret operational defaults and the     │
+# │ DB-binding template tokens. Secrets and deploy-specific URLs        │
+# │ (JWT_SECRET, STRIPE_*, TWILIO_*, SENTRY_DSN, CORS_ORIGIN,           │
+# │ PUBLIC_WEB_URL) are managed EXCLUSIVELY in the DO dashboard.        │
+# │                                                                     │
+# │ For env var changes after initial creation, use:                    │
+# │   - The DO dashboard (Apps → zaz → Settings → Components → api)     │
+# │   - `doctl apps update <id> --env KEY=VALUE` (single var)           │
+# │                                                                     │
+# │ Code changes deploy automatically via `deploy_on_push: true`.       │
+# │ Pushing to main triggers a rebuild that PRESERVES dashboard env.    │
+# └─────────────────────────────────────────────────────────────────────┘
+#
+# Apply this once for the FIRST create only:
 #   doctl apps create --spec .do/app.yaml
 #
-# Or import it from the DO dashboard: Apps → Create App → "Import App Spec".
+# After creation, set these in the dashboard:
+#   JWT_SECRET                       (openssl rand -base64 48)
+#   CORS_ORIGIN                      (Vercel URL, no trailing /)
+#   PUBLIC_WEB_URL                   (Vercel URL, no trailing /)
+#   STRIPE_SECRET_KEY                (sk_test_... or sk_live_...)
+#   STRIPE_WEBHOOK_SECRET            (whsec_... after creating webhook)
+#   STRIPE_SUBSCRIPTION_PRICE_ID     (price_...)
+#   TWILIO_ACCOUNT_SID               (AC...)
+#   TWILIO_API_KEY_SID               (SK...)
+#   TWILIO_API_KEY_SECRET            (one-time at API key creation)
+#   TWILIO_FROM_NUMBER               (E.164, e.g. +1...)
+#   SENTRY_DSN                       (from Sentry project, optional)
 #
-# After the first deploy:
-#   - Hit /api/health to confirm DB connectivity.
-#   - Set the rest of the secrets (Stripe, Twilio, Sentry, JWT_SECRET) in the
-#     DO dashboard under each component's Environment Variables.
-#   - Configure the Stripe webhook in your Stripe dashboard pointing to:
-#       https://<your-app>.ondigitalocean.app/api/payments/stripe/webhook
+# Stripe webhook URL after deploy:
+#   https://<your-app>.ondigitalocean.app/api/payments/stripe/webhook
 
 name: zaz
 region: nyc
@@ -47,14 +74,16 @@ services:
       - path: /api
         preserve_path_prefix: true
     envs:
-      # Runtime
+      # ─── Runtime defaults — safe to ship in spec ─────────────────────
       - key: NODE_ENV
         scope: RUN_AND_BUILD_TIME
         value: production
       - key: API_PORT
         scope: RUN_AND_BUILD_TIME
         value: "3001"
-      # DB — bound from the managed-database resource below.
+      # ─── DB — bound from the managed-database resource below ─────────
+      # These are template tokens, not real values; DO substitutes them at
+      # runtime from the database resource. Safe to keep in spec.
       - key: DB_HOST
         scope: RUN_TIME
         value: ${zaz-db.HOSTNAME}
@@ -77,73 +106,36 @@ services:
       - key: DB_SYNCHRONIZE
         scope: RUN_TIME
         value: "false"
-      # Auth — set via DO dashboard. Min 32 chars.
-      - key: JWT_SECRET
-        scope: RUN_TIME
-        value: REPLACE_VIA_DO_DASHBOARD_MIN_32_CHARS
-        type: SECRET
+      # ─── JWT TTLs (not secret) ───────────────────────────────────────
       - key: JWT_ACCESS_TTL
         scope: RUN_TIME
         value: "1h"
       - key: JWT_REFRESH_TTL
         scope: RUN_TIME
         value: "30d"
-      # CORS — comma-separated list of allowed origins (no trailing slash).
-      - key: CORS_ORIGIN
-        scope: RUN_TIME
-        value: REPLACE_WITH_VERCEL_URL
-      - key: PUBLIC_WEB_URL
-        scope: RUN_TIME
-        value: REPLACE_WITH_VERCEL_URL
-      # Stripe — TEST keys for now.
-      - key: STRIPE_SECRET_KEY
-        scope: RUN_TIME
-        value: REPLACE_WITH_STRIPE_TEST_KEY
-        type: SECRET
-      - key: STRIPE_WEBHOOK_SECRET
-        scope: RUN_TIME
-        value: REPLACE_WITH_STRIPE_WEBHOOK_SECRET
-        type: SECRET
-      - key: STRIPE_SUBSCRIPTION_PRICE_ID
-        scope: RUN_TIME
-        value: REPLACE_WITH_STRIPE_PRICE_ID
-      # Twilio — production credentials.
-      - key: TWILIO_ACCOUNT_SID
-        scope: RUN_TIME
-        value: REPLACE_WITH_TWILIO_PROD_SID
-        type: SECRET
-      - key: TWILIO_API_KEY_SID
-        scope: RUN_TIME
-        value: REPLACE_WITH_TWILIO_PROD_KEY_SID
-        type: SECRET
-      - key: TWILIO_API_KEY_SECRET
-        scope: RUN_TIME
-        value: REPLACE_WITH_TWILIO_PROD_KEY_SECRET
-        type: SECRET
-      - key: TWILIO_FROM_NUMBER
-        scope: RUN_TIME
-        value: REPLACE_WITH_TWILIO_PROD_PHONE
-      # Auth bypass — temporary while A2P 10DLC is being registered.
-      # Comma-separated E.164 phones that skip Twilio entirely.
+      # ─── Auth bypass — temp while A2P 10DLC is being registered ──────
+      # Inocuous defaults. Keep in spec so they're versioned & visible in
+      # PRs; flip values via dashboard if needed without touching git.
       - key: AUTH_BYPASS_PHONES
         scope: RUN_TIME
         value: "+19172541473"
       - key: AUTH_BYPASS_OTP_CODE
         scope: RUN_TIME
         value: "000000"
-      # Phones bootstrapped as SUPER admin on first login. Lets seed a real
-      # admin account without needing psql access.
       - key: AUTH_BOOTSTRAP_ADMIN_PHONES
         scope: RUN_TIME
         value: "+19172541473"
-      # Sentry — paste DSN from the API project in Sentry.
-      - key: SENTRY_DSN
-        scope: RUN_TIME
-        value: REPLACE_WITH_SENTRY_API_DSN
-        type: SECRET
+      # ─── Sentry sampling (DSN itself is in dashboard) ────────────────
       - key: SENTRY_TRACES_SAMPLE_RATE
         scope: RUN_TIME
         value: "0.1"
+      #
+      # ─── DASHBOARD-ONLY (do NOT add here) ─────────────────────────────
+      # JWT_SECRET, CORS_ORIGIN, PUBLIC_WEB_URL,
+      # STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET, STRIPE_SUBSCRIPTION_PRICE_ID,
+      # TWILIO_ACCOUNT_SID, TWILIO_API_KEY_SID, TWILIO_API_KEY_SECRET,
+      # TWILIO_FROM_NUMBER, SENTRY_DSN
+      # ─────────────────────────────────────────────────────────────────
 
 databases:
   - name: zaz-db
