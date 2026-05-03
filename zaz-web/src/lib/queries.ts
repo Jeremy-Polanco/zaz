@@ -249,7 +249,10 @@ export function useUploadProductImage() {
       const form = new FormData()
       form.append('file', file)
       const { data } = await api.post<Product>(`/products/${id}/image`, form, {
-        headers: { 'Content-Type': 'multipart/form-data' },
+        // Setting to undefined unsets the api instance's default
+        // 'application/json' so the browser can compute the proper
+        // multipart/form-data boundary from the FormData body.
+        headers: { 'Content-Type': undefined },
       })
       return data
     },
@@ -342,7 +345,10 @@ export function useUploadCategoryImage(categoryId: string) {
       const form = new FormData()
       form.append('file', file)
       const { data } = await api.post<Category>(`/categories/${categoryId}/image`, form, {
-        headers: { 'Content-Type': 'multipart/form-data' },
+        // Setting to undefined unsets the api instance's default
+        // 'application/json' so the browser can compute the proper
+        // multipart/form-data boundary from the FormData body.
+        headers: { 'Content-Type': undefined },
       })
       return data
     },
