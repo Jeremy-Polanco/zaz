@@ -94,6 +94,7 @@ export class ProductsService {
     if (dto.description !== undefined) patch.description = dto.description;
     if (dto.priceToPublic !== undefined)
       patch.priceToPublic = String(dto.priceToPublic);
+    if (dto.stock !== undefined) patch.stock = dto.stock;
     if (dto.promoterCommissionPct !== undefined)
       patch.promoterCommissionPct = String(dto.promoterCommissionPct);
     if (dto.pointsPct !== undefined) patch.pointsPct = String(dto.pointsPct);

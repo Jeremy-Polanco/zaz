@@ -1,5 +1,6 @@
 import {
   IsDateString,
+  IsInt,
   IsNumber,
   IsOptional,
   IsString,
@@ -24,6 +25,11 @@ export class UpdateProductDto {
   @IsNumber()
   @Min(0)
   priceToPublic?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  stock?: number;
 
   @IsOptional()
   @IsNumber()
