@@ -23,7 +23,12 @@ async function bootstrap() {
     },
   });
 
-  app.use(helmet());
+  // crossOriginResourcePolicy defaults to 'same-origin', which makes browsers
+  // refuse to render product/category images embedded from a different origin
+  // (e.g. the Vercel-hosted web client loading /products/:id/image from this
+  // API). The image endpoints are explicitly @Public(), so opting them in to
+  // cross-origin loads is the intended posture.
+  app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
   app.use(compression());
 
   app.setGlobalPrefix('api');
