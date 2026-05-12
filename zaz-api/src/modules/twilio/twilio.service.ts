@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import twilio, { Twilio } from 'twilio';
+import type { Order } from '../../entities/order.entity';
 
 const SEEDED_DEV_PHONE_REGEX = /^\+1555555\d{4}$/;
 
@@ -56,5 +57,38 @@ export class TwilioService {
       from: this.fromNumber,
       body,
     });
+  }
+
+  async sendOrderNotificationSms(order: Order): Promise<void> {
+    const numbers =
+      this.config.get<string[]>('ORDER_SMS_NOTIFY_NUMBERS') ?? [];
+
+    if (numbers.length === 0) {
+      this.logger.debug(
+        `ORDER_SMS_NOTIFY_NUMBERS empty — skipping notification for order ${order.id}`,
+      );
+      return;
+    }
+
+    const shortId = order.id.replace(/-/g, '').slice(-8);
+    const customerName = order.customer?.fullName ?? 'Cliente';
+    // totalAmount is a numeric string like "35.50" (not cents). Format as "$35.50".
+    const totalFormatted = `$${order.totalAmount}`;
+    const addressText = order.deliveryAddress?.text ?? '';
+    const truncatedAddress =
+      addressText.length > 40 ? addressText.slice(0, 37) + '...' : addressText;
+
+    const body = `ZAZ: Pedido #${shortId} — ${customerName} — ${totalFormatted} — ${truncatedAddress}`;
+
+    for (const number of numbers) {
+      try {
+        await this.sendSms(number, body);
+      } catch (err) {
+        this.logger.error(
+          `Failed to send order SMS to ${number} for order ${order.id}: ${(err as Error).message}`,
+        );
+        // continue with next number
+      }
+    }
   }
 }

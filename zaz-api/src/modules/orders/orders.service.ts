@@ -19,6 +19,7 @@ import { PromotersService } from '../promoters/promoters.service';
 import { ShippingService } from '../shipping/shipping.service';
 import { CreditService } from '../credit/credit.service';
 import { SubscriptionService } from '../subscription/subscription.service';
+import { TwilioService } from '../twilio/twilio.service';
 import { getEffectivePrice } from '../products/pricing';
 
 const ALLOWED_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
@@ -41,6 +42,8 @@ export const TAX_RATE = 0.08887;
 
 @Injectable()
 export class OrdersService {
+  private readonly logger = new Logger(OrdersService.name);
+
   constructor(
     @InjectRepository(Order) private readonly orders: Repository<Order>,
     @InjectRepository(OrderItem) private readonly items: Repository<OrderItem>,
@@ -53,6 +56,7 @@ export class OrdersService {
     private readonly shipping: ShippingService,
     private readonly credit: CreditService,
     private readonly subscriptionService: SubscriptionService,
+    private readonly twilio: TwilioService,
   ) {}
 
   private buildScope(user: AuthenticatedUser): FindOptionsWhere<Order> {
@@ -219,7 +223,18 @@ export class OrdersService {
       return persisted;
     });
 
-    return this.findOne(saved.id, user);
+    const order = await this.findOne(saved.id, user);
+
+    // Fire-and-forget SMS notification — never block the HTTP response on Twilio.
+    void this.twilio
+      .sendOrderNotificationSms(order)
+      .catch((err) =>
+        this.logger.error(
+          `Order SMS notification failed for order ${order.id}: ${(err as Error).message}`,
+        ),
+      );
+
+    return order;
   }
 
   /**
@@ -250,11 +265,9 @@ export class OrdersService {
       );
     }
 
-    // Subscriber override: if customer has an active subscription, shipping is free
+    // Subscription status is stamped on the order for data lineage (wasSubscriberAtQuote).
+    // It no longer affects pricing — free-shipping override removed (REQ-FS1).
     const isSub = await this.subscriptionService.isActiveSubscriber(order.customerId);
-    if (isSub) {
-      shippingCents = 0;
-    }
     Logger.debug(
       `order ${id} subscriber: ${isSub}, shipping=${shippingCents}`,
       OrdersService.name,

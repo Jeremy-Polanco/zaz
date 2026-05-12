@@ -84,6 +84,21 @@ export type RecordPaymentInput = z.infer<typeof recordPaymentSchema>
 export type AdjustCreditInput = z.infer<typeof adjustCreditSchema>
 export type ManualAdjustmentInput = z.infer<typeof manualAdjustmentSchema>
 
+// ── User Address schemas (Zod 3) ──────────────────────────────────────────────
+
+export const savedAddressSchema = z.object({
+  label: z.string().min(1, 'Nombre requerido').max(60),
+  line1: z.string().min(1, 'Dirección requerida').max(255),
+  line2: z.string().max(255).optional(),
+  lat: z.number().min(-90).max(90),
+  lng: z.number().min(-180).max(180),
+  instructions: z.string().max(500).optional(),
+})
+
+export const updateSavedAddressSchema = savedAddressSchema.partial()
+
+export type SavedAddressInput = z.infer<typeof savedAddressSchema>
+
 // ── Subscription schemas (Zod 3) ──────────────────────────────────────────────
 
 export const subscriptionStatusSchema = z.enum([

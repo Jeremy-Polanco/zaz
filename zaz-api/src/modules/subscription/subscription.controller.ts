@@ -5,6 +5,7 @@ import {
   HttpCode,
   HttpStatus,
   Post,
+  ServiceUnavailableException,
   UseGuards,
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
@@ -19,11 +20,21 @@ export class SubscriptionController {
 
   /**
    * GET /subscription/plan — public, no auth guard.
+   * Returns the public plan shape { priceCents, currency, interval } from DB.
+   * Throws 503 SUBSCRIPTION_PLAN_NOT_CONFIGURED when no plan row exists (pre-seed window).
    */
   @Public()
   @Get('subscription/plan')
-  getPlan() {
-    return this.subscription.getPlan();
+  async getPlan() {
+    const plan = await this.subscription.getPlan();
+    if (!plan) {
+      throw new ServiceUnavailableException({
+        statusCode: 503,
+        code: 'SUBSCRIPTION_PLAN_NOT_CONFIGURED',
+        message: 'Subscription plan not configured',
+      });
+    }
+    return plan;
   }
 
   /**

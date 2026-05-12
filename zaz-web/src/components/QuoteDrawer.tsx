@@ -4,6 +4,7 @@ import { useSetOrderQuote } from '../lib/queries'
 import { computeQuotePreviewCents } from '../lib/tax'
 import { formatCents } from '../lib/utils'
 import { Button, FieldError, Input, Label } from './ui'
+import { SavedAddressesList } from './SavedAddressesList'
 
 function mapsDeepLink(order: Order): string {
   const addr = order.deliveryAddress
@@ -150,6 +151,11 @@ export function QuoteDrawer({
             </span>
           </div>
         </div>
+
+        <section className="mb-8 border-t border-ink/15 pt-6">
+          <h3 className="eyebrow mb-3">Direcciones guardadas del cliente</h3>
+          <SavedAddressesList userId={order.customerId} />
+        </section>
 
         <div className="mt-auto flex gap-3">
           <Button

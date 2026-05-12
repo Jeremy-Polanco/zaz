@@ -10,14 +10,31 @@
 import * as path from 'path';
 import * as fs from 'fs';
 
-jest.mock('stripe', () => ({
-  default: jest.fn().mockImplementation(() => mockStripe),
-}));
+// The service uses `import Stripe = require('stripe')` → Stripe is a constructor function.
+// Return jest.fn() directly (NOT { default: fn }) so `new Stripe(secret)` works.
+// eslint-disable-next-line no-var
+var mockStripe: Record<string, unknown>;
+jest.mock('stripe', () => jest.fn().mockImplementation(() => mockStripe));
 
 const NOW_UNIX = Math.floor(Date.now() / 1000);
 const FUTURE_UNIX = NOW_UNIX + 86400 * 30;
 
-const mockStripe = {
+mockStripe = {
+  prices: {
+    // Required for onModuleInit seed flow: STRIPE_SUBSCRIPTION_PRICE_ID env var → prices.retrieve
+    retrieve: jest.fn().mockResolvedValue({
+      id: 'price_test_monthly',
+      product: 'prod_test_sub',
+      unit_amount: 1000,
+      currency: 'usd',
+      recurring: { interval: 'month' },
+    }),
+    create: jest.fn().mockResolvedValue({ id: 'price_new_sub', unit_amount: 1500, currency: 'usd', recurring: { interval: 'month' } }),
+    update: jest.fn().mockResolvedValue({}),
+  },
+  products: {
+    update: jest.fn().mockResolvedValue({}),
+  },
   customers: {
     create: jest.fn().mockResolvedValue({ id: 'cus_e2e_sub_test' }),
     search: jest.fn().mockResolvedValue({ data: [] }),
@@ -55,7 +72,8 @@ const mockStripe = {
   },
 };
 
-import * as request from 'supertest';
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const request = require('supertest') as typeof import('supertest');
 import { INestApplication } from '@nestjs/common';
 import { DataSource } from 'typeorm';
 import { createTestingApp } from '../../src/test-utils/testing-app';

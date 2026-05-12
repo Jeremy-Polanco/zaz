@@ -11,8 +11,11 @@
 
 // Module-level Stripe mock — CreditService doesn't call Stripe directly
 // but PaymentsService (which may be in the DI graph via OrdersService) does.
-jest.mock('stripe', () => ({
-  default: jest.fn().mockImplementation(() => ({
+// MUST return the constructor directly (not { default: fn }) because the service
+// uses `import Stripe = require('stripe')` (CJS interop).
+jest.mock('stripe', () => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return jest.fn().mockImplementation(() => ({
     paymentIntents: {
       create: jest.fn().mockResolvedValue({ id: 'pi_test', client_secret: 'secret', status: 'requires_payment_method', amount: 1000, currency: 'usd' }),
       retrieve: jest.fn(),
@@ -24,8 +27,10 @@ jest.mock('stripe', () => ({
     subscriptions: { create: jest.fn(), retrieve: jest.fn(), update: jest.fn(), list: jest.fn() },
     checkout: { sessions: { create: jest.fn().mockResolvedValue({ url: 'https://stripe.test/session' }) } },
     billingPortal: { sessions: { create: jest.fn().mockResolvedValue({ url: 'https://stripe.test/portal' }) } },
-  })),
-}));
+    prices: { retrieve: jest.fn(), create: jest.fn(), update: jest.fn() },
+    products: { update: jest.fn() },
+  }));
+});
 
 import * as path from 'path';
 import * as fs from 'fs';
@@ -72,13 +77,17 @@ describe('CreditService (integration)', () => {
     await app.close();
   });
 
-  const { getQueryRunner } = setupTransactionPerTest(() => dataSource);
-
   // -------------------------------------------------------------------------
   // Balance correctness — basic charge + reversal idempotency
+  //
+  // setupTransactionPerTest is scoped to THIS describe block only, so its
+  // beforeEach/afterEach hooks do NOT apply to the @concurrency describe below.
   // -------------------------------------------------------------------------
 
   describe('applyCharge and reverseCharge', () => {
+    // Transaction-per-test rollback: scoped to this describe only.
+    const { getQueryRunner } = setupTransactionPerTest(() => dataSource);
+
     it('charges balance and reversal restores it exactly once', async () => {
       const qr: QueryRunner = getQueryRunner();
 

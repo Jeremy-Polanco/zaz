@@ -104,6 +104,19 @@ function checkDockerReachable(): Promise<void> {
 }
 
 export default async function globalSetup(): Promise<void> {
+  // Force correct test DB credentials BEFORE loadEnvTest() so .env.test cannot
+  // override them with non-Docker values (e.g. colmapp_test from a dev .env.test).
+  process.env.DB_HOST = 'localhost';
+  process.env.DB_PORT = '5433';
+  process.env.DB_USER = 'zaz_test';
+  process.env.DB_PASSWORD = 'zaz_test';
+  process.env.DB_NAME = 'zaz_test';
+  process.env.NODE_ENV = 'test';
+  process.env.JWT_SECRET = process.env.JWT_SECRET ?? 'test-secret-32-characters-long-xxx';
+  process.env.STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY ?? 'sk_test_dummy';
+  process.env.STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET ?? 'whsec_test';
+  process.env.STRIPE_SUBSCRIPTION_PRICE_ID = process.env.STRIPE_SUBSCRIPTION_PRICE_ID ?? 'price_test_monthly';
+
   loadEnvTest();
 
   // 1. Fail fast if no migration files
@@ -135,6 +148,7 @@ export default async function globalSetup(): Promise<void> {
     await ds.query('DROP SCHEMA public CASCADE');
     await ds.query('CREATE SCHEMA public');
     await ds.query('CREATE EXTENSION IF NOT EXISTS pgcrypto');
+    await ds.query('CREATE EXTENSION IF NOT EXISTS "uuid-ossp"');
 
     // 5. Run all migrations
     await ds.runMigrations({ transaction: 'each' });

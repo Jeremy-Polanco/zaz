@@ -354,10 +354,12 @@ export type SubscriptionStatus =
 export interface Subscription {
   id: string
   status: SubscriptionStatus
+  model?: 'rental' | 'purchase'
   currentPeriodStart: string
   currentPeriodEnd: string
   cancelAtPeriodEnd: boolean
   canceledAt: string | null
+  purchasedAt?: string | null
 }
 
 export interface SubscriptionPlan {
@@ -365,3 +367,30 @@ export interface SubscriptionPlan {
   currency: 'usd'
   interval: 'month'
 }
+
+// ── User Addresses ────────────────────────────────────────────────────────────
+
+export interface UserAddress {
+  id: string
+  userId: string
+  label: string
+  line1: string
+  line2: string | null
+  lat: number
+  lng: number
+  instructions: string | null
+  isDefault: boolean
+  createdAt: string
+  updatedAt: string
+}
+
+export interface CreateAddressInput {
+  label: string
+  line1: string
+  line2?: string
+  lat: number
+  lng: number
+  instructions?: string
+}
+
+export type UpdateAddressInput = Partial<CreateAddressInput>

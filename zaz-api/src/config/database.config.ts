@@ -14,7 +14,9 @@ import {
   Product,
   PromoterCommissionEntry,
   Subscription,
+  SubscriptionPlan,
   User,
+  UserAddress,
 } from '../entities';
 
 export const buildDatabaseConfig = (
@@ -58,9 +60,11 @@ export const buildDatabaseConfig = (
     CreditAccount,
     CreditMovement,
     Subscription,
+    SubscriptionPlan,
+    UserAddress,
   ],
   // Belt-and-suspenders: hard-disable synchronize in production regardless of env var.
-  // The Joi schema also enforces DB_SYNCHRONIZE='false' in production.
+  // The env schema also enforces DB_SYNCHRONIZE='false' in production.
   synchronize:
     config.get<string>('NODE_ENV') !== 'production' &&
     config.get<string>('DB_SYNCHRONIZE', 'false') === 'true',

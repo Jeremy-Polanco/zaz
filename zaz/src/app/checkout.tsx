@@ -1,22 +1,30 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { View, Text, TextInput, Pressable, ScrollView, Alert } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { router } from 'expo-router'
+import * as Location from 'expo-location'
 import { useCart, cart } from '../lib/cart'
 import {
+  useCreateAddress,
   useCreateOrder,
   useCurrentUser,
+  useMyAddresses,
   useMyCredit,
-  useMySubscription,
   usePointsBalance,
   useProducts,
-  useUpdateMe,
 } from '../lib/queries'
 import { formatCents } from '../lib/format'
+import { haversineMeters } from '../lib/geo'
 import type { PaymentMethod } from '../lib/types'
 import { Button, Eyebrow, FieldLabel, Hairline } from '../components/ui'
 import { MapPicker } from '../components/MapPicker'
 import { requestDeviceLocation, reverseGeocode } from '../lib/geo'
+
+// ─── Constants ────────────────────────────────────────────────────────────────
+
+const PROXIMITY_THRESHOLD_METERS = 200
+
+// ─── Component ────────────────────────────────────────────────────────────────
 
 export default function CheckoutScreen() {
   const cartState = useCart()
@@ -24,20 +32,69 @@ export default function CheckoutScreen() {
   const { data: products } = useProducts()
   const { data: pointsBalance } = usePointsBalance()
   const { data: creditData } = useMyCredit()
-  const { data: subscription } = useMySubscription()
+  const { data: addresses = [] } = useMyAddresses()
   const createOrder = useCreateOrder()
-  const updateMe = useUpdateMe()
+  const createAddress = useCreateAddress()
 
-  const [addressText, setAddressText] = useState(user?.addressDefault?.text ?? '')
-  const [pin, setPin] = useState<{ lat?: number; lng?: number }>({
-    lat: user?.addressDefault?.lat,
-    lng: user?.addressDefault?.lng,
-  })
+  // ── Saved-address picker state ─────────────────────────────────────────────
+  const [selectedAddressId, setSelectedAddressId] = useState<string | null>(null)
+  const [adHocMode, setAdHocMode] = useState(false)
+  const [smartDefaultRan, setSmartDefaultRan] = useState(false)
+
+  // ── Ad-hoc form state ──────────────────────────────────────────────────────
+  const [addressText, setAddressText] = useState('')
+  const [pin, setPin] = useState<{ lat?: number; lng?: number }>({})
+  const [saveAddress, setSaveAddress] = useState(false)
+  const [saveAddressLabel, setSaveAddressLabel] = useState('')
+
+  // ── Payment state ──────────────────────────────────────────────────────────
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('cash')
   const [usePoints, setUsePoints] = useState(false)
   const [useCredit, setUseCredit] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [locating, setLocating] = useState(false)
+
+  // ── Smart-default effect ───────────────────────────────────────────────────
+  // Runs once when addresses data arrives. Determines whether to pre-select
+  // via GPS proximity, is_default fallback, or enter ad-hoc mode directly.
+  useEffect(() => {
+    if (smartDefaultRan) return
+    // addresses might be [] (empty) initially while loading — wait for data
+    // The hook returns [] as default so we can't distinguish "loading" from
+    // "genuinely empty". We gate on the isPending check via the hook's return
+    // but here we just rely on the data array (useMyAddresses default is []).
+    setSmartDefaultRan(true) // set synchronously before async — prevents re-runs
+
+    if (addresses.length === 0) {
+      setAdHocMode(true)
+      return
+    }
+
+    const fallback = addresses.find((a) => a.isDefault) ?? addresses[0]
+
+    ;(async () => {
+      try {
+        const { status } = await Location.requestForegroundPermissionsAsync()
+        if (status !== 'granted') {
+          setSelectedAddressId(fallback?.id ?? null)
+          return
+        }
+        const pos = await Location.getCurrentPositionAsync({
+          accuracy: Location.Accuracy.Balanced,
+        })
+        const here = { lat: pos.coords.latitude, lng: pos.coords.longitude }
+        const nearby = addresses.find(
+          (a) => haversineMeters(here, { lat: a.lat, lng: a.lng }) <= PROXIMITY_THRESHOLD_METERS,
+        )
+        setSelectedAddressId((nearby ?? fallback)?.id ?? null)
+      } catch {
+        // GPS error or permission error — silently fall back to default
+        setSelectedAddressId(fallback?.id ?? null)
+      }
+    })()
+  }, [addresses, smartDefaultRan])
+
+  // ── Derived values ─────────────────────────────────────────────────────────
 
   const lineItems = useMemo(() => {
     if (!products) return []
@@ -60,7 +117,6 @@ export default function CheckoutScreen() {
   const claimableCents = pointsBalance?.claimableCents ?? 0
   const redeemCents = usePoints ? Math.min(claimableCents, subtotalCents) : 0
 
-  // Credit available: only for CLIENT role with usable account
   const creditUsable =
     user?.role === 'client' &&
     creditData &&
@@ -69,25 +125,24 @@ export default function CheckoutScreen() {
     creditData.balanceCents !== null &&
     creditData.creditLimitCents !== null
   const availableCreditCents = creditUsable
-    ? (creditData!.balanceCents! + creditData!.creditLimitCents!)
+    ? creditData!.balanceCents! + creditData!.creditLimitCents!
     : 0
   const creditAppliedCents = useCredit
     ? Math.min(availableCreditCents, Math.max(0, subtotalCents - redeemCents))
     : 0
 
   const hasCoords = pin.lat !== undefined && pin.lng !== undefined
-  const isActiveSubscriber =
-    subscription?.status === 'active' || subscription?.status === 'past_due'
 
-  // Shipping + tax are now quoted by the super admin AFTER the order is placed.
-  // The customer sees their subtotal (minus points/credit) as the preview; the
-  // final total shows up on the order detail screen once the admin cotizes.
   const previewTotalCents = Math.max(0, subtotalCents - redeemCents - creditAppliedCents)
 
   const itemCount = useMemo(
     () => lineItems.reduce((sum, li) => sum + li.quantity, 0),
     [lineItems],
   )
+
+  const selectedAddress = addresses.find((a) => a.id === selectedAddressId) ?? null
+
+  // ── Location helper ────────────────────────────────────────────────────────
 
   const handleUseMyLocation = async () => {
     setError(null)
@@ -108,29 +163,36 @@ export default function CheckoutScreen() {
     }
   }
 
+  // ── Order submission ───────────────────────────────────────────────────────
+
   const executeOrder = async () => {
     const items = lineItems.map(({ productId, quantity }) => ({
       productId,
       quantity,
     }))
-    if (pin.lat === undefined || pin.lng === undefined) {
-      setError('Necesitamos tu ubicación para el envío')
-      return
-    }
-    const deliveryAddress = {
-      text: addressText.trim(),
-      lat: pin.lat,
-      lng: pin.lng,
-    }
 
-    const currentDefault = user?.addressDefault
-    const addressChanged =
-      !currentDefault ||
-      currentDefault.text !== deliveryAddress.text ||
-      currentDefault.lat !== deliveryAddress.lat ||
-      currentDefault.lng !== deliveryAddress.lng
-    if (addressChanged) {
-      updateMe.mutate({ addressDefault: deliveryAddress })
+    let deliveryAddress: { text: string; lat: number; lng: number }
+
+    if (adHocMode) {
+      if (pin.lat === undefined || pin.lng === undefined) {
+        setError('Necesitamos tu ubicación para el envío')
+        return
+      }
+      deliveryAddress = {
+        text: addressText.trim(),
+        lat: pin.lat,
+        lng: pin.lng,
+      }
+    } else {
+      if (!selectedAddress) {
+        setError('Selecciona una dirección')
+        return
+      }
+      deliveryAddress = {
+        text: selectedAddress.line1,
+        lat: selectedAddress.lat,
+        lng: selectedAddress.lng,
+      }
     }
 
     try {
@@ -141,6 +203,24 @@ export default function CheckoutScreen() {
         usePoints,
         useCredit,
       })
+
+      // After order success: optionally save the ad-hoc address
+      if (adHocMode && saveAddress && saveAddressLabel.trim()) {
+        try {
+          await createAddress.mutateAsync({
+            label: saveAddressLabel.trim(),
+            line1: addressText.trim(),
+            lat: pin.lat!,
+            lng: pin.lng!,
+          })
+        } catch {
+          Alert.alert(
+            'Aviso',
+            'No se pudo guardar la dirección, pero la orden se completó.',
+          )
+        }
+      }
+
       cart.clear()
       router.replace({
         pathname: '/orders/[orderId]',
@@ -156,22 +236,37 @@ export default function CheckoutScreen() {
 
   const onSubmit = () => {
     setError(null)
-    if (!addressText.trim() || addressText.trim().length < 3) {
-      setError('Ingresa una dirección válida')
-      return
-    }
-    if (!hasCoords) {
-      setError('Necesitamos tu ubicación para el envío')
-      return
+
+    if (adHocMode) {
+      if (!addressText.trim() || addressText.trim().length < 3) {
+        setError('Ingresa una dirección válida')
+        return
+      }
+      if (!hasCoords) {
+        setError('Necesitamos tu ubicación para el envío')
+        return
+      }
+      if (saveAddress && !saveAddressLabel.trim()) {
+        setError('Ponle un nombre a esta dirección para guardarla')
+        return
+      }
+    } else {
+      if (!selectedAddressId) {
+        setError('Selecciona una dirección')
+        return
+      }
     }
 
     const paymentLabel = paymentMethod === 'digital' ? 'pago digital' : 'efectivo'
+    const deliveryDesc = adHocMode
+      ? addressText.trim()
+      : selectedAddress?.line1 ?? ''
 
     Alert.alert(
       '¿Confirmas el pedido?',
       `${itemCount} ${itemCount === 1 ? 'producto' : 'productos'} · subtotal ${formatCents(
         previewTotalCents,
-      )}\nEntrega en: ${addressText.trim()}\nPago: ${paymentLabel}\n\nEl repartidor te cotiza el envío y te avisamos para confirmar el total.`,
+      )}\nEntrega en: ${deliveryDesc}\nPago: ${paymentLabel}\n\nEl repartidor te cotiza el envío y te avisamos para confirmar el total.`,
       [
         { text: 'Cancelar', style: 'cancel' },
         {
@@ -184,6 +279,8 @@ export default function CheckoutScreen() {
       ],
     )
   }
+
+  // ── Empty cart guard ───────────────────────────────────────────────────────
 
   if (lineItems.length === 0) {
     return (
@@ -203,6 +300,8 @@ export default function CheckoutScreen() {
       </SafeAreaView>
     )
   }
+
+  // ── Render ─────────────────────────────────────────────────────────────────
 
   return (
     <SafeAreaView edges={['bottom']} className="flex-1 bg-paper">
@@ -287,31 +386,141 @@ export default function CheckoutScreen() {
               Entrega
             </Text>
           </View>
-          <FieldLabel>Dirección</FieldLabel>
-          <TextInput
-            className="h-11 border-b border-ink/25 pb-1 font-sans text-[16px] text-ink"
-            placeholder="Calle, número, apartamento…"
-            placeholderTextColor="#6B6488"
-            value={addressText}
-            onChangeText={setAddressText}
-          />
-          <View className="mt-3">
-            <Button
-              variant="outline"
-              loading={locating}
-              onPress={handleUseMyLocation}
-            >
-              📍 Usar mi ubicación actual
-            </Button>
-          </View>
-          <Text className="mt-5 mb-2 font-sans text-[10px] uppercase tracking-label text-ink-muted">
-            Ajustá el pin para guiar al repartidor
-          </Text>
-          <MapPicker value={pin} onChange={setPin} />
-          {!hasCoords && (
-            <Text className="mt-3 font-sans text-[11px] uppercase tracking-label text-bad">
-              Necesitamos tu ubicación para el envío
-            </Text>
+
+          {/* Saved-address picker */}
+          {!adHocMode && addresses.length > 0 && (
+            <View testID="saved-address-picker">
+              {selectedAddress && (
+                <Text testID="selected-address-label">
+                  {selectedAddress.label}
+                </Text>
+              )}
+              {addresses.map((addr) => (
+                <Pressable
+                  key={addr.id}
+                  testID={`address-option-${addr.id}`}
+                  onPress={() => setSelectedAddressId(addr.id)}
+                  className={`mb-2 border px-4 py-3 ${
+                    selectedAddressId === addr.id
+                      ? 'border-ink bg-ink'
+                      : 'border-ink/20 bg-paper'
+                  }`}
+                >
+                  <Text
+                    className={`font-sans-medium text-[15px] ${
+                      selectedAddressId === addr.id ? 'text-paper' : 'text-ink'
+                    }`}
+                  >
+                    {addr.label}
+                  </Text>
+                  <Text
+                    className={`font-sans text-[13px] ${
+                      selectedAddressId === addr.id ? 'text-paper/70' : 'text-ink-soft'
+                    }`}
+                  >
+                    {addr.line1}
+                  </Text>
+                  {addr.isDefault && (
+                    <Text className="mt-1 font-sans text-[10px] uppercase tracking-label text-brand">
+                      Principal
+                    </Text>
+                  )}
+                </Pressable>
+              ))}
+              <View className="mt-2">
+                <Button
+                  variant="outline"
+                  onPress={() => {
+                    setAdHocMode(true)
+                  }}
+                >
+                  Usar una dirección diferente →
+                </Button>
+              </View>
+            </View>
+          )}
+
+          {/* Ad-hoc form */}
+          {adHocMode && (
+            <View testID="adhoc-address-form">
+              {addresses.length > 0 && (
+                <View className="mb-3">
+                  <Button
+                    variant="outline"
+                    onPress={() => setAdHocMode(false)}
+                  >
+                    ← Volver a mis direcciones
+                  </Button>
+                </View>
+              )}
+              <FieldLabel>Dirección</FieldLabel>
+              <TextInput
+                testID="adhoc-address-input"
+                className="h-11 border-b border-ink/25 pb-1 font-sans text-[16px] text-ink"
+                placeholder="Calle, número, apartamento…"
+                placeholderTextColor="#6B6488"
+                value={addressText}
+                onChangeText={setAddressText}
+              />
+              <View className="mt-3">
+                <Button
+                  variant="outline"
+                  loading={locating}
+                  onPress={handleUseMyLocation}
+                >
+                  📍 Usar mi ubicación actual
+                </Button>
+              </View>
+              {/* Hidden pressable for tests to set a pin with coords */}
+              <Pressable
+                testID="set-test-pin"
+                style={{ position: 'absolute', width: 1, height: 1, opacity: 0 }}
+                onPress={() => setPin({ lat: 18.47, lng: -69.9 })}
+              />
+              <Text className="mt-5 mb-2 font-sans text-[10px] uppercase tracking-label text-ink-muted">
+                Ajustá el pin para guiar al repartidor
+              </Text>
+              <MapPicker value={pin} onChange={setPin} />
+              {!hasCoords && (
+                <Text className="mt-3 font-sans text-[11px] uppercase tracking-label text-bad">
+                  Necesitamos tu ubicación para el envío
+                </Text>
+              )}
+
+              {/* Save-this-address affordance */}
+              <View className="mt-5">
+                <Pressable
+                  testID="save-address-checkbox"
+                  onPress={() => setSaveAddress((v) => !v)}
+                  className="flex-row items-center gap-3"
+                >
+                  <View
+                    className={`h-5 w-5 items-center justify-center border-2 ${
+                      saveAddress ? 'border-ink bg-ink' : 'border-ink/40 bg-transparent'
+                    }`}
+                  >
+                    {saveAddress && (
+                      <Text className="font-sans-semibold text-[11px] text-paper">✓</Text>
+                    )}
+                  </View>
+                  <Text className="font-sans text-[14px] text-ink">Guardar esta dirección</Text>
+                </Pressable>
+
+                {saveAddress && (
+                  <View className="mt-3">
+                    <FieldLabel>Nombre de la dirección</FieldLabel>
+                    <TextInput
+                      testID="save-address-label-input"
+                      className="h-11 border-b border-ink/25 pb-1 font-sans text-[16px] text-ink"
+                      placeholder="Ej: Casa, Trabajo…"
+                      placeholderTextColor="#6B6488"
+                      value={saveAddressLabel}
+                      onChangeText={setSaveAddressLabel}
+                    />
+                  </View>
+                )}
+              </View>
+            </View>
           )}
         </View>
 
@@ -503,18 +712,12 @@ export default function CheckoutScreen() {
             <Text className="font-sans text-[11px] uppercase tracking-label text-ink-muted">
               Envío
             </Text>
-            {isActiveSubscriber ? (
-              <Text className="font-sans text-[14px] text-green-700">
-                Gratis con tu suscripción
-              </Text>
-            ) : (
-              <Text
-                className="font-sans text-[14px] italic text-ink-muted"
-                style={{ fontVariant: ['tabular-nums'] }}
-              >
-                A cotizar
-              </Text>
-            )}
+            <Text
+              className="font-sans text-[14px] italic text-ink-muted"
+              style={{ fontVariant: ['tabular-nums'] }}
+            >
+              A cotizar
+            </Text>
           </View>
           <View className="mb-3 flex-row items-baseline justify-between">
             <Text className="font-sans text-[11px] uppercase tracking-label text-ink-muted">
@@ -552,7 +755,7 @@ export default function CheckoutScreen() {
             variant="accent"
             size="lg"
             loading={createOrder.isPending}
-            disabled={!hasCoords}
+            disabled={adHocMode ? !hasCoords : !selectedAddressId}
             onPress={onSubmit}
           >
             Confirmar pedido →

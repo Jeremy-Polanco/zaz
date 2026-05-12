@@ -11,11 +11,28 @@
 import * as path from 'path';
 import * as fs from 'fs';
 
-jest.mock('stripe', () => ({
-  default: jest.fn().mockImplementation(() => mockStripe),
-}));
+// The service uses `import Stripe = require('stripe')` → Stripe is a constructor function.
+// Return jest.fn() directly (NOT { default: fn }) so `new Stripe(secret)` works.
+// eslint-disable-next-line no-var
+var mockStripe: Record<string, unknown>;
+jest.mock('stripe', () => jest.fn().mockImplementation(() => mockStripe));
 
-const mockStripe = {
+mockStripe = {
+  prices: {
+    // Required for onModuleInit seed flow
+    retrieve: jest.fn().mockResolvedValue({
+      id: 'price_test_monthly',
+      product: 'prod_test_orders',
+      unit_amount: 1000,
+      currency: 'usd',
+      recurring: { interval: 'month' },
+    }),
+    create: jest.fn().mockResolvedValue({ id: 'price_new_orders', unit_amount: 1500, currency: 'usd', recurring: { interval: 'month' } }),
+    update: jest.fn().mockResolvedValue({}),
+  },
+  products: {
+    update: jest.fn().mockResolvedValue({}),
+  },
   paymentIntents: {
     create: jest.fn().mockResolvedValue({
       id: 'pi_e2e_test',
@@ -46,7 +63,8 @@ const mockStripe = {
   webhooks: { constructEvent: jest.fn() },
 };
 
-import * as request from 'supertest';
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const request = require('supertest') as typeof import('supertest');
 import { INestApplication } from '@nestjs/common';
 import { DataSource } from 'typeorm';
 import { createTestingApp } from '../../src/test-utils/testing-app';
@@ -101,7 +119,7 @@ describe('Orders E2E', () => {
     testProduct = await dataSource.getRepository(Product).save({
       name: 'E2E Test Product',
       description: 'Product for E2E tests',
-      priceCents: 1000,
+      priceToPublic: '10.00', // entity field is priceToPublic (column: price_to_public)
       salePrice: null,
       salePriceStart: null,
       salePriceEnd: null,

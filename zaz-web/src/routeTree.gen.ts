@@ -20,9 +20,11 @@ import { Route as CatalogRouteImport } from './routes/catalog'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as PromoterIndexRouteImport } from './routes/promoter.index'
 import { Route as OrdersIndexRouteImport } from './routes/orders.index'
+import { Route as SuperSubscriptionRouteImport } from './routes/super.subscription'
 import { Route as SuperPromotersRouteImport } from './routes/super.promoters'
 import { Route as SuperProductsRouteImport } from './routes/super.products'
 import { Route as SuperOrdersRouteImport } from './routes/super.orders'
+import { Route as SuperDispensersRouteImport } from './routes/super.dispensers'
 import { Route as SuperCreditRouteImport } from './routes/super.credit'
 import { Route as SuperCategoriesRouteImport } from './routes/super.categories'
 import { Route as RCodeRouteImport } from './routes/r.$code'
@@ -90,6 +92,11 @@ const OrdersIndexRoute = OrdersIndexRouteImport.update({
   path: '/',
   getParentRoute: () => OrdersRoute,
 } as any)
+const SuperSubscriptionRoute = SuperSubscriptionRouteImport.update({
+  id: '/super/subscription',
+  path: '/super/subscription',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const SuperPromotersRoute = SuperPromotersRouteImport.update({
   id: '/super/promoters',
   path: '/super/promoters',
@@ -103,6 +110,11 @@ const SuperProductsRoute = SuperProductsRouteImport.update({
 const SuperOrdersRoute = SuperOrdersRouteImport.update({
   id: '/super/orders',
   path: '/super/orders',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SuperDispensersRoute = SuperDispensersRouteImport.update({
+  id: '/super/dispensers',
+  path: '/super/dispensers',
   getParentRoute: () => rootRouteImport,
 } as any)
 const SuperCreditRoute = SuperCreditRouteImport.update({
@@ -178,9 +190,11 @@ export interface FileRoutesByFullPath {
   '/r/$code': typeof RCodeRoute
   '/super/categories': typeof SuperCategoriesRoute
   '/super/credit': typeof SuperCreditRouteWithChildren
+  '/super/dispensers': typeof SuperDispensersRoute
   '/super/orders': typeof SuperOrdersRoute
   '/super/products': typeof SuperProductsRoute
   '/super/promoters': typeof SuperPromotersRouteWithChildren
+  '/super/subscription': typeof SuperSubscriptionRoute
   '/orders/': typeof OrdersIndexRoute
   '/promoter/': typeof PromoterIndexRoute
   '/orders/$orderId/invoice': typeof OrdersOrderIdInvoiceRoute
@@ -204,8 +218,10 @@ export interface FileRoutesByTo {
   '/r/$code': typeof RCodeRoute
   '/super/categories': typeof SuperCategoriesRoute
   '/super/credit': typeof SuperCreditRouteWithChildren
+  '/super/dispensers': typeof SuperDispensersRoute
   '/super/orders': typeof SuperOrdersRoute
   '/super/products': typeof SuperProductsRoute
+  '/super/subscription': typeof SuperSubscriptionRoute
   '/orders': typeof OrdersIndexRoute
   '/promoter': typeof PromoterIndexRoute
   '/orders/$orderId/invoice': typeof OrdersOrderIdInvoiceRoute
@@ -231,9 +247,11 @@ export interface FileRoutesById {
   '/r/$code': typeof RCodeRoute
   '/super/categories': typeof SuperCategoriesRoute
   '/super/credit': typeof SuperCreditRouteWithChildren
+  '/super/dispensers': typeof SuperDispensersRoute
   '/super/orders': typeof SuperOrdersRoute
   '/super/products': typeof SuperProductsRoute
   '/super/promoters': typeof SuperPromotersRouteWithChildren
+  '/super/subscription': typeof SuperSubscriptionRoute
   '/orders/': typeof OrdersIndexRoute
   '/promoter/': typeof PromoterIndexRoute
   '/orders/$orderId/invoice': typeof OrdersOrderIdInvoiceRoute
@@ -260,9 +278,11 @@ export interface FileRouteTypes {
     | '/r/$code'
     | '/super/categories'
     | '/super/credit'
+    | '/super/dispensers'
     | '/super/orders'
     | '/super/products'
     | '/super/promoters'
+    | '/super/subscription'
     | '/orders/'
     | '/promoter/'
     | '/orders/$orderId/invoice'
@@ -286,8 +306,10 @@ export interface FileRouteTypes {
     | '/r/$code'
     | '/super/categories'
     | '/super/credit'
+    | '/super/dispensers'
     | '/super/orders'
     | '/super/products'
+    | '/super/subscription'
     | '/orders'
     | '/promoter'
     | '/orders/$orderId/invoice'
@@ -312,9 +334,11 @@ export interface FileRouteTypes {
     | '/r/$code'
     | '/super/categories'
     | '/super/credit'
+    | '/super/dispensers'
     | '/super/orders'
     | '/super/products'
     | '/super/promoters'
+    | '/super/subscription'
     | '/orders/'
     | '/promoter/'
     | '/orders/$orderId/invoice'
@@ -338,9 +362,11 @@ export interface RootRouteChildren {
   RCodeRoute: typeof RCodeRoute
   SuperCategoriesRoute: typeof SuperCategoriesRoute
   SuperCreditRoute: typeof SuperCreditRouteWithChildren
+  SuperDispensersRoute: typeof SuperDispensersRoute
   SuperOrdersRoute: typeof SuperOrdersRoute
   SuperProductsRoute: typeof SuperProductsRoute
   SuperPromotersRoute: typeof SuperPromotersRouteWithChildren
+  SuperSubscriptionRoute: typeof SuperSubscriptionRoute
   PromoterIndexRoute: typeof PromoterIndexRoute
 }
 
@@ -423,6 +449,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof OrdersIndexRouteImport
       parentRoute: typeof OrdersRoute
     }
+    '/super/subscription': {
+      id: '/super/subscription'
+      path: '/super/subscription'
+      fullPath: '/super/subscription'
+      preLoaderRoute: typeof SuperSubscriptionRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/super/promoters': {
       id: '/super/promoters'
       path: '/super/promoters'
@@ -442,6 +475,13 @@ declare module '@tanstack/react-router' {
       path: '/super/orders'
       fullPath: '/super/orders'
       preLoaderRoute: typeof SuperOrdersRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/super/dispensers': {
+      id: '/super/dispensers'
+      path: '/super/dispensers'
+      fullPath: '/super/dispensers'
+      preLoaderRoute: typeof SuperDispensersRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/super/credit': {
@@ -601,9 +641,11 @@ const rootRouteChildren: RootRouteChildren = {
   RCodeRoute: RCodeRoute,
   SuperCategoriesRoute: SuperCategoriesRoute,
   SuperCreditRoute: SuperCreditRouteWithChildren,
+  SuperDispensersRoute: SuperDispensersRoute,
   SuperOrdersRoute: SuperOrdersRoute,
   SuperProductsRoute: SuperProductsRoute,
   SuperPromotersRoute: SuperPromotersRouteWithChildren,
+  SuperSubscriptionRoute: SuperSubscriptionRoute,
   PromoterIndexRoute: PromoterIndexRoute,
 }
 export const routeTree = rootRouteImport

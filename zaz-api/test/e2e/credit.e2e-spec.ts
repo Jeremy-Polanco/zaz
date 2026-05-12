@@ -10,11 +10,28 @@
 import * as path from 'path';
 import * as fs from 'fs';
 
-jest.mock('stripe', () => ({
-  default: jest.fn().mockImplementation(() => mockStripe),
-}));
+// The service uses `import Stripe = require('stripe')` → Stripe is a constructor function.
+// Return jest.fn() directly (NOT { default: fn }) so `new Stripe(secret)` works.
+// eslint-disable-next-line no-var
+var mockStripe: Record<string, unknown>;
+jest.mock('stripe', () => jest.fn().mockImplementation(() => mockStripe));
 
-const mockStripe = {
+mockStripe = {
+  prices: {
+    // Required for onModuleInit seed flow
+    retrieve: jest.fn().mockResolvedValue({
+      id: 'price_test_monthly',
+      product: 'prod_test_credit',
+      unit_amount: 1000,
+      currency: 'usd',
+      recurring: { interval: 'month' },
+    }),
+    create: jest.fn().mockResolvedValue({ id: 'price_new', unit_amount: 1500, currency: 'usd', recurring: { interval: 'month' } }),
+    update: jest.fn().mockResolvedValue({}),
+  },
+  products: {
+    update: jest.fn().mockResolvedValue({}),
+  },
   paymentIntents: {
     create: jest.fn().mockResolvedValue({
       id: 'pi_credit_e2e',
@@ -39,7 +56,8 @@ const mockStripe = {
   webhooks: { constructEvent: jest.fn() },
 };
 
-import * as request from 'supertest';
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const request = require('supertest') as typeof import('supertest');
 import { INestApplication } from '@nestjs/common';
 import { DataSource } from 'typeorm';
 import { createTestingApp } from '../../src/test-utils/testing-app';
@@ -95,7 +113,7 @@ describe('Credit E2E', () => {
     testProduct = await dataSource.getRepository(Product).save({
       name: 'Credit E2E Product',
       description: 'Product for credit E2E tests',
-      priceCents: 2000, // $20.00
+      priceToPublic: '20.00', // $20.00 — entity field is priceToPublic (column: price_to_public)
       salePrice: null,
       salePriceStart: null,
       salePriceEnd: null,
@@ -133,7 +151,7 @@ describe('Credit E2E', () => {
 
     it('POST /credit/:userId/grant sets credit balance for the user', async () => {
       const res = await request(app.getHttpServer())
-        .post(`/credit/${clientUser.id}/grant`)
+        .post(`/admin/credit-accounts/${clientUser.id}/grant`)
         .set('Authorization', `Bearer ${superToken}`)
         .send({
           amountCents: grantAmount,
@@ -150,9 +168,10 @@ describe('Credit E2E', () => {
         .set('Authorization', `Bearer ${clientToken}`);
 
       expect(res.status).toBe(200);
-      expect(res.body.account).not.toBeNull();
+      // The /me/credit endpoint returns a flat object (not { account: {...} })
+      expect(res.body.balanceCents).not.toBeNull();
       // Balance should be >= grantAmount (may include prior state)
-      expect(res.body.account.balanceCents).toBeGreaterThanOrEqual(grantAmount);
+      expect(res.body.balanceCents).toBeGreaterThanOrEqual(grantAmount);
     });
 
     let orderId: string;
@@ -162,14 +181,14 @@ describe('Credit E2E', () => {
       const creditBefore = await request(app.getHttpServer())
         .get('/me/credit')
         .set('Authorization', `Bearer ${clientToken}`);
-      const balanceBefore: number = creditBefore.body.account?.balanceCents ?? 0;
+      const balanceBefore: number = creditBefore.body.balanceCents ?? 0;
 
       const orderRes = await request(app.getHttpServer())
         .post('/orders')
         .set('Authorization', `Bearer ${clientToken}`)
         .send({
           items: [{ productId: testProduct.id, quantity: 1 }],
-          deliveryAddress: { text: '456 Credit E2E St' },
+          deliveryAddress: { text: '456 Credit E2E St', lat: 18.4749, lng: -69.9312 },
           paymentMethod: PaymentMethod.CASH,
           usePoints: false,
           useCredit: true,
@@ -186,7 +205,7 @@ describe('Credit E2E', () => {
       const creditAfter = await request(app.getHttpServer())
         .get('/me/credit')
         .set('Authorization', `Bearer ${clientToken}`);
-      const balanceAfter: number = creditAfter.body.account?.balanceCents ?? 0;
+      const balanceAfter: number = creditAfter.body.balanceCents ?? 0;
       expect(balanceAfter).toBeLessThan(balanceBefore);
     });
 
@@ -195,7 +214,7 @@ describe('Credit E2E', () => {
       const creditBefore = await request(app.getHttpServer())
         .get('/me/credit')
         .set('Authorization', `Bearer ${clientToken}`);
-      const balanceBefore: number = creditBefore.body.account?.balanceCents ?? 0;
+      const balanceBefore: number = creditBefore.body.balanceCents ?? 0;
 
       // Cancel the order
       const cancelRes = await request(app.getHttpServer())
@@ -210,7 +229,7 @@ describe('Credit E2E', () => {
       const creditAfter = await request(app.getHttpServer())
         .get('/me/credit')
         .set('Authorization', `Bearer ${clientToken}`);
-      const balanceAfter: number = creditAfter.body.account?.balanceCents ?? 0;
+      const balanceAfter: number = creditAfter.body.balanceCents ?? 0;
 
       expect(balanceAfter).toBeGreaterThan(balanceBefore);
     });

@@ -13,3 +13,5 @@ export * from './promoter-commission-entry.entity';
 export * from './credit-account.entity';
 export * from './credit-movement.entity';
 export * from './subscription.entity';
+export * from './subscription-plan.entity';
+export * from './user-address.entity';

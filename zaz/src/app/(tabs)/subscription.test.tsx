@@ -234,6 +234,40 @@ describe('SubscriptionTab — state: canceled', () => {
   })
 })
 
+// ── T63 — Phase 11: copy cleanup ─────────────────────────────────────────────
+
+describe('SubscriptionTab — Phase 11 copy cleanup (T63)', () => {
+  it('does NOT show "Envío gratis" anywhere in the subscription screen', () => {
+    setupMocks({ data: null })
+    const { queryByText } = renderWithProviders(<SubscriptionTab />)
+    expect(queryByText(/envío gratis/i)).toBeNull()
+  })
+
+  it('shows rental-context copy in the header subtitle', () => {
+    setupMocks({ data: null })
+    const { queryAllByText } = renderWithProviders(<SubscriptionTab />)
+    expect(queryAllByText(/dispensador/i).length).toBeGreaterThan(0)
+  })
+
+  it('does NOT show "Envío gratis" in the cancel-pending state', () => {
+    setupMocks({ data: makeSub({ status: 'active', cancelAtPeriodEnd: true }) })
+    const { queryByText } = renderWithProviders(<SubscriptionTab />)
+    expect(queryByText(/envío gratis/i)).toBeNull()
+  })
+
+  it('does NOT show "Envío gratis" in the past_due state', () => {
+    setupMocks({ data: makeSub({ status: 'past_due' }) })
+    const { queryByText } = renderWithProviders(<SubscriptionTab />)
+    expect(queryByText(/envío gratis/i)).toBeNull()
+  })
+
+  it('shows success toast with rental copy (not free-shipping copy)', () => {
+    setupMocks({ data: makeSub({ status: 'active' }) }, { success: '1' })
+    const { queryByText } = renderWithProviders(<SubscriptionTab />)
+    expect(queryByText(/envío gratis/i)).toBeNull()
+  })
+})
+
 describe('SubscriptionTab — deep-link return (success=1)', () => {
   beforeAll(() => {
     jest.useFakeTimers()

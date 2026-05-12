@@ -11,6 +11,7 @@ import {
 import type { GeoAddress } from './enums';
 import { UserRole } from './enums';
 import { Order } from './order.entity';
+import { UserAddress } from './user-address.entity';
 
 @Entity('users')
 export class User {
@@ -35,6 +36,10 @@ export class User {
   })
   role!: UserRole;
 
+  /**
+   * @deprecated Use `UserAddress` entity / `GET /me/addresses`.
+   * Retained for `ShippingService.warehouseOrigin` and `useBootstrapLocation` read-throughs (zaz-web).
+   */
   @Column({ name: 'address_default', type: 'jsonb', nullable: true })
   addressDefault!: GeoAddress | null;
 
@@ -62,4 +67,7 @@ export class User {
 
   @OneToMany(() => Order, (order) => order.customer)
   orders?: Order[];
+
+  @OneToMany(() => UserAddress, (a) => a.user)
+  addresses?: UserAddress[];
 }

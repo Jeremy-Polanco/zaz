@@ -346,15 +346,84 @@ export type SubscriptionStatus =
 
 export interface Subscription {
   id: string
+  userId: string
   status: SubscriptionStatus
   currentPeriodStart: string
   currentPeriodEnd: string
   cancelAtPeriodEnd: boolean
   canceledAt: string | null
+  /** 'rental' | 'purchase' — added in rental-billing phase */
+  model: 'rental' | 'purchase'
+  /** ISO timestamp — set only for model='purchase' rows */
+  purchasedAt: string | null
 }
 
 export interface SubscriptionPlan {
   priceCents: number
   currency: 'usd'
   interval: 'month'
+}
+
+export interface AdminPlanResponse {
+  id: string
+  stripeProductId: string
+  activeStripePriceId: string
+  unitAmountCents: number
+  /** Cents price for one-time dispenser purchase (0 = not configured) */
+  purchasePriceCents: number
+  /** Cents amount charged as late fee (0 = not configured) */
+  lateFeeCents: number
+  currency: string
+  interval: string
+  updatedAt: string // ISO timestamp
+}
+
+export interface UpdateSubscriptionPlanInput {
+  unitAmountCents?: number
+  purchasePriceCents?: number
+  lateFeeCents?: number
+}
+
+// ── Delinquent subscription (admin) ──────────────────────────────────────────
+
+export type DelinquentSubscription = {
+  subscriptionId: string
+  userId: string
+  userName: string
+  userPhone: string | null
+  daysDelinquent: number
+  currentPeriodEnd: string
+  rentalAmountCents: number
+  status: string
+}
+
+export type ChargeLateFeeRequest = {
+  alsoCancel: boolean
+}
+
+export type ChargeLateFeeResponse = {
+  chargedCents: number
+  paymentIntentId: string
+  subscriptionCanceled: boolean
+}
+
+export type AdminUserSubscriptionResponse = {
+  subscription: Subscription | null
+  hasPaymentMethod: boolean
+}
+
+// ── UserAddress ───────────────────────────────────────────────────────────────
+
+export type UserAddress = {
+  id: string
+  userId: string
+  label: string
+  line1: string
+  line2: string | null
+  lat: number
+  lng: number
+  instructions: string | null
+  isDefault: boolean
+  createdAt: string
+  updatedAt: string
 }

@@ -6,6 +6,7 @@ import type {
   AuthorizedIntent,
   AuthUser,
   Category,
+  CreateAddressInput,
   CreditAccountsPage,
   CreditMovementsPage,
   GeoAddress,
@@ -26,6 +27,8 @@ import type {
   ShippingQuote,
   Subscription,
   SubscriptionPlan,
+  UpdateAddressInput,
+  UserAddress,
 } from './types'
 import type {
   AdjustCreditInput,
@@ -785,6 +788,72 @@ export function useReactivateSubscription() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['me', 'subscription'] })
+    },
+  })
+}
+
+// ── User Addresses ────────────────────────────────────────────────────────────
+
+/** Client: GET /me/addresses — list saved addresses */
+export function useMyAddresses() {
+  return useQuery<UserAddress[]>({
+    queryKey: ['me', 'addresses'],
+    queryFn: async () => (await api.get<UserAddress[]>('/me/addresses')).data,
+    staleTime: 30_000,
+  })
+}
+
+/** Client: POST /me/addresses — create a new saved address */
+export function useCreateAddress() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (body: CreateAddressInput) => {
+      const { data } = await api.post<UserAddress>('/me/addresses', body)
+      return data
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['me', 'addresses'] })
+    },
+  })
+}
+
+/** Client: PATCH /me/addresses/:id — update a saved address */
+export function useUpdateAddress() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async ({ id, ...body }: { id: string } & UpdateAddressInput) => {
+      const { data } = await api.patch<UserAddress>(`/me/addresses/${id}`, body)
+      return data
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['me', 'addresses'] })
+    },
+  })
+}
+
+/** Client: DELETE /me/addresses/:id — delete a saved address */
+export function useDeleteAddress() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (id: string) => {
+      await api.delete(`/me/addresses/${id}`)
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['me', 'addresses'] })
+    },
+  })
+}
+
+/** Client: PATCH /me/addresses/:id/set-default — promote an address to default */
+export function useSetDefaultAddress() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const { data } = await api.patch<UserAddress>(`/me/addresses/${id}/set-default`)
+      return data
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['me', 'addresses'] })
     },
   })
 }

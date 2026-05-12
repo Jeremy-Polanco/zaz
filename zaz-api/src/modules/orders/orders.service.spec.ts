@@ -26,6 +26,7 @@ import { PromotersService } from '../promoters/promoters.service';
 import { ShippingService } from '../shipping/shipping.service';
 import { CreditService } from '../credit/credit.service';
 import { SubscriptionService } from '../subscription/subscription.service';
+import { TwilioService } from '../twilio/twilio.service';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -110,6 +111,7 @@ describe('OrdersService', () => {
   let shippingService: jest.Mocked<ShippingService>;
   let creditService: jest.Mocked<CreditService>;
   let subscriptionService: jest.Mocked<SubscriptionService>;
+  let twilioService: jest.Mocked<TwilioService>;
 
   beforeEach(async () => {
     ordersRepo = makeRepoMock<Order>();
@@ -153,6 +155,10 @@ describe('OrdersService', () => {
       isActiveSubscriber: jest.fn().mockResolvedValue(false),
     } as unknown as jest.Mocked<SubscriptionService>;
 
+    twilioService = {
+      sendOrderNotificationSms: jest.fn().mockResolvedValue(undefined),
+    } as unknown as jest.Mocked<TwilioService>;
+
     dataSource = {
       transaction: jest.fn(),
       query: jest.fn(),
@@ -172,6 +178,7 @@ describe('OrdersService', () => {
         { provide: ShippingService, useValue: shippingService },
         { provide: CreditService, useValue: creditService },
         { provide: SubscriptionService, useValue: subscriptionService },
+        { provide: TwilioService, useValue: twilioService },
       ],
     }).compile();
 
@@ -301,6 +308,88 @@ describe('OrdersService', () => {
 
       expect(creditService.applyCharge).not.toHaveBeenCalled();
     });
+
+    // -----------------------------------------------------------------------
+    // SMS fire-and-forget hook (REQ-12–15)
+    // -----------------------------------------------------------------------
+
+    function setupSuccessfulCreate(orderOverrides: Partial<Order> = {}) {
+      productsRepo.find.mockResolvedValue([fakeProduct()]);
+
+      const savedOrder = fakeOrder();
+      const orderWithRelations = fakeOrder({
+        customer: fakeUser() as never,
+        items: [],
+        ...orderOverrides,
+      });
+
+      (dataSource.transaction as jest.Mock).mockImplementation(
+        async (cb: (mgr: EntityManager) => Promise<unknown>) => {
+          const orderRepo = makeRepoMock<Order>();
+          const itemRepo = makeRepoMock<OrderItem>();
+          orderRepo.create.mockImplementation((d) => ({ ...d, id: 'order-1' }) as Order);
+          orderRepo.save.mockResolvedValue(savedOrder);
+          orderRepo.update.mockResolvedValue({ affected: 1 } as never);
+          itemRepo.save.mockResolvedValue({} as never);
+          itemRepo.create.mockImplementation((d) => d as OrderItem);
+
+          const mgr = {
+            getRepository: (entity: unknown) => {
+              if (entity === Order) return orderRepo;
+              if (entity === OrderItem) return itemRepo;
+              return makeRepoMock();
+            },
+          };
+          return cb(mgr as unknown as EntityManager);
+        },
+      );
+
+      ordersRepo.findOne.mockResolvedValue(orderWithRelations);
+      return orderWithRelations;
+    }
+
+    it('calls sendOrderNotificationSms with the order returned by findOne', async () => {
+      const orderWithRelations = setupSuccessfulCreate();
+
+      const result = await service.create(fakeUser(UserRole.CLIENT), dto);
+
+      expect(twilioService.sendOrderNotificationSms).toHaveBeenCalledTimes(1);
+      expect(twilioService.sendOrderNotificationSms).toHaveBeenCalledWith(
+        orderWithRelations,
+      );
+      expect(result).toBe(orderWithRelations);
+    });
+
+    it('returns the order even when sendOrderNotificationSms returns a never-settling promise (fire-and-forget)', async () => {
+      setupSuccessfulCreate();
+
+      // sendOrderNotificationSms hangs forever — create() must still resolve
+      twilioService.sendOrderNotificationSms.mockReturnValue(new Promise(() => {/* never resolves */}));
+
+      const resultPromise = service.create(fakeUser(UserRole.CLIENT), dto);
+
+      // Use a race: if create() awaits SMS, it would hang and this would timeout.
+      // We race with a fast-resolving promise to confirm create() resolves quickly.
+      const result = await Promise.race([
+        resultPromise,
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('create() was blocked by SMS')), 500),
+        ),
+      ]);
+
+      expect(result).toBeDefined();
+    });
+
+    it('returns the order even when sendOrderNotificationSms rejects (SMS failure does not break create)', async () => {
+      setupSuccessfulCreate();
+
+      twilioService.sendOrderNotificationSms.mockRejectedValue(
+        new Error('SMS service error'),
+      );
+
+      // create() must resolve (not reject) despite SMS failure
+      await expect(service.create(fakeUser(UserRole.CLIENT), dto)).resolves.toBeDefined();
+    });
   });
 
   // -------------------------------------------------------------------------
@@ -397,28 +486,60 @@ describe('OrdersService', () => {
   describe('setQuote', () => {
     const superUser = fakeUser(UserRole.SUPER_ADMIN_DELIVERY);
 
-    it('sets shippingCents=0 and wasSubscriberAtQuote=true for active subscriber', async () => {
+    /**
+     * REQ-FS1: Active rental subscriber no longer gets free shipping.
+     * setQuote MUST use the provided shippingCents regardless of subscription status.
+     * wasSubscriberAtQuote is still stamped for data lineage.
+     */
+    it('active subscriber pays normal shipping (no free-shipping override) and wasSubscriberAtQuote=true', async () => {
       const order = fakeOrder({
         status: OrderStatus.PENDING_QUOTE,
         customerId: 'user-1',
         customer: fakeUser() as never,
+        subtotal: '10.00',
+        pointsRedeemed: '0.00',
       });
       ordersRepo.findOne
         .mockResolvedValueOnce(order) // inside findOne called by setQuote
-        .mockResolvedValueOnce({ ...order, shipping: '0.00', wasSubscriberAtQuote: true } as never);
+        .mockResolvedValueOnce({ ...order, shipping: '3.00', wasSubscriberAtQuote: true } as never);
 
       subscriptionService.isActiveSubscriber.mockResolvedValue(true);
       ordersRepo.update.mockResolvedValue({ affected: 1 } as never);
 
       await service.setQuote('order-1', 300 /* 3.00 */, superUser);
 
+      const updateCall = ordersRepo.update.mock.calls[0][1] as Record<string, unknown>;
+      // Shipping MUST equal the provided value — NOT 0 (free-shipping override removed)
+      expect(updateCall.shipping).toBe('3.00');
       expect(ordersRepo.update).toHaveBeenCalledWith(
         'order-1',
         expect.objectContaining({
-          shipping: '0.00',
           wasSubscriberAtQuote: true,
         }),
       );
+    });
+
+    it('regression: subscriber order shippingCents is NOT zero', async () => {
+      const order = fakeOrder({
+        status: OrderStatus.PENDING_QUOTE,
+        customerId: 'user-1',
+        customer: fakeUser() as never,
+        subtotal: '10.00',
+        pointsRedeemed: '0.00',
+      });
+      ordersRepo.findOne
+        .mockResolvedValueOnce(order)
+        .mockResolvedValueOnce({ ...order, shipping: '5.00', wasSubscriberAtQuote: true } as never);
+
+      subscriptionService.isActiveSubscriber.mockResolvedValue(true);
+      ordersRepo.update.mockResolvedValue({ affected: 1 } as never);
+
+      await service.setQuote('order-1', 500 /* 5.00 */, superUser);
+
+      const updateCall = ordersRepo.update.mock.calls[0][1] as Record<string, unknown>;
+      // Regression guard: free-shipping override no longer applies for rental subscribers
+      expect(updateCall.shipping).not.toBe('0.00');
+      expect(Number(updateCall.shipping)).toBeGreaterThan(0);
     });
 
     it('uses provided shippingCents and sets wasSubscriberAtQuote=false for non-subscriber', async () => {

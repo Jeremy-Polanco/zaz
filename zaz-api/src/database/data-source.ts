@@ -14,7 +14,9 @@ import {
   Product,
   PromoterCommissionEntry,
   Subscription,
+  SubscriptionPlan,
   User,
+  UserAddress,
 } from '../entities';
 
 // Standalone DataSource for the TypeORM CLI (migration generate / run / revert).
@@ -60,6 +62,8 @@ export const AppDataSource = new DataSource({
     CreditAccount,
     CreditMovement,
     Subscription,
+    SubscriptionPlan,
+    UserAddress,
   ],
   synchronize: false,
   migrationsRun: true,

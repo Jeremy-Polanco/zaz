@@ -106,13 +106,19 @@ export default function ProfileTab() {
           </View>
         )}
 
-        {user?.addressDefault && (
-          <View className="mt-6">
-            <Eyebrow>Dirección por defecto</Eyebrow>
-            <Text className="mt-1.5 text-[16px] leading-[22px] text-ink">
-              {user.addressDefault.text}
-            </Text>
-          </View>
+        {isClient && (
+          <>
+            <Hairline className="mt-10" />
+            <View className="mt-6">
+              <Eyebrow className="mb-1">Mis datos</Eyebrow>
+              <AccountLink
+                label="Mis direcciones"
+                iosIcon="house.fill"
+                androidIcon="home"
+                href="/addresses"
+              />
+            </View>
+          </>
         )}
 
         {isClient && (

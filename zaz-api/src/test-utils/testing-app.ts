@@ -62,6 +62,9 @@ export async function createTestingApp(
   process.env.TWILIO_API_KEY_SID = process.env.TWILIO_API_KEY_SID ?? 'SKtest';
   process.env.TWILIO_API_KEY_SECRET = process.env.TWILIO_API_KEY_SECRET ?? 'test-secret';
   process.env.TWILIO_FROM_NUMBER = process.env.TWILIO_FROM_NUMBER ?? '+15550000000';
+  // Default to empty string so the feature is disabled in all E2E/integration tests.
+  // Tests that want to exercise the SMS path must explicitly set this before calling createTestingApp.
+  process.env.ORDER_SMS_NOTIFY_NUMBERS = process.env.ORDER_SMS_NOTIFY_NUMBERS ?? '';
 
   const builder = Test.createTestingModule({
     imports: [AppModule],
@@ -79,7 +82,8 @@ export async function createTestingApp(
   // that avoids reimplementing the full module graph.
   const moduleRef: TestingModule = await builder.compile();
 
-  const app = moduleRef.createNestApplication();
+  // Enable rawBody so webhook handlers can access req.rawBody (matches main.ts NestFactory.create options)
+  const app = moduleRef.createNestApplication({ rawBody: true });
 
   app.useGlobalPipes(
     new ValidationPipe({

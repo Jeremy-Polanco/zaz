@@ -59,10 +59,12 @@ export function setupTransactionPerTest(
 
     // Monkey-patch DataSource.manager getter to redirect to qr.manager
     // This makes services that call ds.manager.getRepository() use the TX.
-    originalManagerDescriptor = Object.getOwnPropertyDescriptor(
-      Object.getPrototypeOf(ds),
-      'manager',
-    );
+    // IMPORTANT: save the OWN-PROPERTY descriptor from the instance itself (not
+    // the prototype), because TypeORM stores `manager` as a plain instance value
+    // property set in the constructor — not as a prototype accessor.
+    originalManagerDescriptor =
+      Object.getOwnPropertyDescriptor(ds, 'manager') ??
+      Object.getOwnPropertyDescriptor(Object.getPrototypeOf(ds), 'manager');
 
     const qr = currentQr;
     Object.defineProperty(ds, 'manager', {

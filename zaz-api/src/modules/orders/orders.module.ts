@@ -10,6 +10,7 @@ import { PromotersModule } from '../promoters/promoters.module';
 import { ShippingModule } from '../shipping/shipping.module';
 import { CreditModule } from '../credit/credit.module';
 import { SubscriptionModule } from '../subscription/subscription.module';
+import { TwilioModule } from '../twilio/twilio.module';
 
 @Module({
   imports: [
@@ -21,6 +22,7 @@ import { SubscriptionModule } from '../subscription/subscription.module';
     ShippingModule,
     CreditModule,
     SubscriptionModule,
+    TwilioModule,
   ],
   controllers: [OrdersController],
   providers: [OrdersService],

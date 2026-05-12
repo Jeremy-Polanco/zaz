@@ -26,7 +26,16 @@ export interface MockStripe {
     create: jest.Mock;
     retrieve: jest.Mock;
     update: jest.Mock;
+    cancel: jest.Mock;
     list: jest.Mock;
+  };
+  prices: {
+    retrieve: jest.Mock;
+    create: jest.Mock;
+    update: jest.Mock;
+  };
+  products: {
+    update: jest.Mock;
   };
   checkout: {
     sessions: {
@@ -62,6 +71,26 @@ export function createMockStripe(): MockStripe {
       update: jest.fn().mockResolvedValue({}),
       list: jest.fn().mockResolvedValue({ data: [] }),
     },
+    prices: {
+      retrieve: jest.fn().mockResolvedValue({
+        id: 'price_test_monthly',
+        product: 'prod_test_default',
+        unit_amount: 1000,
+        currency: 'usd',
+        recurring: { interval: 'month' },
+      }),
+      create: jest.fn().mockResolvedValue({
+        id: 'price_new_default',
+        product: 'prod_test_default',
+        unit_amount: 1500,
+        currency: 'usd',
+        recurring: { interval: 'month' },
+      }),
+      update: jest.fn().mockResolvedValue({}),
+    },
+    products: {
+      update: jest.fn().mockResolvedValue({}),
+    },
     subscriptions: {
       create: jest.fn().mockResolvedValue({ id: 'sub_test_default', status: 'active' }),
       retrieve: jest.fn().mockResolvedValue({
@@ -74,6 +103,7 @@ export function createMockStripe(): MockStripe {
         metadata: {},
       }),
       update: jest.fn().mockResolvedValue({}),
+      cancel: jest.fn().mockResolvedValue({ id: 'sub_test_default', status: 'canceled' }),
       list: jest.fn().mockResolvedValue({ data: [] }),
     },
     checkout: {
@@ -135,9 +165,14 @@ export function resetMockStripe(mock: MockStripe): void {
   mock.customers.search.mockReset().mockImplementation(fresh.customers.search);
   mock.customers.update.mockReset().mockImplementation(fresh.customers.update);
   mock.customers.list.mockReset().mockImplementation(fresh.customers.list);
+  mock.prices.retrieve.mockReset().mockImplementation(fresh.prices.retrieve);
+  mock.prices.create.mockReset().mockImplementation(fresh.prices.create);
+  mock.prices.update.mockReset().mockImplementation(fresh.prices.update);
+  mock.products.update.mockReset().mockImplementation(fresh.products.update);
   mock.subscriptions.create.mockReset().mockImplementation(fresh.subscriptions.create);
   mock.subscriptions.retrieve.mockReset().mockImplementation(fresh.subscriptions.retrieve);
   mock.subscriptions.update.mockReset().mockImplementation(fresh.subscriptions.update);
+  mock.subscriptions.cancel.mockReset().mockImplementation(fresh.subscriptions.cancel);
   mock.subscriptions.list.mockReset().mockImplementation(fresh.subscriptions.list);
   mock.checkout.sessions.create.mockReset().mockImplementation(fresh.checkout.sessions.create);
   mock.billingPortal.sessions.create.mockReset().mockImplementation(fresh.billingPortal.sessions.create);
