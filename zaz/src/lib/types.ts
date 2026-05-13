@@ -354,12 +354,10 @@ export type SubscriptionStatus =
 export interface Subscription {
   id: string
   status: SubscriptionStatus
-  model?: 'rental' | 'purchase'
   currentPeriodStart: string
   currentPeriodEnd: string
   cancelAtPeriodEnd: boolean
   canceledAt: string | null
-  purchasedAt?: string | null
 }
 
 export interface SubscriptionPlan {

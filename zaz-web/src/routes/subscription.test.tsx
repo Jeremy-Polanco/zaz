@@ -39,14 +39,11 @@ const defaultPlan: SubscriptionPlan = {
 function makeSub(overrides: Partial<Subscription> = {}): Subscription {
   return {
     id: 'sub_test_001',
-    userId: 'user_test_001',
     status: 'active',
-    model: 'rental',
     currentPeriodStart: '2026-01-01T00:00:00.000Z',
     currentPeriodEnd: '2026-02-01T00:00:00.000Z',
     cancelAtPeriodEnd: false,
     canceledAt: null,
-    purchasedAt: null,
     ...overrides,
   }
 }

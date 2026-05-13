@@ -2,16 +2,13 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from './api'
 import type {
   AdminPlanResponse,
-  AdminUserSubscriptionResponse,
   AuthorizedIntent,
   AuthUser,
   Category,
-  ChargeLateFeeResponse,
   CreditAccount,
   CreditAccountsPage,
   CreditMovement,
   CreditMovementsPage,
-  DelinquentSubscription,
   GeoAddress,
   Invoice,
   MyCreditResponse,
@@ -806,15 +803,11 @@ export function useSuperUserAddresses(userId: string | undefined) {
   })
 }
 
-/** Super-admin: PUT /admin/subscription/plan — update plan price (partial) */
+/** Super-admin: PUT /admin/subscription/plan — update monthly price */
 export function useUpdateSubscriptionPlan() {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: async (body: {
-      unitAmountCents?: number
-      purchasePriceCents?: number
-      lateFeeCents?: number
-    }) => {
+    mutationFn: async (body: { unitAmountCents: number }) => {
       const { data } = await api.put<AdminPlanResponse>(
         '/admin/subscription/plan',
         body,
@@ -824,110 +817,6 @@ export function useUpdateSubscriptionPlan() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['admin', 'subscription', 'plan'] })
       qc.invalidateQueries({ queryKey: ['subscription', 'plan'] })
-    },
-  })
-}
-
-// ── Admin rental / dispenser hooks ───────────────────────────────────────────
-
-/** Super-admin: GET /admin/subscription/delinquent — list of delinquent rentals */
-export function useDelinquentSubscriptions() {
-  return useQuery<DelinquentSubscription[]>({
-    queryKey: ['admin', 'subscription', 'delinquent'],
-    queryFn: async () =>
-      (await api.get<DelinquentSubscription[]>('/admin/subscription/delinquent')).data,
-    staleTime: 0,
-  })
-}
-
-/** Super-admin: GET /admin/users/:userId/subscription — current subscription + hasPaymentMethod */
-export function useUserSubscription(userId: string | undefined) {
-  return useQuery<AdminUserSubscriptionResponse>({
-    queryKey: ['admin', 'user', userId, 'subscription'],
-    queryFn: async () =>
-      (await api.get<AdminUserSubscriptionResponse>(`/admin/users/${userId}/subscription`)).data,
-    enabled: !!userId,
-    staleTime: 0,
-    retry: false,
-  })
-}
-
-/** Super-admin: POST /admin/subscriptions/:id/charge-late-fee */
-export function useChargeLateFee() {
-  const qc = useQueryClient()
-  return useMutation({
-    mutationFn: async ({
-      subscriptionId,
-      alsoCancel,
-    }: {
-      subscriptionId: string
-      alsoCancel: boolean
-    }) => {
-      const { data } = await api.post<ChargeLateFeeResponse>(
-        `/admin/subscriptions/${subscriptionId}/charge-late-fee`,
-        { alsoCancel },
-      )
-      return data
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['admin', 'subscription', 'delinquent'] })
-    },
-  })
-}
-
-/** Super-admin: POST /admin/subscriptions/:id/cancel */
-export function useCancelSubscriptionAdmin() {
-  const qc = useQueryClient()
-  return useMutation({
-    mutationFn: async ({
-      subscriptionId,
-    }: {
-      subscriptionId: string
-      userId?: string
-    }) => {
-      const { data } = await api.post<Subscription>(
-        `/admin/subscriptions/${subscriptionId}/cancel`,
-      )
-      return data
-    },
-    onSuccess: (_data, vars) => {
-      qc.invalidateQueries({ queryKey: ['admin', 'subscription', 'delinquent'] })
-      if (vars.userId) {
-        qc.invalidateQueries({ queryKey: ['admin', 'user', vars.userId, 'subscription'] })
-      }
-    },
-  })
-}
-
-/** Super-admin: POST /admin/users/:userId/subscription/activate-rental */
-export function useActivateAsRental(userId: string) {
-  const qc = useQueryClient()
-  return useMutation({
-    mutationFn: async () => {
-      const { data } = await api.post<Subscription>(
-        `/admin/users/${userId}/subscription/activate-rental`,
-      )
-      return data
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['admin', 'user', userId, 'subscription'] })
-      qc.invalidateQueries({ queryKey: ['admin', 'subscription', 'delinquent'] })
-    },
-  })
-}
-
-/** Super-admin: POST /admin/users/:userId/subscription/activate-purchase */
-export function useActivateAsPurchase(userId: string) {
-  const qc = useQueryClient()
-  return useMutation({
-    mutationFn: async () => {
-      const { data } = await api.post<Subscription>(
-        `/admin/users/${userId}/subscription/activate-purchase`,
-      )
-      return data
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['admin', 'user', userId, 'subscription'] })
     },
   })
 }

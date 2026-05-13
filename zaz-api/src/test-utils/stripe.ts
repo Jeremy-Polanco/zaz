@@ -23,10 +23,8 @@ export interface MockStripe {
     list: jest.Mock;
   };
   subscriptions: {
-    create: jest.Mock;
     retrieve: jest.Mock;
     update: jest.Mock;
-    cancel: jest.Mock;
     list: jest.Mock;
   };
   prices: {
@@ -92,7 +90,6 @@ export function createMockStripe(): MockStripe {
       update: jest.fn().mockResolvedValue({}),
     },
     subscriptions: {
-      create: jest.fn().mockResolvedValue({ id: 'sub_test_default', status: 'active' }),
       retrieve: jest.fn().mockResolvedValue({
         id: 'sub_test_default',
         status: 'active',
@@ -103,7 +100,6 @@ export function createMockStripe(): MockStripe {
         metadata: {},
       }),
       update: jest.fn().mockResolvedValue({}),
-      cancel: jest.fn().mockResolvedValue({ id: 'sub_test_default', status: 'canceled' }),
       list: jest.fn().mockResolvedValue({ data: [] }),
     },
     checkout: {
@@ -169,10 +165,8 @@ export function resetMockStripe(mock: MockStripe): void {
   mock.prices.create.mockReset().mockImplementation(fresh.prices.create);
   mock.prices.update.mockReset().mockImplementation(fresh.prices.update);
   mock.products.update.mockReset().mockImplementation(fresh.products.update);
-  mock.subscriptions.create.mockReset().mockImplementation(fresh.subscriptions.create);
   mock.subscriptions.retrieve.mockReset().mockImplementation(fresh.subscriptions.retrieve);
   mock.subscriptions.update.mockReset().mockImplementation(fresh.subscriptions.update);
-  mock.subscriptions.cancel.mockReset().mockImplementation(fresh.subscriptions.cancel);
   mock.subscriptions.list.mockReset().mockImplementation(fresh.subscriptions.list);
   mock.checkout.sessions.create.mockReset().mockImplementation(fresh.checkout.sessions.create);
   mock.billingPortal.sessions.create.mockReset().mockImplementation(fresh.billingPortal.sessions.create);

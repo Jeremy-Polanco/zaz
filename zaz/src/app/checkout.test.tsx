@@ -227,68 +227,6 @@ afterEach(() => {
   jest.clearAllMocks()
 })
 
-// ── T65 — Phase 11: checkout shipping copy cleanup ────────────────────────────
-
-describe('T65 — checkout shipping label copy cleanup', () => {
-  /**
-   * "Gratis con tu suscripción" must NOT appear regardless of subscription status.
-   * "A cotizar" must always appear in the shipping row.
-   */
-  it('does NOT show "Gratis con tu suscripción" when user has an active subscription', async () => {
-    setupBaseQueryMocks([])
-
-    // Give the user an active subscription
-    mockUseMySubscription.mockReturnValue({
-      data: { id: 'sub-1', status: 'active', cancelAtPeriodEnd: false,
-              currentPeriodStart: '2026-01-01T00:00:00Z', currentPeriodEnd: '2026-02-01T00:00:00Z',
-              canceledAt: null },
-    } as unknown as ReturnType<typeof useMySubscription>)
-
-    mockLocation.requestForegroundPermissionsAsync.mockResolvedValue({ status: 'denied' } as never)
-    mockLocation.getForegroundPermissionsAsync.mockResolvedValue({ status: 'denied' } as never)
-
-    const { queryByText } = renderWithProviders(<CheckoutScreen />)
-
-    await waitFor(() => {
-      expect(queryByText(/gratis con tu suscripción/i)).toBeNull()
-    })
-  })
-
-  it('always shows "A cotizar" in the shipping row regardless of subscription status', async () => {
-    setupBaseQueryMocks([])
-
-    // Give the user an active subscription
-    mockUseMySubscription.mockReturnValue({
-      data: { id: 'sub-1', status: 'active', cancelAtPeriodEnd: false,
-              currentPeriodStart: '2026-01-01T00:00:00Z', currentPeriodEnd: '2026-02-01T00:00:00Z',
-              canceledAt: null },
-    } as unknown as ReturnType<typeof useMySubscription>)
-
-    mockLocation.requestForegroundPermissionsAsync.mockResolvedValue({ status: 'denied' } as never)
-    mockLocation.getForegroundPermissionsAsync.mockResolvedValue({ status: 'denied' } as never)
-
-    const { queryByText } = renderWithProviders(<CheckoutScreen />)
-
-    await waitFor(() => {
-      expect(queryByText(/A cotizar/i)).toBeTruthy()
-    })
-  })
-
-  it('shows "A cotizar" for users without a subscription too', async () => {
-    setupBaseQueryMocks([])
-
-    // No subscription (default mock already has null)
-    mockLocation.requestForegroundPermissionsAsync.mockResolvedValue({ status: 'denied' } as never)
-    mockLocation.getForegroundPermissionsAsync.mockResolvedValue({ status: 'denied' } as never)
-
-    const { queryByText } = renderWithProviders(<CheckoutScreen />)
-
-    await waitFor(() => {
-      expect(queryByText(/A cotizar/i)).toBeTruthy()
-    })
-  })
-})
-
 // ── Pair G/H — Smart-default within 200m pre-selects nearest ──────────────────
 
 describe('Pair G/H — Smart-default selects address within 200m of GPS', () => {

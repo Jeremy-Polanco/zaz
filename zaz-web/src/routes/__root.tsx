@@ -85,9 +85,6 @@ function RoleNav({ role }: { role: string }) {
         >
           Crédito
         </Link>
-        <Link to="/super/dispensers" className={navLinkClass}>
-          Dispensers
-        </Link>
         <Link to="/super/subscription" className={navLinkClass}>
           Suscripción
         </Link>

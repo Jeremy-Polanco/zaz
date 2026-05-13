@@ -4,16 +4,11 @@ import { z } from 'zod'
 import {
   useAdminCreditAccount,
   useAdminCreditMovements,
-  useAdminSubscriptionPlan,
   useAdjustCredit,
-  useActivateAsRental,
-  useActivateAsPurchase,
-  useCancelSubscriptionAdmin,
   useGrantCredit,
   useManualAdjustment,
   useRecordPayment,
   useRefundCreditOrder,
-  useUserSubscription,
 } from '../lib/queries'
 import { formatCents, formatDate } from '../lib/utils'
 import { TOKEN_KEY, api } from '../lib/api'
@@ -145,200 +140,6 @@ function MovementRow({
         )}
       </td>
     </tr>
-  )
-}
-
-// ── Dispenser section ──────────────────────────────────────────────────────────
-
-type DispenserAction = 'rental' | 'purchase' | 'cancel'
-
-function DispenserSection({ userId }: { userId: string }) {
-  const { data: subData } = useUserSubscription(userId)
-  const { data: plan } = useAdminSubscriptionPlan()
-  const rentalMut = useActivateAsRental(userId)
-  const purchaseMut = useActivateAsPurchase(userId)
-  const cancelMut = useCancelSubscriptionAdmin()
-
-  const [confirm, setConfirm] = useState<DispenserAction | null>(null)
-  const [actionError, setActionError] = useState<string | null>(null)
-
-  const subscription = subData?.subscription ?? null
-  const hasPaymentMethod = subData?.hasPaymentMethod ?? false
-  const purchasePriceConfigured = (plan?.purchasePriceCents ?? 0) > 0
-
-  const canActivateRental = hasPaymentMethod
-  const canActivatePurchase = hasPaymentMethod && purchasePriceConfigured
-
-  const isNoSub = !subscription || subscription.status === 'canceled'
-  const isRental = subscription != null && subscription.status !== 'canceled' && subscription.model === 'rental'
-  const isPurchase = subscription != null && subscription.model === 'purchase'
-
-  const isAnyPending = rentalMut.isPending || purchaseMut.isPending || cancelMut.isPending
-
-  const handleConfirm = () => {
-    setActionError(null)
-    if (confirm === 'rental') {
-      rentalMut.mutate(undefined, {
-        onSuccess: () => setConfirm(null),
-        onError: (err: unknown) => {
-          setActionError((err as { message?: string })?.message ?? 'Error al activar alquiler')
-          setConfirm(null)
-        },
-      })
-    } else if (confirm === 'purchase') {
-      purchaseMut.mutate(undefined, {
-        onSuccess: () => setConfirm(null),
-        onError: (err: unknown) => {
-          setActionError((err as { message?: string })?.message ?? 'Error al activar compra')
-          setConfirm(null)
-        },
-      })
-    } else if (confirm === 'cancel' && subscription) {
-      cancelMut.mutate(
-        { subscriptionId: subscription.id, userId },
-        {
-          onSuccess: () => setConfirm(null),
-          onError: (err: unknown) => {
-            setActionError((err as { message?: string })?.message ?? 'Error al cancelar')
-            setConfirm(null)
-          },
-        },
-      )
-    } else {
-      setConfirm(null)
-    }
-  }
-
-  return (
-    <div className="mt-10 border border-ink/15 bg-paper p-6">
-      <h2 className="eyebrow mb-4">Dispenser</h2>
-
-      {/* Confirmation dialog */}
-      {confirm && (
-        <div
-          role="dialog"
-          aria-modal="true"
-          className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 backdrop-blur-sm"
-        >
-          <div className="mx-4 w-full max-w-md border border-ink/15 bg-paper p-6">
-            <h3 className="eyebrow mb-2">
-              {confirm === 'rental' ? 'Activar como alquiler'
-                : confirm === 'purchase' ? 'Activar como compra'
-                : 'Cancelar suscripción'}
-            </h3>
-            <p className="mb-6 text-sm text-ink-muted">
-              {confirm === 'rental' ? '¿Activar alquiler de dispenser para este cliente?'
-                : confirm === 'purchase' ? '¿Registrar compra del dispenser para este cliente?'
-                : '¿Cancelar el alquiler? Esta acción es irreversible.'}
-            </p>
-            <div className="flex items-center gap-3">
-              <Button
-                variant="danger"
-                onClick={handleConfirm}
-                disabled={isAnyPending}
-              >
-                {isAnyPending ? 'Procesando…' : 'Confirmar'}
-              </Button>
-              <Button
-                variant="secondary"
-                onClick={() => setConfirm(null)}
-                disabled={isAnyPending}
-              >
-                Cancelar
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Error banner */}
-      {actionError && (
-        <div
-          role="alert"
-          className="mb-4 rounded-xs border border-bad/30 bg-bad/5 px-4 py-3 text-sm text-bad"
-        >
-          {actionError}
-        </div>
-      )}
-
-      {/* State: no subscription */}
-      {isNoSub && (
-        <div className="flex flex-col gap-3">
-          <p className="text-sm text-ink-muted">El cliente no tiene dispenser.</p>
-          <div className="flex items-center gap-3 flex-wrap">
-            <div className="flex flex-col gap-1">
-              <Button
-                variant="primary"
-                disabled={!canActivateRental || isAnyPending}
-                onClick={() => setConfirm('rental')}
-                size="sm"
-              >
-                Activar como alquiler
-              </Button>
-              {!hasPaymentMethod && (
-                <p className="text-[11px] text-ink-muted">Cliente sin método de pago</p>
-              )}
-            </div>
-            <div className="flex flex-col gap-1">
-              <Button
-                variant="secondary"
-                disabled={!canActivatePurchase || isAnyPending}
-                onClick={() => setConfirm('purchase')}
-                size="sm"
-              >
-                Activar como compra
-              </Button>
-              {!hasPaymentMethod && (
-                <p className="text-[11px] text-ink-muted">Cliente sin método de pago</p>
-              )}
-              {hasPaymentMethod && !purchasePriceConfigured && (
-                <p className="text-[11px] text-ink-muted">
-                  Configura el precio en /super/subscription primero
-                </p>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* State: active rental */}
-      {isRental && subscription && (
-        <div className="flex flex-col gap-3">
-          <div className="flex items-center gap-2">
-            <span className="rounded-full bg-green-100 px-3 py-1 text-xs font-medium uppercase tracking-wide text-green-700">
-              Alquiler activo
-            </span>
-          </div>
-          <p className="text-sm text-ink">
-            Alquiler activo desde {formatDate(subscription.currentPeriodStart)}
-          </p>
-          <p className="text-sm text-ink-muted">
-            Próximo cargo: {formatDate(subscription.currentPeriodEnd)}
-          </p>
-          <Button
-            variant="danger"
-            size="sm"
-            onClick={() => setConfirm('cancel')}
-            disabled={isAnyPending}
-            className="w-fit"
-          >
-            Cancelar suscripción
-          </Button>
-        </div>
-      )}
-
-      {/* State: purchased */}
-      {isPurchase && subscription && (
-        <div className="flex flex-col gap-2">
-          <span className="rounded-full bg-blue-100 px-3 py-1 text-xs font-medium uppercase tracking-wide text-blue-700 w-fit">
-            Comprado
-          </span>
-          <p className="text-sm text-ink">
-            Dispenser comprado el {formatDate(subscription.purchasedAt ?? subscription.currentPeriodStart)}
-          </p>
-        </div>
-      )}
-    </div>
   )
 }
 
@@ -695,8 +496,6 @@ function SuperCreditDetailPage() {
         )}
       </div>
 
-      {/* Dispenser section */}
-      <DispenserSection userId={userId} />
     </div>
   )
 }

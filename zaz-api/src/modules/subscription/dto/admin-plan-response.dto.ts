@@ -3,8 +3,6 @@ export class AdminPlanResponseDto {
   stripeProductId!: string;
   activeStripePriceId!: string;
   unitAmountCents!: number;
-  purchasePriceCents!: number;
-  lateFeeCents!: number;
   currency!: string;
   interval!: string;
   updatedAt!: Date;

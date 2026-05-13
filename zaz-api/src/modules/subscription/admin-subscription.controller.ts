@@ -13,16 +13,14 @@ import { UserRole } from '../../entities/enums';
 import { SubscriptionService } from './subscription.service';
 import { UpdateSubscriptionPlanDto } from './dto/update-subscription-plan.dto';
 import { AdminPlanResponseDto } from './dto/admin-plan-response.dto';
-import { DelinquentSubscriptionDto } from './dto/delinquent-subscription.dto';
 
 /**
  * Admin endpoints for subscription plan management.
  * All routes require SUPER_ADMIN_DELIVERY role.
  *
  * Routes:
- *   GET  /admin/subscription/plan       — retrieve current plan (admin view with all fields)
- *   PUT  /admin/subscription/plan       — rotate Stripe price + update DB row
- *   GET  /admin/subscription/delinquent — list past-due rental subscriptions ordered by days delinquent
+ *   GET  /admin/subscription/plan — retrieve current plan (admin view with all fields)
+ *   PUT  /admin/subscription/plan — rotate Stripe price + update DB row
  */
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles(UserRole.SUPER_ADMIN_DELIVERY)
@@ -51,27 +49,16 @@ export class AdminSubscriptionController {
   /**
    * PUT /admin/subscription/plan
    * Rotates the Stripe Price (Stripe-first), then updates the DB row.
-   * Body: UpdateSubscriptionPlanDto — all three fields optional (unitAmountCents, purchasePriceCents, lateFeeCents).
+   * Body: UpdateSubscriptionPlanDto — { unitAmountCents }.
    * Returns 200 AdminPlanResponseDto on success.
    * Throws:
-   *   400 — DTO validation failure or empty body
+   *   400 — DTO validation failure
    *   502 — Stripe step 1 or 2 failure
    *   503 — no plan row in DB
    *   500 — DB write failure after Stripe success (retry-safe)
    */
   @Put('plan')
   async updatePlan(@Body() dto: UpdateSubscriptionPlanDto): Promise<AdminPlanResponseDto> {
-    return this.subscription.updatePlan(dto);
-  }
-
-  /**
-   * GET /admin/subscription/delinquent
-   * Returns rental subscriptions with status past_due/unpaid and current_period_end < NOW(),
-   * ordered by days delinquent DESC (oldest first).
-   * Returns an empty array when no delinquent subscriptions exist.
-   */
-  @Get('delinquent')
-  async getDelinquentList(): Promise<DelinquentSubscriptionDto[]> {
-    return this.subscription.getDelinquentList();
+    return this.subscription.updatePlan(dto.unitAmountCents);
   }
 }

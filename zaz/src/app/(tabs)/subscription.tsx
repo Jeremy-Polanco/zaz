@@ -93,13 +93,13 @@ export default function SubscriptionTab() {
           </Text>
         </View>
         <Text className="mt-2 text-[13px] text-ink-soft">
-          Tu suscripción cubre el alquiler del dispensador.
+          Envío gratis en todos tus pedidos.
         </Text>
 
         {toastVisible && (
           <View className="mt-4 border border-green-200 bg-green-50 px-4 py-3">
             <Text className="font-sans text-[12px] text-green-800">
-              ¡Suscripción activada! Tu dispensador ya está en camino.
+              ¡Suscripción activada! Ya puedes disfrutar del envío gratis.
             </Text>
           </View>
         )}
@@ -113,7 +113,7 @@ export default function SubscriptionTab() {
               {plan ? formatCents(plan.priceCents) : '$10.00'} / mes
             </Text>
             <Text className="mt-2 text-[14px] text-ink-soft">
-              Alquiler del dispensador incluido. Cancela cuando quieras.
+              Envío gratis en todos tus pedidos. Cancela cuando quieras.
             </Text>
             <View className="mt-5">
               <Button
@@ -157,7 +157,7 @@ export default function SubscriptionTab() {
               Activo hasta {formatDate(sub.currentPeriodEnd)}, no se renovará.
             </Text>
             <Text className="mt-1 text-[13px] text-yellow-700">
-              El dispensador continúa activo hasta esa fecha.
+              Aún tienes envío gratis hasta esa fecha.
             </Text>
             <View className="mt-5 gap-3">
               <Button
@@ -178,7 +178,7 @@ export default function SubscriptionTab() {
               Tu pago está pendiente.
             </Text>
             <Text className="mt-1 text-[13px] text-red-700">
-              Actualizá tu medio de pago para mantener el dispensador activo.
+              Actualizá tu medio de pago para seguir con el envío gratis.
             </Text>
             <View className="mt-5">
               <Button onPress={openPortal} disabled={portal.isPending}>

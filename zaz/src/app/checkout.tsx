@@ -10,6 +10,7 @@ import {
   useCurrentUser,
   useMyAddresses,
   useMyCredit,
+  useMySubscription,
   usePointsBalance,
   useProducts,
 } from '../lib/queries'
@@ -33,8 +34,12 @@ export default function CheckoutScreen() {
   const { data: pointsBalance } = usePointsBalance()
   const { data: creditData } = useMyCredit()
   const { data: addresses = [] } = useMyAddresses()
+  const { data: subscription } = useMySubscription()
   const createOrder = useCreateOrder()
   const createAddress = useCreateAddress()
+
+  const isActiveSubscriber =
+    subscription?.status === 'active' || subscription?.status === 'past_due'
 
   // ── Saved-address picker state ─────────────────────────────────────────────
   const [selectedAddressId, setSelectedAddressId] = useState<string | null>(null)
@@ -712,12 +717,18 @@ export default function CheckoutScreen() {
             <Text className="font-sans text-[11px] uppercase tracking-label text-ink-muted">
               Envío
             </Text>
-            <Text
-              className="font-sans text-[14px] italic text-ink-muted"
-              style={{ fontVariant: ['tabular-nums'] }}
-            >
-              A cotizar
-            </Text>
+            {isActiveSubscriber ? (
+              <Text className="font-sans text-[14px] text-green-700">
+                Gratis con tu suscripción
+              </Text>
+            ) : (
+              <Text
+                className="font-sans text-[14px] italic text-ink-muted"
+                style={{ fontVariant: ['tabular-nums'] }}
+              >
+                A cotizar
+              </Text>
+            )}
           </View>
           <View className="mb-3 flex-row items-baseline justify-between">
             <Text className="font-sans text-[11px] uppercase tracking-label text-ink-muted">

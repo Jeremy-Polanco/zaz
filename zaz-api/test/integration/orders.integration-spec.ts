@@ -88,7 +88,7 @@ import { Category } from '../../src/entities/category.entity';
 import { UserRole, OrderStatus, PaymentMethod } from '../../src/entities/enums';
 import { OrdersService } from '../../src/modules/orders/orders.service';
 import { TwilioService } from '../../src/modules/twilio/twilio.service';
-import { Subscription, SubscriptionModel, SubscriptionStatus } from '../../src/entities/subscription.entity';
+import { Subscription, SubscriptionStatus } from '../../src/entities/subscription.entity';
 import { SubscriptionPlan } from '../../src/entities/subscription-plan.entity';
 
 function loadEnvTest(): void {
@@ -319,12 +319,12 @@ describe('OrdersService (integration)', () => {
   });
 
   // -------------------------------------------------------------------------
-  // REQ-FS1: Subscriber orders no longer get free shipping
+  // Subscriber orders get free shipping (override admin-quoted amount to 0)
   // -------------------------------------------------------------------------
 
-  describe('setQuote — free-shipping removal (REQ-FS1)', () => {
-    it('subscriber order has shippingCents equal to provided value (not 0)', async () => {
-      // Arrange: create user with active rental subscription
+  describe('setQuote — free-shipping override for active subscribers', () => {
+    it('subscriber order has shippingCents overridden to 0 regardless of admin-quoted amount', async () => {
+      // Arrange: create user with active subscription
       const userData = makeUser({ role: UserRole.CLIENT, stripeCustomerId: 'cus_fs_test' });
       const user = await dataSource.getRepository(User).save(userData as unknown as User);
       createdUserIds.push(user.id);
@@ -337,8 +337,6 @@ describe('OrdersService (integration)', () => {
           stripeProductId: 'prod_fs_test',
           activeStripePriceId: 'price_fs_test',
           unitAmountCents: 1000,
-          purchasePriceCents: 0,
-          lateFeeCents: 0,
           currency: 'usd',
           interval: 'month',
         } as unknown as SubscriptionPlan);
@@ -347,19 +345,16 @@ describe('OrdersService (integration)', () => {
       const now = new Date();
       const futureEnd = new Date(now.getTime() + 30 * 24 * 3600 * 1000);
 
-      // Insert an active rental subscription for this user
+      // Insert an active subscription for this user
       const subRepo = dataSource.getRepository(Subscription);
       const sub = await subRepo.save({
         userId: user.id,
         stripeSubscriptionId: `sub_fs_test_${Date.now()}`,
-        model: SubscriptionModel.RENTAL,
         status: SubscriptionStatus.ACTIVE,
         currentPeriodStart: now,
         currentPeriodEnd: futureEnd,
         cancelAtPeriodEnd: false,
         canceledAt: null,
-        stripeChargeId: null,
-        purchasedAt: null,
       } as unknown as Subscription);
 
       // Create an order for this user
@@ -384,9 +379,9 @@ describe('OrdersService (integration)', () => {
       const superAdmin = { id: user.id, role: UserRole.SUPER_ADMIN_DELIVERY, email: null };
       const result = await ordersService.setQuote(order.id, providedShippingCents, superAdmin);
 
-      // Assert: shipping is NOT overridden to 0
-      expect(Number(result.shipping) * 100).toBeCloseTo(providedShippingCents, 0);
-      expect(result.shipping).not.toBe('0.00');
+      // Assert: shipping is overridden to 0 because the user is an active subscriber
+      expect(result.shipping).toBe('0.00');
+      expect(result.wasSubscriberAtQuote).toBe(true);
 
       // Cleanup
       await subRepo.delete({ id: sub.id });

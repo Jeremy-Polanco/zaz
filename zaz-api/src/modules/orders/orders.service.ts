@@ -265,13 +265,12 @@ export class OrdersService {
       );
     }
 
-    // Subscription status is stamped on the order for data lineage (wasSubscriberAtQuote).
-    // It no longer affects pricing — free-shipping override removed (REQ-FS1).
+    // Active subscribers get free shipping — override the admin-quoted amount.
     const isSub = await this.subscriptionService.isActiveSubscriber(order.customerId);
-    Logger.debug(
-      `order ${id} subscriber: ${isSub}, shipping=${shippingCents}`,
-      OrdersService.name,
-    );
+    let effectiveShippingCents = shippingCents;
+    if (isSub) {
+      effectiveShippingCents = 0;
+    }
 
     const subtotalCents = Math.round(parseFloat(order.subtotal) * 100);
     const pointsRedeemedCents = Math.round(
@@ -279,13 +278,13 @@ export class OrdersService {
     );
     const taxableCents = Math.max(
       0,
-      subtotalCents + shippingCents - pointsRedeemedCents,
+      subtotalCents + effectiveShippingCents - pointsRedeemedCents,
     );
     const taxCents = Math.round(taxableCents * TAX_RATE);
     const totalCents = taxableCents + taxCents;
 
     await this.orders.update(id, {
-      shipping: (shippingCents / 100).toFixed(2),
+      shipping: (effectiveShippingCents / 100).toFixed(2),
       tax: (taxCents / 100).toFixed(2),
       totalAmount: (totalCents / 100).toFixed(2),
       status: OrderStatus.QUOTED,

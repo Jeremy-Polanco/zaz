@@ -486,12 +486,7 @@ describe('OrdersService', () => {
   describe('setQuote', () => {
     const superUser = fakeUser(UserRole.SUPER_ADMIN_DELIVERY);
 
-    /**
-     * REQ-FS1: Active rental subscriber no longer gets free shipping.
-     * setQuote MUST use the provided shippingCents regardless of subscription status.
-     * wasSubscriberAtQuote is still stamped for data lineage.
-     */
-    it('active subscriber pays normal shipping (no free-shipping override) and wasSubscriberAtQuote=true', async () => {
+    it('active subscriber gets free shipping (override to 0) and wasSubscriberAtQuote=true', async () => {
       const order = fakeOrder({
         status: OrderStatus.PENDING_QUOTE,
         customerId: 'user-1',
@@ -501,45 +496,22 @@ describe('OrdersService', () => {
       });
       ordersRepo.findOne
         .mockResolvedValueOnce(order) // inside findOne called by setQuote
-        .mockResolvedValueOnce({ ...order, shipping: '3.00', wasSubscriberAtQuote: true } as never);
+        .mockResolvedValueOnce({ ...order, shipping: '0.00', wasSubscriberAtQuote: true } as never);
 
       subscriptionService.isActiveSubscriber.mockResolvedValue(true);
       ordersRepo.update.mockResolvedValue({ affected: 1 } as never);
 
-      await service.setQuote('order-1', 300 /* 3.00 */, superUser);
+      await service.setQuote('order-1', 300 /* admin quoted 3.00 */, superUser);
 
       const updateCall = ordersRepo.update.mock.calls[0][1] as Record<string, unknown>;
-      // Shipping MUST equal the provided value — NOT 0 (free-shipping override removed)
-      expect(updateCall.shipping).toBe('3.00');
+      // Free-shipping override: subscribers pay 0 regardless of admin-quoted amount
+      expect(updateCall.shipping).toBe('0.00');
       expect(ordersRepo.update).toHaveBeenCalledWith(
         'order-1',
         expect.objectContaining({
           wasSubscriberAtQuote: true,
         }),
       );
-    });
-
-    it('regression: subscriber order shippingCents is NOT zero', async () => {
-      const order = fakeOrder({
-        status: OrderStatus.PENDING_QUOTE,
-        customerId: 'user-1',
-        customer: fakeUser() as never,
-        subtotal: '10.00',
-        pointsRedeemed: '0.00',
-      });
-      ordersRepo.findOne
-        .mockResolvedValueOnce(order)
-        .mockResolvedValueOnce({ ...order, shipping: '5.00', wasSubscriberAtQuote: true } as never);
-
-      subscriptionService.isActiveSubscriber.mockResolvedValue(true);
-      ordersRepo.update.mockResolvedValue({ affected: 1 } as never);
-
-      await service.setQuote('order-1', 500 /* 5.00 */, superUser);
-
-      const updateCall = ordersRepo.update.mock.calls[0][1] as Record<string, unknown>;
-      // Regression guard: free-shipping override no longer applies for rental subscribers
-      expect(updateCall.shipping).not.toBe('0.00');
-      expect(Number(updateCall.shipping)).toBeGreaterThan(0);
     });
 
     it('uses provided shippingCents and sets wasSubscriberAtQuote=false for non-subscriber', async () => {
