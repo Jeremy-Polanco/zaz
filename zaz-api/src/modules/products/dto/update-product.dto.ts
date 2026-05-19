@@ -1,5 +1,6 @@
 import {
   IsDateString,
+  IsEnum,
   IsInt,
   IsNumber,
   IsOptional,
@@ -65,4 +66,21 @@ export class UpdateProductDto {
   @IsOptional()
   @IsDateString()
   offerEndsAt?: string | null;
+
+  // Rental pricing — Stripe IDs are server-managed and MUST NOT be in the DTO.
+  @IsOptional()
+  @IsEnum(['single_payment', 'rental'])
+  pricingMode?: 'single_payment' | 'rental';
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(1000000)
+  monthlyRentCents?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(1000000)
+  lateFeeCents?: number;
 }

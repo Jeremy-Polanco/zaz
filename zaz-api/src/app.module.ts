@@ -25,6 +25,7 @@ import { ShippingModule } from './modules/shipping/shipping.module';
 import { CreditModule } from './modules/credit/credit.module';
 import { SubscriptionModule } from './modules/subscription/subscription.module';
 import { AddressesModule } from './modules/addresses/addresses.module';
+import { RentalsModule } from './modules/rentals/rentals.module';
 import { HealthController } from './health/health.controller';
 import { RequestLoggerMiddleware } from './common/middleware/request-logger.middleware';
 
@@ -53,6 +54,7 @@ import { RequestLoggerMiddleware } from './common/middleware/request-logger.midd
     CreditModule,
     SubscriptionModule,
     AddressesModule,
+    RentalsModule,
   ],
   controllers: [HealthController],
   providers: [

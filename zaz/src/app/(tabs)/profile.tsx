@@ -117,6 +117,12 @@ export default function ProfileTab() {
                 androidIcon="home"
                 href="/addresses"
               />
+              <AccountLink
+                label="Mis alquileres"
+                iosIcon="arrow.clockwise.circle.fill"
+                androidIcon="autorenew"
+                href="/rentals"
+              />
             </View>
           </>
         )}

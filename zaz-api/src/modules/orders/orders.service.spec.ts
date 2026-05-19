@@ -7,6 +7,7 @@
 
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   HttpException,
   HttpStatus,
@@ -27,6 +28,7 @@ import { ShippingService } from '../shipping/shipping.service';
 import { CreditService } from '../credit/credit.service';
 import { SubscriptionService } from '../subscription/subscription.service';
 import { TwilioService } from '../twilio/twilio.service';
+import { RentalsService } from '../rentals/rentals.service';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -49,22 +51,46 @@ function fakeUser(role: UserRole = UserRole.CLIENT): AuthenticatedUser {
   return { id: 'user-1', role, email: null };
 }
 
-function fakeProduct(): Product {
+function fakeProduct(overrides: Partial<Product> = {}): Product {
   return {
     id: 'prod-1',
     name: 'Test Product',
     isAvailable: true,
     stock: 10,
-    priceCents: 1000,
+    priceToPublic: '5.00',       // getEffectivePrice reads this; 5.00 → 500 cents
+    priceCents: 500,             // legacy field used in tests that cast to unknown
     salePrice: null,
     salePriceStart: null,
     salePriceEnd: null,
     description: null,
     imageUrl: null,
     categoryId: 'cat-1',
+    pricingMode: 'single_payment',
+    monthlyRentCents: 0,
+    lateFeeCents: 0,
+    stripeProductId: null,
+    stripePriceId: null,
+    offerDiscountPct: null,
+    offerStartsAt: null,
+    offerEndsAt: null,
     createdAt: new Date(),
     updatedAt: new Date(),
+    ...overrides,
   } as unknown as Product;
+}
+
+function fakeRentalProduct(overrides: Partial<Product> = {}): Product {
+  return fakeProduct({
+    id: 'prod-rental-1',
+    name: 'Dispenser (rental)',
+    priceToPublic: '0.00',
+    pricingMode: 'rental',
+    monthlyRentCents: 2000,
+    lateFeeCents: 300,
+    stripePriceId: 'price_rental_123',
+    stripeProductId: 'prod_stripe_123',
+    ...overrides,
+  });
 }
 
 function fakeOrder(overrides: Partial<Order> = {}): Order {
@@ -112,6 +138,7 @@ describe('OrdersService', () => {
   let creditService: jest.Mocked<CreditService>;
   let subscriptionService: jest.Mocked<SubscriptionService>;
   let twilioService: jest.Mocked<TwilioService>;
+  let rentalsService: jest.Mocked<RentalsService>;
 
   beforeEach(async () => {
     ordersRepo = makeRepoMock<Order>();
@@ -153,11 +180,19 @@ describe('OrdersService', () => {
 
     subscriptionService = {
       isActiveSubscriber: jest.fn().mockResolvedValue(false),
+      getOrCreateStripeCustomer: jest.fn().mockResolvedValue('cus_test_default'),
     } as unknown as jest.Mocked<SubscriptionService>;
 
     twilioService = {
       sendOrderNotificationSms: jest.fn().mockResolvedValue(undefined),
     } as unknown as jest.Mocked<TwilioService>;
+
+    rentalsService = {
+      findActiveByUserAndProduct: jest.fn().mockResolvedValue(null),
+      activateRentalsForOrder: jest.fn().mockResolvedValue([]),
+      activateForOrder: jest.fn().mockResolvedValue({} as never),
+      createForOrder: jest.fn().mockResolvedValue({}),
+    } as unknown as jest.Mocked<RentalsService>;
 
     dataSource = {
       transaction: jest.fn(),
@@ -179,6 +214,7 @@ describe('OrdersService', () => {
         { provide: CreditService, useValue: creditService },
         { provide: SubscriptionService, useValue: subscriptionService },
         { provide: TwilioService, useValue: twilioService },
+        { provide: RentalsService, useValue: rentalsService },
       ],
     }).compile();
 
@@ -540,6 +576,562 @@ describe('OrdersService', () => {
       // Shipping should be non-zero
       const updateCall = ordersRepo.update.mock.calls[0][1] as Record<string, unknown>;
       expect(updateCall.shipping).not.toBe('0.00');
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Phase 6 — Mixed cart + OrdersService integration (T57–T67)
+  // -------------------------------------------------------------------------
+
+  /**
+   * Helper: builds a transaction mock that simulates the create() TX.
+   * Returns the savedOrder from the TX callback.
+   */
+  function setupMixedCartCreateTx(products: Product[], savedOrderOverride: Partial<Order> = {}) {
+    const savedOrder = fakeOrder({ ...savedOrderOverride });
+    const orderWithRelations = fakeOrder({
+      customer: fakeUser() as never,
+      items: products.map((p) => ({
+        productId: p.id,
+        quantity: 1,
+        priceAtOrder: p.pricingMode === 'rental'
+          ? (p.monthlyRentCents / 100).toFixed(2)
+          : p.priceToPublic,
+        product: p,
+      })) as never,
+      ...savedOrderOverride,
+    });
+
+    (dataSource.transaction as jest.Mock).mockImplementation(
+      async (cb: (mgr: EntityManager) => Promise<unknown>) => {
+        const orderRepo = makeRepoMock<Order>();
+        const itemRepo = makeRepoMock<OrderItem>();
+        orderRepo.create.mockImplementation((d) => ({ ...d, id: 'order-1' }) as Order);
+        orderRepo.save.mockResolvedValue(savedOrder);
+        orderRepo.update.mockResolvedValue({ affected: 1 } as never);
+        itemRepo.save.mockResolvedValue({} as never);
+        itemRepo.create.mockImplementation((d) => d as OrderItem);
+
+        const mgr = {
+          getRepository: (entity: unknown) => {
+            if (entity === Order) return orderRepo;
+            if (entity === OrderItem) return itemRepo;
+            return makeRepoMock();
+          },
+        };
+        return cb(mgr as unknown as EntityManager);
+      },
+    );
+
+    ordersRepo.findOne.mockResolvedValue(orderWithRelations);
+    return { savedOrder, orderWithRelations };
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // T57 — Mixed cart total: sum(singlePayment × priceToPublic) + sum(rental × monthlyRentCents)
+  // ─────────────────────────────────────────────────────────────────────────
+
+  describe('create — Phase 6 mixed cart', () => {
+    const singlePaymentProduct = fakeProduct({
+      id: 'prod-water',
+      priceToPublic: '5.00',   // 500 cents
+      pricingMode: 'single_payment',
+    });
+    const rentalProduct = fakeRentalProduct({
+      id: 'prod-dispenser',
+      monthlyRentCents: 2000,
+    });
+
+    const mixedCartDto = {
+      items: [
+        { productId: 'prod-water', quantity: 1 },
+        { productId: 'prod-dispenser', quantity: 1 },
+      ],
+      deliveryAddress: { text: '123 Test', lat: 18.4861, lng: -69.9312 },
+      paymentMethod: PaymentMethod.CASH,
+      usePoints: false,
+      useCredit: false,
+    } as import('./dto/create-order.dto').CreateOrderDto;
+
+    // T57 — total should be 500 + 2000 = 2500 cents → subtotal = '25.00'
+    it('T57: calculates subtotal using monthlyRentCents for rental items (500 + 2000 = 2500 cents)', async () => {
+      productsRepo.find.mockResolvedValue([singlePaymentProduct, rentalProduct]);
+      setupMixedCartCreateTx([singlePaymentProduct, rentalProduct]);
+
+      await service.create(fakeUser(UserRole.CLIENT), mixedCartDto);
+
+      // Verify the transaction was called (meaning create() reached TX step)
+      expect(dataSource.transaction).toHaveBeenCalledTimes(1);
+
+      // The order passed to save() inside the TX should have subtotal = '25.00'
+      const txCallback = (dataSource.transaction as jest.Mock).mock.calls[0][0] as (mgr: EntityManager) => Promise<unknown>;
+      let capturedSubtotal: string | undefined;
+
+      // Re-run the callback with a spy to capture the create() call
+      await (async () => {
+        const orderRepo = makeRepoMock<Order>();
+        const itemRepo = makeRepoMock<OrderItem>();
+        orderRepo.create.mockImplementation((d) => {
+          capturedSubtotal = (d as Partial<Order>).subtotal;
+          return { ...d, id: 'order-1' } as Order;
+        });
+        orderRepo.save.mockResolvedValue(fakeOrder());
+        orderRepo.update.mockResolvedValue({ affected: 1 } as never);
+        itemRepo.save.mockResolvedValue({} as never);
+        itemRepo.create.mockImplementation((d) => d as OrderItem);
+
+        const mgr = {
+          getRepository: (entity: unknown) => {
+            if (entity === Order) return orderRepo;
+            if (entity === OrderItem) return itemRepo;
+            return makeRepoMock();
+          },
+        };
+        await txCallback(mgr as unknown as EntityManager);
+      })();
+
+      expect(capturedSubtotal).toBe('25.00'); // (500 + 2000) / 100 = 25.00
+    });
+
+    // T57: Single-payment-only order total unchanged
+    it('T57: single-payment-only cart still uses priceToPublic for total', async () => {
+      const singleDto = {
+        items: [{ productId: 'prod-water', quantity: 1 }],
+        deliveryAddress: { text: '123 Test', lat: 18.4861, lng: -69.9312 },
+        paymentMethod: PaymentMethod.CASH,
+        usePoints: false,
+        useCredit: false,
+      } as import('./dto/create-order.dto').CreateOrderDto;
+
+      productsRepo.find.mockResolvedValue([singlePaymentProduct]);
+      setupMixedCartCreateTx([singlePaymentProduct]);
+
+      await service.create(fakeUser(UserRole.CLIENT), singleDto);
+
+      const txCallback = (dataSource.transaction as jest.Mock).mock.calls[0][0] as (mgr: EntityManager) => Promise<unknown>;
+      let capturedSubtotal: string | undefined;
+
+      await (async () => {
+        const orderRepo = makeRepoMock<Order>();
+        const itemRepo = makeRepoMock<OrderItem>();
+        orderRepo.create.mockImplementation((d) => {
+          capturedSubtotal = (d as Partial<Order>).subtotal;
+          return { ...d, id: 'order-1' } as Order;
+        });
+        orderRepo.save.mockResolvedValue(fakeOrder());
+        orderRepo.update.mockResolvedValue({ affected: 1 } as never);
+        itemRepo.save.mockResolvedValue({} as never);
+        itemRepo.create.mockImplementation((d) => d as OrderItem);
+
+        const mgr = {
+          getRepository: (entity: unknown) => {
+            if (entity === Order) return orderRepo;
+            if (entity === OrderItem) return itemRepo;
+            return makeRepoMock();
+          },
+        };
+        await txCallback(mgr as unknown as EntityManager);
+      })();
+
+      expect(capturedSubtotal).toBe('5.00'); // 500 cents / 100
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // T59 — PaymentIntent flags for mixed cart vs single-payment-only
+  // ─────────────────────────────────────────────────────────────────────────
+
+  describe('authorize — Phase 6 PaymentIntent flags', () => {
+    it('T59: mixed-cart order → createAuthorizationIntent called with customerId and setupFutureUsage', async () => {
+      const rentalItem = {
+        id: 'item-1',
+        orderId: 'order-1',
+        productId: 'prod-dispenser',
+        quantity: 1,
+        priceAtOrder: '20.00',
+        product: fakeRentalProduct({ id: 'prod-dispenser', pricingMode: 'rental' }),
+      } as unknown as OrderItem;
+
+      const mixedOrder = fakeOrder({
+        id: 'order-1',
+        customerId: 'user-1',
+        status: OrderStatus.QUOTED,
+        paymentMethod: PaymentMethod.DIGITAL,
+        totalAmount: '25.00',
+        creditApplied: '0.00',
+        stripePaymentIntentId: null,
+        items: [rentalItem],
+        customer: { id: 'user-1', stripeCustomerId: 'cus_test_123' } as never,
+      });
+
+      ordersRepo.findOne.mockResolvedValue(mixedOrder);
+
+      // subscriptionService.getOrCreateStripeCustomer returns customerId for rental orders
+      subscriptionService.getOrCreateStripeCustomer.mockResolvedValue('cus_test_123');
+
+      paymentsService.createAuthorizationIntent.mockResolvedValue({
+        paymentIntentId: 'pi_test_123',
+        clientSecret: 'secret_123',
+        amount: 2500,
+        currency: 'usd',
+      });
+      ordersRepo.update.mockResolvedValue({ affected: 1 } as never);
+
+      await service.authorize('order-1', fakeUser(UserRole.CLIENT));
+
+      expect(paymentsService.createAuthorizationIntent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          customerId: 'cus_test_123',
+          setupFutureUsage: 'off_session',
+        }),
+      );
+    });
+
+    it('T59: single-payment-only order → createAuthorizationIntent WITHOUT customerId and setupFutureUsage', async () => {
+      const singleItem = {
+        id: 'item-1',
+        orderId: 'order-1',
+        productId: 'prod-water',
+        quantity: 1,
+        priceAtOrder: '5.00',
+        product: fakeProduct({ id: 'prod-water', pricingMode: 'single_payment' }),
+      } as unknown as OrderItem;
+
+      const singleOrder = fakeOrder({
+        id: 'order-1',
+        customerId: 'user-1',
+        status: OrderStatus.QUOTED,
+        paymentMethod: PaymentMethod.DIGITAL,
+        totalAmount: '5.00',
+        creditApplied: '0.00',
+        stripePaymentIntentId: null,
+        items: [singleItem],
+        customer: { id: 'user-1', stripeCustomerId: null } as never,
+      });
+
+      ordersRepo.findOne.mockResolvedValue(singleOrder);
+      paymentsService.createAuthorizationIntent.mockResolvedValue({
+        paymentIntentId: 'pi_test_456',
+        clientSecret: 'secret_456',
+        amount: 500,
+        currency: 'usd',
+      });
+      ordersRepo.update.mockResolvedValue({ affected: 1 } as never);
+
+      await service.authorize('order-1', fakeUser(UserRole.CLIENT));
+
+      // Should NOT have customerId or setupFutureUsage
+      expect(paymentsService.createAuthorizationIntent).toHaveBeenCalledWith(
+        expect.not.objectContaining({ customerId: expect.anything() }),
+      );
+      expect(paymentsService.createAuthorizationIntent).toHaveBeenCalledWith(
+        expect.not.objectContaining({ setupFutureUsage: expect.anything() }),
+      );
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // T62 — Pre-check one-active-per-rental-product
+  // ─────────────────────────────────────────────────────────────────────────
+
+  describe('create — Phase 6 duplicate rental pre-check', () => {
+    const rentalProduct = fakeRentalProduct({ id: 'prod-dispenser' });
+
+    const rentalCartDto = {
+      items: [{ productId: 'prod-dispenser', quantity: 1 }],
+      deliveryAddress: { text: '123 Test', lat: 18.4861, lng: -69.9312 },
+      paymentMethod: PaymentMethod.CASH,
+      usePoints: false,
+      useCredit: false,
+    } as import('./dto/create-order.dto').CreateOrderDto;
+
+    it('T62: throws 409 RENTAL_ALREADY_ACTIVE when user already has active rental for product', async () => {
+      productsRepo.find.mockResolvedValue([rentalProduct]);
+
+      // rentalsService.findActiveByUserAndProduct returns existing rental
+      rentalsService.findActiveByUserAndProduct.mockResolvedValue({
+        id: 'rental-existing',
+        userId: 'user-1',
+        productId: 'prod-dispenser',
+        status: 'active',
+      } as never);
+
+      await expect(
+        service.create(fakeUser(UserRole.CLIENT), rentalCartDto),
+      ).rejects.toThrow(ConflictException);
+
+      // Pre-check must be BEFORE TX
+      expect(dataSource.transaction).not.toHaveBeenCalled();
+      // Verify the pre-check was called with correct args
+      expect(rentalsService.findActiveByUserAndProduct).toHaveBeenCalledWith('user-1', 'prod-dispenser');
+    });
+
+    it('T62: Stripe NOT called, no DB writes when duplicate rental pre-check triggers', async () => {
+      productsRepo.find.mockResolvedValue([rentalProduct]);
+      rentalsService.findActiveByUserAndProduct.mockResolvedValue({
+        id: 'rental-existing',
+      } as never);
+
+      await expect(
+        service.create(fakeUser(UserRole.CLIENT), rentalCartDto),
+      ).rejects.toThrow(ConflictException);
+
+      expect(dataSource.transaction).not.toHaveBeenCalled();
+      expect(paymentsService.createAuthorizationIntent).not.toHaveBeenCalled();
+    });
+
+    it('T62: single-payment product skips rental pre-check', async () => {
+      const singleProduct = fakeProduct({ id: 'prod-water' });
+      productsRepo.find.mockResolvedValue([singleProduct]);
+      setupMixedCartCreateTx([singleProduct]);
+
+      await service.create(fakeUser(UserRole.CLIENT), {
+        items: [{ productId: 'prod-water', quantity: 1 }],
+        deliveryAddress: { text: '123 Test', lat: 18.4861, lng: -69.9312 },
+        paymentMethod: PaymentMethod.CASH,
+        usePoints: false,
+        useCredit: false,
+      } as import('./dto/create-order.dto').CreateOrderDto);
+
+      // findActiveByUserAndProduct should NOT have been called for single-payment items
+      expect(rentalsService.findActiveByUserAndProduct).not.toHaveBeenCalled();
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // T64 — markDelivered activates rentals
+  // ─────────────────────────────────────────────────────────────────────────
+
+  describe('updateStatus → markDelivered — Phase 6 rental activation', () => {
+    it('T64: markDelivered calls rentalsService.activateForOrder for each pending_setup rental', async () => {
+      const deliveredOrder = fakeOrder({
+        status: OrderStatus.IN_DELIVERY_ROUTE,
+        paymentMethod: PaymentMethod.DIGITAL,
+        stripePaymentIntentId: 'pi_test_123',
+        paidAt: null,
+        customer: fakeUser() as never,
+        items: [],
+      });
+
+      // First findOne: for the updateStatus lookup
+      // Second findOne: at end of updateStatus for final return
+      ordersRepo.findOne
+        .mockResolvedValueOnce(deliveredOrder)
+        .mockResolvedValueOnce({ ...deliveredOrder, status: OrderStatus.DELIVERED } as Order);
+
+      paymentsService.captureIntent.mockResolvedValue({} as never);
+
+      rentalsService.activateRentalsForOrder.mockResolvedValue([]);
+
+      (dataSource.transaction as jest.Mock).mockImplementation(
+        async (cb: (mgr: EntityManager) => Promise<unknown>) => {
+          const orderRepo = makeRepoMock<Order>();
+          orderRepo.findOne.mockResolvedValue({ ...deliveredOrder, id: 'order-1' } as never);
+          orderRepo.update.mockResolvedValue({ affected: 1 } as never);
+
+          const mgr = {
+            getRepository: (entity: unknown) => {
+              if (entity === Order) return orderRepo;
+              return makeRepoMock();
+            },
+          };
+          return cb(mgr as unknown as EntityManager);
+        },
+      );
+
+      await service.updateStatus(
+        'order-1',
+        { status: OrderStatus.DELIVERED },
+        fakeUser(UserRole.SUPER_ADMIN_DELIVERY),
+      );
+
+      // activateRentalsForOrder should have been called with the orderId
+      expect(rentalsService.activateRentalsForOrder).toHaveBeenCalledWith('order-1');
+    });
+
+    it('T64: markDelivered activation failure does NOT fail the delivery (best-effort)', async () => {
+      const deliveredOrder = fakeOrder({
+        status: OrderStatus.IN_DELIVERY_ROUTE,
+        paymentMethod: PaymentMethod.DIGITAL,
+        stripePaymentIntentId: 'pi_test_123',
+        paidAt: null,
+        customer: fakeUser() as never,
+        items: [],
+      });
+
+      ordersRepo.findOne
+        .mockResolvedValueOnce(deliveredOrder)
+        .mockResolvedValueOnce({ ...deliveredOrder, status: OrderStatus.DELIVERED } as Order);
+
+      paymentsService.captureIntent.mockResolvedValue({} as never);
+
+      // activateRentalsForOrder throws — should NOT propagate
+      rentalsService.activateRentalsForOrder.mockRejectedValue(new Error('Stripe failed'));
+
+      (dataSource.transaction as jest.Mock).mockImplementation(
+        async (cb: (mgr: EntityManager) => Promise<unknown>) => {
+          const orderRepo = makeRepoMock<Order>();
+          orderRepo.findOne.mockResolvedValue({ ...deliveredOrder, id: 'order-1' } as never);
+          orderRepo.update.mockResolvedValue({ affected: 1 } as never);
+
+          const mgr = {
+            getRepository: (entity: unknown) => {
+              if (entity === Order) return orderRepo;
+              return makeRepoMock();
+            },
+          };
+          return cb(mgr as unknown as EntityManager);
+        },
+      );
+
+      // Should resolve without throwing even though activateForOrder fails
+      await expect(
+        service.updateStatus(
+          'order-1',
+          { status: OrderStatus.DELIVERED },
+          fakeUser(UserRole.SUPER_ADMIN_DELIVERY),
+        ),
+      ).resolves.toBeDefined();
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // T66 — confirmed_by_colmado stock decrement unchanged for all items
+  // ─────────────────────────────────────────────────────────────────────────
+
+  describe('updateStatus → confirmAndDecrementStock — Phase 6 stock decrement regression', () => {
+    it('T66: both single_payment AND rental items decrement stock at CONFIRMED_BY_COLMADO', async () => {
+      const singleItem: OrderItem = {
+        id: 'item-1',
+        orderId: 'order-1',
+        productId: 'prod-water',
+        quantity: 2,
+        priceAtOrder: '5.00',
+        product: fakeProduct({ id: 'prod-water' }),
+      } as unknown as OrderItem;
+
+      const rentalItem: OrderItem = {
+        id: 'item-2',
+        orderId: 'order-1',
+        productId: 'prod-dispenser',
+        quantity: 1,
+        priceAtOrder: '20.00',
+        product: fakeRentalProduct({ id: 'prod-dispenser', stock: 5 }),
+      } as unknown as OrderItem;
+
+      const pendingOrder = fakeOrder({
+        status: OrderStatus.PENDING_VALIDATION,
+        customer: fakeUser() as never,
+        items: [singleItem, rentalItem],
+      });
+
+      ordersRepo.findOne
+        .mockResolvedValueOnce(pendingOrder)
+        .mockResolvedValueOnce({ ...pendingOrder, status: OrderStatus.CONFIRMED_BY_COLMADO } as Order);
+
+      let stockUpdates: Record<string, number> = {};
+
+      (dataSource.transaction as jest.Mock).mockImplementation(
+        async (cb: (mgr: EntityManager) => Promise<unknown>) => {
+          const orderRepo = makeRepoMock<Order>();
+          const itemRepo = makeRepoMock<OrderItem>();
+          const productRepo = makeRepoMock<Product>();
+
+          orderRepo.findOne.mockResolvedValue({ ...pendingOrder, id: 'order-1', status: OrderStatus.PENDING_VALIDATION } as never);
+          orderRepo.update.mockResolvedValue({ affected: 1 } as never);
+          itemRepo.find.mockResolvedValue([singleItem, rentalItem]);
+
+          // Each product.findOne returns appropriate product
+          productRepo.findOne
+            .mockResolvedValueOnce(fakeProduct({ id: 'prod-water', stock: 10 }))
+            .mockResolvedValueOnce(fakeRentalProduct({ id: 'prod-dispenser', stock: 5 }));
+
+          productRepo.update.mockImplementation((id: string, data: Partial<Product>) => {
+            if (data.stock !== undefined) {
+              stockUpdates[id as string] = data.stock as number;
+            }
+            return Promise.resolve({ affected: 1 }) as never;
+          });
+
+          const mgr = {
+            getRepository: (entity: unknown) => {
+              if (entity === Order) return orderRepo;
+              if (entity === OrderItem) return itemRepo;
+              if (entity === Product) return productRepo;
+              return makeRepoMock();
+            },
+          };
+          return cb(mgr as unknown as EntityManager);
+        },
+      );
+
+      await service.updateStatus(
+        'order-1',
+        { status: OrderStatus.CONFIRMED_BY_COLMADO },
+        fakeUser(UserRole.SUPER_ADMIN_DELIVERY),
+      );
+
+      // Both items should have had stock decremented
+      expect(stockUpdates['prod-water']).toBe(8);      // 10 - 2
+      expect(stockUpdates['prod-dispenser']).toBe(4);  // 5 - 1
+    });
+
+    it('T66: existing single-payment stock decrement still works (regression guard)', async () => {
+      const singleItem: OrderItem = {
+        id: 'item-1',
+        orderId: 'order-1',
+        productId: 'prod-water',
+        quantity: 3,
+        priceAtOrder: '5.00',
+        product: fakeProduct({ id: 'prod-water', stock: 10 }),
+      } as unknown as OrderItem;
+
+      const pendingOrder = fakeOrder({
+        status: OrderStatus.PENDING_VALIDATION,
+        customer: fakeUser() as never,
+        items: [singleItem],
+      });
+
+      ordersRepo.findOne
+        .mockResolvedValueOnce(pendingOrder)
+        .mockResolvedValueOnce({ ...pendingOrder, status: OrderStatus.CONFIRMED_BY_COLMADO } as Order);
+
+      let stockUpdate: number | undefined;
+
+      (dataSource.transaction as jest.Mock).mockImplementation(
+        async (cb: (mgr: EntityManager) => Promise<unknown>) => {
+          const orderRepo = makeRepoMock<Order>();
+          const itemRepo = makeRepoMock<OrderItem>();
+          const productRepo = makeRepoMock<Product>();
+
+          orderRepo.findOne.mockResolvedValue({ ...pendingOrder, id: 'order-1', status: OrderStatus.PENDING_VALIDATION } as never);
+          orderRepo.update.mockResolvedValue({ affected: 1 } as never);
+          itemRepo.find.mockResolvedValue([singleItem]);
+          productRepo.findOne.mockResolvedValue(fakeProduct({ id: 'prod-water', stock: 10 }));
+          productRepo.update.mockImplementation((_id: string, data: Partial<Product>) => {
+            if (data.stock !== undefined) stockUpdate = data.stock as number;
+            return Promise.resolve({ affected: 1 }) as never;
+          });
+
+          const mgr = {
+            getRepository: (entity: unknown) => {
+              if (entity === Order) return orderRepo;
+              if (entity === OrderItem) return itemRepo;
+              if (entity === Product) return productRepo;
+              return makeRepoMock();
+            },
+          };
+          return cb(mgr as unknown as EntityManager);
+        },
+      );
+
+      await service.updateStatus(
+        'order-1',
+        { status: OrderStatus.CONFIRMED_BY_COLMADO },
+        fakeUser(UserRole.SUPER_ADMIN_DELIVERY),
+      );
+
+      expect(stockUpdate).toBe(7); // 10 - 3
     });
   });
 });

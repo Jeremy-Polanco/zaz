@@ -101,6 +101,37 @@ export type SavedAddressInput = z.infer<typeof savedAddressSchema>
 
 // ── Subscription schemas (Zod 3) ──────────────────────────────────────────────
 
+// ── Product pricing schemas (Zod 3) ──────────────────────────────────────────
+
+export const pricingModeSchema = z.enum(['single_payment', 'rental'])
+
+export const productRentalFieldsSchema = z.object({
+  pricingMode: pricingModeSchema.optional(),
+  monthlyRentCents: z.number().int().min(0).optional(),
+  lateFeeCents: z.number().int().min(0).optional(),
+})
+
+export const rentalStatusSchema = z.enum([
+  'pending_setup',
+  'active',
+  'past_due',
+  'unpaid',
+  'canceled',
+])
+
+export const rentalSchema = z.object({
+  id: z.string().uuid(),
+  productId: z.string().uuid(),
+  productName: z.string(),
+  productImageUrl: z.string().nullable(),
+  monthlyRentCents: z.number().int().min(0),
+  status: rentalStatusSchema,
+  nextChargeAt: z.string().nullable(),
+  activatedAt: z.string().nullable(),
+})
+
+// ── Subscription schemas (Zod 3) ──────────────────────────────────────────────
+
 export const subscriptionStatusSchema = z.enum([
   'active',
   'past_due',

@@ -119,6 +119,20 @@ export default function CheckoutScreen() {
     [lineItems],
   )
 
+  const rentalFirstMonthCents = useMemo(
+    () =>
+      lineItems.reduce(
+        (sum, li) =>
+          li.product?.pricingMode === 'rental' && li.product.monthlyRentCents
+            ? sum + li.product.monthlyRentCents * li.quantity
+            : sum,
+        0,
+      ),
+    [lineItems],
+  )
+
+  const hasRentalItems = rentalFirstMonthCents > 0
+
   const claimableCents = pointsBalance?.claimableCents ?? 0
   const redeemCents = usePoints ? Math.min(claimableCents, subtotalCents) : 0
 
@@ -361,6 +375,18 @@ export default function CheckoutScreen() {
                         style={{ fontVariant: ['tabular-nums'] }}
                       >
                         {formatCents(li.product.basePriceCents)}
+                      </Text>
+                    </View>
+                  ) : li.product.pricingMode === 'rental' && li.product.monthlyRentCents ? (
+                    <View className="mt-0.5">
+                      <Text
+                        className="font-sans text-[11px] uppercase tracking-label text-ink-muted"
+                        style={{ fontVariant: ['tabular-nums'] }}
+                      >
+                        {formatCents(li.product.monthlyRentCents)} (primer mes)
+                      </Text>
+                      <Text className="font-sans text-[10px] text-ink-muted">
+                        luego {formatCents(li.product.monthlyRentCents)}/mes
                       </Text>
                     </View>
                   ) : (
@@ -687,6 +713,19 @@ export default function CheckoutScreen() {
               {formatCents(subtotalCents)}
             </Text>
           </View>
+          {hasRentalItems && (
+            <View className="mb-2 flex-row items-baseline justify-between">
+              <Text className="font-sans text-[11px] uppercase tracking-label text-brand">
+                Primer mes alquiler
+              </Text>
+              <Text
+                className="font-sans text-[14px] text-brand"
+                style={{ fontVariant: ['tabular-nums'] }}
+              >
+                {formatCents(rentalFirstMonthCents)}
+              </Text>
+            </View>
+          )}
           {redeemCents > 0 && (
             <View className="mb-2 flex-row items-baseline justify-between">
               <Text className="font-sans text-[11px] uppercase tracking-label text-brand">

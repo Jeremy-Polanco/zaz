@@ -206,6 +206,16 @@ function ProductCard({ product, qty }: { product: Product; qty: number }) {
           )}
         </View>
 
+        {product.pricingMode === 'rental' && product.monthlyRentCents ? (
+          <View className="mt-1.5 flex-row items-center">
+            <View className="bg-brand/10 px-1.5 py-0.5">
+              <Text className="font-sans-medium text-[9px] uppercase tracking-label text-brand">
+                Alquiler {formatCents(product.monthlyRentCents)}/mes
+              </Text>
+            </View>
+          </View>
+        ) : null}
+
         <View className="mt-2.5">
           {unavailable ? (
             <Text className="font-sans text-[10px] uppercase tracking-label text-ink-muted">
@@ -264,6 +274,15 @@ function ProductRow({ product, qty }: { product: Product; qty: number }) {
             {product.description}
           </Text>
         )}
+        {product.pricingMode === 'rental' && product.monthlyRentCents ? (
+          <View className="mt-1 flex-row items-center">
+            <View className="bg-brand/10 px-1.5 py-0.5">
+              <Text className="font-sans-medium text-[9px] uppercase tracking-label text-brand">
+                Alquiler {formatCents(product.monthlyRentCents)}/mes
+              </Text>
+            </View>
+          </View>
+        ) : null}
         <View className="mt-2 flex-row items-end justify-between">
           <View className="flex-row items-baseline gap-2">
             <TypographicPrice cents={product.effectivePriceCents} size="md" />

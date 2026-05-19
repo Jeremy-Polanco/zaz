@@ -88,6 +88,9 @@ function RoleNav({ role }: { role: string }) {
         <Link to="/super/subscription" className={navLinkClass}>
           Suscripción
         </Link>
+        <Link to="/super/rentals" className={navLinkClass}>
+          Alquileres
+        </Link>
       </nav>
     )
   }

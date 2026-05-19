@@ -24,6 +24,7 @@ import type {
   PromoterDashboard,
   PromoterMyStats,
   PromoterPublicInfo,
+  Rental,
   ShippingQuote,
   Subscription,
   SubscriptionPlan,
@@ -855,5 +856,16 @@ export function useSetDefaultAddress() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['me', 'addresses'] })
     },
+  })
+}
+
+// ── Rentals ───────────────────────────────────────────────────────────────────
+
+/** Client: GET /me/rentals — list the authenticated user's rentals */
+export function useMyRentals() {
+  return useQuery<Rental[]>({
+    queryKey: ['me', 'rentals'],
+    queryFn: async () => (await api.get<Rental[]>('/me/rentals')).data,
+    staleTime: 30_000,
   })
 }

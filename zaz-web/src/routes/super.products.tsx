@@ -51,6 +51,10 @@ type FormState = {
   offerDiscountText: string
   offerStartsAt: string
   offerEndsAt: string
+  // Rental pricing
+  pricingMode: 'single_payment' | 'rental'
+  monthlyRentText: string
+  lateFeeText: string
   errors: {
     name?: string
     priceText?: string
@@ -59,6 +63,8 @@ type FormState = {
     pointsText?: string
     offerDiscountText?: string
     image?: string
+    monthlyRentText?: string
+    lateFeeText?: string
   }
 }
 
@@ -76,6 +82,9 @@ const emptyForm: FormState = {
   offerDiscountText: '',
   offerStartsAt: '',
   offerEndsAt: '',
+  pricingMode: 'single_payment',
+  monthlyRentText: '',
+  lateFeeText: '',
   errors: {},
 }
 
@@ -140,6 +149,9 @@ function ProductForm({
       offerDiscountText: editing.offerDiscountPct ?? '',
       offerStartsAt: toDateInput(editing.offerStartsAt),
       offerEndsAt: toDateInput(editing.offerEndsAt),
+      pricingMode: editing.pricingMode ?? 'single_payment',
+      monthlyRentText: editing.monthlyRentCents ? String(editing.monthlyRentCents / 100) : '',
+      lateFeeText: editing.lateFeeCents ? String(editing.lateFeeCents / 100) : '',
       errors: {},
     }
   })
@@ -221,6 +233,13 @@ function ProductForm({
       offerDiscountPct: showOffer && offerDiscount != null ? offerDiscount : null,
       offerStartsAt: showOffer ? fromDateInput(state.offerStartsAt) : null,
       offerEndsAt: showOffer ? fromDateInput(state.offerEndsAt) : null,
+      pricingMode: state.pricingMode,
+      ...(state.pricingMode === 'rental'
+        ? {
+            monthlyRentCents: Math.round(parseFloat(state.monthlyRentText || '0') * 100),
+            lateFeeCents: Math.round(parseFloat(state.lateFeeText || '0') * 100),
+          }
+        : {}),
     }
 
     try {
@@ -539,6 +558,94 @@ function ProductForm({
                     title="Precio"
                     hint="USD. El impuesto y el envío se calculan en checkout."
                   />
+
+                  {/* Pricing mode selector */}
+                  <div>
+                    <Label>Modo de precio</Label>
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setState((s) => ({ ...s, pricingMode: 'single_payment' }))}
+                        className={`flex items-center gap-3 border px-3 py-3 text-left ${
+                          state.pricingMode === 'single_payment'
+                            ? 'border-brand bg-brand-light text-brand'
+                            : 'border-ink/15 bg-paper text-ink hover:border-ink/30'
+                        }`}
+                        data-testid="pricing-mode-single"
+                      >
+                        <span className="text-base">$</span>
+                        <div className="flex flex-col">
+                          <span className="text-sm font-semibold">Pago único</span>
+                          <span className="text-[0.65rem] text-ink-muted">El cliente paga al ordenar</span>
+                        </div>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setState((s) => ({ ...s, pricingMode: 'rental' }))}
+                        className={`flex items-center gap-3 border px-3 py-3 text-left ${
+                          state.pricingMode === 'rental'
+                            ? 'border-brand bg-brand-light text-brand'
+                            : 'border-ink/15 bg-paper text-ink hover:border-ink/30'
+                        }`}
+                        data-testid="pricing-mode-rental"
+                      >
+                        <span className="text-base">↻</span>
+                        <div className="flex flex-col">
+                          <span className="text-sm font-semibold">Alquiler mensual</span>
+                          <span className="text-[0.65rem] text-ink-muted">Cobro recurrente mensual</span>
+                        </div>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Rental-specific fields */}
+                  {state.pricingMode === 'rental' ? (
+                    <div className="flex flex-col gap-4 border-l-[3px] border-brand bg-brand-light/20 px-4 py-4" data-testid="rental-fields">
+                      <SectionHeader
+                        letter="↻"
+                        title="Alquiler mensual"
+                        hint="Precio del primer mes + multa de atraso si el pago falla."
+                      />
+                      <div>
+                        <Label htmlFor="monthlyRent">Renta mensual ($)</Label>
+                        <div className="flex items-center border border-ink/15 bg-paper">
+                          <span className="border-r border-ink/15 px-3 py-2.5 text-sm text-ink-muted">$</span>
+                          <input
+                            id="monthlyRent"
+                            type="number"
+                            step="0.01"
+                            min="0"
+                            value={state.monthlyRentText}
+                            onChange={(e) => setState((s) => ({ ...s, monthlyRentText: e.target.value }))}
+                            className="nums flex-1 bg-transparent px-3 py-2.5 text-sm text-ink outline-none"
+                            placeholder="0.00"
+                            data-testid="monthly-rent-input"
+                          />
+                          <span className="px-3 py-2.5 text-[0.65rem] uppercase tracking-[0.10em] text-ink-muted">USD/mes</span>
+                        </div>
+                        <FieldError message={state.errors.monthlyRentText} />
+                      </div>
+                      <div>
+                        <Label htmlFor="lateFee">Multa por atraso ($)</Label>
+                        <div className="flex items-center border border-ink/15 bg-paper">
+                          <span className="border-r border-ink/15 px-3 py-2.5 text-sm text-ink-muted">$</span>
+                          <input
+                            id="lateFee"
+                            type="number"
+                            step="0.01"
+                            min="0"
+                            value={state.lateFeeText}
+                            onChange={(e) => setState((s) => ({ ...s, lateFeeText: e.target.value }))}
+                            className="nums flex-1 bg-transparent px-3 py-2.5 text-sm text-ink outline-none"
+                            placeholder="0.00"
+                            data-testid="late-fee-input"
+                          />
+                          <span className="px-3 py-2.5 text-[0.65rem] uppercase tracking-[0.10em] text-ink-muted">USD</span>
+                        </div>
+                        <FieldError message={state.errors.lateFeeText} />
+                      </div>
+                    </div>
+                  ) : null}
 
                   <div>
                     <Label htmlFor="price">Precio base</Label>

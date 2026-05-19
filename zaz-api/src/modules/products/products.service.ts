@@ -1,12 +1,20 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
+  HttpException,
+  HttpStatus,
   Injectable,
+  Logger,
   NotFoundException,
+  OnModuleInit,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
+import { ConfigService } from '@nestjs/config';
+import Stripe = require('stripe');
 import { Product } from '../../entities';
+import { Rental, RentalStatus } from '../../entities/rental.entity';
 import { UserRole } from '../../entities/enums';
 import { AuthenticatedUser } from '../../common/types/authenticated-user';
 import { CreateProductDto } from './dto/create-product.dto';
@@ -14,14 +22,31 @@ import { UpdateProductDto } from './dto/update-product.dto';
 import { UpdateInventoryDto } from './dto/update-inventory.dto';
 import { decorateProduct, ProductWithPricing } from './pricing';
 
+type StripeClient = InstanceType<typeof Stripe>;
+
 export type ProductForClient = Omit<ProductWithPricing, 'imageBytes'>;
 
 @Injectable()
-export class ProductsService {
+export class ProductsService implements OnModuleInit {
+  private readonly logger = new Logger(ProductsService.name);
+  private stripe: StripeClient | null = null;
+
   constructor(
     @InjectRepository(Product)
     private readonly products: Repository<Product>,
+    @InjectRepository(Rental)
+    private readonly rentals: Repository<Rental>,
+    private readonly config: ConfigService,
   ) {}
+
+  async onModuleInit(): Promise<void> {
+    const secret = this.config.get<string>('STRIPE_SECRET_KEY');
+    if (!secret) {
+      this.logger.warn('STRIPE_SECRET_KEY missing — Stripe rental sync disabled');
+      return;
+    }
+    this.stripe = new Stripe(secret);
+  }
 
   /** Catálogo público — productos disponibles. */
   async findAllPublic(): Promise<ProductForClient[]> {
@@ -89,6 +114,25 @@ export class ProductsService {
   ): Promise<ProductForClient> {
     this.assertSuperAdmin(user);
     const p = await this.findOne(id);
+
+    // Pre-check: block rental → single_payment switch when active rentals exist
+    if (dto.pricingMode === 'single_payment' && p.pricingMode === 'rental') {
+      const activeRental = await this.rentals.findOne({
+        where: {
+          productId: id,
+          status: In([
+            RentalStatus.PENDING_SETUP,
+            RentalStatus.ACTIVE,
+            RentalStatus.PAST_DUE,
+            RentalStatus.UNPAID,
+          ]),
+        },
+      });
+      if (activeRental) {
+        throw new ConflictException('ACTIVE_RENTALS_EXIST');
+      }
+    }
+
     const patch: Partial<Product> = {};
     if (dto.name !== undefined) patch.name = dto.name;
     if (dto.description !== undefined) patch.description = dto.description;
@@ -112,6 +156,32 @@ export class ProductsService {
     if (dto.offerEndsAt !== undefined) {
       patch.offerEndsAt = dto.offerEndsAt ? new Date(dto.offerEndsAt) : null;
     }
+
+    // Rental pricing fields
+    if (dto.pricingMode !== undefined) patch.pricingMode = dto.pricingMode;
+    if (dto.monthlyRentCents !== undefined) patch.monthlyRentCents = dto.monthlyRentCents;
+    if (dto.lateFeeCents !== undefined) patch.lateFeeCents = dto.lateFeeCents;
+
+    // Determine if Stripe sync is needed before DB update
+    const incomingPricingMode = dto.pricingMode ?? p.pricingMode;
+    const incomingMonthlyRent = dto.monthlyRentCents ?? p.monthlyRentCents;
+    const needsStripeSync =
+      incomingPricingMode === 'rental' &&
+      incomingMonthlyRent > 0 &&
+      (dto.pricingMode === 'rental' || dto.monthlyRentCents !== undefined);
+
+    // Perform Stripe sync BEFORE DB write (Stripe-first pattern from ADR-3)
+    if (needsStripeSync) {
+      // Compute stripe IDs: use incoming patch values or existing ones
+      const workingProduct: Product = {
+        ...p,
+        ...patch,
+      } as Product;
+      const stripeIds = await this.syncStripeRentalPrice(workingProduct);
+      patch.stripeProductId = stripeIds.stripeProductId;
+      patch.stripePriceId = stripeIds.stripePriceId;
+    }
+
     if (Object.keys(patch).length > 0) {
       await this.products.update(p.id, patch);
     }
@@ -191,6 +261,103 @@ export class ProductsService {
     };
   }
 
+  /**
+   * Syncs Stripe Product + Price for a rental product.
+   *
+   * 4-step rotation pattern (mirrors SubscriptionService.updatePlan / ADR-3):
+   *   1. Create Stripe Product if none exists
+   *   2. Create new Stripe Price (always — we always issue a fresh price)
+   *   3. Set new Price as default_price on Stripe Product
+   *   4. Archive old Price (NON-BLOCKING — log warn but continue)
+   *
+   * Returns the new { stripeProductId, stripePriceId } to persist in DB.
+   */
+  private async syncStripeRentalPrice(
+    product: Product,
+  ): Promise<{ stripeProductId: string; stripePriceId: string }> {
+    const stripe = this.requireStripe();
+    let stripeProductId = product.stripeProductId;
+    const oldPriceId = product.stripePriceId;
+
+    // Step 1: create Stripe Product if not yet created
+    if (!stripeProductId) {
+      let stripeProduct: { id: string };
+      try {
+        stripeProduct = await stripe.products.create(
+          { name: product.name, metadata: { productId: product.id } },
+          { idempotencyKey: `product-rental:${product.id}` },
+        );
+      } catch (e) {
+        this.logger.error(
+          `syncStripeRentalPrice: stripe.products.create failed for product ${product.id}: ${(e as Error).message}`,
+        );
+        throw new HttpException(
+          {
+            statusCode: 502,
+            code: 'STRIPE_PRODUCT_CREATE_FAILED',
+            message: 'Stripe product creation failed',
+          },
+          HttpStatus.BAD_GATEWAY,
+        );
+      }
+      stripeProductId = stripeProduct.id;
+    }
+
+    // Step 2: create new Stripe Price
+    let newPrice: { id: string };
+    try {
+      newPrice = await stripe.prices.create(
+        {
+          unit_amount: product.monthlyRentCents,
+          currency: 'usd',
+          recurring: { interval: 'month' },
+          product: stripeProductId,
+        },
+        {
+          idempotencyKey: `product-rental-price:${product.id}:${product.monthlyRentCents}:${Date.now()}`,
+        },
+      );
+    } catch (e) {
+      this.logger.error(
+        `syncStripeRentalPrice: stripe.prices.create failed for product ${product.id}: ${(e as Error).message}`,
+      );
+      throw new HttpException(
+        {
+          statusCode: 502,
+          code: 'STRIPE_PRICE_CREATE_FAILED',
+          message: 'Stripe price creation failed',
+        },
+        HttpStatus.BAD_GATEWAY,
+      );
+    }
+
+    // Step 3: set new Price as default_price on Stripe Product
+    try {
+      await stripe.products.update(stripeProductId, {
+        default_price: newPrice.id,
+      });
+    } catch (e) {
+      this.logger.warn(
+        `syncStripeRentalPrice: stripe.products.update(default_price) failed (non-blocking): ${(e as Error).message}`,
+      );
+      // Non-blocking: product default_price is cosmetic; subscriptions use items[].price
+    }
+
+    // Step 4: archive old Price (NON-BLOCKING)
+    if (oldPriceId) {
+      try {
+        await stripe.prices.update(oldPriceId, { active: false });
+      } catch (e) {
+        this.logger.warn(
+          `syncStripeRentalPrice: archive of old price ${oldPriceId} failed (non-blocking): ${(e as Error).message}`,
+        );
+        // proceed
+      }
+    }
+
+    return { stripeProductId, stripePriceId: newPrice.id };
+  }
+
   private toClient(p: Product, now: Date = new Date()): ProductForClient {
     const decorated = decorateProduct(p, now);
     const { imageBytes, ...rest } = decorated;
@@ -202,5 +369,19 @@ export class ProductsService {
     if (user.role !== UserRole.SUPER_ADMIN_DELIVERY) {
       throw new ForbiddenException('Solo super admin puede gestionar productos');
     }
+  }
+
+  private requireStripe(): StripeClient {
+    if (!this.stripe) {
+      throw new HttpException(
+        {
+          statusCode: 503,
+          code: 'STRIPE_NOT_CONFIGURED',
+          message: 'Stripe no está configurado en este entorno',
+        },
+        HttpStatus.SERVICE_UNAVAILABLE,
+      );
+    }
+    return this.stripe;
   }
 }

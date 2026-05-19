@@ -90,6 +90,7 @@ import { OrdersService } from '../../src/modules/orders/orders.service';
 import { TwilioService } from '../../src/modules/twilio/twilio.service';
 import { Subscription, SubscriptionStatus } from '../../src/entities/subscription.entity';
 import { SubscriptionPlan } from '../../src/entities/subscription-plan.entity';
+import { RentalStatus } from '../../src/entities/rental.entity';
 
 function loadEnvTest(): void {
   const envTestPath = path.resolve(__dirname, '../../.env.test');
@@ -523,6 +524,177 @@ describe('OrdersService (integration)', () => {
 
       expect(order).toBeDefined();
       expect(order.status).toBe(OrderStatus.PENDING_QUOTE);
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // T73: Mixed cart — single_payment + rental items
+  // ─────────────────────────────────────────────────────────────────────────
+
+  describe('T73: Mixed cart (single_payment + rental)', () => {
+    let singleProduct: Product;
+    let rentalProduct: Product;
+    let mixedTestCategory: { id: string };
+    const mixedCartUserIds: string[] = [];
+    const mixedCartRentalIds: string[] = [];
+
+    beforeAll(async () => {
+      // Create a category and two products: one single_payment, one rental
+      mixedTestCategory = await dataSource.getRepository(Category).save({
+        name: 'Mixed Cart Category',
+        slug: `mixed-cart-cat-${Date.now()}`,
+        emoji: null,
+        imageUrl: null,
+        isActive: true,
+      } as unknown as Category) as unknown as { id: string };
+
+      singleProduct = await dataSource.getRepository(Product).save({
+        name: 'Mixed Cart - Single Payment Product',
+        priceToPublic: '5.00',
+        salePrice: null,
+        salePriceStart: null,
+        salePriceEnd: null,
+        isAvailable: true,
+        stock: 100,
+        imageUrl: null,
+        description: null,
+        categoryId: mixedTestCategory.id,
+        pricingMode: 'single_payment',
+        monthlyRentCents: 0,
+        lateFeeCents: 0,
+      } as unknown as Product);
+
+      rentalProduct = await dataSource.getRepository(Product).save({
+        name: 'Mixed Cart - Rental Product',
+        priceToPublic: '0.00',
+        salePrice: null,
+        salePriceStart: null,
+        salePriceEnd: null,
+        isAvailable: true,
+        stock: 10,
+        imageUrl: null,
+        description: null,
+        categoryId: mixedTestCategory.id,
+        pricingMode: 'rental',
+        monthlyRentCents: 2000,
+        lateFeeCents: 500,
+        stripePriceId: 'price_mixed_cart_test',
+        stripeProductId: 'prod_mixed_cart_test',
+      } as unknown as Product);
+    });
+
+    afterAll(async () => {
+      for (const id of mixedCartRentalIds) {
+        await dataSource.query(`DELETE FROM rentals WHERE id = $1`, [id]);
+      }
+      for (const userId of mixedCartUserIds) {
+        await dataSource.query(`DELETE FROM "order_item" WHERE order_id IN (SELECT id FROM "order" WHERE customer_id = $1)`, [userId]);
+        await dataSource.query(`DELETE FROM "order" WHERE customer_id = $1`, [userId]);
+        await dataSource.getRepository(User).delete({ id: userId });
+      }
+      await dataSource.getRepository(Product).delete({ id: singleProduct.id });
+      await dataSource.getRepository(Product).delete({ id: rentalProduct.id });
+      await dataSource.getRepository(Category).delete({ id: mixedTestCategory.id });
+    });
+
+    it('mixed cart total = singlePaymentCents + rentalMonthlyRentCents', async () => {
+      // single product: 2 × $5.00 = $10.00 = 1000 cents
+      // rental product: 1 × $20.00/mo = 2000 cents
+      // Expected total: 3000 cents = $30.00
+
+      const userData = makeUser({ role: UserRole.CLIENT, stripeCustomerId: 'cus_mixed_cart_test' });
+      const user = await dataSource.getRepository(User).save(userData as unknown as User);
+      mixedCartUserIds.push(user.id);
+
+      const authUser = { id: user.id, role: UserRole.CLIENT, email: null };
+
+      const order = await ordersService.create(authUser, {
+        items: [
+          { productId: singleProduct.id, quantity: 2 },
+          { productId: rentalProduct.id, quantity: 1 },
+        ],
+        deliveryAddress: { text: 'Mixed Cart Test St', lat: 18.4, lng: -69.9 },
+        paymentMethod: PaymentMethod.DIGITAL,
+        usePoints: false,
+        useCredit: false,
+      });
+
+      // subtotal = 1000 (2 × 500 single_payment priceToPublic $5.00 → 500 cents) + 2000 rental = 3000
+      // Note: priceToPublic '5.00' → 500 cents; 2 × 500 = 1000; + 2000 = 3000 = $30.00
+      expect(parseFloat(order.subtotal) * 100).toBe(3000);
+      expect(order.status).toBe(OrderStatus.PENDING_QUOTE);
+
+      // Per ADR-1 + ADR-6: Rental rows are created at DELIVERED (markDelivered), NOT at order create.
+      // orders.create() only creates the Order and OrderItems.
+      // No Rental rows should exist at this point.
+      const { Rental: RentalEntity } = await import('../../src/entities/rental.entity');
+      const rentalRows = await dataSource.getRepository(RentalEntity).find({
+        where: { userId: user.id, productId: rentalProduct.id },
+      });
+      expect(rentalRows).toHaveLength(0); // Rental rows created at markDelivered, not create()
+    });
+
+    it('free-shipping subscription regression — subscriber order still gets shippingCents=0 with rental in cart', async () => {
+      // Arrange: subscriber user with mixed cart
+      const userData = makeUser({ role: UserRole.CLIENT, stripeCustomerId: 'cus_fs_rental_test' });
+      const user = await dataSource.getRepository(User).save(userData as unknown as User);
+      mixedCartUserIds.push(user.id);
+
+      // Ensure a subscription plan exists
+      const planRepo = dataSource.getRepository(SubscriptionPlan);
+      let plan = await planRepo.findOne({ where: {} });
+      if (!plan) {
+        plan = await planRepo.save({
+          stripeProductId: 'prod_fs_rental_test',
+          activeStripePriceId: 'price_fs_rental_test',
+          unitAmountCents: 1000,
+          currency: 'usd',
+          interval: 'month',
+        } as unknown as SubscriptionPlan);
+      }
+
+      const now = new Date();
+      const futureEnd = new Date(now.getTime() + 30 * 24 * 3600 * 1000);
+
+      await dataSource.getRepository(Subscription).save({
+        userId: user.id,
+        stripeSubscriptionId: `sub_fs_rental_${Date.now()}`,
+        status: SubscriptionStatus.ACTIVE,
+        currentPeriodStart: now,
+        currentPeriodEnd: futureEnd,
+        cancelAtPeriodEnd: false,
+        canceledAt: null,
+      } as unknown as Subscription);
+
+      // Create an order for this subscriber
+      const authUser = { id: user.id, role: UserRole.CLIENT, email: null };
+      const order = await ordersService.create(authUser, {
+        items: [
+          { productId: singleProduct.id, quantity: 1 },
+          { productId: rentalProduct.id, quantity: 1 },
+        ],
+        deliveryAddress: { text: 'FS Rental Test St', lat: 18.4, lng: -69.9 },
+        paymentMethod: PaymentMethod.DIGITAL,
+        usePoints: false,
+        useCredit: false,
+      });
+
+      // Admin quotes with non-zero shipping
+      const superAdmin = { id: user.id, role: UserRole.SUPER_ADMIN_DELIVERY, email: null };
+      const quoted = await ordersService.setQuote(order.id, 750, superAdmin);
+
+      // Assert: free shipping override still applies
+      expect(quoted.shipping).toBe('0.00');
+      expect(quoted.wasSubscriberAtQuote).toBe(true);
+
+      // Cleanup rentals
+      const { Rental: RentalEntity } = await import('../../src/entities/rental.entity');
+      const rentalRows = await dataSource.getRepository(RentalEntity).find({
+        where: { userId: user.id, productId: rentalProduct.id },
+      });
+      for (const r of rentalRows) {
+        mixedCartRentalIds.push(r.id);
+      }
     });
   });
 });

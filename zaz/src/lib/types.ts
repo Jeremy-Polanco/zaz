@@ -84,6 +84,27 @@ export interface Product {
   effectivePriceCents: number
   basePriceCents: number
   offerActive: boolean
+  pricingMode?: 'single_payment' | 'rental'
+  monthlyRentCents?: number
+  lateFeeCents?: number
+}
+
+export type RentalStatus =
+  | 'pending_setup'
+  | 'active'
+  | 'past_due'
+  | 'unpaid'
+  | 'canceled'
+
+export interface Rental {
+  id: string
+  productId: string
+  productName: string
+  productImageUrl: string | null
+  monthlyRentCents: number
+  status: RentalStatus
+  nextChargeAt: string | null
+  activatedAt: string | null
 }
 
 export interface OrderItem {

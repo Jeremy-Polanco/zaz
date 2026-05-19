@@ -18,12 +18,22 @@ import { PaymentsService } from './payments.service';
 import { CreatePaymentIntentDto } from './dto/create-payment-intent.dto';
 import { SubscriptionService } from '../subscription/subscription.service';
 import { CreditService } from '../credit/credit.service';
+import { RentalsService } from '../rentals/rentals.service';
 
 interface StripePaymentIntentLike {
   id: string;
   amount?: number;
   amount_received?: number;
   metadata?: Record<string, string | undefined>;
+}
+
+interface StripeSubscriptionLike {
+  id: string;
+  metadata?: Record<string, string | undefined>;
+}
+
+interface StripeInvoiceLike {
+  subscription?: string | { id: string };
 }
 
 @Controller('payments')
@@ -34,6 +44,7 @@ export class PaymentsController {
     private readonly payments: PaymentsService,
     private readonly subscriptionService: SubscriptionService,
     private readonly credit: CreditService,
+    private readonly rentalsService: RentalsService,
   ) {}
 
   @UseGuards(JwtAuthGuard)
@@ -89,22 +100,70 @@ export class PaymentsController {
       case 'payment_intent.payment_failed':
         await this.payments.handleAuthFailureByIntentId(intent.id);
         break;
-      // Subscription/billing events — dispatched to SubscriptionService (ADR-8: never 500)
+      // Subscription/billing events — dispatched to SubscriptionService (ADR-5: never 500)
+      // AND to RentalsService when the underlying subscription has metadata.rentalId (ADR-5).
       case 'checkout.session.completed':
       case 'customer.subscription.created':
       case 'customer.subscription.updated':
       case 'customer.subscription.deleted':
       case 'invoice.payment_succeeded':
       case 'invoice.payment_failed':
+        // Always dispatch to SubscriptionService (free-shipping path — unaffected)
         try {
           await this.subscriptionService.handleWebhook(event);
         } catch (err) {
           this.logger.error('subscription webhook handler failed', err);
+        }
+        // Rental dispatch: route to RentalsService if the subscription has metadata.rentalId
+        try {
+          const rentalId = await this.resolveRentalId(event);
+          if (rentalId) {
+            await this.rentalsService.handleWebhook(event);
+          }
+        } catch (err) {
+          this.logger.error('rental webhook handler failed', err);
         }
         break;
       default:
         break;
     }
     return { received: true };
+  }
+
+  /**
+   * Resolves the rentalId from a Stripe event.
+   *
+   * For subscription events (customer.subscription.*): metadata is directly on
+   * the subscription object at event.data.object.metadata.rentalId.
+   *
+   * For invoice events (invoice.payment_*): metadata lives on the subscription,
+   * not the invoice. We must fetch the subscription from Stripe to read it.
+   * This mirrors the pattern in SubscriptionService.handleWebhook lines 432-443.
+   *
+   * Returns the rentalId string if present, or null if absent.
+   */
+  private async resolveRentalId(event: { type: string; data: { object: unknown } }): Promise<string | null> {
+    const obj = event.data.object as Record<string, unknown>;
+
+    // Direct metadata on subscription events
+    if (event.type.startsWith('customer.subscription.')) {
+      const sub = obj as unknown as StripeSubscriptionLike;
+      return sub.metadata?.rentalId ?? null;
+    }
+
+    // Invoice events: fetch subscription to read metadata
+    if (event.type.startsWith('invoice.')) {
+      const invoice = obj as StripeInvoiceLike;
+      if (!invoice.subscription) return null;
+      const subId =
+        typeof invoice.subscription === 'string'
+          ? invoice.subscription
+          : invoice.subscription.id;
+      const sub = await this.payments.retrieveSubscription(subId);
+      const subMetadata = (sub as unknown as StripeSubscriptionLike).metadata;
+      return subMetadata?.rentalId ?? null;
+    }
+
+    return null;
   }
 }

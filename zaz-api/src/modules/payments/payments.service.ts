@@ -142,6 +142,16 @@ export class PaymentsService implements OnModuleInit {
   }
 
   /**
+   * Retrieves a Stripe Subscription object by ID.
+   * Used by the webhook dispatcher to read subscription metadata
+   * for invoice events (which don't carry metadata directly).
+   */
+  async retrieveSubscription(subscriptionId: string) {
+    const stripe = this.requireStripe();
+    return stripe.subscriptions.retrieve(subscriptionId);
+  }
+
+  /**
    * Creates a PaymentIntent for a customer to settle their outstanding credit
    * balance. Tagged with `metadata.kind = 'credit_payment'` so the webhook
    * handler can route it to the credit ledger instead of the orders table.
@@ -175,27 +185,42 @@ export class PaymentsService implements OnModuleInit {
    * Creates a PaymentIntent with capture_method='manual' for admin-quoted
    * orders. Funds are authorized (held) on the customer's card when the client
    * confirms; we capture later on delivery.
+   *
+   * T61: Optional `customerId` and `setupFutureUsage` are set for mixed-cart
+   * orders that contain rental items, so the PaymentMethod is saved off-session
+   * for recurring subscription charges.
    */
   async createAuthorizationIntent(input: {
     userId: string;
     orderId: string;
     amountCents: number;
+    /** Stripe Customer ID — required when cart contains rental items */
+    customerId?: string;
+    /** Set 'off_session' to save the PaymentMethod for future recurring charges */
+    setupFutureUsage?: 'off_session' | 'on_session';
   }): Promise<CreatedIntent> {
     const stripe = this.requireStripe();
     if (!Number.isInteger(input.amountCents) || input.amountCents <= 0) {
       throw new BadRequestException('Monto inválido');
     }
-    const intent = await stripe.paymentIntents.create(
-      {
-        amount: input.amountCents,
-        currency: 'usd',
-        capture_method: 'manual',
-        automatic_payment_methods: { enabled: true },
-        metadata: {
-          userId: input.userId,
-          orderId: input.orderId,
-        },
+
+    // Build the base params; conditionally add rental-specific fields using
+    // spread to avoid TypeScript index-signature issues.
+    const intentParams = {
+      amount: input.amountCents,
+      currency: 'usd',
+      capture_method: 'manual' as const,
+      automatic_payment_methods: { enabled: true as const },
+      metadata: {
+        userId: input.userId,
+        orderId: input.orderId,
       },
+      ...(input.customerId ? { customer: input.customerId } : {}),
+      ...(input.setupFutureUsage ? { setup_future_usage: input.setupFutureUsage as 'off_session' | 'on_session' } : {}),
+    };
+
+    const intent = await stripe.paymentIntents.create(
+      intentParams as Parameters<StripeClient['paymentIntents']['create']>[0],
       { idempotencyKey: `order_${input.orderId}_intent` },
     );
     return {

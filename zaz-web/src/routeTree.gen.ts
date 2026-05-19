@@ -21,6 +21,7 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as PromoterIndexRouteImport } from './routes/promoter.index'
 import { Route as OrdersIndexRouteImport } from './routes/orders.index'
 import { Route as SuperSubscriptionRouteImport } from './routes/super.subscription'
+import { Route as SuperRentalsRouteImport } from './routes/super.rentals'
 import { Route as SuperPromotersRouteImport } from './routes/super.promoters'
 import { Route as SuperProductsRouteImport } from './routes/super.products'
 import { Route as SuperOrdersRouteImport } from './routes/super.orders'
@@ -94,6 +95,11 @@ const OrdersIndexRoute = OrdersIndexRouteImport.update({
 const SuperSubscriptionRoute = SuperSubscriptionRouteImport.update({
   id: '/super/subscription',
   path: '/super/subscription',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SuperRentalsRoute = SuperRentalsRouteImport.update({
+  id: '/super/rentals',
+  path: '/super/rentals',
   getParentRoute: () => rootRouteImport,
 } as any)
 const SuperPromotersRoute = SuperPromotersRouteImport.update({
@@ -187,6 +193,7 @@ export interface FileRoutesByFullPath {
   '/super/orders': typeof SuperOrdersRoute
   '/super/products': typeof SuperProductsRoute
   '/super/promoters': typeof SuperPromotersRouteWithChildren
+  '/super/rentals': typeof SuperRentalsRoute
   '/super/subscription': typeof SuperSubscriptionRoute
   '/orders/': typeof OrdersIndexRoute
   '/promoter/': typeof PromoterIndexRoute
@@ -213,6 +220,7 @@ export interface FileRoutesByTo {
   '/super/credit': typeof SuperCreditRouteWithChildren
   '/super/orders': typeof SuperOrdersRoute
   '/super/products': typeof SuperProductsRoute
+  '/super/rentals': typeof SuperRentalsRoute
   '/super/subscription': typeof SuperSubscriptionRoute
   '/orders': typeof OrdersIndexRoute
   '/promoter': typeof PromoterIndexRoute
@@ -242,6 +250,7 @@ export interface FileRoutesById {
   '/super/orders': typeof SuperOrdersRoute
   '/super/products': typeof SuperProductsRoute
   '/super/promoters': typeof SuperPromotersRouteWithChildren
+  '/super/rentals': typeof SuperRentalsRoute
   '/super/subscription': typeof SuperSubscriptionRoute
   '/orders/': typeof OrdersIndexRoute
   '/promoter/': typeof PromoterIndexRoute
@@ -272,6 +281,7 @@ export interface FileRouteTypes {
     | '/super/orders'
     | '/super/products'
     | '/super/promoters'
+    | '/super/rentals'
     | '/super/subscription'
     | '/orders/'
     | '/promoter/'
@@ -298,6 +308,7 @@ export interface FileRouteTypes {
     | '/super/credit'
     | '/super/orders'
     | '/super/products'
+    | '/super/rentals'
     | '/super/subscription'
     | '/orders'
     | '/promoter'
@@ -326,6 +337,7 @@ export interface FileRouteTypes {
     | '/super/orders'
     | '/super/products'
     | '/super/promoters'
+    | '/super/rentals'
     | '/super/subscription'
     | '/orders/'
     | '/promoter/'
@@ -353,6 +365,7 @@ export interface RootRouteChildren {
   SuperOrdersRoute: typeof SuperOrdersRoute
   SuperProductsRoute: typeof SuperProductsRoute
   SuperPromotersRoute: typeof SuperPromotersRouteWithChildren
+  SuperRentalsRoute: typeof SuperRentalsRoute
   SuperSubscriptionRoute: typeof SuperSubscriptionRoute
   PromoterIndexRoute: typeof PromoterIndexRoute
 }
@@ -441,6 +454,13 @@ declare module '@tanstack/react-router' {
       path: '/super/subscription'
       fullPath: '/super/subscription'
       preLoaderRoute: typeof SuperSubscriptionRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/super/rentals': {
+      id: '/super/rentals'
+      path: '/super/rentals'
+      fullPath: '/super/rentals'
+      preLoaderRoute: typeof SuperRentalsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/super/promoters': {
@@ -624,6 +644,7 @@ const rootRouteChildren: RootRouteChildren = {
   SuperOrdersRoute: SuperOrdersRoute,
   SuperProductsRoute: SuperProductsRoute,
   SuperPromotersRoute: SuperPromotersRouteWithChildren,
+  SuperRentalsRoute: SuperRentalsRoute,
   SuperSubscriptionRoute: SuperSubscriptionRoute,
   PromoterIndexRoute: PromoterIndexRoute,
 }

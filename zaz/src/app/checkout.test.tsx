@@ -695,3 +695,118 @@ describe('Pair S/T — Save-address failure after order success is non-blocking'
     })
   })
 })
+
+// ── T87 — Rental line item copy + breakdown ────────────────────────────────────
+
+const RENTAL_PRODUCT = {
+  id: 'product-rental',
+  name: 'Dispensador de Agua',
+  effectivePriceCents: 2000,
+  basePriceCents: 2000,
+  offerActive: false,
+  offerLabel: null,
+  stock: 10,
+  categoryId: null,
+  description: null,
+  imageUrl: null,
+  active: true,
+  pricingMode: 'rental' as const,
+  monthlyRentCents: 2000,
+}
+
+const SINGLE_PRODUCT = {
+  id: 'product-single',
+  name: 'Agua Embotellada',
+  effectivePriceCents: 500,
+  basePriceCents: 500,
+  offerActive: false,
+  offerLabel: null,
+  stock: 10,
+  categoryId: null,
+  description: null,
+  imageUrl: null,
+  active: true,
+  pricingMode: 'single_payment' as const,
+}
+
+function setupRentalCheckoutMocks(products: typeof MOCK_PRODUCT[], cartItems: Record<string, number>) {
+  const { useCart, cart } = require('../lib/cart')
+  const mockUseCartFn = useCart as jest.MockedFunction<typeof useCart>
+  mockUseCartFn.mockReturnValue({ items: cartItems })
+
+  mockUseProducts.mockReturnValue({
+    data: products,
+  } as unknown as ReturnType<typeof useProducts>)
+
+  mockUseMyAddresses.mockReturnValue({
+    data: [],
+    isPending: false,
+    isLoading: false,
+  } as unknown as ReturnType<typeof useMyAddresses>)
+
+  mockUseCreateOrder.mockReturnValue({
+    mutateAsync: mockCreateOrderMutateAsync,
+    isPending: false,
+  } as unknown as ReturnType<typeof useCreateOrder>)
+
+  mockUseCreateAddress.mockReturnValue({
+    mutate: jest.fn(),
+    mutateAsync: jest.fn(),
+    isPending: false,
+  } as unknown as ReturnType<typeof useCreateAddress>)
+
+  mockUseCurrentUser.mockReturnValue({
+    data: { id: 'user-1', role: 'client', addressDefault: null },
+  } as unknown as ReturnType<typeof useCurrentUser>)
+
+  mockUseMyCredit.mockReturnValue({ data: null } as unknown as ReturnType<typeof useMyCredit>)
+  mockUseMySubscription.mockReturnValue({ data: null } as unknown as ReturnType<typeof useMySubscription>)
+  mockUsePointsBalance.mockReturnValue({ data: null } as unknown as ReturnType<typeof usePointsBalance>)
+  mockUseUpdateMe.mockReturnValue({ mutate: jest.fn(), isPending: false } as unknown as ReturnType<typeof useUpdateMe>)
+
+  mockLocation.requestForegroundPermissionsAsync.mockResolvedValue({ status: 'denied' } as never)
+  mockLocation.getForegroundPermissionsAsync.mockResolvedValue({ status: 'denied' } as never)
+}
+
+describe('T87 — Rental: mixed cart shows "(primer mes)" copy under rental item', () => {
+  it('shows "(primer mes)" text under the rental line item', async () => {
+    setupRentalCheckoutMocks(
+      [SINGLE_PRODUCT as unknown as typeof MOCK_PRODUCT, RENTAL_PRODUCT as unknown as typeof MOCK_PRODUCT],
+      { 'product-single': 1, 'product-rental': 1 },
+    )
+
+    const { getAllByText } = renderWithProviders(<CheckoutScreen />)
+
+    await waitFor(() => {
+      const matches = getAllByText(/primer mes/i)
+      expect(matches.length).toBeGreaterThan(0)
+    })
+  })
+
+  it('shows "Primer mes alquiler" line in the breakdown section for mixed cart', async () => {
+    setupRentalCheckoutMocks(
+      [SINGLE_PRODUCT as unknown as typeof MOCK_PRODUCT, RENTAL_PRODUCT as unknown as typeof MOCK_PRODUCT],
+      { 'product-single': 1, 'product-rental': 1 },
+    )
+
+    const { getByText } = renderWithProviders(<CheckoutScreen />)
+
+    await waitFor(() => {
+      expect(getByText(/Primer mes alquiler/i)).toBeTruthy()
+    })
+  })
+
+  it('does NOT show rental copy for a single-payment-only cart', async () => {
+    setupRentalCheckoutMocks(
+      [SINGLE_PRODUCT as unknown as typeof MOCK_PRODUCT],
+      { 'product-single': 1 },
+    )
+
+    const { queryByText } = renderWithProviders(<CheckoutScreen />)
+
+    await waitFor(() => {
+      expect(queryByText(/primer mes/i)).toBeNull()
+      expect(queryByText(/Primer mes alquiler/i)).toBeNull()
+    })
+  })
+})

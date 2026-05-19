@@ -7,6 +7,7 @@ import { PointsModule } from '../points/points.module';
 import { ShippingModule } from '../shipping/shipping.module';
 import { CreditModule } from '../credit/credit.module';
 import { SubscriptionModule } from '../subscription/subscription.module';
+import { RentalsModule } from '../rentals/rentals.module';
 
 @Module({
   imports: [
@@ -15,6 +16,7 @@ import { SubscriptionModule } from '../subscription/subscription.module';
     ShippingModule,
     forwardRef(() => CreditModule),
     forwardRef(() => SubscriptionModule),
+    forwardRef(() => RentalsModule),
   ],
   controllers: [PaymentsController],
   providers: [PaymentsService],

@@ -84,6 +84,12 @@ export interface Product {
   effectivePriceCents: number
   basePriceCents: number
   offerActive: boolean
+  // Rental pricing fields
+  pricingMode?: 'single_payment' | 'rental'
+  monthlyRentCents?: number
+  lateFeeCents?: number
+  stripeProductId?: string | null
+  stripePriceId?: string | null
 }
 
 export interface OrderItem {
@@ -371,6 +377,49 @@ export interface AdminPlanResponse {
 
 export interface UpdateSubscriptionPlanInput {
   unitAmountCents: number
+}
+
+// ── Rental types ──────────────────────────────────────────────────────────────
+
+export type RentalStatus =
+  | 'pending_setup'
+  | 'active'
+  | 'past_due'
+  | 'unpaid'
+  | 'canceled'
+
+export interface AdminRentalResponse {
+  id: string
+  userId: string
+  userName: string
+  userPhone: string | null
+  productId: string
+  productName: string
+  status: RentalStatus
+  monthlyRentCents: number
+  lateFeeCents: number
+  stripeSubscriptionId: string | null
+  currentPeriodEnd: string | null
+  activatedAt: string | null
+  canceledAt: string | null
+  daysDelinquent: number
+  createdAt: string
+}
+
+export type RentalFilter = {
+  status?: string[]
+  userId?: string
+  productId?: string
+  page?: number
+  pageSize?: number
+}
+
+export type ChargeLateFeeRequest = { alsoCancel?: boolean }
+
+export type ChargeLateFeeResponse = {
+  chargedCents: number
+  paymentIntentId: string
+  subscriptionCanceled: boolean
 }
 
 // ── UserAddress ───────────────────────────────────────────────────────────────

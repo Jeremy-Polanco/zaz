@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { forwardRef, Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { Order, OrderItem, Product } from '../../entities';
 import { OrdersController } from './orders.controller';
@@ -11,6 +11,7 @@ import { ShippingModule } from '../shipping/shipping.module';
 import { CreditModule } from '../credit/credit.module';
 import { SubscriptionModule } from '../subscription/subscription.module';
 import { TwilioModule } from '../twilio/twilio.module';
+import { RentalsModule } from '../rentals/rentals.module';
 
 @Module({
   imports: [
@@ -23,6 +24,10 @@ import { TwilioModule } from '../twilio/twilio.module';
     CreditModule,
     SubscriptionModule,
     TwilioModule,
+    // T65: RentalsModule imported so OrdersService can call activateRentalsForOrder.
+    // No circular dependency: RentalsModule does NOT import OrdersModule.
+    // PaymentsModule already imports forwardRef(RentalsModule) — this is a direct import.
+    forwardRef(() => RentalsModule),
   ],
   controllers: [OrdersController],
   providers: [OrdersService],

@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Injectable,
   Logger,
@@ -20,6 +21,7 @@ import { ShippingService } from '../shipping/shipping.service';
 import { CreditService } from '../credit/credit.service';
 import { SubscriptionService } from '../subscription/subscription.service';
 import { TwilioService } from '../twilio/twilio.service';
+import { RentalsService } from '../rentals/rentals.service';
 import { getEffectivePrice } from '../products/pricing';
 
 const ALLOWED_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
@@ -57,6 +59,7 @@ export class OrdersService {
     private readonly credit: CreditService,
     private readonly subscriptionService: SubscriptionService,
     private readonly twilio: TwilioService,
+    private readonly rentalsService: RentalsService,
   ) {}
 
   private buildScope(user: AuthenticatedUser): FindOptionsWhere<Order> {
@@ -117,14 +120,36 @@ export class OrdersService {
       }
     }
 
+    // T63: Pre-check — for each rental item, ensure no active rental already exists.
+    // This runs BEFORE TX (outside any transaction) per the design spec.
+    for (const input of dto.items) {
+      const product = byId.get(input.productId)!;
+      if (product.pricingMode === 'rental') {
+        const existing = await this.rentalsService.findActiveByUserAndProduct(user.id, product.id);
+        if (existing) {
+          throw new ConflictException('RENTAL_ALREADY_ACTIVE');
+        }
+      }
+    }
+
     const now = new Date();
     let subtotalCents = 0;
     const builtItems = dto.items.map((input) => {
       const product = byId.get(input.productId)!;
-      const effective = getEffectivePrice(product, now);
-      const lineCents = effective.priceCents * input.quantity;
+      let lineCents: number;
+      let priceAtOrder: string;
+
+      if (product.pricingMode === 'rental') {
+        // T58: For rental items, use monthlyRentCents (first month's payment)
+        lineCents = product.monthlyRentCents * input.quantity;
+        priceAtOrder = (product.monthlyRentCents / 100).toFixed(2);
+      } else {
+        const effective = getEffectivePrice(product, now);
+        lineCents = effective.priceCents * input.quantity;
+        priceAtOrder = (effective.priceCents / 100).toFixed(2);
+      }
+
       subtotalCents += lineCents;
-      const priceAtOrder = (effective.priceCents / 100).toFixed(2);
       return {
         productId: input.productId,
         quantity: input.quantity,
@@ -350,11 +375,30 @@ export class OrdersService {
       );
     }
 
-    const created = await this.payments.createAuthorizationIntent({
+    // T60: Detect if order has any rental items — if so, include customerId
+    // and setup_future_usage='off_session' in the PaymentIntent so the
+    // PaymentMethod is saved for recurring Stripe Subscription charges.
+    const hasRentalItems = order.items?.some(
+      (item) => (item.product as Product | undefined)?.pricingMode === 'rental',
+    ) ?? false;
+
+    let rentalCustomerId: string | undefined;
+    if (hasRentalItems) {
+      // Ensure Stripe customer exists (reuse SubscriptionService helper)
+      rentalCustomerId = await this.subscriptionService.getOrCreateStripeCustomer(user.id);
+    }
+
+    const intentInput: Parameters<typeof this.payments.createAuthorizationIntent>[0] = {
       userId: user.id,
       orderId: order.id,
       amountCents: stripeAmountCents,
-    });
+    };
+    if (hasRentalItems && rentalCustomerId) {
+      intentInput.customerId = rentalCustomerId;
+      intentInput.setupFutureUsage = 'off_session';
+    }
+
+    const created = await this.payments.createAuthorizationIntent(intentInput);
 
     await this.orders.update(id, {
       stripePaymentIntentId: created.paymentIntentId,
@@ -482,6 +526,18 @@ export class OrdersService {
       await this.invoices.createForOrder(orderId, tx);
       await this.promotersService.creditCommissionsForOrder(orderId, tx);
     });
+
+    // T65: Activate pending_setup rentals for this order OUTSIDE the TX.
+    // Per ADR-6: Stripe calls must NOT run inside a DB transaction.
+    // Best-effort: activation failure must NOT fail the delivery.
+    // The TX has already committed at this point.
+    try {
+      await this.rentalsService.activateRentalsForOrder(orderId);
+    } catch (err) {
+      this.logger.error(
+        `markDelivered: activateRentalsForOrder failed for order ${orderId} (rentals stay pending_setup): ${(err as Error).message}`,
+      );
+    }
   }
 
   private async confirmAndDecrementStock(orderId: string) {

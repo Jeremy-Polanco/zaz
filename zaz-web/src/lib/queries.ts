@@ -2,9 +2,11 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from './api'
 import type {
   AdminPlanResponse,
+  AdminRentalResponse,
   AuthorizedIntent,
   AuthUser,
   Category,
+  ChargeLateFeeResponse,
   CreditAccount,
   CreditAccountsPage,
   CreditMovement,
@@ -23,6 +25,7 @@ import type {
   PromoterDashboard,
   PromoterMyStats,
   PromoterPublicInfo,
+  RentalFilter,
   ShippingQuote,
   Subscription,
   SubscriptionPlan,
@@ -204,6 +207,9 @@ export type CreateProductInput = {
   offerDiscountPct?: number | null
   offerStartsAt?: string | null
   offerEndsAt?: string | null
+  pricingMode?: 'single_payment' | 'rental'
+  monthlyRentCents?: number
+  lateFeeCents?: number
 }
 
 export function useCreateProduct() {
@@ -817,6 +823,77 @@ export function useUpdateSubscriptionPlan() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['admin', 'subscription', 'plan'] })
       qc.invalidateQueries({ queryKey: ['subscription', 'plan'] })
+    },
+  })
+}
+
+// ── Rental hooks (admin) ──────────────────────────────────────────────────────
+
+/** Super-admin: GET /admin/rentals — paginated rental list with filters */
+export function useAdminRentals(filters: RentalFilter) {
+  const q = new URLSearchParams()
+  if (filters.status) {
+    for (const s of filters.status) q.append('status', s)
+  }
+  if (filters.userId) q.set('userId', filters.userId)
+  if (filters.productId) q.set('productId', filters.productId)
+  if (filters.page) q.set('page', String(filters.page))
+  if (filters.pageSize) q.set('pageSize', String(filters.pageSize))
+  const qs = q.toString()
+  return useQuery<AdminRentalResponse[]>({
+    queryKey: ['admin', 'rentals', filters],
+    queryFn: async () =>
+      (await api.get<AdminRentalResponse[]>(qs ? `/admin/rentals?${qs}` : '/admin/rentals')).data,
+  })
+}
+
+/** Super-admin: POST /admin/rentals/:id/charge-late-fee */
+export function useChargeLateFee() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async ({
+      rentalId,
+      alsoCancel,
+    }: {
+      rentalId: string
+      alsoCancel?: boolean
+    }) => {
+      const { data } = await api.post<ChargeLateFeeResponse>(
+        `/admin/rentals/${rentalId}/charge-late-fee`,
+        { alsoCancel },
+      )
+      return data
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['admin', 'rentals'] })
+    },
+  })
+}
+
+/** Super-admin: POST /admin/rentals/:id/cancel */
+export function useCancelRental() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (rentalId: string) => {
+      const { data } = await api.post(`/admin/rentals/${rentalId}/cancel`)
+      return data
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['admin', 'rentals'] })
+    },
+  })
+}
+
+/** Super-admin: POST /admin/rentals/:id/retry-setup */
+export function useRetryRentalSetup() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (rentalId: string) => {
+      const { data } = await api.post(`/admin/rentals/${rentalId}/retry-setup`)
+      return data
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['admin', 'rentals'] })
     },
   })
 }
