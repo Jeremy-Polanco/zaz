@@ -55,6 +55,8 @@ type FormState = {
   pricingMode: 'single_payment' | 'rental'
   monthlyRentText: string
   lateFeeText: string
+  stripeProductId: string
+  stripePriceId: string
   errors: {
     name?: string
     priceText?: string
@@ -85,6 +87,8 @@ const emptyForm: FormState = {
   pricingMode: 'single_payment',
   monthlyRentText: '',
   lateFeeText: '',
+  stripeProductId: '',
+  stripePriceId: '',
   errors: {},
 }
 
@@ -152,6 +156,8 @@ function ProductForm({
       pricingMode: editing.pricingMode ?? 'single_payment',
       monthlyRentText: editing.monthlyRentCents ? String(editing.monthlyRentCents / 100) : '',
       lateFeeText: editing.lateFeeCents ? String(editing.lateFeeCents / 100) : '',
+      stripeProductId: editing.stripeProductId ?? '',
+      stripePriceId: editing.stripePriceId ?? '',
       errors: {},
     }
   })
@@ -238,6 +244,8 @@ function ProductForm({
         ? {
             monthlyRentCents: Math.round(parseFloat(state.monthlyRentText || '0') * 100),
             lateFeeCents: Math.round(parseFloat(state.lateFeeText || '0') * 100),
+            stripeProductId: state.stripeProductId.trim() || null,
+            stripePriceId: state.stripePriceId.trim() || null,
           }
         : {}),
     }
@@ -643,6 +651,36 @@ function ProductForm({
                           <span className="px-3 py-2.5 text-[0.65rem] uppercase tracking-[0.10em] text-ink-muted">USD</span>
                         </div>
                         <FieldError message={state.errors.lateFeeText} />
+                      </div>
+                      <div>
+                        <Label htmlFor="stripeProductId">Stripe Product ID</Label>
+                        <input
+                          id="stripeProductId"
+                          type="text"
+                          value={state.stripeProductId}
+                          onChange={(e) => setState((s) => ({ ...s, stripeProductId: e.target.value }))}
+                          className="w-full border border-ink/15 bg-paper px-3 py-2.5 font-mono text-sm text-ink outline-none placeholder:text-ink-muted"
+                          placeholder="prod_xxx (opcional)"
+                          data-testid="stripe-product-id-input"
+                        />
+                        <p className="mt-1 text-[0.65rem] text-ink-muted">
+                          Deja vacío para que el servidor lo cree automáticamente.
+                        </p>
+                      </div>
+                      <div>
+                        <Label htmlFor="stripePriceId">Stripe Price ID</Label>
+                        <input
+                          id="stripePriceId"
+                          type="text"
+                          value={state.stripePriceId}
+                          onChange={(e) => setState((s) => ({ ...s, stripePriceId: e.target.value }))}
+                          className="w-full border border-ink/15 bg-paper px-3 py-2.5 font-mono text-sm text-ink outline-none placeholder:text-ink-muted"
+                          placeholder="price_xxx (opcional)"
+                          data-testid="stripe-price-id-input"
+                        />
+                        <p className="mt-1 text-[0.65rem] text-ink-muted">
+                          Deja vacío para que el servidor lo cree automáticamente.
+                        </p>
                       </div>
                     </div>
                   ) : null}

@@ -133,6 +133,28 @@ export default function CheckoutScreen() {
 
   const hasRentalItems = rentalFirstMonthCents > 0
 
+  // Mixed-cart guard: detect when cart has BOTH rental and non-rental products
+  const hasMixedCart = useMemo(() => {
+    const hasRental = lineItems.some((li) => li.product?.pricingMode === 'rental')
+    const hasSinglePayment = lineItems.some((li) => li.product && li.product.pricingMode !== 'rental')
+    return hasRental && hasSinglePayment
+  }, [lineItems])
+
+  // Monthly recurring total — shown only for pure-rental carts
+  const monthlyRecurringCents = useMemo(
+    () =>
+      hasMixedCart
+        ? 0
+        : lineItems.reduce(
+            (sum, li) =>
+              li.product?.pricingMode === 'rental' && li.product.monthlyRentCents
+                ? sum + li.product.monthlyRentCents * li.quantity
+                : sum,
+            0,
+          ),
+    [lineItems, hasMixedCart],
+  )
+
   const claimableCents = pointsBalance?.claimableCents ?? 0
   const redeemCents = usePoints ? Math.min(claimableCents, subtotalCents) : 0
 
@@ -255,6 +277,12 @@ export default function CheckoutScreen() {
 
   const onSubmit = () => {
     setError(null)
+
+    // Mixed-cart guard — mirrors server enforcement (Batch C T6.4)
+    if (hasMixedCart) {
+      setError('No podés combinar productos de alquiler con productos de compra única.')
+      return
+    }
 
     if (adHocMode) {
       if (!addressText.trim() || addressText.trim().length < 3) {
@@ -794,6 +822,36 @@ export default function CheckoutScreen() {
           </Text>
         </View>
 
+        {/* Monthly recurring disclosure — only for pure-rental carts */}
+        {monthlyRecurringCents > 0 && !hasMixedCart && (
+          <View className="mt-4 border border-brand/30 bg-brand-light/20 px-4 py-3">
+            <Text className="font-sans text-[11px] uppercase tracking-label text-brand">
+              Cargo recurrente mensual
+            </Text>
+            <Text
+              className="mt-1 font-sans-semibold text-[18px] text-brand"
+              style={{ fontVariant: ['tabular-nums'] }}
+            >
+              {formatCents(monthlyRecurringCents)}/mes
+            </Text>
+            <Text className="mt-1 font-sans text-[11px] text-ink-muted">
+              A partir del segundo mes, el cargo mensual se aplicará automáticamente.
+            </Text>
+          </View>
+        )}
+
+        {/* Mixed-cart error banner */}
+        {hasMixedCart && (
+          <View className="mt-4 border border-bad/30 bg-bad/5 px-4 py-3">
+            <Text className="font-sans text-[13px] text-bad">
+              No podés combinar productos de alquiler con productos de compra única.
+            </Text>
+            <Text className="mt-1 font-sans text-[11px] text-ink-muted">
+              Hacé pedidos separados: uno para alquileres y otro para compras únicas.
+            </Text>
+          </View>
+        )}
+
         {error && (
           <Text className="mt-4 font-sans text-[11px] uppercase tracking-label text-bad">
             {error}
@@ -805,7 +863,7 @@ export default function CheckoutScreen() {
             variant="accent"
             size="lg"
             loading={createOrder.isPending}
-            disabled={adHocMode ? !hasCoords : !selectedAddressId}
+            disabled={(adHocMode ? !hasCoords : !selectedAddressId) || hasMixedCart}
             onPress={onSubmit}
           >
             Confirmar pedido →

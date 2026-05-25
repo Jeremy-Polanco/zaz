@@ -65,7 +65,7 @@ export class CreateProductDto {
   @IsDateString()
   offerEndsAt?: string | null;
 
-  // Rental pricing — Stripe IDs are server-managed and MUST NOT be in the DTO.
+  // Rental pricing
   @IsOptional()
   @IsEnum(['single_payment', 'rental'])
   pricingMode?: 'single_payment' | 'rental';
@@ -81,4 +81,13 @@ export class CreateProductDto {
   @Min(0)
   @Max(1000000)
   lateFeeCents?: number;
+
+  // Stripe IDs — admin may set these manually; server will lazy-create if absent
+  @IsOptional()
+  @IsString()
+  stripeProductId?: string | null;
+
+  @IsOptional()
+  @IsString()
+  stripePriceId?: string | null;
 }

@@ -768,6 +768,125 @@ function setupRentalCheckoutMocks(products: typeof MOCK_PRODUCT[], cartItems: Re
   mockLocation.getForegroundPermissionsAsync.mockResolvedValue({ status: 'denied' } as never)
 }
 
+// ── T9.1 — Mixed-cart guard blocks submission ─────────────────────────────────
+
+describe('T9.1 — Mixed-cart guard: blocks submit when cart has rental + non-rental items', () => {
+  it('T9.1a: shows mixed-cart error copy when cart has both rental and single_payment products', async () => {
+    setupRentalCheckoutMocks(
+      [SINGLE_PRODUCT as unknown as typeof MOCK_PRODUCT, RENTAL_PRODUCT as unknown as typeof MOCK_PRODUCT],
+      { 'product-single': 1, 'product-rental': 1 },
+    )
+
+    const { getByText } = renderWithProviders(<CheckoutScreen />)
+
+    // Wait for initial render
+    await waitFor(() => {
+      expect(getByText(/Confirmar pedido/i)).toBeTruthy()
+    })
+
+    // The submit button should show mixed-cart error inline
+    await waitFor(() => {
+      expect(
+        getByText(/No podés combinar productos de alquiler con productos de compra única/i),
+      ).toBeTruthy()
+    })
+  })
+
+  // T9.1 triangulate — mixed cart button is disabled
+  it('T9.1b: submit button is disabled for a mixed rental + non-rental cart', async () => {
+    setupRentalCheckoutMocks(
+      [SINGLE_PRODUCT as unknown as typeof MOCK_PRODUCT, RENTAL_PRODUCT as unknown as typeof MOCK_PRODUCT],
+      { 'product-single': 1, 'product-rental': 1 },
+    )
+
+    const { getByText } = renderWithProviders(<CheckoutScreen />)
+
+    await waitFor(() => {
+      const btn = getByText(/Confirmar pedido/i)
+      // The button should exist (component renders) but pressing it should NOT call createOrder
+      expect(btn).toBeTruthy()
+    })
+
+    // Press the button — should NOT trigger Alert (blocked by mixed-cart guard)
+    fireEvent.press(getByText(/Confirmar pedido/i))
+
+    // createOrder must NOT have been called
+    expect(mockCreateOrderMutateAsync).not.toHaveBeenCalled()
+    // And the error text must still be visible
+    expect(
+      getByText(/No podés combinar productos de alquiler con productos de compra única/i),
+    ).toBeTruthy()
+  })
+})
+
+// ── T9.2 — Monthly disclosure for all-rental cart ────────────────────────────
+
+describe('T9.2 — Monthly disclosure block shows for all-rental cart', () => {
+  it('T9.2a: shows "Cargo recurrente mensual" copy with amount when all items are rental', async () => {
+    setupRentalCheckoutMocks(
+      [RENTAL_PRODUCT as unknown as typeof MOCK_PRODUCT],
+      { 'product-rental': 1 },
+    )
+
+    const { getByText } = renderWithProviders(<CheckoutScreen />)
+
+    await waitFor(() => {
+      expect(getByText(/Cargo recurrente mensual/i)).toBeTruthy()
+    })
+  })
+
+  // T9.2 triangulate — monthly amount shows in disclosure
+  it('T9.2b: monthly disclosure shows correct total cents formatted as dollars', async () => {
+    setupRentalCheckoutMocks(
+      [RENTAL_PRODUCT as unknown as typeof MOCK_PRODUCT],
+      { 'product-rental': 1 },
+    )
+
+    const { getAllByText } = renderWithProviders(<CheckoutScreen />)
+
+    // RENTAL_PRODUCT has monthlyRentCents=2000 → $20/mes (appears in line item AND disclosure)
+    await waitFor(() => {
+      const matches = getAllByText(/\$20\/mes/i)
+      expect(matches.length).toBeGreaterThan(0)
+    })
+  })
+})
+
+// ── T9.3 — No monthly disclosure for all-single_payment cart ─────────────────
+
+describe('T9.3 — No monthly disclosure for single-payment-only cart (regression guard)', () => {
+  it('T9.3a: does NOT show "Cargo recurrente mensual" for all single-payment cart', async () => {
+    setupRentalCheckoutMocks(
+      [SINGLE_PRODUCT as unknown as typeof MOCK_PRODUCT],
+      { 'product-single': 1 },
+    )
+
+    const { queryByText } = renderWithProviders(<CheckoutScreen />)
+
+    await waitFor(() => {
+      expect(queryByText(/Cargo recurrente mensual/i)).toBeNull()
+    })
+  })
+
+  // T9.3 triangulate — no mixed-cart error shown for pure single-payment cart
+  it('T9.3b: does NOT show mixed-cart error for single-payment-only cart', async () => {
+    setupRentalCheckoutMocks(
+      [SINGLE_PRODUCT as unknown as typeof MOCK_PRODUCT],
+      { 'product-single': 1 },
+    )
+
+    const { queryByText } = renderWithProviders(<CheckoutScreen />)
+
+    await waitFor(() => {
+      expect(
+        queryByText(/No podés combinar productos de alquiler con productos de compra única/i),
+      ).toBeNull()
+    })
+  })
+})
+
+// ── T87 — Rental line item copy + breakdown ────────────────────────────────────
+
 describe('T87 — Rental: mixed cart shows "(primer mes)" copy under rental item', () => {
   it('shows "(primer mes)" text under the rental line item', async () => {
     setupRentalCheckoutMocks(

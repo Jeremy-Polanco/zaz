@@ -173,3 +173,45 @@ describe('RentalsIndex — status badges', () => {
     expect(getByText(/cancelado/i)).toBeTruthy()
   })
 })
+
+// ── T8.1 / T8.2 — PENDING_SETUP badge ─────────────────────────────────────────
+
+describe('T8.1 — PENDING_SETUP badge with exact Spanish copy', () => {
+  it('T8.1a: shows the exact setup-in-progress copy when rental.status is pending_setup', () => {
+    const pending = makeRental({ id: 'r-ps', status: 'pending_setup' })
+    setupMocks([pending])
+    const { getByText } = renderWithProviders(<RentalsIndex />)
+    expect(
+      getByText('Estamos terminando de configurar tu alquiler. Te avisamos cuando esté activo.'),
+    ).toBeTruthy()
+  })
+
+  // T8.1 triangulate — pending_setup badge label is visible
+  it('T8.1b: shows "Pendiente" badge label for pending_setup rental', () => {
+    const pending = makeRental({ id: 'r-ps2', status: 'pending_setup' })
+    setupMocks([pending])
+    const { getByText } = renderWithProviders(<RentalsIndex />)
+    expect(getByText(/pendiente/i)).toBeTruthy()
+  })
+})
+
+describe('T8.2 — PENDING_SETUP badge NOT shown for other statuses', () => {
+  it('T8.2a: active rental does NOT show the setup-in-progress copy', () => {
+    const active = makeRental({ id: 'r-a', status: 'active' })
+    setupMocks([active])
+    const { queryByText } = renderWithProviders(<RentalsIndex />)
+    expect(
+      queryByText('Estamos terminando de configurar tu alquiler. Te avisamos cuando esté activo.'),
+    ).toBeNull()
+  })
+
+  // T8.2 triangulate — past_due also doesn't show setup copy
+  it('T8.2b: past_due rental does NOT show the setup-in-progress copy', () => {
+    const pastDue = makeRental({ id: 'r-pd2', status: 'past_due' })
+    setupMocks([pastDue])
+    const { queryByText } = renderWithProviders(<RentalsIndex />)
+    expect(
+      queryByText('Estamos terminando de configurar tu alquiler. Te avisamos cuando esté activo.'),
+    ).toBeNull()
+  })
+})

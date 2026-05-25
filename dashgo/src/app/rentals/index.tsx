@@ -38,10 +38,12 @@ const STATUS_BADGE: Record<RentalStatus, BadgeConfig> = {
   },
   pending_setup: {
     label: 'Pendiente',
-    bgClass: 'bg-blue-100',
-    textClass: 'text-blue-800',
+    bgClass: 'bg-amber-100',
+    textClass: 'text-amber-800',
   },
 }
+
+const PENDING_SETUP_COPY = 'Estamos terminando de configurar tu alquiler. Te avisamos cuando esté activo.'
 
 // ─── Rental card ─────────────────────────────────────────────────────────────
 
@@ -96,6 +98,11 @@ function RentalCard({ rental }: { rental: Rental }) {
           {rental.nextChargeAt && (
             <Text className="mt-1 font-sans text-[12px] text-ink-soft">
               Próximo cargo: {formatDate(rental.nextChargeAt)}
+            </Text>
+          )}
+          {rental.status === 'pending_setup' && (
+            <Text className="mt-2 font-sans text-[12px] text-amber-800">
+              {PENDING_SETUP_COPY}
             </Text>
           )}
         </View>

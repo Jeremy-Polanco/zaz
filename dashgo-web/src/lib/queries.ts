@@ -210,6 +210,8 @@ export type CreateProductInput = {
   pricingMode?: 'single_payment' | 'rental'
   monthlyRentCents?: number
   lateFeeCents?: number
+  stripeProductId?: string | null
+  stripePriceId?: string | null
 }
 
 export function useCreateProduct() {

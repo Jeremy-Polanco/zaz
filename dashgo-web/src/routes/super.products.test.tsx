@@ -137,6 +137,25 @@ import { useState } from 'react'
 import { Input, Label } from '../components/ui'
 import { useUpdateProduct as useUpdateProductFn } from '../lib/queries'
 
+// Pure validation function — extracted for testability (per strict-tdd pure-function preference)
+export function validateRentalFields(fields: {
+  monthlyRentText: string
+  lateFeeText: string
+  stripeProductId: string
+  stripePriceId: string
+}): { monthlyRentText?: string; lateFeeText?: string } {
+  const errors: { monthlyRentText?: string; lateFeeText?: string } = {}
+  const monthly = parseFloat(fields.monthlyRentText)
+  if (!Number.isFinite(monthly) || monthly <= 0) {
+    errors.monthlyRentText = 'Ingresa una renta mensual válida'
+  }
+  const lateFee = parseFloat(fields.lateFeeText)
+  if (!Number.isFinite(lateFee) || lateFee < 0) {
+    errors.lateFeeText = 'Ingresa una multa válida (0 o más)'
+  }
+  return errors
+}
+
 // Minimal driver that renders the pricing mode portion of ProductForm
 function PricingModeDriver({
   initialProduct,
@@ -154,12 +173,26 @@ function PricingModeDriver({
   const [lateFeeText, setLateFeeText] = useState(
     initialProduct?.lateFeeCents ? String(initialProduct.lateFeeCents / 100) : '',
   )
+  const [stripeProductId, setStripeProductId] = useState(initialProduct?.stripeProductId ?? '')
+  const [stripePriceId, setStripePriceId] = useState(initialProduct?.stripePriceId ?? '')
+  const [rentalErrors, setRentalErrors] = useState<{ monthlyRentText?: string; lateFeeText?: string }>({})
 
   const handleSubmit = async () => {
+    if (pricingMode === 'rental') {
+      const errors = validateRentalFields({ monthlyRentText, lateFeeText, stripeProductId, stripePriceId })
+      if (Object.keys(errors).length > 0) {
+        setRentalErrors(errors)
+        return
+      }
+      setRentalErrors({})
+    }
+
     const payload: Record<string, unknown> = { pricingMode }
     if (pricingMode === 'rental') {
       payload.monthlyRentCents = Math.round(parseFloat(monthlyRentText || '0') * 100)
       payload.lateFeeCents = Math.round(parseFloat(lateFeeText || '0') * 100)
+      payload.stripeProductId = stripeProductId || null
+      payload.stripePriceId = stripePriceId || null
     }
     if (initialProduct) {
       await update.mutateAsync({ id: initialProduct.id, ...payload } as Parameters<typeof update.mutateAsync>[0])
@@ -210,6 +243,9 @@ function PricingModeDriver({
               data-testid="monthly-rent-input"
               placeholder="0.00"
             />
+            {rentalErrors.monthlyRentText && (
+              <span data-testid="monthly-rent-error">{rentalErrors.monthlyRentText}</span>
+            )}
           </div>
           <div>
             <Label htmlFor="lateFee">Multa por atraso ($)</Label>
@@ -222,6 +258,31 @@ function PricingModeDriver({
               onChange={(e) => setLateFeeText(e.target.value)}
               data-testid="late-fee-input"
               placeholder="0.00"
+            />
+            {rentalErrors.lateFeeText && (
+              <span data-testid="late-fee-error">{rentalErrors.lateFeeText}</span>
+            )}
+          </div>
+          <div>
+            <Label htmlFor="stripeProductId">Stripe Product ID</Label>
+            <Input
+              id="stripeProductId"
+              type="text"
+              value={stripeProductId ?? ''}
+              onChange={(e) => setStripeProductId(e.target.value)}
+              data-testid="stripe-product-id-input"
+              placeholder="prod_xxx"
+            />
+          </div>
+          <div>
+            <Label htmlFor="stripePriceId">Stripe Price ID</Label>
+            <Input
+              id="stripePriceId"
+              type="text"
+              value={stripePriceId ?? ''}
+              onChange={(e) => setStripePriceId(e.target.value)}
+              data-testid="stripe-price-id-input"
+              placeholder="price_xxx"
             />
           </div>
         </div>
@@ -342,5 +403,178 @@ describe('super.products — pricing mode radio group', () => {
     await userEvent.click(screen.getByTestId('pricing-mode-single'))
 
     expect(screen.queryByTestId('rental-fields')).not.toBeInTheDocument()
+  })
+
+  // T7.1 — Stripe ID fields visible in rental mode, hidden in single_payment
+  it('T7.1a: rental mode shows stripeProductId and stripePriceId inputs inside rental-fields', async () => {
+    setupMocks()
+    renderWithProviders(<PricingModeDriver initialProduct={makeSinglePaymentProduct()} />)
+
+    // Switch to rental
+    await userEvent.click(screen.getByTestId('pricing-mode-rental'))
+
+    expect(screen.getByTestId('rental-fields')).toBeInTheDocument()
+    expect(screen.getByTestId('stripe-product-id-input')).toBeInTheDocument()
+    expect(screen.getByTestId('stripe-price-id-input')).toBeInTheDocument()
+  })
+
+  // T7.2 — Stripe ID fields hidden when single_payment
+  it('T7.2a: single_payment mode does NOT show stripeProductId or stripePriceId inputs', () => {
+    setupMocks()
+    renderWithProviders(<PricingModeDriver initialProduct={makeSinglePaymentProduct()} />)
+
+    expect(screen.queryByTestId('stripe-product-id-input')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('stripe-price-id-input')).not.toBeInTheDocument()
+  })
+
+  // T7.2 (triangulate) — rental product starts with stripe fields visible
+  it('T7.2b: editing rental product pre-populates stripeProductId and stripePriceId fields', () => {
+    setupMocks()
+    renderWithProviders(<PricingModeDriver initialProduct={makeRentalProduct()} />)
+
+    expect(screen.getByTestId('stripe-product-id-input')).toHaveValue('prod_stripe_001')
+    expect(screen.getByTestId('stripe-price-id-input')).toHaveValue('price_stripe_001')
+  })
+
+  // T7.3 — Submit with rental mode includes stripeProductId and stripePriceId in payload
+  it('T7.3a: submit with rental mode → payload includes stripeProductId and stripePriceId', async () => {
+    const mutateAsyncMock = vi.fn().mockResolvedValue({ id: 'prod-002', stock: 0, isAvailable: true })
+    setupMocks({
+      updateMutation: createMutationMock({ mutateAsync: mutateAsyncMock }),
+    })
+    renderWithProviders(<PricingModeDriver initialProduct={makeRentalProduct()} />)
+
+    // Change stripeProductId
+    await userEvent.clear(screen.getByTestId('stripe-product-id-input'))
+    await userEvent.type(screen.getByTestId('stripe-product-id-input'), 'prod_new_123')
+    await userEvent.click(screen.getByTestId('submit-btn'))
+
+    await waitFor(() => {
+      expect(mutateAsyncMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: 'prod-002',
+          pricingMode: 'rental',
+          stripeProductId: 'prod_new_123',
+          stripePriceId: 'price_stripe_001',
+        }),
+      )
+    })
+  })
+
+  // T7.3 (triangulate) — single_payment submit does NOT include stripe IDs
+  it('T7.3b: submit with single_payment mode → no stripeProductId or stripePriceId in payload', async () => {
+    const mutateAsyncMock = vi.fn().mockResolvedValue({ id: 'prod-001', stock: 10, isAvailable: true })
+    setupMocks({
+      updateMutation: createMutationMock({ mutateAsync: mutateAsyncMock }),
+    })
+    renderWithProviders(<PricingModeDriver initialProduct={makeSinglePaymentProduct()} />)
+
+    await userEvent.click(screen.getByTestId('submit-btn'))
+
+    await waitFor(() => {
+      expect(mutateAsyncMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: 'prod-001',
+          pricingMode: 'single_payment',
+        }),
+      )
+    })
+
+    const callArg = mutateAsyncMock.mock.calls[0][0]
+    expect(callArg).not.toHaveProperty('stripeProductId')
+    expect(callArg).not.toHaveProperty('stripePriceId')
+  })
+})
+
+// ── T7.4 — validateRentalFields pure function tests ──────────────────────────────
+
+describe('super.products — validateRentalFields (pure function)', () => {
+  // T7.4a: empty monthlyRentText produces error
+  it('T7.4a: empty monthlyRentText returns monthlyRentText error', () => {
+    const result = validateRentalFields({
+      monthlyRentText: '',
+      lateFeeText: '5.00',
+      stripeProductId: '',
+      stripePriceId: '',
+    })
+    expect(result.monthlyRentText).toBeDefined()
+    expect(typeof result.monthlyRentText).toBe('string')
+    expect(result.lateFeeText).toBeUndefined()
+  })
+
+  // T7.4b (triangulate): zero monthly rent also produces error (must be > 0)
+  it('T7.4b: zero monthlyRentText returns monthlyRentText error', () => {
+    const result = validateRentalFields({
+      monthlyRentText: '0',
+      lateFeeText: '5.00',
+      stripeProductId: '',
+      stripePriceId: '',
+    })
+    expect(result.monthlyRentText).toBeDefined()
+  })
+
+  // T7.4c: valid monthly + negative late fee produces lateFeeText error
+  it('T7.4c: negative lateFeeText returns lateFeeText error', () => {
+    const result = validateRentalFields({
+      monthlyRentText: '20.00',
+      lateFeeText: '-1',
+      stripeProductId: '',
+      stripePriceId: '',
+    })
+    expect(result.lateFeeText).toBeDefined()
+    expect(result.monthlyRentText).toBeUndefined()
+  })
+
+  // T7.4d: valid monthly + zero late fee passes (late fee = 0 is allowed)
+  it('T7.4d: zero lateFeeText is valid (returns no lateFeeText error)', () => {
+    const result = validateRentalFields({
+      monthlyRentText: '20.00',
+      lateFeeText: '0',
+      stripeProductId: '',
+      stripePriceId: '',
+    })
+    expect(result.lateFeeText).toBeUndefined()
+    expect(result.monthlyRentText).toBeUndefined()
+  })
+
+  // T7.4e: form submit with rental + empty monthlyRent blocks mutation
+  it('T7.4e: form submit with empty monthlyRent shows error and does NOT call mutateAsync', async () => {
+    const mutateAsyncMock = vi.fn().mockResolvedValue({ id: 'prod-002', stock: 0, isAvailable: true })
+    setupMocks({
+      updateMutation: createMutationMock({ mutateAsync: mutateAsyncMock }),
+    })
+
+    // Start with rental mode but empty monthlyRentText
+    renderWithProviders(<PricingModeDriver initialProduct={makeSinglePaymentProduct({ pricingMode: 'rental', monthlyRentCents: 0 })} />)
+
+    // Click submit without filling monthlyRent
+    await userEvent.click(screen.getByTestId('submit-btn'))
+
+    await waitFor(() => {
+      expect(screen.getByTestId('monthly-rent-error')).toBeInTheDocument()
+    })
+
+    // mutation must NOT have been called
+    expect(mutateAsyncMock).not.toHaveBeenCalled()
+  })
+
+  // T7.4f (triangulate): valid rental form submits and mutation IS called
+  it('T7.4f: valid rental form (monthlyRent > 0, lateFee >= 0) calls mutateAsync', async () => {
+    const mutateAsyncMock = vi.fn().mockResolvedValue({ id: 'prod-002', stock: 0, isAvailable: true })
+    setupMocks({
+      updateMutation: createMutationMock({ mutateAsync: mutateAsyncMock }),
+    })
+    renderWithProviders(<PricingModeDriver initialProduct={makeRentalProduct()} />)
+
+    await userEvent.click(screen.getByTestId('submit-btn'))
+
+    await waitFor(() => {
+      expect(mutateAsyncMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          pricingMode: 'rental',
+          monthlyRentCents: 2000,
+        }),
+      )
+    })
   })
 })
