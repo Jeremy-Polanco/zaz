@@ -628,10 +628,15 @@ describe('OrdersService', () => {
   }
 
   // ─────────────────────────────────────────────────────────────────────────
-  // T57 — Mixed cart total: sum(singlePayment × priceToPublic) + sum(rental × monthlyRentCents)
+  // T57 — Rental pricing: monthlyRentCents used for all-rental cart total
+  //
+  // NOTE: T57 originally tested a mixed cart for pricing. Since T6.4 introduced
+  // the MIXED_CART_RENTAL guard, mixed carts are rejected before pricing runs.
+  // T57 now tests the same pricing behavior using an all-rental cart, which is
+  // the valid path that exercises rental pricing logic.
   // ─────────────────────────────────────────────────────────────────────────
 
-  describe('create — Phase 6 mixed cart', () => {
+  describe('create — Phase 6 rental pricing', () => {
     const singlePaymentProduct = fakeProduct({
       id: 'prod-water',
       priceToPublic: '5.00',   // 500 cents
@@ -642,28 +647,25 @@ describe('OrdersService', () => {
       monthlyRentCents: 2000,
     });
 
-    const mixedCartDto = {
-      items: [
-        { productId: 'prod-water', quantity: 1 },
-        { productId: 'prod-dispenser', quantity: 1 },
-      ],
-      deliveryAddress: { text: '123 Test', lat: 18.4861, lng: -69.9312 },
-      paymentMethod: PaymentMethod.CASH,
-      usePoints: false,
-      useCredit: false,
-    } as import('./dto/create-order.dto').CreateOrderDto;
+    // T57 — rental-only cart uses monthlyRentCents for total
+    it('T57: calculates subtotal using monthlyRentCents for all-rental cart (2000 cents → 20.00)', async () => {
+      productsRepo.find.mockResolvedValue([rentalProduct]);
+      setupMixedCartCreateTx([rentalProduct]);
 
-    // T57 — total should be 500 + 2000 = 2500 cents → subtotal = '25.00'
-    it('T57: calculates subtotal using monthlyRentCents for rental items (500 + 2000 = 2500 cents)', async () => {
-      productsRepo.find.mockResolvedValue([singlePaymentProduct, rentalProduct]);
-      setupMixedCartCreateTx([singlePaymentProduct, rentalProduct]);
+      const allRentalDto = {
+        items: [{ productId: 'prod-dispenser', quantity: 1 }],
+        deliveryAddress: { text: '123 Test', lat: 18.4861, lng: -69.9312 },
+        paymentMethod: PaymentMethod.CASH,
+        usePoints: false,
+        useCredit: false,
+      } as import('./dto/create-order.dto').CreateOrderDto;
 
-      await service.create(fakeUser(UserRole.CLIENT), mixedCartDto);
+      await service.create(fakeUser(UserRole.CLIENT), allRentalDto);
 
       // Verify the transaction was called (meaning create() reached TX step)
       expect(dataSource.transaction).toHaveBeenCalledTimes(1);
 
-      // The order passed to save() inside the TX should have subtotal = '25.00'
+      // The order passed to save() inside the TX should have subtotal = '20.00'
       const txCallback = (dataSource.transaction as jest.Mock).mock.calls[0][0] as (mgr: EntityManager) => Promise<unknown>;
       let capturedSubtotal: string | undefined;
 
@@ -690,7 +692,7 @@ describe('OrdersService', () => {
         await txCallback(mgr as unknown as EntityManager);
       })();
 
-      expect(capturedSubtotal).toBe('25.00'); // (500 + 2000) / 100 = 25.00
+      expect(capturedSubtotal).toBe('20.00'); // 2000 cents / 100 = 20.00
     });
 
     // T57: Single-payment-only order total unchanged
@@ -1211,6 +1213,117 @@ describe('OrdersService', () => {
       );
 
       expect(stockUpdate).toBe(7); // 10 - 3
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Phase 6 — Mixed-cart server enforcement (T6.1–T6.3)
+  //
+  // Server MUST reject orders that mix rental + single_payment products.
+  // Error code: MIXED_CART_RENTAL (400 BadRequestException).
+  // ─────────────────────────────────────────────────────────────────────────
+
+  describe('create — mixed-cart server enforcement (T6.1–T6.3)', () => {
+    const rentalProduct = fakeRentalProduct({ id: 'prod-dispenser' });
+    const singleProduct = fakeProduct({ id: 'prod-water' });
+
+    // T6.1 — MUST throw 400 MIXED_CART_RENTAL for mixed cart
+    it('T6.1: throws BadRequestException with code MIXED_CART_RENTAL when cart mixes rental + single_payment', async () => {
+      productsRepo.find.mockResolvedValue([rentalProduct, singleProduct]);
+
+      const mixedCartDto = {
+        items: [
+          { productId: 'prod-dispenser', quantity: 1 },
+          { productId: 'prod-water', quantity: 1 },
+        ],
+        deliveryAddress: { text: '123 Test', lat: 18.4861, lng: -69.9312 },
+        paymentMethod: PaymentMethod.CASH,
+        usePoints: false,
+        useCredit: false,
+      } as import('./dto/create-order.dto').CreateOrderDto;
+
+      await expect(
+        service.create(fakeUser(UserRole.CLIENT), mixedCartDto),
+      ).rejects.toThrow(BadRequestException);
+
+      // Must NOT reach TX
+      expect(dataSource.transaction).not.toHaveBeenCalled();
+    });
+
+    it('T6.1-triangulate: mixed-cart error response contains MIXED_CART_RENTAL code', async () => {
+      productsRepo.find.mockResolvedValue([rentalProduct, singleProduct]);
+
+      const mixedCartDto = {
+        items: [
+          { productId: 'prod-dispenser', quantity: 1 },
+          { productId: 'prod-water', quantity: 2 },
+        ],
+        deliveryAddress: { text: '123 Test', lat: 18.4861, lng: -69.9312 },
+        paymentMethod: PaymentMethod.CASH,
+        usePoints: false,
+        useCredit: false,
+      } as import('./dto/create-order.dto').CreateOrderDto;
+
+      let thrown: BadRequestException | undefined;
+      try {
+        await service.create(fakeUser(UserRole.CLIENT), mixedCartDto);
+      } catch (err) {
+        thrown = err as BadRequestException;
+      }
+
+      expect(thrown).toBeInstanceOf(BadRequestException);
+      const responseBody = thrown!.getResponse() as Record<string, unknown>;
+      expect(responseBody.code).toBe('MIXED_CART_RENTAL');
+    });
+
+    // T6.2 — all-rental cart MUST succeed (no error)
+    it('T6.2: accepts all-rental cart (no BadRequestException thrown)', async () => {
+      const rentalProduct2 = fakeRentalProduct({ id: 'prod-dispenser-2', name: 'Dispenser B' });
+      productsRepo.find.mockResolvedValue([rentalProduct, rentalProduct2]);
+
+      setupMixedCartCreateTx([rentalProduct, rentalProduct2]);
+
+      const allRentalDto = {
+        items: [
+          { productId: 'prod-dispenser', quantity: 1 },
+          { productId: 'prod-dispenser-2', quantity: 1 },
+        ],
+        deliveryAddress: { text: '123 Test', lat: 18.4861, lng: -69.9312 },
+        paymentMethod: PaymentMethod.CASH,
+        usePoints: false,
+        useCredit: false,
+      } as import('./dto/create-order.dto').CreateOrderDto;
+
+      // Must NOT throw — all-rental cart is allowed
+      await expect(
+        service.create(fakeUser(UserRole.CLIENT), allRentalDto),
+      ).resolves.toBeDefined();
+
+      // TX reached
+      expect(dataSource.transaction).toHaveBeenCalledTimes(1);
+    });
+
+    // T6.3 — all-single_payment cart MUST succeed (regression guard)
+    it('T6.3: accepts all-single_payment cart (regression guard — existing behavior unchanged)', async () => {
+      productsRepo.find.mockResolvedValue([singleProduct]);
+
+      setupMixedCartCreateTx([singleProduct]);
+
+      const singleCartDto = {
+        items: [{ productId: 'prod-water', quantity: 1 }],
+        deliveryAddress: { text: '123 Test', lat: 18.4861, lng: -69.9312 },
+        paymentMethod: PaymentMethod.CASH,
+        usePoints: false,
+        useCredit: false,
+      } as import('./dto/create-order.dto').CreateOrderDto;
+
+      // Must NOT throw
+      await expect(
+        service.create(fakeUser(UserRole.CLIENT), singleCartDto),
+      ).resolves.toBeDefined();
+
+      // TX reached
+      expect(dataSource.transaction).toHaveBeenCalledTimes(1);
     });
   });
 });

@@ -281,6 +281,39 @@ export class RentalsService implements OnModuleInit {
   }
 
   // ─────────────────────────────────────────────────────────────────────────
+  // T5.5 — findEligibleForLateFee
+  //
+  // Returns rentals eligible for a daily late-fee charge:
+  //   status = PAST_DUE
+  //   AND pastDueSince <= NOW - 3 days (grace period elapsed)
+  //   AND (lastLateFeeAt IS NULL OR lastLateFeeAt < today UTC midnight)
+  //
+  // Parameterized query — safe for injection.
+  // ─────────────────────────────────────────────────────────────────────────
+
+  async findEligibleForLateFee(): Promise<Rental[]> {
+    // 3-day grace period threshold (UTC)
+    const now = new Date();
+    const gracePeriodMs = 3 * 24 * 60 * 60 * 1000;
+    const threshold = new Date(now.getTime() - gracePeriodMs);
+
+    // Today at UTC midnight for the "already charged today" check
+    const todayUTC = new Date(
+      Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
+    );
+
+    return this.rentals
+      .createQueryBuilder('rental')
+      .where('rental.status = :status', { status: RentalStatus.PAST_DUE })
+      .andWhere('rental.pastDueSince <= :threshold', { threshold })
+      .andWhere(
+        '(rental.lastLateFeeAt IS NULL OR rental.lastLateFeeAt < :todayUTC)',
+        { todayUTC },
+      )
+      .getMany();
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
   // T28 — listMine
   // ─────────────────────────────────────────────────────────────────────────
 
@@ -415,6 +448,12 @@ export class RentalsService implements OnModuleInit {
       this.logger.error(`chargeLateFee: PaymentIntent failed for rental ${rentalId}: ${(err as Error).message}`);
       throw new HttpException('STRIPE_PAYMENT_FAILED', HttpStatus.BAD_GATEWAY);
     }
+
+    // T5.6: Update lastLateFeeAt on Stripe success for cron idempotency.
+    // Order of operations: charge Stripe FIRST, then persist the timestamp.
+    // Using the same day-key as the idempotency key (UTC date).
+    rental.lastLateFeeAt = new Date();
+    await this.rentals.save(rental);
 
     // T36: alsoCancel=true → cancel Stripe sub + mark DB canceled
     if (alsoCancel) {

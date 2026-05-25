@@ -643,8 +643,45 @@ describe('RentalsService', () => {
       // subscriptions.cancel NOT called
       expect(mockStripeInstance.subscriptions.cancel).not.toHaveBeenCalled();
 
-      // Rental status UNCHANGED
-      expect(rentalRepo.save).not.toHaveBeenCalled();
+      // T5.6: lastLateFeeAt must be set on the rental after PI success
+      expect(rentalRepo.save).toHaveBeenCalledTimes(1);
+      const savedArg = rentalRepo.save.mock.calls[0][0] as Partial<Rental>;
+      expect(savedArg.lastLateFeeAt).toBeInstanceOf(Date);
+    });
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // T5.6 — chargeLateFee sets lastLateFeeAt on Stripe success
+    // ─────────────────────────────────────────────────────────────────────────
+
+    it('T5.6: chargeLateFee sets rental.lastLateFeeAt = new Date() on successful Stripe charge', async () => {
+      const before = new Date();
+      const rental = fakeRental({
+        id: 'rental-lf',
+        userId: 'user-1',
+        lateFeeCents: 500,
+        status: RentalStatus.PAST_DUE,
+        lastLateFeeAt: null,
+      });
+      const user = fakeUser({ id: 'user-1', stripeCustomerId: 'cus_lf' });
+
+      rentalRepo.findOne.mockResolvedValueOnce(rental);
+      userRepo.findOne.mockResolvedValueOnce(user);
+      mockStripeInstance.paymentIntents.create.mockResolvedValueOnce({
+        id: 'pi_lf_test',
+        status: 'succeeded',
+        amount: 500,
+      });
+      rentalRepo.save.mockResolvedValueOnce({ ...rental, lastLateFeeAt: new Date() });
+
+      await service.chargeLateFee('rental-lf', false);
+
+      // Must save rental with a recent lastLateFeeAt
+      expect(rentalRepo.save).toHaveBeenCalledTimes(1);
+      const savedArg = rentalRepo.save.mock.calls[0][0] as Partial<Rental>;
+      expect(savedArg.lastLateFeeAt).toBeInstanceOf(Date);
+      const after = new Date();
+      expect(savedArg.lastLateFeeAt!.getTime()).toBeGreaterThanOrEqual(before.getTime());
+      expect(savedArg.lastLateFeeAt!.getTime()).toBeLessThanOrEqual(after.getTime());
     });
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -674,8 +711,12 @@ describe('RentalsService', () => {
         amount: 500,
       });
 
+      // T5.6: chargeLateFee now saves lastLateFeeAt FIRST, then cancelAdmin saves CANCELED.
+      const rentalWithLateFee = { ...rental, lastLateFeeAt: new Date() };
       const canceledRental = { ...rental, status: RentalStatus.CANCELED, canceledAt: new Date() };
-      rentalRepo.save.mockResolvedValueOnce(canceledRental);
+      rentalRepo.save
+        .mockResolvedValueOnce(rentalWithLateFee)  // first save: lastLateFeeAt
+        .mockResolvedValueOnce(canceledRental);     // second save: cancelAdmin CANCELED
 
       const result = await service.chargeLateFee('rental-2', true);
 
@@ -688,11 +729,15 @@ describe('RentalsService', () => {
       expect(cancelCall[0]).toBe('sub_def');
       expect((cancelCall[1] as Record<string, unknown>)['invoice_now']).toBe(false);
 
-      // Rental saved with canceled status
-      expect(rentalRepo.save).toHaveBeenCalledTimes(1);
-      const savedArg = rentalRepo.save.mock.calls[0][0] as Partial<Rental>;
-      expect(savedArg.status).toBe(RentalStatus.CANCELED);
-      expect(savedArg.canceledAt).toBeInstanceOf(Date);
+      // Two saves total: first for lastLateFeeAt, second for CANCELED in cancelAdmin
+      expect(rentalRepo.save).toHaveBeenCalledTimes(2);
+      // First save: lastLateFeeAt set
+      const firstSaveArg = rentalRepo.save.mock.calls[0][0] as Partial<Rental>;
+      expect(firstSaveArg.lastLateFeeAt).toBeInstanceOf(Date);
+      // Second save: status=CANCELED from cancelAdmin
+      const secondSaveArg = rentalRepo.save.mock.calls[1][0] as Partial<Rental>;
+      expect(secondSaveArg.status).toBe(RentalStatus.CANCELED);
+      expect(secondSaveArg.canceledAt).toBeInstanceOf(Date);
 
       // Return value
       expect(result.paymentIntentId).toBe('pi_late_fee_456');

@@ -120,6 +120,23 @@ export class OrdersService {
       }
     }
 
+    // T6.4: Mixed-cart guard — reject orders that mix rental + single_payment items.
+    // Server-side enforcement mirrors mobile validation (T6.1/T9.3).
+    // Must run BEFORE TX to avoid partial writes.
+    const hasRental = dto.items.some(
+      (input) => byId.get(input.productId)?.pricingMode === 'rental',
+    );
+    const hasSinglePayment = dto.items.some(
+      (input) => byId.get(input.productId)?.pricingMode !== 'rental',
+    );
+    if (hasRental && hasSinglePayment) {
+      throw new BadRequestException({
+        code: 'MIXED_CART_RENTAL',
+        message:
+          'No podés combinar productos de alquiler con productos de compra única en el mismo pedido.',
+      });
+    }
+
     // T63: Pre-check — for each rental item, ensure no active rental already exists.
     // This runs BEFORE TX (outside any transaction) per the design spec.
     for (const input of dto.items) {
