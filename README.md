@@ -195,6 +195,9 @@ referralCode 8-char alfanumérico (sin 0/O/1/I), landing `/r/:code`, dashboard c
 ### Payouts
 Manual por ahora — super admin ve promotor, presiona "Pagar ahora", se registra en `Payout` con notes. (Stripe Connect deferred).
 
+### Alquileres (Rentals)
+Productos configurables como `pricingMode = rental` vía admin UI. Al entregar una orden con ítems de alquiler, el sistema crea automáticamente una Stripe Subscription para el cliente. Estado del alquiler sincronizado vía webhooks (`ACTIVE` → `PAST_DUE` → `CANCELED`). Cargo por mora (`lateFeeCents`) vía cron diario (`LateFeeCron`). Ver `DEPLOYMENT.md §11` para el runbook operacional.
+
 ---
 
 ## Auth — Phone + OTP only
@@ -274,18 +277,22 @@ Si order tiene `creditApplied > 0`:
 
 Cron `0 3 * * *` (vía `@nestjs/schedule`): puntos PENDING → CLAIMABLE a los 90d, → EXPIRED a los 180d. Mismo pattern para comisiones (sin expiry).
 
+### LateFeeCron (rentals)
+
+Cron `0 3 * * *` — cada día a las 03:00 UTC, cobra `lateFeeCents` a cada alquiler en `PAST_DUE` con más de 3 días de mora y sin cargo aplicado hoy. Logs en DigitalOcean App Platform bajo `LateFeeCron.runDaily`. Idempotente: no cobra dos veces en el mismo día UTC. Ver `DEPLOYMENT.md §11.3` para monitoreo.
+
 ---
 
 ## Testing
 
-195 tests across 3 projects. Money paths cubiertos.
+524 tests across 3 projects (246 backend unit / 115 web / 163 mobile). Money paths cubiertos.
 
 ### Backend (Jest + Postgres en Docker + Stripe mocked)
 
 ```bash
 cd dashgo-api
 
-# Unit tests (in-process, fast, ~44 tests)
+# Unit tests (in-process, fast, 246 tests)
 npm test
 npm run test:cov           # con coverage (80% threshold en money modules)
 
@@ -312,7 +319,7 @@ Lo que cubre:
 
 ```bash
 cd dashgo-web
-npm test                   # 63 tests across 8 suites
+pnpm test --run            # 115 tests across 9 suites (2 pre-existing failures in CheckoutCreditStep — formatMoney bug, not cycle 5)
 npm run test:watch
 npm run test:cov
 ```
@@ -323,7 +330,7 @@ Cubre: cart signal, schemas (zod 4), CategoryCard image fallback, CheckoutCredit
 
 ```bash
 cd dashgo
-npm test                   # 88 tests across 8 suites
+pnpm test                  # 163 tests across 11 suites
 npm run test:cov
 ```
 

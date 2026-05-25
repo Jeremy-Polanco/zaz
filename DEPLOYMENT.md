@@ -190,6 +190,10 @@ Run these in order to verify everything's working end-to-end:
 - [ ] **Stripe webhook**: Stripe dashboard → Webhooks → your endpoint → "Send test event" with `payment_intent.succeeded`. Should return 200.
 - [ ] **Sentry**: trigger a 500 (e.g. hit a bogus admin endpoint as a normal user). Confirm an event appears in `dashgo-api` Sentry project.
 - [ ] **CORS**: open the web app, look at network tab — API requests should succeed without CORS errors.
+- [ ] **Rental product**: create a test rental product via admin UI (`/super/products`), set `pricingMode = rental`, fill in `monthlyRentCents`, `lateFeeCents`, `stripeProductId`, and `stripePriceId`. Save and verify all four fields persist (check DB or re-open the edit form).
+- [ ] **Rental order activation**: place a test rental order as a client, then advance it through the full status lifecycle to `DELIVERED` as admin. Verify a Stripe Subscription is created in the Stripe dashboard and the Rental row in the DB flips to `status = ACTIVE`.
+- [ ] **(Optional — manual) past_due webhook**: in the Stripe test dashboard, mark the test subscription as `past_due` (or use `stripe trigger customer.subscription.updated`). Verify the Rental row in the DB flips to `status = PAST_DUE`.
+- [ ] **(Optional — manual) late-fee cron**: wait for the 03:00 UTC tick, or inject `LateFeeCron` and call `runDaily()` from a one-off script. Verify `last_late_fee_at` is set on any PAST_DUE rental that is ≥ 3 days past due. Re-run within the same UTC day and confirm the charge is NOT repeated (`lastLateFeeAt` is already today).
 
 ---
 
@@ -262,3 +266,170 @@ That's the whole thing. The code is mode-agnostic — only env vars change.
 - **Database access**: DO → Databases → dashgo-db → "Connection details". Use Postico/TablePlus from your laptop (DO whitelists trusted sources by default; you may need to add your IP).
 - **Webhooks failing**: usually a `STRIPE_WEBHOOK_SECRET` mismatch after rotating keys. Re-copy from Stripe dashboard.
 - **JWT secret rotation**: changing `JWT_SECRET` invalidates every active session — users get logged out and have to OTP again. Plan accordingly.
+
+---
+
+## 10. Rentals — Stripe test mode provisioning (CI and local E2E)
+
+### 10.1 Create the Stripe test-mode rental product
+
+1. Open the [Stripe dashboard](https://dashboard.stripe.com) and switch to **Test mode** (toggle in the top-left).
+2. Go to **Products → + Add product**.
+3. Fill in:
+   - **Name**: `Rental Test Product` (or any name — it's only used for labelling)
+   - **Pricing model**: Recurring
+   - **Price**: any amount (e.g. `20.00 USD / month`)
+4. Click **Save product**.
+5. On the product detail page copy:
+   - `prod_…` → this is your `STRIPE_RENTAL_TEST_PRODUCT_ID`
+   - `price_…` → this is your `STRIPE_RENTAL_TEST_PRICE_ID`
+
+### 10.2 GitHub Actions secrets (CI E2E)
+
+Add these four secrets under **Settings → Secrets and variables → Actions** in the repo:
+
+| Secret | Value |
+|--------|-------|
+| `STRIPE_SECRET_KEY` | Test-mode secret key (`sk_test_…`) from Stripe → Developers → API keys |
+| `STRIPE_WEBHOOK_SECRET` | Signing secret (`whsec_…`) from the Stripe webhook endpoint you create for CI (see 10.3) |
+| `STRIPE_RENTAL_TEST_PRODUCT_ID` | `prod_…` ID copied in step 10.1 |
+| `STRIPE_RENTAL_TEST_PRICE_ID` | `price_…` ID copied in step 10.1 |
+
+### 10.3 Stripe webhook endpoint for CI
+
+CI E2E tests use `Stripe.webhooks.generateTestHeaderString()` to sign fixture events locally — they do NOT call back to a live URL. You still need a `whsec_…` secret to sign events:
+
+**Option A — reuse an existing test webhook endpoint**:
+1. In Stripe → Webhooks, click an existing test-mode endpoint (or create one pointing at `https://example.com` — it never receives real traffic).
+2. Copy the **Signing secret** (`whsec_…`).
+3. Set it as `STRIPE_WEBHOOK_SECRET` in GitHub Actions.
+
+**Option B — derive a secret without a real endpoint**:
+Generate a deterministic test secret locally:
+```bash
+node -e "console.log('whsec_' + require('crypto').randomBytes(32).toString('base64'))"
+```
+Use that value for `STRIPE_WEBHOOK_SECRET` in GitHub Actions AND in the `createTestingApp()` environment.
+
+### 10.4 Local E2E with the Stripe CLI
+
+To run E2E tests locally against a live forwarded webhook:
+
+```bash
+# Terminal 1 — start the API on port 3001
+cd dashgo-api && npm run start:dev
+
+# Terminal 2 — forward Stripe test events to the local API
+stripe listen --forward-to localhost:3001/api/payments/webhook --print-secret
+# Copy the printed whsec_... value
+
+# Terminal 3 — run the E2E suite with real creds
+STRIPE_SECRET_KEY=sk_test_... \
+STRIPE_WEBHOOK_SECRET=whsec_... \
+STRIPE_RENTAL_TEST_PRODUCT_ID=prod_... \
+STRIPE_RENTAL_TEST_PRICE_ID=price_... \
+  cd dashgo-api && npx jest --selectProjects e2e
+```
+
+### 10.5 CI workflow snippet (reference)
+
+The E2E project already uses `describeIfStripe` which skips gracefully when creds are absent. To enable the full suite in CI, add to your workflow:
+
+```yaml
+- name: Run E2E tests
+  env:
+    STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
+    STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET }}
+    STRIPE_RENTAL_TEST_PRODUCT_ID: ${{ secrets.STRIPE_RENTAL_TEST_PRODUCT_ID }}
+    STRIPE_RENTAL_TEST_PRICE_ID: ${{ secrets.STRIPE_RENTAL_TEST_PRICE_ID }}
+  run: |
+    cd dashgo-api
+    npx jest --selectProjects e2e
+```
+
+### 10.6 LateFeeCron — monitoring
+
+The `LateFeeCron` runs at **03:00 server time** daily (cron: `0 3 * * *`).
+
+- **Logs**: search Runtime Logs for `LateFeeCron.runDaily` to see charge/skip counts.
+- **Expected output on a quiet day**: `charged=0 skipped/errored=0 total=0`
+- **Alert on skipped/errored > 0**: means a rental charge failed. Check Sentry for `LateFeeCron.runDaily: failed to charge rental`.
+- **Manual trigger**: inject the `LateFeeCron` service and call `runDaily()` from a one-off script or admin endpoint if needed.
+- **Idempotency**: the cron is safe to re-run within the same UTC day — it will not double-charge a rental whose `last_late_fee_at` is today.
+
+---
+
+## 11. Rentals — Live Stripe products runbook
+
+This section covers the steps needed to go live with rental products. It supplements the general Stripe live-mode steps in §9.
+
+### 11.1 Create a Stripe live-mode Product + recurring Price for each rental SKU
+
+For **each** product in the admin UI that has `pricingMode = rental`:
+
+1. Open the [Stripe dashboard](https://dashboard.stripe.com) and switch to **Live mode** (toggle in the top-left).
+2. Go to **Products → + Add product**.
+3. Fill in:
+   - **Name**: match the product name in your admin (e.g. `Botellón 20L — Alquiler mensual`)
+   - **Pricing model**: Recurring
+   - **Price**: the monthly rent amount (e.g. `15.00 USD / month`)
+4. Click **Save product**.
+5. On the product detail page copy:
+   - `prod_…` → `stripeProductId`
+   - `price_…` → `stripePriceId`
+
+### 11.2 Paste the IDs into the admin product form
+
+1. Open the DashGo admin web (`/super/products`).
+2. Find the rental product and click **Edit**.
+3. Paste:
+   - `prod_…` into the **Stripe Product ID** field
+   - `price_…` into the **Stripe Price ID** field
+4. Save. The API persists both IDs alongside `monthlyRentCents` and `lateFeeCents`.
+
+These IDs are used at order delivery time when `RentalsService.performActivation` calls `stripe.subscriptions.create({ items: [{ price: stripePriceId }] })`.
+
+### 11.3 Late-fee cron schedule and observability
+
+The late-fee cron is implemented in:
+
+```
+dashgo-api/src/modules/rentals/late-fee.cron.ts
+```
+
+Schedule: `@Cron('0 3 * * *')` — runs daily at **03:00 UTC**.
+
+**Viewing logs on DigitalOcean App Platform**:
+
+1. Go to **Apps → dashgo-api → Runtime Logs**.
+2. Filter by text `LateFeeCron` to isolate cron output.
+3. Each run emits a structured log line with `charged`, `skipped`, `errored`, and `total` counts.
+
+**What to look for**:
+
+| Log output | Meaning |
+|---|---|
+| `charged=N` | N rentals had a late-fee PaymentIntent created today |
+| `skipped=N` | N rentals were in the grace period (< 3 days past due) or already charged today |
+| `errored=N` | N rentals threw an error — check Sentry for `LateFeeCron.runDaily: failed to charge rental` |
+
+### 11.4 Admin retry-setup action
+
+When a rental activation fails at delivery (Stripe unreachable, invalid price ID, etc.), the rental stays in `PENDING_SETUP`.
+
+**Customer experience before retry**: the customer sees a yellow badge in the mobile app with the message _"Estamos terminando de configurar tu alquiler. Te avisamos cuando esté activo."_
+
+**Admin retry endpoint**:
+
+```
+POST /api/admin/rentals/:id/retry-setup
+Authorization: Bearer <super-admin JWT>
+```
+
+- **When to use**: any time a rental is stuck in `PENDING_SETUP` after the order has been delivered.
+- **What it does**: re-runs the same `performActivation` logic — creates a Stripe Subscription for the rental's product price and flips the rental to `ACTIVE` if successful.
+- **Idempotency key**: `rental:{rentalId}:activate` — safe to call multiple times; Stripe deduplicates.
+- **On success**: the rental status flips to `ACTIVE` and `stripeSubscriptionId` is populated in the DB.
+- **On failure**: returns the Stripe error. Fix the root cause (e.g. update `stripePriceId` in the product) and retry again.
+
+**Finding stuck rentals**: the admin listing endpoint returns all rentals. Filter by `status = PENDING_SETUP` to find the ones needing attention.
