@@ -228,6 +228,24 @@ export class OrdersService {
         );
       }
 
+      // T3.3 (REQ-2): Create Rental rows inside the same TX for all rental-mode items.
+      // This guarantees a Rental row exists at PENDING_SETUP before the order is committed,
+      // so activateRentalsForOrder at delivery time always finds the row.
+      for (const input of dto.items) {
+        const product = byId.get(input.productId)!;
+        if (product.pricingMode === 'rental') {
+          await this.rentalsService.createForOrder(
+            {
+              userId: user.id,
+              productId: product.id,
+              orderId: persisted.id,
+              product,
+            },
+            tx,
+          );
+        }
+      }
+
       // T4.3 (continued): Apply credit charge AFTER order+items persisted, BEFORE points
       if (creditAppliedCents > 0) {
         await this.credit.applyCharge(

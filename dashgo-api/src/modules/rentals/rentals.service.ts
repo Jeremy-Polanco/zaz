@@ -86,43 +86,22 @@ export class RentalsService implements OnModuleInit {
   // No Stripe call here — Stripe subscription is created in activateForOrder.
   // ─────────────────────────────────────────────────────────────────────────
 
-  async createForOrder(params: CreateForOrderParams): Promise<Rental> {
+  async createForOrder(params: CreateForOrderParams, tx?: EntityManager): Promise<Rental> {
     const { userId, productId, orderId, product } = params;
 
+    // When an external TX is provided (e.g., from OrdersService.create), use it directly
+    // so the Rental row commits atomically with the Order row.
+    if (tx) {
+      return this.createForOrderWithManager(params, tx);
+    }
+
+    // Standalone path: open own QueryRunner TX
     const qr = this.dataSource.createQueryRunner();
     await qr.connect();
     await qr.startTransaction();
 
     try {
-      const em: EntityManager = qr.manager;
-
-      // T26: pre-check — SELECT FOR UPDATE to prevent race conditions
-      const existing = await em.findOne(Rental, {
-        where: {
-          userId,
-          productId,
-          status: In(BLOCKING_STATUSES),
-        },
-        lock: { mode: 'pessimistic_write' },
-      });
-
-      if (existing) {
-        throw new ConflictException('RENTAL_ALREADY_ACTIVE');
-      }
-
-      // Snapshot pricing from product at time of creation
-      const rentalData: Partial<Rental> = {
-        userId,
-        productId,
-        orderId,
-        stripePriceId: product.stripePriceId!,
-        monthlyRentCents: product.monthlyRentCents,
-        lateFeeCents: product.lateFeeCents,
-        status: RentalStatus.PENDING_SETUP,
-      };
-
-      const saved = await em.save(Rental, rentalData);
-
+      const saved = await this.createForOrderWithManager(params, qr.manager);
       await qr.commitTransaction();
       return saved;
     } catch (err) {
@@ -131,6 +110,40 @@ export class RentalsService implements OnModuleInit {
     } finally {
       await qr.release();
     }
+  }
+
+  private async createForOrderWithManager(
+    params: CreateForOrderParams,
+    em: EntityManager,
+  ): Promise<Rental> {
+    const { userId, productId, orderId, product } = params;
+
+    // T26: pre-check — SELECT FOR UPDATE to prevent race conditions
+    const existing = await em.findOne(Rental, {
+      where: {
+        userId,
+        productId,
+        status: In(BLOCKING_STATUSES),
+      },
+      lock: { mode: 'pessimistic_write' },
+    });
+
+    if (existing) {
+      throw new ConflictException('RENTAL_ALREADY_ACTIVE');
+    }
+
+    // Snapshot pricing from product at time of creation
+    const rentalData: Partial<Rental> = {
+      userId,
+      productId,
+      orderId,
+      stripePriceId: product.stripePriceId!,
+      monthlyRentCents: product.monthlyRentCents,
+      lateFeeCents: product.lateFeeCents,
+      status: RentalStatus.PENDING_SETUP,
+    };
+
+    return em.save(Rental, rentalData);
   }
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -168,9 +181,8 @@ export class RentalsService implements OnModuleInit {
   // ADR-6: Stripe call OUTSIDE the DB TX.
   // 1. Load rental from repo (verify status=pending_setup)
   // 2. Load user (for stripeCustomerId)
-  // 3. Call Stripe OUTSIDE TX with idempotency key
-  // 4. On success: update rental status=active + stripeSubscriptionId in mini-TX
-  // 5. On Stripe failure: log, return rental unchanged (caller unaffected)
+  // 3. Call performActivation (shared with retrySetup)
+  // 4. On Stripe failure: log, return rental unchanged (caller unaffected)
   // ─────────────────────────────────────────────────────────────────────────
 
   async activateForOrder(rentalId: string): Promise<Rental> {
@@ -192,51 +204,60 @@ export class RentalsService implements OnModuleInit {
       return rental;
     }
 
-    // Step 3: Stripe call OUTSIDE TX (ADR-6)
-    const stripe = this.requireStripe();
-    const trialEnd = Math.floor(Date.now() / 1000) + 30 * 86400;
-
     try {
-      const sub = await stripe.subscriptions.create(
-        {
-          customer: user.stripeCustomerId,
-          items: [{ price: rental.stripePriceId }],
-          trial_end: trialEnd,
-          billing_cycle_anchor: trialEnd,
-          proration_behavior: 'none',
-          metadata: {
-            rentalId,
-            userId: rental.userId,
-            productId: rental.productId,
-          },
-        } as Parameters<StripeClient['subscriptions']['create']>[0],
-        { idempotencyKey: `rental-setup-${rentalId}` },
-      );
-
-      // Step 4: Mini-TX — update rental on success
-      const subObj = sub as {
-        id: string;
-        current_period_start?: number;
-        current_period_end?: number;
-        items?: { data?: Array<{ current_period_start?: number; current_period_end?: number }> };
-      };
-
-      const periodStart = subObj.items?.data?.[0]?.current_period_start ?? subObj.current_period_start ?? null;
-      const periodEnd = subObj.items?.data?.[0]?.current_period_end ?? subObj.current_period_end ?? null;
-
-      rental.status = RentalStatus.ACTIVE;
-      rental.stripeSubscriptionId = subObj.id;
-      rental.activatedAt = new Date();
-      rental.currentPeriodStart = periodStart ? new Date(periodStart * 1000) : null;
-      rental.currentPeriodEnd = periodEnd ? new Date(periodEnd * 1000) : null;
-
-      const updated = await this.rentals.save(rental);
-      return updated;
+      return await this.performActivation(rental, user);
     } catch (err) {
       // T24: Stripe failure — keep pending_setup, log, return unchanged
       this.logger.error(`activateForOrder: Stripe subscriptions.create failed for rental ${rentalId}: ${(err as Error).message}`);
       return rental;
     }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // performActivation — shared activation logic (used by activateForOrder
+  // and retrySetup). Creates the Stripe Subscription and persists the result.
+  //
+  // THROWS on Stripe failure — callers decide how to handle errors.
+  // ─────────────────────────────────────────────────────────────────────────
+
+  private async performActivation(rental: Rental, user: User): Promise<Rental> {
+    const stripe = this.requireStripe();
+    const trialEnd = Math.floor(Date.now() / 1000) + 30 * 86400;
+    const rentalId = rental.id;
+
+    const sub = await stripe.subscriptions.create(
+      {
+        customer: user.stripeCustomerId!,
+        items: [{ price: rental.stripePriceId }],
+        trial_end: trialEnd,
+        billing_cycle_anchor: trialEnd,
+        proration_behavior: 'none',
+        metadata: {
+          rentalId,
+          userId: rental.userId,
+          productId: rental.productId,
+        },
+      } as Parameters<StripeClient['subscriptions']['create']>[0],
+      { idempotencyKey: `rental-setup-${rentalId}` },
+    );
+
+    const subObj = sub as {
+      id: string;
+      current_period_start?: number;
+      current_period_end?: number;
+      items?: { data?: Array<{ current_period_start?: number; current_period_end?: number }> };
+    };
+
+    const periodStart = subObj.items?.data?.[0]?.current_period_start ?? subObj.current_period_start ?? null;
+    const periodEnd = subObj.items?.data?.[0]?.current_period_end ?? subObj.current_period_end ?? null;
+
+    rental.status = RentalStatus.ACTIVE;
+    rental.stripeSubscriptionId = subObj.id;
+    rental.activatedAt = new Date();
+    rental.currentPeriodStart = periodStart ? new Date(periodStart * 1000) : null;
+    rental.currentPeriodEnd = periodEnd ? new Date(periodEnd * 1000) : null;
+
+    return this.rentals.save(rental);
   }
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -475,49 +496,13 @@ export class RentalsService implements OnModuleInit {
       throw new HttpException('NO_PAYMENT_METHOD', HttpStatus.BAD_REQUEST);
     }
 
-    const stripe = this.requireStripe();
-    const trialEnd = Math.floor(Date.now() / 1000) + 30 * 86400;
-
-    let sub: {
-      id: string;
-      current_period_start?: number;
-      current_period_end?: number;
-      items?: { data?: Array<{ current_period_start?: number; current_period_end?: number }> };
-    };
-
     try {
-      sub = await stripe.subscriptions.create(
-        {
-          customer: user.stripeCustomerId,
-          items: [{ price: rental.stripePriceId }],
-          trial_end: trialEnd,
-          billing_cycle_anchor: trialEnd,
-          proration_behavior: 'none',
-          metadata: {
-            rentalId,
-            userId: rental.userId,
-            productId: rental.productId,
-          },
-        } as Parameters<StripeClient['subscriptions']['create']>[0],
-        { idempotencyKey: `rental-setup-${rentalId}` },
-      );
+      const updated = await this.performActivation(rental, user);
+      return this.toAdminDto(updated);
     } catch (err) {
       this.logger.error(`retrySetup: Stripe subscriptions.create failed for rental ${rentalId}: ${(err as Error).message}`);
       throw new HttpException('STRIPE_PAYMENT_FAILED', HttpStatus.BAD_GATEWAY);
     }
-
-    // Update rental to active
-    const periodStart = sub.items?.data?.[0]?.current_period_start ?? sub.current_period_start ?? null;
-    const periodEnd = sub.items?.data?.[0]?.current_period_end ?? sub.current_period_end ?? null;
-
-    rental.status = RentalStatus.ACTIVE;
-    rental.stripeSubscriptionId = sub.id;
-    rental.activatedAt = new Date();
-    rental.currentPeriodStart = periodStart ? new Date(periodStart * 1000) : null;
-    rental.currentPeriodEnd = periodEnd ? new Date(periodEnd * 1000) : null;
-
-    const updated = await this.rentals.save(rental);
-    return this.toAdminDto(updated);
   }
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -573,7 +558,15 @@ export class RentalsService implements OnModuleInit {
     }
 
     // Map Stripe status to rental status
-    rental.status = this.mapStripeStatus(sub.status);
+    const newStatus = this.mapStripeStatus(sub.status);
+
+    // Write-once: set pastDueSince ONLY on the FIRST transition into PAST_DUE.
+    // Repeat past_due events must NOT overwrite the original timestamp (Day 0).
+    if (newStatus === RentalStatus.PAST_DUE && rental.pastDueSince === null) {
+      rental.pastDueSince = new Date();
+    }
+
+    rental.status = newStatus;
     if (sub.current_period_start != null) {
       rental.currentPeriodStart = new Date(sub.current_period_start * 1000);
     }

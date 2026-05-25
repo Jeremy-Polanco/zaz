@@ -226,6 +226,46 @@ describe('SubscriptionService', () => {
     });
 
     // -----------------------------------------------------------------------
+    // T0.0 — rental subscription guard (metadata.rentalId → early return)
+    // -----------------------------------------------------------------------
+
+    describe('customer.subscription.updated — rental guard', () => {
+      it('T0.0: returns early (no upsert) when subscription has metadata.rentalId', async () => {
+        subscriptionsRepo.upsert.mockResolvedValue({} as never);
+
+        // Stripe event for a RENTAL subscription (has metadata.rentalId)
+        const event = {
+          type: 'customer.subscription.updated',
+          data: {
+            object: {
+              ...fakeStripeSub(),
+              metadata: { userId: 'user-1', rentalId: 'rental-123' },
+            },
+          },
+        };
+
+        await service.handleWebhook(event);
+
+        // Must NOT call upsertSubscription — this event belongs to RentalsService
+        expect(subscriptionsRepo.upsert).not.toHaveBeenCalled();
+      });
+
+      it('T0.0-triangulate: subscription WITHOUT rentalId is still processed normally', async () => {
+        subscriptionsRepo.upsert.mockResolvedValue({} as never);
+
+        const event = {
+          type: 'customer.subscription.updated',
+          data: { object: fakeStripeSub() }, // no rentalId in metadata
+        };
+
+        await service.handleWebhook(event);
+
+        // Must still call upsertSubscription for regular SaaS subscriptions
+        expect(subscriptionsRepo.upsert).toHaveBeenCalledTimes(1);
+      });
+    });
+
+    // -----------------------------------------------------------------------
     // customer.subscription.updated — upserts
     // -----------------------------------------------------------------------
 

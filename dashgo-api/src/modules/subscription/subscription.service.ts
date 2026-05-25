@@ -417,12 +417,17 @@ export class SubscriptionService implements OnModuleInit {
       case 'customer.subscription.created':
       case 'customer.subscription.updated': {
         const sub = event.data.object as unknown as StripeSubscriptionObject;
+        // Guard: rental subscriptions carry metadata.rentalId — they are handled
+        // by RentalsService.handleWebhook and must NOT pollute the subscriptions table.
+        if (sub.metadata?.rentalId) return;
         await this.upsertSubscription(sub);
         return;
       }
 
       case 'customer.subscription.deleted': {
         const sub = event.data.object as unknown as StripeSubscriptionObject;
+        // Guard: rental subscriptions carry metadata.rentalId — skip SaaS upsert.
+        if (sub.metadata?.rentalId) return;
         // Force canceled status
         const canceledSub = { ...sub, status: 'canceled' };
         await this.upsertSubscription(canceledSub);

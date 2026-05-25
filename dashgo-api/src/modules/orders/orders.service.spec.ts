@@ -899,6 +899,85 @@ describe('OrdersService', () => {
   });
 
   // ─────────────────────────────────────────────────────────────────────────
+  // T3.1 / T3.3 — create() calls rentalsService.createForOrder for rental items
+  // ─────────────────────────────────────────────────────────────────────────
+
+  describe('create — rental row creation (T3.1 / T3.3)', () => {
+    const rentalProduct = fakeRentalProduct({ id: 'prod-dispenser' });
+
+    const rentalCartDto = {
+      items: [{ productId: 'prod-dispenser', quantity: 1 }],
+      deliveryAddress: { text: '123 Test', lat: 18.4861, lng: -69.9312 },
+      paymentMethod: PaymentMethod.CASH,
+      usePoints: false,
+      useCredit: false,
+    } as import('./dto/create-order.dto').CreateOrderDto;
+
+    it('T3.1: create() calls rentalsService.createForOrder for each rental-mode item inside the TX', async () => {
+      productsRepo.find.mockResolvedValue([rentalProduct]);
+
+      const savedOrder = fakeOrder({ id: 'order-created-1' });
+      const orderWithRelations = fakeOrder({ id: 'order-created-1', customer: fakeUser() as never, items: [] });
+
+      let capturedTx: EntityManager | undefined;
+
+      (dataSource.transaction as jest.Mock).mockImplementation(
+        async (cb: (mgr: EntityManager) => Promise<unknown>) => {
+          const orderRepo = makeRepoMock<Order>();
+          const itemRepo = makeRepoMock<OrderItem>();
+          orderRepo.create.mockImplementation((d) => ({ ...d, id: 'order-created-1' }) as Order);
+          orderRepo.save.mockResolvedValue(savedOrder);
+          orderRepo.update.mockResolvedValue({ affected: 1 } as never);
+          itemRepo.save.mockResolvedValue({} as never);
+          itemRepo.create.mockImplementation((d) => d as OrderItem);
+
+          const mgr = {
+            getRepository: (entity: unknown) => {
+              if (entity === Order) return orderRepo;
+              if (entity === OrderItem) return itemRepo;
+              return makeRepoMock();
+            },
+          } as unknown as EntityManager;
+
+          capturedTx = mgr;
+          return cb(mgr);
+        },
+      );
+
+      ordersRepo.findOne.mockResolvedValue(orderWithRelations);
+
+      await service.create(fakeUser(UserRole.CLIENT), rentalCartDto);
+
+      // Must call createForOrder with the rental item's params + the TX EntityManager
+      expect(rentalsService.createForOrder).toHaveBeenCalledTimes(1);
+      expect(rentalsService.createForOrder).toHaveBeenCalledWith(
+        expect.objectContaining({
+          userId: 'user-1',
+          productId: 'prod-dispenser',
+          orderId: 'order-created-1',
+        }),
+        capturedTx,
+      );
+    });
+
+    it('T3.1-triangulate: non-rental product cart does NOT call createForOrder', async () => {
+      const singleProduct = fakeProduct({ id: 'prod-water' });
+      productsRepo.find.mockResolvedValue([singleProduct]);
+      setupMixedCartCreateTx([singleProduct]);
+
+      await service.create(fakeUser(UserRole.CLIENT), {
+        items: [{ productId: 'prod-water', quantity: 1 }],
+        deliveryAddress: { text: '123 Test', lat: 18.4861, lng: -69.9312 },
+        paymentMethod: PaymentMethod.CASH,
+        usePoints: false,
+        useCredit: false,
+      } as import('./dto/create-order.dto').CreateOrderDto);
+
+      expect(rentalsService.createForOrder).not.toHaveBeenCalled();
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────
   // T64 — markDelivered activates rentals
   // ─────────────────────────────────────────────────────────────────────────
 

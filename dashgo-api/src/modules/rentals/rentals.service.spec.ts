@@ -125,6 +125,8 @@ function fakeRental(overrides: Partial<Rental> = {}): Rental {
     currentPeriodEnd: null,
     activatedAt: null,
     canceledAt: null,
+    pastDueSince: null,
+    lastLateFeeAt: null,
     createdAt: new Date('2024-01-01T10:00:00Z'),
     updatedAt: new Date('2024-01-01T10:00:00Z'),
     user: {} as User,
@@ -850,6 +852,117 @@ describe('RentalsService', () => {
       await expect(service.retrySetup('rental-8')).rejects.toMatchObject({ status: 409 });
 
       expect(mockStripeInstance.subscriptions.create).not.toHaveBeenCalled();
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Phase 4 (Batch B) — past_due webhook: pastDueSince write-once
+  // ─────────────────────────────────────────────────────────────────────────
+
+  describe('handleSubscriptionUpdated — pastDueSince write-once (T4.1–T4.3)', () => {
+    it('T4.1: past_due event sets rental.status=PAST_DUE AND pastDueSince to a non-null Date', async () => {
+      const rental = fakeRental({
+        id: 'rental-pd-1',
+        stripeSubscriptionId: 'sub_pd_abc',
+        status: RentalStatus.ACTIVE,
+        pastDueSince: null,
+      });
+
+      rentalRepo.findOne.mockResolvedValueOnce(rental);
+      rentalRepo.save.mockResolvedValueOnce({
+        ...rental,
+        status: RentalStatus.PAST_DUE,
+        pastDueSince: new Date(),
+      });
+
+      const event = {
+        type: 'customer.subscription.updated',
+        data: {
+          object: {
+            id: 'sub_pd_abc',
+            status: 'past_due',
+            metadata: { rentalId: 'rental-pd-1' },
+            current_period_start: Math.floor(Date.now() / 1000) - 86400,
+            current_period_end: Math.floor(Date.now() / 1000) + 86400,
+          },
+        },
+      };
+
+      await service.handleWebhook(event);
+
+      // Rental was saved with status=PAST_DUE and a pastDueSince date
+      expect(rentalRepo.save).toHaveBeenCalledTimes(1);
+      const savedArg = rentalRepo.save.mock.calls[0][0] as Partial<Rental>;
+      expect(savedArg.status).toBe(RentalStatus.PAST_DUE);
+      expect(savedArg.pastDueSince).toBeInstanceOf(Date);
+    });
+
+    it('T4.2: repeated past_due events do NOT overwrite pastDueSince (write-once)', async () => {
+      const firstPastDueDate = new Date('2026-01-15T03:00:00Z');
+      const rental = fakeRental({
+        id: 'rental-pd-2',
+        stripeSubscriptionId: 'sub_pd_xyz',
+        status: RentalStatus.PAST_DUE,
+        pastDueSince: firstPastDueDate, // already set from first event
+      });
+
+      rentalRepo.findOne.mockResolvedValueOnce(rental);
+      rentalRepo.save.mockResolvedValueOnce({
+        ...rental,
+        status: RentalStatus.PAST_DUE,
+        pastDueSince: firstPastDueDate, // must remain unchanged
+      });
+
+      const event = {
+        type: 'customer.subscription.updated',
+        data: {
+          object: {
+            id: 'sub_pd_xyz',
+            status: 'past_due',
+            metadata: { rentalId: 'rental-pd-2' },
+            current_period_start: Math.floor(Date.now() / 1000) - 86400,
+            current_period_end: Math.floor(Date.now() / 1000) + 86400,
+          },
+        },
+      };
+
+      await service.handleWebhook(event);
+
+      // pastDueSince must NOT be overwritten — must be the original date
+      const savedArg = rentalRepo.save.mock.calls[0][0] as Partial<Rental>;
+      expect(savedArg.pastDueSince).toEqual(firstPastDueDate);
+    });
+
+    it('T4.3: customer.subscription.deleted sets rental.status=CANCELED', async () => {
+      const rental = fakeRental({
+        id: 'rental-cancel-new',
+        stripeSubscriptionId: 'sub_cancel_new',
+        status: RentalStatus.PAST_DUE,
+        canceledAt: null,
+      });
+
+      rentalRepo.findOne.mockResolvedValueOnce(rental);
+      rentalRepo.save.mockResolvedValueOnce({
+        ...rental,
+        status: RentalStatus.CANCELED,
+        canceledAt: new Date(),
+      });
+
+      const event = {
+        type: 'customer.subscription.deleted',
+        data: {
+          object: {
+            id: 'sub_cancel_new',
+            metadata: { rentalId: 'rental-cancel-new' },
+          },
+        },
+      };
+
+      await service.handleWebhook(event);
+
+      expect(rentalRepo.save).toHaveBeenCalledTimes(1);
+      const savedArg = rentalRepo.save.mock.calls[0][0] as Partial<Rental>;
+      expect(savedArg.status).toBe(RentalStatus.CANCELED);
     });
   });
 
