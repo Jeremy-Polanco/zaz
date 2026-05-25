@@ -101,6 +101,11 @@ export class ProductsService implements OnModuleInit {
         dto.offerDiscountPct != null ? String(dto.offerDiscountPct) : null,
       offerStartsAt: dto.offerStartsAt ? new Date(dto.offerStartsAt) : null,
       offerEndsAt: dto.offerEndsAt ? new Date(dto.offerEndsAt) : null,
+      pricingMode: dto.pricingMode ?? 'single_payment',
+      monthlyRentCents: dto.monthlyRentCents ?? 0,
+      lateFeeCents: dto.lateFeeCents ?? 0,
+      stripeProductId: dto.stripeProductId ?? null,
+      stripePriceId: dto.stripePriceId ?? null,
     });
     const saved = await this.products.save(product);
     const full = await this.findOne(saved.id);
@@ -161,6 +166,18 @@ export class ProductsService implements OnModuleInit {
     if (dto.pricingMode !== undefined) patch.pricingMode = dto.pricingMode;
     if (dto.monthlyRentCents !== undefined) patch.monthlyRentCents = dto.monthlyRentCents;
     if (dto.lateFeeCents !== undefined) patch.lateFeeCents = dto.lateFeeCents;
+    // Admin-provided Stripe IDs override any auto-sync. When both arrive in the
+    // same request, persist them as-is and skip the Stripe API call entirely —
+    // operators sometimes create Stripe Products/Prices out-of-band (live mode,
+    // CI fixtures, manual mirroring) and the form's `prod_*` / `price_*` Zod
+    // validation is meaningless if these get overwritten by auto-create.
+    if (dto.stripeProductId !== undefined) patch.stripeProductId = dto.stripeProductId;
+    if (dto.stripePriceId !== undefined) patch.stripePriceId = dto.stripePriceId;
+    const adminProvidedStripeIds =
+      typeof dto.stripeProductId === 'string' &&
+      dto.stripeProductId.length > 0 &&
+      typeof dto.stripePriceId === 'string' &&
+      dto.stripePriceId.length > 0;
 
     // Determine if Stripe sync is needed before DB update
     const incomingPricingMode = dto.pricingMode ?? p.pricingMode;
@@ -168,7 +185,8 @@ export class ProductsService implements OnModuleInit {
     const needsStripeSync =
       incomingPricingMode === 'rental' &&
       incomingMonthlyRent > 0 &&
-      (dto.pricingMode === 'rental' || dto.monthlyRentCents !== undefined);
+      (dto.pricingMode === 'rental' || dto.monthlyRentCents !== undefined) &&
+      !adminProvidedStripeIds;
 
     // Perform Stripe sync BEFORE DB write (Stripe-first pattern from ADR-3)
     if (needsStripeSync) {

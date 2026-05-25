@@ -20,15 +20,18 @@ export class AllExceptionsFilter implements ExceptionFilter {
 
     let status: number;
     let message: string;
+    let errorCode: string | undefined;
 
     if (exception instanceof HttpException) {
       status = exception.getStatus();
       const res = exception.getResponse();
-      message =
-        typeof res === 'string'
-          ? res
-          : (res as Record<string, unknown>).message?.toString() ??
-            exception.message;
+      if (typeof res === 'string') {
+        message = res;
+      } else {
+        const obj = res as Record<string, unknown>;
+        message = obj.message?.toString() ?? exception.message;
+        if (typeof obj.code === 'string') errorCode = obj.code;
+      }
     } else {
       status = HttpStatus.INTERNAL_SERVER_ERROR;
       message =
@@ -57,6 +60,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
 
     response.status(status).json({
       statusCode: status,
+      ...(errorCode ? { code: errorCode } : {}),
       message,
       timestamp: new Date().toISOString(),
       path: request.url,

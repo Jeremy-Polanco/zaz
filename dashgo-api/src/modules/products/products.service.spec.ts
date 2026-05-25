@@ -349,6 +349,111 @@ describe('ProductsService', () => {
     });
   });
 
+  // -------------------------------------------------------------------------
+  // BUG-1 fix: create() must persist rental fields
+  // -------------------------------------------------------------------------
+
+  describe('create: rental fields are persisted', () => {
+    it('should pass pricingMode + monthlyRentCents + lateFeeCents + stripe IDs to repo.create when provided in DTO', async () => {
+      const captured = fakeProduct({
+        id: 'new-1',
+        pricingMode: 'rental',
+        monthlyRentCents: 1500,
+        lateFeeCents: 500,
+        stripeProductId: 'prod_admin123',
+        stripePriceId: 'price_admin456',
+      });
+      productsRepo.create.mockReturnValueOnce(captured);
+      productsRepo.save.mockResolvedValueOnce(captured);
+      productsRepo.findOne.mockResolvedValueOnce(captured);
+
+      const result = await service.create(superAdmin, {
+        name: 'Dispenser',
+        priceToPublic: 0,
+        stock: 10,
+        pricingMode: 'rental',
+        monthlyRentCents: 1500,
+        lateFeeCents: 500,
+        stripeProductId: 'prod_admin123',
+        stripePriceId: 'price_admin456',
+      } as never);
+
+      expect(productsRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          pricingMode: 'rental',
+          monthlyRentCents: 1500,
+          lateFeeCents: 500,
+          stripeProductId: 'prod_admin123',
+          stripePriceId: 'price_admin456',
+        }),
+      );
+      expect(result.pricingMode).toBe('rental');
+      expect(result.monthlyRentCents).toBe(1500);
+    });
+
+    it('should default pricingMode to single_payment + zero rental amounts when not provided', async () => {
+      const captured = fakeProduct({ id: 'new-2' });
+      productsRepo.create.mockReturnValueOnce(captured);
+      productsRepo.save.mockResolvedValueOnce(captured);
+      productsRepo.findOne.mockResolvedValueOnce(captured);
+
+      await service.create(superAdmin, {
+        name: 'Botellón',
+        priceToPublic: 5,
+        stock: 20,
+      } as never);
+
+      expect(productsRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          pricingMode: 'single_payment',
+          monthlyRentCents: 0,
+          lateFeeCents: 0,
+          stripeProductId: null,
+          stripePriceId: null,
+        }),
+      );
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // BUG-2 fix: admin-provided Stripe IDs short-circuit auto-sync
+  // -------------------------------------------------------------------------
+
+  describe('update: admin-provided Stripe IDs skip syncStripeRentalPrice', () => {
+    it('should NOT call Stripe when both stripeProductId AND stripePriceId are provided', async () => {
+      const product = fakeProduct({
+        pricingMode: 'single_payment',
+        monthlyRentCents: 0,
+      });
+      productsRepo.findOne
+        .mockResolvedValueOnce(product)
+        .mockResolvedValueOnce({
+          ...product,
+          pricingMode: 'rental',
+          monthlyRentCents: 1500,
+          stripeProductId: 'prod_admin999',
+          stripePriceId: 'price_admin999',
+        } as Product);
+
+      await service.update('product-1', superAdmin, {
+        pricingMode: 'rental',
+        monthlyRentCents: 1500,
+        stripeProductId: 'prod_admin999',
+        stripePriceId: 'price_admin999',
+      });
+
+      expect(mockStripeInstance.products.create).not.toHaveBeenCalled();
+      expect(mockStripeInstance.prices.create).not.toHaveBeenCalled();
+      expect(productsRepo.update).toHaveBeenCalledWith(
+        'product-1',
+        expect.objectContaining({
+          stripeProductId: 'prod_admin999',
+          stripePriceId: 'price_admin999',
+        }),
+      );
+    });
+  });
+
   describe('update: permission guard', () => {
     it('should throw ForbiddenException when called by non-super-admin', async () => {
       const regularUser: AuthenticatedUser = {

@@ -9,6 +9,10 @@ export default defineConfig({
     tanstackRouter({
       target: 'react',
       autoCodeSplitting: true,
+      // Co-located test files (foo.test.tsx) live next to their routes but
+      // are not routes themselves — ignore them so the router stops warning
+      // on every dev start.
+      routeFileIgnorePattern: '\\.test\\.tsx?$',
     }),
     react(),
     tailwindcss(),
