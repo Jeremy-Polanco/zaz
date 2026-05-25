@@ -9,6 +9,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
+import * as Sentry from '@sentry/node';
 import { DataSource, EntityManager, In, Repository } from 'typeorm';
 import Stripe = require('stripe');
 import { Rental, RentalStatus } from '../../entities/rental.entity';
@@ -209,6 +210,10 @@ export class RentalsService implements OnModuleInit {
     } catch (err) {
       // T24: Stripe failure — keep pending_setup, log, return unchanged
       this.logger.error(`activateForOrder: Stripe subscriptions.create failed for rental ${rentalId}: ${(err as Error).message}`);
+      Sentry.captureException(err, {
+        tags: { module: 'rentals', phase: 'activation' },
+        extra: { rentalId, userId: rental.userId, productId: rental.productId },
+      });
       return rental;
     }
   }

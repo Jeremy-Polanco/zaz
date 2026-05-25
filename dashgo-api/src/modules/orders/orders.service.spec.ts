@@ -631,7 +631,7 @@ describe('OrdersService', () => {
   // T57 — Rental pricing: monthlyRentCents used for all-rental cart total
   //
   // NOTE: T57 originally tested a mixed cart for pricing. Since T6.4 introduced
-  // the MIXED_CART_RENTAL guard, mixed carts are rejected before pricing runs.
+  // the MIXED_CART_NOT_ALLOWED guard, mixed carts are rejected before pricing runs.
   // T57 now tests the same pricing behavior using an all-rental cart, which is
   // the valid path that exercises rental pricing logic.
   // ─────────────────────────────────────────────────────────────────────────
@@ -1220,15 +1220,15 @@ describe('OrdersService', () => {
   // Phase 6 — Mixed-cart server enforcement (T6.1–T6.3)
   //
   // Server MUST reject orders that mix rental + single_payment products.
-  // Error code: MIXED_CART_RENTAL (400 BadRequestException).
+  // Error code: MIXED_CART_NOT_ALLOWED (400 BadRequestException).
   // ─────────────────────────────────────────────────────────────────────────
 
   describe('create — mixed-cart server enforcement (T6.1–T6.3)', () => {
     const rentalProduct = fakeRentalProduct({ id: 'prod-dispenser' });
     const singleProduct = fakeProduct({ id: 'prod-water' });
 
-    // T6.1 — MUST throw 400 MIXED_CART_RENTAL for mixed cart
-    it('T6.1: throws BadRequestException with code MIXED_CART_RENTAL when cart mixes rental + single_payment', async () => {
+    // T6.1 — MUST throw 400 MIXED_CART_NOT_ALLOWED for mixed cart
+    it('T6.1: throws BadRequestException with code MIXED_CART_NOT_ALLOWED when cart mixes rental + single_payment', async () => {
       productsRepo.find.mockResolvedValue([rentalProduct, singleProduct]);
 
       const mixedCartDto = {
@@ -1250,7 +1250,7 @@ describe('OrdersService', () => {
       expect(dataSource.transaction).not.toHaveBeenCalled();
     });
 
-    it('T6.1-triangulate: mixed-cart error response contains MIXED_CART_RENTAL code', async () => {
+    it('T6.1-triangulate: mixed-cart error response contains MIXED_CART_NOT_ALLOWED code', async () => {
       productsRepo.find.mockResolvedValue([rentalProduct, singleProduct]);
 
       const mixedCartDto = {
@@ -1273,7 +1273,7 @@ describe('OrdersService', () => {
 
       expect(thrown).toBeInstanceOf(BadRequestException);
       const responseBody = thrown!.getResponse() as Record<string, unknown>;
-      expect(responseBody.code).toBe('MIXED_CART_RENTAL');
+      expect(responseBody.code).toBe('MIXED_CART_NOT_ALLOWED');
     });
 
     // T6.2 — all-rental cart MUST succeed (no error)

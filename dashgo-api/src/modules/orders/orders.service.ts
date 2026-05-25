@@ -7,6 +7,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
+import * as Sentry from '@sentry/node';
 import { DataSource, FindOptionsWhere, In, Repository } from 'typeorm';
 import { Order, OrderItem, Product } from '../../entities';
 import { OrderStatus, PaymentMethod, UserRole } from '../../entities/enums';
@@ -131,7 +132,7 @@ export class OrdersService {
     );
     if (hasRental && hasSinglePayment) {
       throw new BadRequestException({
-        code: 'MIXED_CART_RENTAL',
+        code: 'MIXED_CART_NOT_ALLOWED',
         message:
           'No podés combinar productos de alquiler con productos de compra única en el mismo pedido.',
       });
@@ -572,6 +573,10 @@ export class OrdersService {
       this.logger.error(
         `markDelivered: activateRentalsForOrder failed for order ${orderId} (rentals stay pending_setup): ${(err as Error).message}`,
       );
+      Sentry.captureException(err, {
+        tags: { module: 'orders', phase: 'rental-activation' },
+        extra: { orderId },
+      });
     }
   }
 
