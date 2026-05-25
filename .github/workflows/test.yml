@@ -7,18 +7,18 @@ on:
 
 jobs:
   api-tests:
-    name: Backend (zaz-api)
+    name: Backend (dashgo-api)
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: zaz-api
+        working-directory: dashgo-api
     services:
       postgres:
         image: postgres:16-alpine
         env:
-          POSTGRES_DB: zaz_test
-          POSTGRES_USER: zaz_test
-          POSTGRES_PASSWORD: zaz_test
+          POSTGRES_DB: dashgo_test
+          POSTGRES_USER: dashgo_test
+          POSTGRES_PASSWORD: dashgo_test
         ports:
           - 5433:5432
         options: >-
@@ -32,7 +32,7 @@ jobs:
         with:
           node-version: '20'
           cache: 'npm'
-          cache-dependency-path: zaz-api/package-lock.json
+          cache-dependency-path: dashgo-api/package-lock.json
       - run: npm ci
       - name: Run unit tests
         run: npm test
@@ -41,9 +41,9 @@ jobs:
         env:
           DB_HOST: localhost
           DB_PORT: 5433
-          DB_NAME: zaz_test
-          DB_USER: zaz_test
-          DB_PASSWORD: zaz_test
+          DB_NAME: dashgo_test
+          DB_USER: dashgo_test
+          DB_PASSWORD: dashgo_test
           JWT_SECRET: ci-test-secret-32-characters-long
           NODE_ENV: test
           STRIPE_SECRET_KEY: sk_test_dummy
@@ -56,9 +56,9 @@ jobs:
         env:
           DB_HOST: localhost
           DB_PORT: 5433
-          DB_NAME: zaz_test
-          DB_USER: zaz_test
-          DB_PASSWORD: zaz_test
+          DB_NAME: dashgo_test
+          DB_USER: dashgo_test
+          DB_PASSWORD: dashgo_test
           JWT_SECRET: ci-test-secret-32-characters-long
           NODE_ENV: test
           STRIPE_SECRET_KEY: sk_test_dummy
@@ -71,22 +71,22 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: api-coverage
-          path: zaz-api/coverage
+          path: dashgo-api/coverage
           retention-days: 7
 
   web-tests:
-    name: Web (zaz-web)
+    name: Web (dashgo-web)
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: zaz-web
+        working-directory: dashgo-web
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
           cache: 'npm'
-          cache-dependency-path: zaz-web/package-lock.json
+          cache-dependency-path: dashgo-web/package-lock.json
       - run: npm ci
       - name: Run tests
         run: npm test
@@ -99,22 +99,22 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: web-coverage
-          path: zaz-web/coverage
+          path: dashgo-web/coverage
           retention-days: 7
 
   mobile-tests:
-    name: Mobile (zaz)
+    name: Mobile (dashgo)
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: zaz
+        working-directory: dashgo
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
           cache: 'npm'
-          cache-dependency-path: zaz/package-lock.json
+          cache-dependency-path: dashgo/package-lock.json
       - run: npm ci
       - name: Run tests
         run: npm test
@@ -127,5 +127,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: mobile-coverage
-          path: zaz/coverage
+          path: dashgo/coverage
           retention-days: 7

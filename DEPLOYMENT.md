@@ -1,4 +1,4 @@
-# Zaz · Deployment guide
+# DashGo · Deployment guide
 
 End-to-end steps to deploy the **API** (NestJS) to **DigitalOcean App Platform** and the **web** (Vite) to **Vercel**.
 
@@ -15,7 +15,7 @@ This guide assumes:
 The API gained `@sentry/node` as a new dependency. Install once locally so the lockfile is up to date, then commit:
 
 ```bash
-cd zaz-api
+cd dashgo-api
 npm install
 git add package.json package-lock.json
 git commit -m "chore(api): add @sentry/node"
@@ -27,8 +27,8 @@ git commit -m "chore(api): add @sentry/node"
 
 1. Sign in to [sentry.io](https://sentry.io). Create an organization if you don't have one.
 2. Create **two projects** under that org:
-   - **zaz-api** → platform: `Node.js`
-   - **zaz-web** → platform: `React`
+   - **dashgo-api** → platform: `Node.js`
+   - **dashgo-web** → platform: `React`
 3. Copy each project's **DSN** from `Settings → Projects → <project> → Client Keys (DSN)`. You'll paste them in the next steps.
 
 ---
@@ -41,7 +41,7 @@ The repo includes [`.do/app.yaml`](./.do/app.yaml) — an App Spec describing th
 
 **Edit `.do/app.yaml` first**:
 
-- Replace `REPLACE_WITH_GH_OWNER/REPLACE_WITH_GH_REPO` with your GitHub coordinates (e.g. `jeremypolanco/zaz`).
+- Replace `REPLACE_WITH_GH_OWNER/REPLACE_WITH_GH_REPO` with your GitHub coordinates (e.g. `jeremypolanco/dashgo`).
 - Replace every `REPLACE_WITH_*` value with the real one **OR** leave them as placeholders and set them via the DO dashboard after creation (recommended for secrets).
 
 Then either:
@@ -69,12 +69,12 @@ After the app is created, go to **Settings → Components → api → Environmen
 | `JWT_SECRET` | `openssl rand -base64 48` (must be ≥32 chars) |
 | `STRIPE_SECRET_KEY` | Stripe dashboard → Developers → API keys → "Secret key" (TEST mode) |
 | `STRIPE_WEBHOOK_SECRET` | Set after step 3.4 below |
-| `STRIPE_SUBSCRIPTION_PRICE_ID` | Stripe → Products → create a recurring price → copy `price_...` |
+| `STRIPE_SUBSCRIPTION_PRICE_ID` | Stripe → Products → create a recurring price → copy `price_...` (optional — only used to bootstrap `subscription_plan` when the table is empty; leave unset if you seed the plan directly in the DB) |
 | `TWILIO_ACCOUNT_SID` | Twilio console (Production credentials) |
 | `TWILIO_API_KEY_SID` | Twilio → Account → API Keys → create a Standard key |
 | `TWILIO_API_KEY_SECRET` | (shown once when you create the key) |
 | `TWILIO_FROM_NUMBER` | Your Twilio production phone number, E.164 format (`+1...`) |
-| `SENTRY_DSN` | The DSN from the **zaz-api** Sentry project |
+| `SENTRY_DSN` | The DSN from the **dashgo-api** Sentry project |
 
 `CORS_ORIGIN` and `PUBLIC_WEB_URL` will get the Vercel URL — set them in step 4.3.
 
@@ -82,10 +82,10 @@ Save and the app redeploys automatically.
 
 ### 3.3 Verify the API is up
 
-The API URL is shown in the DO dashboard, something like `https://zaz-XXXX.ondigitalocean.app`.
+The API URL is shown in the DO dashboard, something like `https://dashgo-XXXX.ondigitalocean.app`.
 
 ```bash
-curl https://zaz-XXXX.ondigitalocean.app/api/health
+curl https://dashgo-XXXX.ondigitalocean.app/api/health
 # → {"status":"ok","db":"up"}
 ```
 
@@ -94,7 +94,7 @@ If `db` is `down`, check that `DB_SSL=true` is set and the database is healthy i
 ### 3.4 Configure the Stripe webhook
 
 1. In the [Stripe dashboard](https://dashboard.stripe.com/test/webhooks), click **Add endpoint**.
-2. Endpoint URL: `https://zaz-XXXX.ondigitalocean.app/api/payments/stripe/webhook`
+2. Endpoint URL: `https://dashgo-XXXX.ondigitalocean.app/api/payments/stripe/webhook`
 3. Events to listen to (at minimum):
    - `payment_intent.amount_capturable_updated`
    - `payment_intent.succeeded`
@@ -116,7 +116,7 @@ If `db` is `down`, check that `DB_SSL=true` is set and the database is healthy i
 
 1. Sign in to [Vercel](https://vercel.com).
 2. **Add New… → Project** → import your GitHub repo.
-3. **Root Directory**: set to `zaz-web`.
+3. **Root Directory**: set to `dashgo-web`.
 4. **Framework Preset**: Vite (auto-detected from `vercel.json`).
 5. Don't deploy yet — set env vars first.
 
@@ -126,20 +126,56 @@ Under **Settings → Environment Variables**, add (Production, Preview, Developm
 
 | Variable | Value |
 |---|---|
-| `VITE_API_URL` | `https://zaz-XXXX.ondigitalocean.app/api` (from step 3.3) |
-| `VITE_SENTRY_DSN` | DSN from the **zaz-web** Sentry project |
+| `VITE_API_URL` | `https://dashgo-XXXX.ondigitalocean.app/api` (from step 3.3) |
+| `VITE_SENTRY_DSN` | DSN from the **dashgo-web** Sentry project |
 | `VITE_SENTRY_TRACES_SAMPLE_RATE` | `0.1` |
 
-Click **Deploy**. After the deploy, Vercel gives you a URL like `https://zaz.vercel.app`.
+Click **Deploy**. After the deploy, Vercel gives you a URL like `https://dashgo.vercel.app`.
 
 ### 4.3 Wire the web URL back into the API
 
 Now that you have the Vercel URL, return to **DO Apps → api → Environment Variables** and set:
 
-- `CORS_ORIGIN` = `https://zaz.vercel.app` (no trailing slash; comma-separate if multiple)
-- `PUBLIC_WEB_URL` = `https://zaz.vercel.app`
+- `CORS_ORIGIN` = `https://dashgo.vercel.app` (no trailing slash; comma-separate if multiple)
+- `PUBLIC_WEB_URL` = `https://dashgo.vercel.app`
 
 Save. The API redeploys.
+
+---
+
+## 4.5 Mobile → EAS Build & Submit
+
+The mobile app builds through Expo EAS. Production builds require live Stripe credentials and Sentry, both wired as EAS **project secrets** (never committed).
+
+### Set the production secrets
+
+From `dashgo/` run:
+
+```bash
+eas secret:create --scope project --name EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY --value pk_live_xxx
+eas secret:create --scope project --name EXPO_PUBLIC_SENTRY_DSN --value https://...@sentry.io/...
+```
+
+EAS injects these into the build env automatically — there is no entry for them in `eas.json` for the production profile (intentionally; that file is committed and must not carry live keys).
+
+### Build & submit
+
+```bash
+# iOS — first build creates certs/provisioning interactively
+eas build --profile production --platform ios
+eas submit --profile production --platform ios
+
+# Android — uploads to internal track; promote in Play Console after testing
+eas build --profile production --platform android
+eas submit --profile production --platform android
+```
+
+### Pre-build checks
+
+- [ ] `npx tsc --noEmit` passes cleanly in `dashgo/`.
+- [ ] `app.config.ts` `version` and `ios.buildNumber` / `android.versionCode` have been bumped (or `autoIncrement: true` in `eas.json` handles it).
+- [ ] PNG brand assets in `dashgo/assets/images/` match the current logo (regenerate from `dashgo-logo.svg` when the brand changes).
+- [ ] Both EAS secrets above exist (`eas secret:list`).
 
 ---
 
@@ -152,19 +188,19 @@ Run these in order to verify everything's working end-to-end:
 - [ ] **Auth (Twilio)**: enter your phone, receive an SMS code, log in.
 - [ ] **Catalog loads**: products and categories render.
 - [ ] **Stripe webhook**: Stripe dashboard → Webhooks → your endpoint → "Send test event" with `payment_intent.succeeded`. Should return 200.
-- [ ] **Sentry**: trigger a 500 (e.g. hit a bogus admin endpoint as a normal user). Confirm an event appears in `zaz-api` Sentry project.
+- [ ] **Sentry**: trigger a 500 (e.g. hit a bogus admin endpoint as a normal user). Confirm an event appears in `dashgo-api` Sentry project.
 - [ ] **CORS**: open the web app, look at network tab — API requests should succeed without CORS errors.
 
 ---
 
 ## 6. Migrations
 
-Migrations are committed under `zaz-api/src/database/migrations/` and **run automatically on every deploy** because the DataSource has `migrationsRun: true`.
+Migrations are committed under `dashgo-api/src/database/migrations/` and **run automatically on every deploy** because the DataSource has `migrationsRun: true`.
 
 To add a new migration:
 
 ```bash
-cd zaz-api
+cd dashgo-api
 # Make schema changes (entity files), then:
 npm run migration:generate -- src/database/migrations/AddSomething
 git add src/database/migrations
@@ -197,10 +233,10 @@ Scale up the API to `basic-xs` ($12) and Postgres to a non-dev cluster ($15+) wh
 ## 8. Custom domain (when ready)
 
 1. Register a domain (Namecheap / Cloudflare Registrar / Google Domains).
-2. **Vercel** → Project → Domains → add `zaz.com` (or whatever). Vercel gives you DNS records to add at your registrar.
-3. **DO Apps** → api → Settings → Domains → add `api.zaz.com`. Same flow — copy the CNAME.
-4. Update `VITE_API_URL` in Vercel to `https://api.zaz.com/api`.
-5. Update `CORS_ORIGIN` and `PUBLIC_WEB_URL` in DO to `https://zaz.com`.
+2. **Vercel** → Project → Domains → add `dashgo.dev` (or whatever). Vercel gives you DNS records to add at your registrar.
+3. **DO Apps** → api → Settings → Domains → add `api.dashgo.dev`. Same flow — copy the CNAME.
+4. Update `VITE_API_URL` in Vercel to `https://api.dashgo.dev/api`.
+5. Update `CORS_ORIGIN` and `PUBLIC_WEB_URL` in DO to `https://dashgo.dev`.
 6. Update the Stripe webhook URL to the new domain.
 
 ---
@@ -223,6 +259,6 @@ That's the whole thing. The code is mode-agnostic — only env vars change.
 
 - **Logs**: DO → Apps → api → Runtime Logs. Errors also land in Sentry.
 - **Restart**: DO → Apps → api → Settings → "Force Rebuild and Deploy".
-- **Database access**: DO → Databases → zaz-db → "Connection details". Use Postico/TablePlus from your laptop (DO whitelists trusted sources by default; you may need to add your IP).
+- **Database access**: DO → Databases → dashgo-db → "Connection details". Use Postico/TablePlus from your laptop (DO whitelists trusted sources by default; you may need to add your IP).
 - **Webhooks failing**: usually a `STRIPE_WEBHOOK_SECRET` mismatch after rotating keys. Re-copy from Stripe dashboard.
 - **JWT secret rotation**: changing `JWT_SECRET` invalidates every active session — users get logged out and have to OTP again. Plan accordingly.

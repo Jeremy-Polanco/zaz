@@ -1,4 +1,4 @@
-# Zaz — Water Delivery Platform
+# DashGo — Water Delivery Platform
 
 SaaS para pedidos de agua a domicilio en New York. Tres roles:
 
@@ -12,13 +12,13 @@ SaaS para pedidos de agua a domicilio en New York. Tres roles:
 
 | Paquete | Tech | Tests |
 |---|---|---|
-| [zaz-api/](./zaz-api) | NestJS 11 · TypeORM 0.3 · Postgres 16 · JWT · Twilio (OTP) · Stripe v22 | Jest (unit + integration + E2E) |
-| [zaz-web/](./zaz-web) | Vite 8 (Rolldown) · React 19 · TanStack Query/Router/Table · RHF · Zod 4 · Tailwind v4 · Sentry | Vitest + RTL + jsdom |
-| [zaz/](./zaz) | Expo SDK 55 · React Native · NativeWind 4 · TanStack Query · RHF · Zod 3 · expo-secure-store | jest-expo + RNTL |
+| [dashgo-api/](./dashgo-api) | NestJS 11 · TypeORM 0.3 · Postgres 16 · JWT · Twilio (OTP) · Stripe v22 | Jest (unit + integration + E2E) |
+| [dashgo-web/](./dashgo-web) | Vite 8 (Rolldown) · React 19 · TanStack Query/Router/Table · RHF · Zod 4 · Tailwind v4 · Sentry | Vitest + RTL + jsdom |
+| [dashgo/](./dashgo) | Expo SDK 55 · React Native · NativeWind 4 · TanStack Query · RHF · Zod 3 · expo-secure-store | jest-expo + RNTL |
 | Postgres dev | Postgres 16 (puerto host **5433** en compose) | Postgres 16 Docker para integration tests |
 | Adminer | Puerto **8082** | — |
 
-Sistema de diseño: **Inter Tight** single-font, paleta Planeta Azul, editorial minimalista (eyebrows, hairlines, tabular nums).
+Sistema de diseño: **Inter Tight** single-font, paleta **DashGo** (negro `#000000` + naranja `#FF8000` + relámpago), editorial minimalista (eyebrows, hairlines, tabular nums). Ver [DESIGN-SPEC.md](./DESIGN-SPEC.md) para tokens, reglas, y flujos de pantalla.
 
 ## Arranque rápido
 
@@ -31,7 +31,7 @@ docker compose logs -f api
 Servicios:
 - API: http://localhost:3002/api
 - Web: http://localhost:5173
-- Adminer: http://localhost:8082 (server: `postgres`, user: `zaz`, pass: `zaz_dev`, db: `zaz_db`)
+- Adminer: http://localhost:8082 (server: `postgres`, user: `dashgo`, pass: `dashgo_dev`, db: `dashgo_db`)
 - Postgres: `localhost:5433`
 
 ### Seed
@@ -53,7 +53,7 @@ Crea (todos los teléfonos son reservados US `+1 555-555-xxxx` — bypassean Twi
 ### Mobile (Expo)
 
 ```bash
-cd zaz
+cd dashgo
 npm install
 cp env.example .env
 npm run ios                  # o npm run android
@@ -72,7 +72,7 @@ Estas cosas **no las podés saltear** y nadie las hizo automáticamente. Sin est
 `DB_SYNCHRONIZE=true` está deshabilitado en producción. Necesitás generar la migración base contra una DB con el schema actual:
 
 ```bash
-cd zaz-api
+cd dashgo-api
 # Asegurate de que la DB de dev tenga el schema correcto, después:
 npm run migration:generate -- src/database/migrations/InitialSchema
 git add . && git commit -m "chore: initial schema migration"
@@ -87,7 +87,7 @@ Sin esto:
 Ya están commiteadas. Después del paso 1:
 
 ```bash
-cd zaz-api && npm run migration:run
+cd dashgo-api && npm run migration:run
 # Aplica en orden:
 #   InitialSchema
 #   1745800000000-AddCategoryImage
@@ -98,7 +98,7 @@ cd zaz-api && npm run migration:run
 ### 3. Stripe Dashboard (sin esto Subscription NO funciona)
 
 3.1. **Crear Product + Price**:
-- Stripe Dashboard → Products → "Zaz Plus" → Recurring → $10 USD/mes
+- Stripe Dashboard → Products → "DashGo Plus" → Recurring → $10 USD/mes
 - Copiar el `price_xxx` ID
 
 3.2. **Setear env var** en prod:
@@ -119,18 +119,18 @@ STRIPE_SUBSCRIPTION_PRICE_ID=price_xxx
 ### 4. Mobile — confirmar bundle ID y EAS secrets
 
 ```bash
-# Confirmar bundle ID es lo que querés (default: com.zaz.app)
-cat zaz/app.config.ts | grep bundleIdentifier
+# Confirmar bundle ID es lo que querés (default: com.dashgo.app)
+cat dashgo/app.config.ts | grep bundleIdentifier
 
 # Setear secrets EAS para builds de prod
-cd zaz
-eas secret:create --scope project --name EXPO_PUBLIC_API_URL --value https://api.zaz.com/api
+cd dashgo
+eas secret:create --scope project --name EXPO_PUBLIC_API_URL --value https://api.dashgo.dev/api
 eas secret:create --scope project --name EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY --value pk_live_xxx
 ```
 
 Y fixear los 2 errores de TS pre-existentes:
-- `zaz/src/app/checkout.tsx:142` — route type `/orders/[orderId]` invalid
-- `zaz/src/app/orders/[orderId]/index.tsx:93` — Button variant "secondary" invalid
+- `dashgo/src/app/checkout.tsx:142` — route type `/orders/[orderId]` invalid
+- `dashgo/src/app/orders/[orderId]/index.tsx:93` — Button variant "secondary" invalid
 
 ### 5. Smoke tests sobre DB real
 
@@ -138,7 +138,7 @@ Después de los pasos 1-3, validar end-to-end:
 
 ```bash
 # Backend
-cd zaz-api
+cd dashgo-api
 docker compose -f test/docker-compose.test.yml up -d
 npm run test:integration   # usa Postgres test de Docker
 npm run test:e2e
@@ -283,7 +283,7 @@ Cron `0 3 * * *` (vía `@nestjs/schedule`): puntos PENDING → CLAIMABLE a los 9
 ### Backend (Jest + Postgres en Docker + Stripe mocked)
 
 ```bash
-cd zaz-api
+cd dashgo-api
 
 # Unit tests (in-process, fast, ~44 tests)
 npm test
@@ -300,7 +300,7 @@ npm run test:e2e
 npm run test:concurrency
 ```
 
-Detalles del setup en [`zaz-api/test/PATTERNS.md`](./zaz-api/test/PATTERNS.md).
+Detalles del setup en [`dashgo-api/test/PATTERNS.md`](./dashgo-api/test/PATTERNS.md).
 
 Lo que cubre:
 - **Credit**: applyCharge, reverseCharge (idempotency!), recordPayment, isOverdue, race conditions con pessimistic_write
@@ -311,7 +311,7 @@ Lo que cubre:
 ### Web (Vitest + RTL + jsdom)
 
 ```bash
-cd zaz-web
+cd dashgo-web
 npm test                   # 63 tests across 8 suites
 npm run test:watch
 npm run test:cov
@@ -322,7 +322,7 @@ Cubre: cart signal, schemas (zod 4), CategoryCard image fallback, CheckoutCredit
 ### Mobile (jest-expo + RNTL)
 
 ```bash
-cd zaz
+cd dashgo
 npm test                   # 88 tests across 8 suites
 npm run test:cov
 ```
@@ -345,9 +345,9 @@ Coverage artifacts se suben en cada job (retention 7 días).
 # postgres solo
 docker compose up -d postgres
 
-cd zaz-api && cp env.example .env && npm install --legacy-peer-deps && npm run start:dev
-cd zaz-web && cp env.example .env && npm install && npm run dev
-cd zaz     && cp env.example .env && npm install && npm run ios
+cd dashgo-api && cp env.example .env && npm install --legacy-peer-deps && npm run start:dev
+cd dashgo-web && cp env.example .env && npm install && npm run dev
+cd dashgo     && cp env.example .env && npm install && npm run ios
 ```
 
 ---
@@ -355,7 +355,7 @@ cd zaz     && cp env.example .env && npm install && npm run ios
 ## Estructura
 
 ```
-Zaz/
+DashGo/
 ├── README.md                      # este archivo
 ├── docker-compose.yml             # postgres + adminer + api + web
 ├── env.example                    # secrets compartidos
@@ -363,7 +363,7 @@ Zaz/
 ├── .github/workflows/test.yml     # CI: 3 jobs paralelos
 ├── .atl/skill-registry.md         # registry de skills (autoresolved)
 │
-├── zaz-api/                   # NestJS backend
+├── dashgo-api/                   # NestJS backend
 │   ├── env.example                # DB_*, JWT_*, TWILIO_*, STRIPE_*
 │   ├── package.json               # jest projects (unit + integration)
 │   ├── Dockerfile                 # multi-stage prod
@@ -386,7 +386,7 @@ Zaz/
 │       ├── integration/{credit,orders,subscription}.integration-spec.ts
 │       └── e2e/{orders,subscription,credit}.e2e-spec.ts
 │
-├── zaz-web/                   # TanStack + Vite
+├── dashgo-web/                   # TanStack + Vite
 │   ├── env.example                # VITE_API_URL, VITE_SENTRY_DSN
 │   ├── vitest.config.ts
 │   ├── tsconfig.test.json
@@ -396,7 +396,7 @@ Zaz/
 │       ├── lib/                   # api, auth, cart, queries, schemas, types, geo, tax
 │       └── test/                  # setup, test-utils, mocks/
 │
-└── zaz/                       # Expo Mobile
+└── dashgo/                    # Expo Mobile
     ├── env.example                # EXPO_PUBLIC_API_URL, EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY, EXPO_PUBLIC_SENTRY_DSN
     ├── app.config.ts              # bundleIdentifier, package, permissions
     ├── eas.json                   # dev/preview/production profiles
@@ -415,18 +415,18 @@ Zaz/
 - **macOS + Docker bind mounts**: cada subpath montado tiene device ID distinto → `fs.rename` entre ellos falla con `EXDEV` (ej. tanstack-router-plugin). El compose monta cada proyecto entero + volumen anónimo en `/app/node_modules`.
 - **Volumen anónimo de node_modules**: `npm install` en el host **no** propaga al contenedor. Para agregar deps del backend: `docker compose exec api npm install <pkg> --legacy-peer-deps && docker compose restart api`.
 - **Vite 8 + Rolldown en nvm Node 24 (macOS)**: binding nativo `.node` choca con Hardened Runtime. Workaround: dev server y typecheck en Docker (Linux), no en el Node local. CI en ubuntu-latest no se ve afectado.
-- **Nest 11 peer deps**: `npm ci` requiere `--legacy-peer-deps` (conflicto `@nestjs/config`). Ya aplicado en `zaz-api/Dockerfile`.
+- **Nest 11 peer deps**: `npm ci` requiere `--legacy-peer-deps` (conflicto `@nestjs/config`). Ya aplicado en `dashgo-api/Dockerfile`.
 - **Enum changes con `synchronize: true`**: si hay filas con el valor viejo, ALTER TYPE falla. Fix: `docker compose down -v && docker compose up -d && docker compose exec api npm run seed`. (En prod synchronize está OFF, usar migrations.)
 - **TypeORM `numeric`**: columnas `numeric(p,s)` devuelven strings. Usá `parseFloat` o aritmética en centavos enteros para evitar drift.
 - **Stripe API version ≥ 2025-04-30**: `current_period_start/end` se movió de Subscription a Subscription.items[0]. Código nuestro lee con fallback compatible con ambos shapes.
 - **Zod versión**: web usa Zod 4, mobile usa Zod 3. **Schemas NO se comparten** entre proyectos.
 - **NativeWind en tests**: jest-expo no corre el babel transform de NativeWind, los tests usan `testID` y accessibility props (NO `className`).
 - **TanStack Router strict + validateSearch**: cualquier `redirect({ to: '/login' })` requiere `search: { next: undefined, ref: undefined }`. Hay 34 fixes ya aplicados.
-- **Database config + entities**: si agregás una entity nueva, sumarla al array en `zaz-api/src/config/database.config.ts` además de exportar en `entities/index.ts`. El bug clásico: `forFeature()` funciona pero relations cross-entity rompen porque `forRoot()` no las tiene.
+- **Database config + entities**: si agregás una entity nueva, sumarla al array en `dashgo-api/src/config/database.config.ts` además de exportar en `entities/index.ts`. El bug clásico: `forFeature()` funciona pero relations cross-entity rompen porque `forRoot()` no las tiene.
 
 ---
 
 ## Licencia
 
-Proprietary — Zaz.
-# zaz
+Proprietary — DashGo.
+# dashgo

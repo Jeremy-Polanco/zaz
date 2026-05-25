@@ -1,4 +1,4 @@
-# DigitalOcean App Platform spec for Zaz API + managed Postgres.
+# DigitalOcean App Platform spec for DashGo API + managed Postgres.
 #
 # ┌─────────────────────────────────────────────────────────────────────┐
 # │ ⚠️  DO NOT run `doctl apps update --spec .do/app.yaml` lightly.     │
@@ -13,7 +13,7 @@
 # │ PUBLIC_WEB_URL) are managed EXCLUSIVELY in the DO dashboard.        │
 # │                                                                     │
 # │ For env var changes after initial creation, use:                    │
-# │   - The DO dashboard (Apps → zaz → Settings → Components → api)     │
+# │   - The DO dashboard (Apps → dashgo → Settings → Components → api)     │
 # │   - `doctl apps update <id> --env KEY=VALUE` (single var)           │
 # │                                                                     │
 # │ Code changes deploy automatically via `deploy_on_push: true`.       │
@@ -39,7 +39,7 @@
 # Stripe webhook URL after deploy:
 #   https://<your-app>.ondigitalocean.app/api/payments/stripe/webhook
 
-name: zaz
+name: dashgo
 region: nyc
 
 services:
@@ -47,12 +47,12 @@ services:
     github:
       branch: main
       deploy_on_push: true
-      repo: Jeremy-Polanco/zaz
-    source_dir: zaz-api
+      repo: Jeremy-Polanco/dashgo
+    source_dir: dashgo-api
     # NOTE: dockerfile_path is relative to the REPO ROOT (not to source_dir).
     # source_dir sets the build context; dockerfile_path locates the Dockerfile
     # in the git tree. Both must be specified independently.
-    dockerfile_path: zaz-api/Dockerfile
+    dockerfile_path: dashgo-api/Dockerfile
     # Multi-stage Dockerfile — target the prod stage which only contains
     # dist + production deps.
     build_command: ""
@@ -86,20 +86,20 @@ services:
       # runtime from the database resource. Safe to keep in spec.
       - key: DB_HOST
         scope: RUN_TIME
-        value: ${zaz-db.HOSTNAME}
+        value: ${dashgo-db.HOSTNAME}
       - key: DB_PORT
         scope: RUN_TIME
-        value: ${zaz-db.PORT}
+        value: ${dashgo-db.PORT}
       - key: DB_USER
         scope: RUN_TIME
-        value: ${zaz-db.USERNAME}
+        value: ${dashgo-db.USERNAME}
       - key: DB_PASSWORD
         scope: RUN_TIME
-        value: ${zaz-db.PASSWORD}
+        value: ${dashgo-db.PASSWORD}
         type: SECRET
       - key: DB_NAME
         scope: RUN_TIME
-        value: ${zaz-db.DATABASE}
+        value: ${dashgo-db.DATABASE}
       - key: DB_SSL
         scope: RUN_TIME
         value: "true"
@@ -138,11 +138,11 @@ services:
       # ─────────────────────────────────────────────────────────────────
 
 databases:
-  - name: zaz-db
+  - name: dashgo-db
     engine: PG
     version: "16"
     production: false
     size: db-s-dev-database
     # Dev tier auto-generates db_name and db_user. DO exposes them via the
-    # ${zaz-db.DATABASE} / ${zaz-db.USERNAME} / ${zaz-db.PASSWORD} / etc.
+    # ${dashgo-db.DATABASE} / ${dashgo-db.USERNAME} / ${dashgo-db.PASSWORD} / etc.
     # bindings already wired in the api component above.
