@@ -106,8 +106,10 @@ function checkDockerReachable(): Promise<void> {
 export default async function globalSetup(): Promise<void> {
   // Force correct test DB credentials BEFORE loadEnvTest() so .env.test cannot
   // override them with non-Docker values (e.g. colmapp_test from a dev .env.test).
-  process.env.DB_HOST = 'localhost';
-  process.env.DB_PORT = '5433';
+  // DB_HOST/DB_PORT honour pre-existing env values so CI runners and dev boxes
+  // with port 5433 already taken can override (e.g. DB_PORT=5436).
+  process.env.DB_HOST = process.env.DB_HOST ?? 'localhost';
+  process.env.DB_PORT = process.env.DB_PORT ?? '5433';
   process.env.DB_USER = 'dashgo_test';
   process.env.DB_PASSWORD = 'dashgo_test';
   process.env.DB_NAME = 'dashgo_test';

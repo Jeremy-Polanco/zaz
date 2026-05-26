@@ -145,7 +145,10 @@ export class OrdersService {
       if (product.pricingMode === 'rental') {
         const existing = await this.rentalsService.findActiveByUserAndProduct(user.id, product.id);
         if (existing) {
-          throw new ConflictException('RENTAL_ALREADY_ACTIVE');
+          throw new ConflictException({
+            code: 'RENTAL_ALREADY_ACTIVE',
+            message: `Ya tenés un alquiler activo de "${product.name}". Cancelá el actual antes de pedir otro.`,
+          });
         }
       }
     }
@@ -513,11 +516,39 @@ export class OrdersService {
     } else if (isDelivering) {
       await this.markDelivered(order.id);
     } else if (dto.status === OrderStatus.CANCELLED) {
-      // T4.4: Wrap cancel transition in a TX so credit reversal is atomic
+      // Wrap cancel in a TX so every side-effect reversal commits atomically
+      // with the status flip.
+      //
+      // Reversed on cancel:
+      //   - Credit: refund any creditApplied (T4.4)
+      //   - Points: restore claimable status of any entries we redeemed
+      //   - Stock: re-increment if the order had been confirmed (stock was
+      //     decremented during pending_validation → confirmed_by_colmado)
+      //   - Rentals: cancel any pending_setup rentals tied to the order
+      const wasStockDecremented =
+        order.status === OrderStatus.CONFIRMED_BY_COLMADO ||
+        order.status === OrderStatus.IN_DELIVERY_ROUTE;
+
       await this.dataSource.transaction(async (cancelTx) => {
-        await cancelTx.getRepository(Order).update(id, { status: OrderStatus.CANCELLED });
+        await cancelTx
+          .getRepository(Order)
+          .update(id, { status: OrderStatus.CANCELLED });
         if (parseFloat(order.creditApplied || '0') > 0) {
           await this.credit.reverseCharge(order.id, cancelTx);
+        }
+        await this.points.reverseRedemptionForOrder(order.id, cancelTx);
+        await this.rentalsService.cancelPendingForOrder(order.id, cancelTx);
+        if (wasStockDecremented) {
+          const itemRepo = cancelTx.getRepository(OrderItem);
+          const productRepo = cancelTx.getRepository(Product);
+          const items = await itemRepo.find({ where: { orderId: order.id } });
+          for (const item of items) {
+            await productRepo.increment(
+              { id: item.productId },
+              'stock',
+              item.quantity,
+            );
+          }
         }
       });
     } else {

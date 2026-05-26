@@ -130,7 +130,10 @@ export class RentalsService implements OnModuleInit {
     });
 
     if (existing) {
-      throw new ConflictException('RENTAL_ALREADY_ACTIVE');
+      throw new ConflictException({
+        code: 'RENTAL_ALREADY_ACTIVE',
+        message: 'Ya existe un alquiler activo para este usuario y producto.',
+      });
     }
 
     // Snapshot pricing from product at time of creation
@@ -480,6 +483,36 @@ export class RentalsService implements OnModuleInit {
   // pending_setup with no stripeSubscriptionId: just mark canceled (no Stripe).
   // ─────────────────────────────────────────────────────────────────────────
 
+  /**
+   * Mark all pending_setup rentals tied to `orderId` as CANCELED.
+   *
+   * Used by OrdersService when an order is cancelled — the rental rows were
+   * created at order placement but no Stripe Subscription exists yet (those
+   * are created on delivery), so we don't call Stripe. Active/past-due
+   * rentals are NOT touched here — they belong to delivered orders, which
+   * cannot be cancelled per ALLOWED_TRANSITIONS.
+   */
+  async cancelPendingForOrder(
+    orderId: string,
+    tx: EntityManager,
+  ): Promise<number> {
+    const rentalRepo = tx.getRepository(Rental);
+    const pending = await rentalRepo.find({
+      where: { orderId, status: RentalStatus.PENDING_SETUP },
+    });
+    if (pending.length === 0) return 0;
+    const now = new Date();
+    for (const r of pending) {
+      r.status = RentalStatus.CANCELED;
+      r.canceledAt = now;
+      await rentalRepo.save(r);
+    }
+    this.logger.log(
+      `cancelPendingForOrder: cancelled ${pending.length} rental(s) for order ${orderId}`,
+    );
+    return pending.length;
+  }
+
   async cancelAdmin(rentalId: string): Promise<AdminRentalResponseDto> {
     const rental = await this.rentals.findOne({
       where: { id: rentalId },
@@ -531,7 +564,13 @@ export class RentalsService implements OnModuleInit {
 
     // T48: pre-check — must be pending_setup
     if (rental.status !== RentalStatus.PENDING_SETUP) {
-      throw new HttpException('RENTAL_NOT_RETRYABLE', HttpStatus.CONFLICT);
+      throw new HttpException(
+        {
+          code: 'RENTAL_NOT_RETRYABLE',
+          message: `El alquiler está en estado ${rental.status}; solo se puede reintentar desde pending_setup.`,
+        },
+        HttpStatus.CONFLICT,
+      );
     }
 
     // Load user for stripeCustomerId

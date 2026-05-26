@@ -156,6 +156,7 @@ describe('OrdersService', () => {
       getBalance: jest.fn().mockResolvedValue({ claimableCents: 0 }),
       redeemAllClaimable: jest.fn(),
       creditForOrder: jest.fn(),
+      reverseRedemptionForOrder: jest.fn(),
     } as unknown as jest.Mocked<PointsService>;
 
     invoicesService = {
@@ -192,6 +193,7 @@ describe('OrdersService', () => {
       activateRentalsForOrder: jest.fn().mockResolvedValue([]),
       activateForOrder: jest.fn().mockResolvedValue({} as never),
       createForOrder: jest.fn().mockResolvedValue({}),
+      cancelPendingForOrder: jest.fn().mockResolvedValue(undefined),
     } as unknown as jest.Mocked<RentalsService>;
 
     dataSource = {

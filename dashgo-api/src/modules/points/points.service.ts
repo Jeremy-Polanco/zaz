@@ -122,6 +122,51 @@ export class PointsService {
     return this.dataSource.transaction(run);
   }
 
+  /**
+   * Reverse a previous `redeemAllClaimable` call for the given order.
+   *
+   * Run inside the cancel TX so the order status flip and the points
+   * restoration commit atomically. Idempotent — safe to call twice (the
+   * second call finds nothing to restore and is a no-op).
+   */
+  async reverseRedemptionForOrder(
+    orderId: string,
+    tx: EntityManager,
+  ): Promise<number> {
+    const ledgerRepo = tx.getRepository(PointsLedgerEntry);
+
+    // Flip the EARNED entries that were redeemed for this order back to claimable.
+    const redeemedEntries = await ledgerRepo.find({
+      where: {
+        orderId,
+        type: PointsEntryType.EARNED,
+        status: PointsEntryStatus.REDEEMED,
+      },
+    });
+    if (redeemedEntries.length === 0) return 0;
+
+    for (const entry of redeemedEntries) {
+      entry.status = PointsEntryStatus.CLAIMABLE;
+      entry.orderId = null;
+      await ledgerRepo.save(entry);
+    }
+
+    // Delete the negative ledger entry that recorded the redemption itself.
+    await ledgerRepo.delete({
+      orderId,
+      type: PointsEntryType.REDEEMED,
+    });
+
+    const totalRestored = redeemedEntries.reduce(
+      (sum, e) => sum + e.amountCents,
+      0,
+    );
+    this.logger.log(
+      `reverseRedemptionForOrder: restored ${totalRestored}c for order ${orderId}`,
+    );
+    return totalRestored;
+  }
+
   async redeemAllClaimable(
     userId: string,
     orderId: string,

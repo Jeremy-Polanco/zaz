@@ -134,7 +134,11 @@ export class ProductsService implements OnModuleInit {
         },
       });
       if (activeRental) {
-        throw new ConflictException('ACTIVE_RENTALS_EXIST');
+        throw new ConflictException({
+          code: 'ACTIVE_RENTALS_EXIST',
+          message:
+            'No podés cambiar este producto a venta única: tiene alquileres activos. Cancelá los alquileres primero.',
+        });
       }
     }
 
