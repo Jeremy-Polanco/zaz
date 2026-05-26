@@ -749,6 +749,7 @@ export class RentalsService implements OnModuleInit {
   private toAdminDto(r: Rental): AdminRentalResponseDto {
     const dto = new AdminRentalResponseDto();
     dto.id = r.id;
+    dto.orderId = r.orderId;
     dto.userId = r.userId;
     dto.userName = r.user?.fullName ?? '';
     dto.userPhone = r.user?.phone ?? null;
@@ -759,6 +760,8 @@ export class RentalsService implements OnModuleInit {
     dto.lateFeeCents = r.lateFeeCents;
     dto.stripeSubscriptionId = r.stripeSubscriptionId;
     dto.currentPeriodEnd = r.currentPeriodEnd;
+    dto.pastDueSince = r.pastDueSince;
+    dto.lastLateFeeAt = r.lastLateFeeAt;
     dto.activatedAt = r.activatedAt;
     dto.canceledAt = r.canceledAt;
     dto.createdAt = r.createdAt;

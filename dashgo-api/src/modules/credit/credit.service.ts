@@ -95,8 +95,12 @@ export class CreditService {
       qb = qb.andWhere('ca.balance_cents >= 0');
     }
 
-    // Default sort: most negative balance first
-    qb = qb.orderBy('ca.balance_cents', 'ASC').skip(skip).take(pageSize);
+    // Default sort: most negative balance first. Use the property name
+    // (`balanceCents`) not the database column (`balance_cents`) — when
+    // combined with leftJoinAndSelect + skip/take, TypeORM's split-query
+    // pagination chokes on the snake_case form with "Cannot read properties
+    // of undefined (reading 'databaseName')".
+    qb = qb.orderBy('ca.balanceCents', 'ASC').skip(skip).take(pageSize);
 
     const [items, totalCount] = await qb.getManyAndCount();
 

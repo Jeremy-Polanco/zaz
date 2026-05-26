@@ -33,7 +33,17 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     return {
       id: user.id,
       email: user.email,
+      fullName: user.fullName,
+      phone: user.phone,
       role: user.role,
+      addressDefault: user.addressDefault ?? null,
+      referralCode: user.referralCode ?? null,
+      referredById: user.referredById ?? null,
+      stripeCustomerId: user.stripeCustomerId ?? null,
+      createdAt:
+        user.createdAt instanceof Date
+          ? user.createdAt.toISOString()
+          : (user.createdAt as unknown as string),
     };
   }
 }

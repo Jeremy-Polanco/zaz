@@ -48,19 +48,21 @@ export class AuthService {
     }
   }
 
-  async sendOtp(dto: SendOtpDto) {
+  async sendOtp(dto: SendOtpDto, opts: { skipCooldown?: boolean } = {}) {
     const phone = dto.phone.trim();
 
-    const recent = await this.otps.findOne({
-      where: { phone, consumedAt: IsNull() },
-      order: { createdAt: 'DESC' },
-    });
-    if (recent) {
-      const elapsed = (Date.now() - recent.createdAt.getTime()) / 1000;
-      if (elapsed < OTP_RESEND_COOLDOWN_SECONDS) {
-        throw new BadRequestException(
-          `Esperá ${Math.ceil(OTP_RESEND_COOLDOWN_SECONDS - elapsed)}s antes de pedir otro código`,
-        );
+    if (!opts.skipCooldown) {
+      const recent = await this.otps.findOne({
+        where: { phone, consumedAt: IsNull() },
+        order: { createdAt: 'DESC' },
+      });
+      if (recent) {
+        const elapsed = (Date.now() - recent.createdAt.getTime()) / 1000;
+        if (elapsed < OTP_RESEND_COOLDOWN_SECONDS) {
+          throw new BadRequestException(
+            `Esperá ${Math.ceil(OTP_RESEND_COOLDOWN_SECONDS - elapsed)}s antes de pedir otro código`,
+          );
+        }
       }
     }
 

@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Get,
+  Headers,
   HttpCode,
   HttpStatus,
   Post,
@@ -37,8 +38,17 @@ export class AuthController {
   @UseGuards(PhoneThrottlerGuard)
   @HttpCode(HttpStatus.OK)
   @Post('otp/send')
-  sendOtp(@Body() dto: SendOtpDto) {
-    return this.auth.sendOtp(dto);
+  sendOtp(
+    @Body() dto: SendOtpDto,
+    @Headers('x-dashgo-e2e') e2eHeader?: string,
+  ) {
+    // E2E header lets Playwright bypass the 30s per-phone cooldown so a
+    // multi-file suite can drive several different phones without sleeps.
+    // Gated by NODE_ENV in the service-level guard would be cleaner, but
+    // the cooldown is in service so we pass an explicit flag.
+    const skipCooldown =
+      !!e2eHeader && process.env.NODE_ENV !== 'production';
+    return this.auth.sendOtp(dto, { skipCooldown });
   }
 
   @Public()

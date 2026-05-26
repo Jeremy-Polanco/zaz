@@ -30,7 +30,21 @@ export class PhoneThrottlerGuard implements CanActivate {
   canActivate(context: ExecutionContext): boolean {
     const req = context
       .switchToHttp()
-      .getRequest<{ body?: { phone?: unknown }; ip?: string }>();
+      .getRequest<{
+        body?: { phone?: unknown };
+        ip?: string;
+        headers?: Record<string, string | string[] | undefined>;
+      }>();
+
+    // E2E bypass — Playwright sets this header on every request via
+    // playwright.config.ts. Guarded by NODE_ENV so it can't be triggered in
+    // production. Without this, a multi-file Playwright run trips the
+    // 3/60s per-phone limit because globalSetup state doesn't carry the
+    // session cache across all the loginAs() calls fast enough.
+    const e2eHeader = req?.headers?.['x-dashgo-e2e'];
+    if (e2eHeader && process.env.NODE_ENV !== 'production') {
+      return true;
+    }
 
     const phoneRaw = req?.body?.phone;
     const phone = typeof phoneRaw === 'string' ? phoneRaw.trim() : '';

@@ -144,11 +144,7 @@ test.describe('Rental cycle 5 — wire contracts', () => {
     expect(body.message).toMatch(/alquiler/i)
   })
 
-  // Skipped: the admin rentals listing returns empty even though
-  // createForOrder runs in the order TX. Likely a list-query filter or
-  // serialization quirk — needs separate investigation. The wire-level
-  // happy path is still covered by the manual verify pass we ran earlier.
-  test.fixme('cycle 5 ROOT FIX: placing an all-rental order creates a Rental row in pending_setup', async ({
+  test('cycle 5 ROOT FIX: placing an all-rental order creates a Rental row in pending_setup', async ({
     request,
   }) => {
     const admin = await loginAs(request, SEEDED.superAdmin)

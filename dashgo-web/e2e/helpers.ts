@@ -12,9 +12,11 @@ export const SEEDED = {
   superAdmin: '+15555550001',
   promoter: '+15555550005',
   client: '+15555550004',
-  // María Pérez — credit account "al día". Used by UI tests that need a fresh
-  // OTP send to a non-cached phone so they don't trip the 30s cooldown.
+  // María Pérez — credit account "al día" ($15 owed, due in 15 days).
   clientAlDia: '+15555550006',
+  // Juan Rodríguez — credit account overdue ($25, 5 days late).
+  // Use to verify the 402 CREDIT_OVERDUE guard.
+  clientVenc: '+15555550007',
 } as const
 
 /**

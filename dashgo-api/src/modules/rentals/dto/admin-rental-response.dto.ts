@@ -6,6 +6,7 @@
  */
 export class AdminRentalResponseDto {
   id!: string;
+  orderId!: string;
   userId!: string;
   userName!: string;
   userPhone!: string | null;
@@ -16,6 +17,8 @@ export class AdminRentalResponseDto {
   lateFeeCents!: number;
   stripeSubscriptionId!: string | null;
   currentPeriodEnd!: Date | null;
+  pastDueSince!: Date | null;
+  lastLateFeeAt!: Date | null;
   activatedAt!: Date | null;
   canceledAt!: Date | null;
   /** Days overdue since currentPeriodEnd. Computed: max(0, days from currentPeriodEnd to NOW). */

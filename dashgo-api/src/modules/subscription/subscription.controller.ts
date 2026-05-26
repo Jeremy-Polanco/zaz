@@ -5,9 +5,11 @@ import {
   HttpCode,
   HttpStatus,
   Post,
+  Res,
   ServiceUnavailableException,
   UseGuards,
 } from '@nestjs/common';
+import type { Response } from 'express';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Public } from '../../common/decorators/public.decorator';
@@ -39,11 +41,19 @@ export class SubscriptionController {
 
   /**
    * GET /me/subscription — returns subscriber's current subscription or null.
+   *
+   * `null` is serialized as JSON literal `null` on the wire — bypassing
+   * Express's `res.send(null)` which would otherwise emit an empty body
+   * (and break axios JSON parsing on the client).
    */
   @UseGuards(JwtAuthGuard)
   @Get('me/subscription')
-  getMySubscription(@CurrentUser() user: AuthenticatedUser) {
-    return this.subscription.getMySubscription(user.id);
+  async getMySubscription(
+    @CurrentUser() user: AuthenticatedUser,
+    @Res() res: Response,
+  ) {
+    const sub = await this.subscription.getMySubscription(user.id);
+    res.json(sub);
   }
 
   /**
