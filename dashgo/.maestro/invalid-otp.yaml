@@ -1,0 +1,31 @@
+# Invalid OTP code — drive the login form with a wrong code and assert the
+# error renders cleanly.
+appId: com.dashgo.app
+tags:
+  - auth
+  - error
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+
+- tapOn:
+    id: "login-phone-input"
+- inputText: "+15555550005" # Promoter — not shared with login.yaml to avoid cooldown
+- tapOn:
+    id: "login-send-code-btn"
+
+- extendedWaitUntil:
+    visible:
+      id: "login-code-input"
+    timeout: 8000
+- tapOn:
+    id: "login-code-input"
+- inputText: "000000" # known-wrong (unless AUTH_BYPASS is active, which the e2e env should not enable)
+- tapOn:
+    id: "login-verify-btn"
+
+# Should still be on the code step with an error visible.
+- assertVisible: "Código inválido|incorrecto"
+- assertVisible:
+    id: "login-code-input"

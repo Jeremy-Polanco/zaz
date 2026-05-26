@@ -35,7 +35,6 @@ export class AuthController {
 
   @Public()
   @UseGuards(PhoneThrottlerGuard)
-  @Throttle({ default: { limit: 3, ttl: 60_000 } })
   @HttpCode(HttpStatus.OK)
   @Post('otp/send')
   sendOtp(@Body() dto: SendOtpDto) {
@@ -44,7 +43,6 @@ export class AuthController {
 
   @Public()
   @UseGuards(PhoneThrottlerGuard)
-  @Throttle({ default: { limit: 5, ttl: 60_000 } })
   @HttpCode(HttpStatus.OK)
   @Post('otp/verify')
   verifyOtp(@Body() dto: VerifyOtpDto) {

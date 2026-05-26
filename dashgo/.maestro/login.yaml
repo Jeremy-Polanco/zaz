@@ -1,0 +1,41 @@
+# OTP login flow — drives the auth screen end-to-end.
+#
+# The OTP code is read from the api container's stdout. Run this AFTER you
+# bring the api up locally; it reads the OTP from `docker logs`.
+appId: com.dashgo.app
+tags:
+  - auth
+  - smoke
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+
+# Step 1 — phone
+- assertVisible: "Iniciar sesión|Ingresar|Ingresá tu teléfono"
+- tapOn:
+    id: "login-phone-input"
+- inputText: "+15555550004"
+- tapOn:
+    id: "login-send-code-btn"
+
+# Step 2 — read OTP from api logs and submit
+- extendedWaitUntil:
+    visible:
+      id: "login-code-input"
+    timeout: 8000
+- runScript:
+    file: scripts/read-otp.js
+    env:
+      MAESTRO_PHONE: "+15555550004"
+- tapOn:
+    id: "login-code-input"
+- inputText: ${output.otp}
+- tapOn:
+    id: "login-verify-btn"
+
+# Verified: app should leave the login screen.
+- extendedWaitUntil:
+    notVisible:
+      id: "login-phone-input"
+    timeout: 15000

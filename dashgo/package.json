@@ -12,6 +12,9 @@
     "test": "jest",
     "test:watch": "jest --watch",
     "test:cov": "jest --coverage",
+    "test:e2e": "maestro test .maestro",
+    "test:e2e:login": "maestro test .maestro/login.yaml",
+    "test:e2e:studio": "maestro studio",
     "postinstall": "cp node_modules/react-native-css-interop/node_modules/lightningcss-darwin-arm64/lightningcss.darwin-arm64.node node_modules/react-native-css-interop/node_modules/lightningcss/lightningcss.darwin-arm64.node 2>/dev/null || true"
   },
   "dependencies": {

@@ -184,6 +184,7 @@ function PhoneStep({
           name="phone"
           render={({ field: { onChange, value } }) => (
             <TextInput
+              testID="login-phone-input"
               className="h-11 border-b border-ink/25 pb-1 font-sans text-[18px] text-ink"
               autoCapitalize="none"
               keyboardType="phone-pad"
@@ -206,6 +207,7 @@ function PhoneStep({
       )}
 
       <Button
+        testID="login-send-code-btn"
         variant="accent"
         size="lg"
         loading={sendOtp.isPending}
@@ -322,6 +324,7 @@ function CodeStep({
           name="code"
           render={({ field: { onChange, value } }) => (
             <TextInput
+              testID="login-code-input"
               className="h-14 border-b border-ink/25 pb-1 text-center font-sans text-[28px] tracking-[8px] text-ink"
               keyboardType="number-pad"
               autoComplete="sms-otp"
@@ -372,6 +375,7 @@ function CodeStep({
       )}
 
       <Button
+        testID="login-verify-btn"
         variant="accent"
         size="lg"
         loading={verifyOtp.isPending}

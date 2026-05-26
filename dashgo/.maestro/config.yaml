@@ -1,0 +1,17 @@
+# Maestro shared config for DashGo mobile e2e flows.
+#
+# Flows assume:
+#   - dashgo-api is running on localhost:3002 (docker compose up -d api)
+#   - The Expo dev build of `dashgo` is installed on the active simulator/device
+#     (run `eas build --profile development --platform ios` or use Expo Go)
+#   - You're logged out at flow start (each flow opens the app fresh)
+#
+# Run:
+#   maestro test .maestro/login.yaml
+#   maestro test .maestro/                  # whole directory
+#   maestro studio .maestro/login.yaml      # interactive inspector
+appId: com.dashgo.app
+---
+# Phones below are seeded in dashgo-api/src/database/seed.ts.
+# All +1 555-555-xxxx numbers bypass Twilio and log the OTP to the api
+# container's stdout. Flows read those logs to advance through step 2.

@@ -36,6 +36,10 @@ import { RequestLoggerMiddleware } from './common/middleware/request-logger.midd
       validate: (config) => envSchema.parse(config),
     }),
     ScheduleModule.forRoot(),
+    // Global IP-based throttler: 100 req/60s per IP. Protects against general
+    // flooding from a single source. SMS-cost endpoints get an additional
+    // per-phone bucket via PhoneThrottlerGuard (see common/guards/) which
+    // owns its own state to avoid coupling with the global tracker.
     ThrottlerModule.forRoot([{ ttl: 60_000, limit: 100 }]),
     TypeOrmModule.forRootAsync({
       inject: [ConfigService],

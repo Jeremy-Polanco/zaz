@@ -1,0 +1,19 @@
+# Brand surface check — the login screen renders the DashGo wordmark + tagline
+# and uses the new brand identity (no legacy ZAZ leakage).
+appId: com.dashgo.app
+tags:
+  - brand
+  - smoke
+---
+- launchApp:
+    clearState: true
+
+# Wordmark and value-prop text on the auth screen.
+- assertVisible: "Dash"
+- assertVisible: "Go"
+- assertNotVisible: "ZAZ"
+- assertNotVisible: "Bodeguita"
+- assertNotVisible: "Colmapp"
+
+# Spanish-first copy
+- assertVisible: "Iniciar sesión|Ingresar"

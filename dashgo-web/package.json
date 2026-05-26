@@ -11,7 +11,11 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:cov": "vitest run --coverage",
-    "test:nvm": "~/.nvm/versions/node/v22.16.0/bin/node ./node_modules/.bin/vitest run"
+    "test:nvm": "~/.nvm/versions/node/v22.16.0/bin/node ./node_modules/.bin/vitest run",
+    "test:e2e": "playwright test",
+    "test:e2e:headed": "playwright test --headed",
+    "test:e2e:ui": "playwright test --ui",
+    "test:e2e:report": "playwright show-report"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.2.2",
@@ -38,6 +42,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.39.4",
+    "@playwright/test": "^1.60.0",
     "@tailwindcss/vite": "^4.1.17",
     "@testing-library/jest-dom": "^6.6.3",
     "@testing-library/react": "^16.3.0",
