@@ -332,6 +332,61 @@ describe('envSchema', () => {
     });
   });
 
+  describe('production: TWILIO_WHATSAPP_FROM + TWILIO_WHATSAPP_OTP_TEMPLATE_SID must be set together', () => {
+    it('succeeds in production when both WhatsApp vars are absent (OTP fails loudly at send-time instead of blocking boot)', () => {
+      const result = envSchema.safeParse({
+        ...validEnv(),
+        NODE_ENV: 'production',
+        DB_SYNCHRONIZE: 'false',
+      });
+      expect(result.success).toBe(true);
+    });
+
+    it('succeeds in production when both WhatsApp vars are set', () => {
+      const result = envSchema.safeParse({
+        ...validEnv(),
+        NODE_ENV: 'production',
+        DB_SYNCHRONIZE: 'false',
+        TWILIO_WHATSAPP_FROM: 'whatsapp:+18001234567',
+        TWILIO_WHATSAPP_OTP_TEMPLATE_SID: 'HXabc123',
+      });
+      expect(result.success).toBe(true);
+    });
+
+    it('fails in production when TWILIO_WHATSAPP_FROM is set without TEMPLATE_SID', () => {
+      const result = envSchema.safeParse({
+        ...validEnv(),
+        NODE_ENV: 'production',
+        DB_SYNCHRONIZE: 'false',
+        TWILIO_WHATSAPP_FROM: 'whatsapp:+18001234567',
+      });
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        const issue = result.error.issues.find(
+          (i) =>
+            Array.isArray(i.path) && i.path[0] === 'TWILIO_WHATSAPP_OTP_TEMPLATE_SID',
+        );
+        expect(issue).toBeDefined();
+      }
+    });
+
+    it('fails in production when TEMPLATE_SID is set without TWILIO_WHATSAPP_FROM', () => {
+      const result = envSchema.safeParse({
+        ...validEnv(),
+        NODE_ENV: 'production',
+        DB_SYNCHRONIZE: 'false',
+        TWILIO_WHATSAPP_OTP_TEMPLATE_SID: 'HXabc123',
+      });
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        const issue = result.error.issues.find(
+          (i) => Array.isArray(i.path) && i.path[0] === 'TWILIO_WHATSAPP_FROM',
+        );
+        expect(issue).toBeDefined();
+      }
+    });
+  });
+
   describe('relaxation: STRIPE_SUBSCRIPTION_PRICE_ID', () => {
     it("succeeds when NODE_ENV='production' and STRIPE_SUBSCRIPTION_PRICE_ID is absent", () => {
       const env = {

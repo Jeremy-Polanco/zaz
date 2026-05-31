@@ -36,6 +36,18 @@ export const envSchema = z.object({
   TWILIO_API_KEY_SECRET: z.string(),
   TWILIO_FROM_NUMBER: z.string(),
 
+  // WhatsApp Business via Twilio (production OTP path).
+  // TWILIO_WHATSAPP_FROM is the sender, format: `whatsapp:+1<number>`. For
+  //   the Twilio sandbox use `whatsapp:+14155238886`.
+  // TWILIO_WHATSAPP_OTP_TEMPLATE_SID is the Content Template SID (HX…) for
+  //   the approved Spanish authentication template. Required outside the
+  //   sandbox because business-initiated WhatsApp messages MUST use a
+  //   pre-approved template per Meta policy. When missing, TwilioService
+  //   falls back to free-form text — only works on the Twilio sandbox where
+  //   each tester has joined with `join <code>`.
+  TWILIO_WHATSAPP_FROM: z.string().optional(),
+  TWILIO_WHATSAPP_OTP_TEMPLATE_SID: z.string().optional(),
+
   // Order SMS notifications
   ORDER_SMS_NOTIFY_NUMBERS: z
     .string()
@@ -90,6 +102,22 @@ export const envSchema = z.object({
         code: z.ZodIssueCode.custom,
         path: ['SENTRY_DSN'],
         message: 'SENTRY_DSN is required in production',
+      });
+    }
+    // Rule 4 — production WhatsApp OTP requires both the sender and the
+    // approved template SID. Without the template SID, business-initiated
+    // messages are rejected by Meta; without the sender, no message gets
+    // sent at all. We allow them to BOTH be absent (boot keeps working,
+    // OTP fails loudly at send-time) so non-API services don't get blocked
+    // by Twilio outages, but if one is set the other must be too.
+    const hasWaFrom = !!env.TWILIO_WHATSAPP_FROM;
+    const hasWaTemplate = !!env.TWILIO_WHATSAPP_OTP_TEMPLATE_SID;
+    if (env.NODE_ENV === 'production' && hasWaFrom !== hasWaTemplate) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: hasWaFrom ? ['TWILIO_WHATSAPP_OTP_TEMPLATE_SID'] : ['TWILIO_WHATSAPP_FROM'],
+        message:
+          'TWILIO_WHATSAPP_FROM and TWILIO_WHATSAPP_OTP_TEMPLATE_SID must be set together in production',
       });
     }
   });

@@ -82,10 +82,12 @@ export class AuthService {
         `[AUTH_BYPASS] OTP send skipped for ${phone}; client should submit AUTH_BYPASS_OTP_CODE`,
       );
     } else {
-      await this.twilio.sendSms(
-        phone,
-        `Tu código DashGo es ${code}. Vence en ${OTP_TTL_MINUTES} min.`,
-      );
+      // WhatsApp-only OTP. SMS path is reserved for admin order notifications
+      // because A2P 10DLC SMS registration is heavy compared to the WhatsApp
+      // Business path — see DEPLOYMENT.md §Twilio WhatsApp setup. If we ever
+      // need an SMS fallback (users without WhatsApp), wrap this in a
+      // try/catch and call this.twilio.sendSms() in the catch.
+      await this.twilio.sendWhatsAppOtp(phone, code);
     }
 
     return { sent: true, expiresAt: expiresAt.toISOString() };

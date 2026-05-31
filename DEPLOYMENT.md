@@ -73,7 +73,9 @@ After the app is created, go to **Settings → Components → api → Environmen
 | `TWILIO_ACCOUNT_SID` | Twilio console (Production credentials) |
 | `TWILIO_API_KEY_SID` | Twilio → Account → API Keys → create a Standard key |
 | `TWILIO_API_KEY_SECRET` | (shown once when you create the key) |
-| `TWILIO_FROM_NUMBER` | Your Twilio production phone number, E.164 format (`+1...`) |
+| `TWILIO_FROM_NUMBER` | Twilio SMS number, E.164 format (`+1...`) — used ONLY for admin order notifications. OTP uses WhatsApp below. |
+| `TWILIO_WHATSAPP_FROM` | `whatsapp:+1...` — your verified WhatsApp Business sender (or `whatsapp:+14155238886` for the Twilio sandbox during dev) |
+| `TWILIO_WHATSAPP_OTP_TEMPLATE_SID` | `HX...` — Content SID of the approved Spanish OTP template. Required outside the sandbox. See §3.5 below. |
 | `SENTRY_DSN` | The DSN from the **dashgo-api** Sentry project |
 
 `CORS_ORIGIN` and `PUBLIC_WEB_URL` will get the Vercel URL — set them in step 4.3.
@@ -107,6 +109,57 @@ If `db` is `down`, check that `DB_SSL=true` is set and the database is healthy i
    - `invoice.payment_failed`
 4. Save → click into the new endpoint → **Signing secret** → "Reveal" → copy `whsec_...`.
 5. Paste that into `STRIPE_WEBHOOK_SECRET` in DO. The app will redeploy.
+
+### 3.5 Set up Twilio WhatsApp for OTP
+
+OTP codes go through WhatsApp instead of SMS — Meta's WhatsApp Business
+API has lighter compliance overhead than A2P 10DLC SMS registration, and
+DashGo's NY-Latino audience uses WhatsApp by default.
+
+There are three sub-steps, all in parallel:
+
+#### 3.5.A — Twilio WhatsApp Sandbox (for dev/staging, instant)
+
+[Twilio Console](https://console.twilio.com) → **Messaging** → **Try it out** → **Send a WhatsApp message** → activate the sandbox.
+
+- Sandbox sender: `whatsapp:+14155238886`
+- Each tester must text `join <your-sandbox-code>` to `+1 415 523 8886` from their WhatsApp ONCE to opt in.
+- After opting in, the api can send free-form text (no template needed).
+- Set `TWILIO_WHATSAPP_FROM=whatsapp:+14155238886` in DO staging. Leave `TWILIO_WHATSAPP_OTP_TEMPLATE_SID` UNSET to use the sandbox free-form path.
+
+#### 3.5.B — Production WABA + Twilio Sender (1-2 days)
+
+1. **Meta side** — [business.facebook.com](https://business.facebook.com) → create / verify your Business Manager. Legal name (matches EIN), business address, business website. Verification takes a few hours to a few days; start this first.
+
+2. **Twilio side** — Twilio Console → **Messaging** → **Senders** → **WhatsApp senders** → **Create new sender**:
+   - Pick a phone number NOT used for personal WhatsApp (buy a fresh one if needed, ~$1.15/mo).
+   - Display name: `DashGo`
+   - Display category: `Local Services`
+   - Description: "Delivery service for water and beverages in New York City"
+   - Link to your Facebook Business Manager from the wizard.
+
+3. Once approved you get a WhatsApp sender like `whatsapp:+1<your-number>`. Set that as `TWILIO_WHATSAPP_FROM` in DO production.
+
+#### 3.5.C — Authentication template (after WABA is approved)
+
+Twilio Console → **Content Template Builder** → **New template** → **WhatsApp** → **Authentication**:
+
+| Field | Value |
+|---|---|
+| Friendly name | `dashgo_otp_es` |
+| Language | Spanish (Latin America) |
+| Category | **AUTHENTICATION** |
+| Body | `{{1}} es tu código de DashGo. Por tu seguridad, no compartas este código.` |
+| Variable `{{1}}` | The 6-digit OTP code |
+| Button | "Copy code" (auto-added for auth templates) |
+
+Meta's auth-template approval is usually instant or within an hour. Once approved, copy the **Content SID** (starts with `HX…`) and set it as `TWILIO_WHATSAPP_OTP_TEMPLATE_SID` in DO.
+
+#### Smoke test
+
+After both `TWILIO_WHATSAPP_FROM` and `TWILIO_WHATSAPP_OTP_TEMPLATE_SID` are set, redeploy the api and hit login with your real phone. You should receive a WhatsApp message within ~2 seconds with the code + a "Copy code" button.
+
+If you see `Twilio WhatsApp is not configured — cannot send OTP in production` in the api logs, one of the two env vars is missing. The env schema's production rule enforces "both or neither", so this can only happen if you set one and not the other.
 
 ---
 
