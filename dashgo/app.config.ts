@@ -14,7 +14,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     buildNumber: '1',
     infoPlist: {
       NSLocationWhenInUseUsageDescription:
-        'DashGo uses your location to find nearby colmados and deliver to your address.',
+        'DashGo uses your location to auto-select the nearest saved delivery address at checkout.',
     },
   },
   android: {

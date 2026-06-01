@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { createFileRoute, useSearch } from '@tanstack/react-router'
+import { createFileRoute, Link, useSearch } from '@tanstack/react-router'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import {
@@ -141,7 +141,7 @@ function PhoneStep({
         Iniciar sesión
       </h1>
       <p className="mt-3 text-base text-ink-soft">
-        Poné tu teléfono y te mandamos un código por SMS.
+        Poné tu teléfono y te mandamos un código por WhatsApp.
       </p>
 
       <form onSubmit={onSubmit} className="mt-10 flex flex-col gap-6">
@@ -166,6 +166,13 @@ function PhoneStep({
         <Button type="submit" size="lg" disabled={sendOtp.isPending}>
           {sendOtp.isPending ? 'Enviando…' : 'Enviar código →'}
         </Button>
+        <p className="text-xs text-ink-muted">
+          Al continuar aceptás nuestra{' '}
+          <Link to="/privacidad" className="underline">
+            política de privacidad
+          </Link>
+          .
+        </p>
       </form>
     </>
   )

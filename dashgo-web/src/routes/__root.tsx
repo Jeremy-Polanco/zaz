@@ -248,7 +248,12 @@ function RootLayout() {
       <footer className="border-t border-ink/10 bg-paper/60 py-6">
         <div className="mx-auto flex max-w-7xl flex-col items-start justify-between gap-2 px-6 sm:flex-row sm:items-center">
           <span className="eyebrow">© DashGo · El colmado, al timbre</span>
-          <span className="eyebrow">New York City · ES / EN</span>
+          <div className="flex items-center gap-4">
+            <Link to="/privacidad" className="eyebrow underline">
+              Privacidad
+            </Link>
+            <span className="eyebrow">New York City · ES / EN</span>
+          </div>
         </div>
       </footer>
       {import.meta.env.DEV && <TanStackRouterDevtools position="bottom-right" />}
