@@ -170,6 +170,51 @@ function AppStack() {
   )
 }
 
+/**
+ * Resolve the Stripe publishable key from expo-constants (preferred — set
+ * via app.config.ts `extra.stripePublishableKey`) with a fallback to the
+ * raw env var. EAS injects EXPO_PUBLIC_* at build time, but if a future
+ * OTA update mutates `extra` without rebuilding native, the env fallback
+ * keeps us covered.
+ */
+function resolveStripeKey(): string | undefined {
+  const fromExtra = Constants.expoConfig?.extra?.stripePublishableKey as
+    | string
+    | undefined
+  const fromEnv = process.env.EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY
+  return fromExtra || fromEnv
+}
+
+/**
+ * Runtime guard mirror of app.config.ts assertProductionStripeKey().
+ *
+ * Build-time guard can be bypassed if an EAS secret is revoked between
+ * build and the user actually launching the app, or if an OTA update
+ * accidentally drops the key from `extra`. In production, refuse to mount
+ * StripeProvider when the key is missing/empty/test — instead render a
+ * support-contact error screen so the user is never silently routed into
+ * a checkout that will fail to tokenize.
+ */
+function isProductionStripeKeyInvalid(key: string | undefined): boolean {
+  // Only enforce in production builds. Dev/preview keep using pk_test_.
+  if (process.env.NODE_ENV !== 'production') return false
+  if (!key || key === '') return true
+  if (key.startsWith('pk_test_')) return true
+  if (!key.startsWith('pk_live_')) return true
+  return false
+}
+
+function StripeUnavailableScreen() {
+  return (
+    <View style={styles.errorContainer}>
+      <Text style={styles.errorTitle}>DashGo</Text>
+      <Text style={styles.errorMessage}>
+        No se pudo iniciar el pago. Por favor, contactá soporte.
+      </Text>
+    </View>
+  )
+}
+
 export default function RootLayout() {
   const [loaded] = useFonts({
     InterTight_400Regular,
@@ -185,9 +230,19 @@ export default function RootLayout() {
 
   if (!loaded) return null
 
-  const stripeKey = Constants.expoConfig?.extra?.stripePublishableKey as
-    | string
-    | undefined
+  const stripeKey = resolveStripeKey()
+
+  // Production-only fail-safe: never mount StripeProvider with a bad key.
+  if (isProductionStripeKeyInvalid(stripeKey)) {
+    return (
+      <GestureHandlerRootView style={{ flex: 1 }}>
+        <SafeAreaProvider>
+          <StatusBar style="dark" />
+          <StripeUnavailableScreen />
+        </SafeAreaProvider>
+      </GestureHandlerRootView>
+    )
+  }
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>

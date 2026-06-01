@@ -6,7 +6,11 @@
   "installCommand": "npm install",
   "rewrites": [
     {
-      "source": "/((?!api|assets|favicon.ico|favicon.svg|icons.svg|.*\\..*).*)",
+      "source": "/privacidad",
+      "destination": "/privacidad.html"
+    },
+    {
+      "source": "/((?!api|assets|favicon.ico|favicon.svg|icons.svg|privacidad\\.html|.*\\..*).*)",
       "destination": "/index.html"
     }
   ],

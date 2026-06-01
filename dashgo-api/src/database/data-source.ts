@@ -1,6 +1,7 @@
 import 'reflect-metadata';
 import { DataSource } from 'typeorm';
 import {
+  AccountDeletion,
   Category,
   Counter,
   CreditAccount,
@@ -66,6 +67,7 @@ export const AppDataSource = new DataSource({
     Subscription,
     SubscriptionPlan,
     UserAddress,
+    AccountDeletion,
   ],
   synchronize: false,
   migrationsRun: true,

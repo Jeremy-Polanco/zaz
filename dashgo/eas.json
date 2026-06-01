@@ -22,7 +22,8 @@
       "distribution": "store",
       "autoIncrement": true,
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://api.dashgo.dev/api"
+        "EXPO_PUBLIC_API_URL": "https://api.dashgo.dev/api",
+        "EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY": "$EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY"
       }
     }
   },

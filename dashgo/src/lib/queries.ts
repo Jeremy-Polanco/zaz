@@ -105,6 +105,28 @@ export function useLogout() {
   }
 }
 
+/**
+ * Permanent account deletion (Apple Guideline 5.1.1(v)).
+ *
+ * Calls DELETE /auth/me on the backend (server soft-deletes the user and
+ * scrubs PII per fiscal-retention policy), then clears the local session
+ * and resets every cached query. The caller is responsible for navigation
+ * (router.replace to landing/login) and any UX confirmation/toast.
+ */
+export function useDeleteAccount() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async () => {
+      await api.delete('/auth/me')
+    },
+    onSuccess: async () => {
+      await clearSession()
+      qc.setQueryData(['auth', 'me'], null)
+      qc.clear()
+    },
+  })
+}
+
 export function useProducts() {
   return useQuery<Product[]>({
     queryKey: ['products'],

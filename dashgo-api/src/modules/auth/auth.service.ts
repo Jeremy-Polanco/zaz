@@ -2,20 +2,34 @@ import {
   BadRequestException,
   Injectable,
   Logger,
+  NotFoundException,
+  OnModuleInit,
   UnauthorizedException,
 } from '@nestjs/common';
-import { randomInt } from 'crypto';
+import { createHash, randomInt } from 'crypto';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { InjectRepository } from '@nestjs/typeorm';
-import { IsNull, LessThan, Repository } from 'typeorm';
+import { DataSource, IsNull, LessThan, Repository } from 'typeorm';
 import * as bcrypt from 'bcrypt';
+import Stripe = require('stripe');
 import { OtpCode, User } from '../../entities';
+import { Order } from '../../entities/order.entity';
+import { UserAddress } from '../../entities/user-address.entity';
+import { Subscription } from '../../entities/subscription.entity';
+import { Rental } from '../../entities/rental.entity';
+import { CreditAccount } from '../../entities/credit-account.entity';
+import { PromoterCommissionEntry } from '../../entities/promoter-commission-entry.entity';
+import { Payout } from '../../entities/payout.entity';
+import { PointsLedgerEntry } from '../../entities/points-ledger-entry.entity';
+import { AccountDeletion } from '../../entities/account-deletion.entity';
 import { UserRole } from '../../entities/enums';
 import { SendOtpDto } from './dto/send-otp.dto';
 import { VerifyOtpDto } from './dto/verify-otp.dto';
 import { TwilioService } from '../twilio/twilio.service';
 import { PromotersService } from '../promoters/promoters.service';
+
+type StripeClient = InstanceType<typeof Stripe>;
 
 const BCRYPT_ROUNDS = 10;
 const OTP_TTL_MINUTES = 5;
@@ -23,23 +37,58 @@ const OTP_MAX_ATTEMPTS = 5;
 const OTP_RESEND_COOLDOWN_SECONDS = 30;
 
 @Injectable()
-export class AuthService {
+export class AuthService implements OnModuleInit {
   private readonly logger = new Logger(AuthService.name);
+  private stripe: StripeClient | null = null;
 
   constructor(
     @InjectRepository(User) private readonly users: Repository<User>,
     @InjectRepository(OtpCode) private readonly otps: Repository<OtpCode>,
+    @InjectRepository(Order) private readonly orders: Repository<Order>,
+    @InjectRepository(UserAddress)
+    private readonly addresses: Repository<UserAddress>,
+    @InjectRepository(Subscription)
+    private readonly subscriptions: Repository<Subscription>,
+    @InjectRepository(Rental) private readonly rentals: Repository<Rental>,
+    @InjectRepository(CreditAccount)
+    private readonly credit: Repository<CreditAccount>,
+    @InjectRepository(PromoterCommissionEntry)
+    private readonly promoterCommissions: Repository<PromoterCommissionEntry>,
+    @InjectRepository(Payout) private readonly payouts: Repository<Payout>,
+    @InjectRepository(PointsLedgerEntry)
+    private readonly pointsLedger: Repository<PointsLedgerEntry>,
+    @InjectRepository(AccountDeletion)
+    private readonly accountDeletions: Repository<AccountDeletion>,
+    private readonly dataSource: DataSource,
     private readonly jwt: JwtService,
     private readonly config: ConfigService,
     private readonly twilio: TwilioService,
     private readonly promoters: PromotersService,
   ) {}
 
+  onModuleInit(): void {
+    // FIX C2 — account deletion deletes the Stripe customer too. We lazily
+    // construct the client at module init so that AuthService remains usable
+    // for OTP flows even if Stripe is misconfigured (deleteAccount will then
+    // warn and proceed without the customer.del call).
+    const secret = this.config.get<string>('STRIPE_SECRET_KEY');
+    if (!secret) {
+      this.logger.warn(
+        'STRIPE_SECRET_KEY missing — account deletion will skip Stripe customer cleanup',
+      );
+      return;
+    }
+    this.stripe = new Stripe(secret);
+  }
+
   async refresh(refreshToken: string) {
     try {
-      const payload = await this.jwt.verifyAsync<{ sub: string }>(refreshToken, {
-        secret: this.config.get<string>('JWT_SECRET'),
-      });
+      const payload = await this.jwt.verifyAsync<{ sub: string }>(
+        refreshToken,
+        {
+          secret: this.config.get<string>('JWT_SECRET'),
+        },
+      );
       const user = await this.users.findOne({ where: { id: payload.sub } });
       if (!user) throw new UnauthorizedException();
       return this.issueTokens(user);
@@ -78,8 +127,14 @@ export class AuthService {
     );
 
     if (isBypass) {
+      // [AUTH_BYPASS_ACTIVE] — load-bearing log marker for production alerting.
+      // We emit this in EVERY environment (including production) so that ops
+      // sees a clear signal in the log stream the moment the bypass is used.
+      // env.schema.ts already blocks unsafe combinations (000000 code, non-test
+      // phones) from booting in production — this log is the second line of
+      // defense to catch misconfigurations that slip past CI.
       this.logger.warn(
-        `[AUTH_BYPASS] OTP send skipped for ${phone}; client should submit AUTH_BYPASS_OTP_CODE`,
+        `[AUTH_BYPASS_ACTIVE] OTP send skipped for ${phone}; client should submit AUTH_BYPASS_OTP_CODE`,
       );
     } else {
       // WhatsApp-only OTP. SMS path is reserved for admin order notifications
@@ -118,7 +173,9 @@ export class AuthService {
       order: { createdAt: 'DESC' },
     });
     if (!otp) {
-      throw new UnauthorizedException('No hay código pendiente para este teléfono');
+      throw new UnauthorizedException(
+        'No hay código pendiente para este teléfono',
+      );
     }
     if (otp.expiresAt.getTime() < Date.now()) {
       throw new UnauthorizedException('El código expiró — pedí uno nuevo');
@@ -215,5 +272,173 @@ export class AuthService {
         referralCode: user.referralCode,
       },
     };
+  }
+
+  /**
+   * FIX C2 — Account deletion (Apple Guideline 5.1.1(v)).
+   *
+   * Removes a user's account end-to-end. The policy mirrors privacidad.tsx:
+   *
+   *   HARD-DELETE (no retention need)
+   *     - user_addresses
+   *     - otp_codes (matched by phone)
+   *     - subscriptions
+   *     - rentals
+   *     - credit_account (movements cascade via FK)
+   *     - points_ledger_entries
+   *     - promoter_commission_entries where the user IS the promoter
+   *     - payouts the user received as a promoter
+   *
+   *   SOFT-ANONYMIZE (7-year tax/accounting retention — RD law)
+   *     - orders: customer_id → NULL,
+   *               customer_name_snapshot → 'Cuenta eliminada',
+   *               customer_phone_snapshot → NULL
+   *
+   *   EXTERNAL
+   *     - Stripe customers.del — fired AFTER the DB transaction commits so
+   *       a Stripe outage cannot leave us with orphan rows. If the customer
+   *       was already deleted upstream (error.code === 'resource_missing')
+   *       we swallow the error.
+   *
+   * Referral chain: User.referredById is ON DELETE SET NULL at the DB level,
+   * so deleting promoter A automatically nulls the referredById of every
+   * downstream user B. No application-level update needed.
+   *
+   * Wraps everything in a single TypeORM transaction so a partial failure
+   * rolls back. Logs an audit warning before commit.
+   */
+  async deleteAccount(userId: string): Promise<void> {
+    const user = await this.users.findOne({ where: { id: userId } });
+    if (!user) {
+      throw new NotFoundException('Usuario no encontrado');
+    }
+
+    const phone = user.phone;
+    const email = user.email;
+    const stripeCustomerId = user.stripeCustomerId;
+    const fullName = user.fullName;
+
+    // FIX HIGH-G6 — hash PII with JWT_SECRET as salt for the durable audit
+    // row. Computed outside the transaction so the salt-resolution failure
+    // mode is "service misconfigured" not "deletion half-finished".
+    const hashSecret = this.config.get<string>('JWT_SECRET') ?? '';
+    const hashedPhone = createHash('sha256')
+      .update((phone ?? '') + hashSecret)
+      .digest('hex');
+    const hashedEmail = email
+      ? createHash('sha256').update(email + hashSecret).digest('hex')
+      : null;
+
+    await this.dataSource.transaction(async (mgr) => {
+      const orderRepo = mgr.getRepository(Order);
+      const addressRepo = mgr.getRepository(UserAddress);
+      const otpRepo = mgr.getRepository(OtpCode);
+      const subRepo = mgr.getRepository(Subscription);
+      const rentalRepo = mgr.getRepository(Rental);
+      const creditRepo = mgr.getRepository(CreditAccount);
+      const promoterCommissionRepo = mgr.getRepository(PromoterCommissionEntry);
+      const payoutRepo = mgr.getRepository(Payout);
+      const pointsRepo = mgr.getRepository(PointsLedgerEntry);
+      const userRepo = mgr.getRepository(User);
+      const accountDeletionRepo = mgr.getRepository(AccountDeletion);
+
+      // Soft-anonymize first — we keep the order rows but unlink them from
+      // the user. Doing this BEFORE deleting the user is required because
+      // the FK is ON DELETE SET NULL, but the snapshot fields are NOT
+      // touched by that cascade — we must write them ourselves.
+      //
+      // FIX CRITICAL-N1 — also overwrite delivery_address jsonb. Without
+      // this, every retained order kept the user's full street address
+      // (text + lat + lng) forever, defeating right-to-erasure.
+      const orderCount = await orderRepo.count({
+        where: { customerId: userId },
+      });
+      if (orderCount > 0) {
+        await orderRepo.update(
+          { customerId: userId },
+          {
+            customerId: null,
+            customerNameSnapshot: 'Cuenta eliminada',
+            customerPhoneSnapshot: null,
+            deliveryAddress: {
+              text: 'Cuenta eliminada',
+              lat: null,
+              lng: null,
+            },
+          },
+        );
+      }
+
+      // FIX HIGH-G5 — snapshot the admin's full name into payouts they
+      // created BEFORE the FK becomes null via ON DELETE SET NULL. This
+      // preserves audit display ("issued by Admin X") even after the user
+      // row is gone. The FK update itself is handled by the DB cascade
+      // when we delete the user below.
+      await payoutRepo.update(
+        { createdByUserId: userId },
+        { createdByNameSnapshot: fullName },
+      );
+
+      // Hard-deletes. Ordering matters where ON DELETE RESTRICT could fire:
+      //   - credit_account has ON DELETE RESTRICT against users → delete it
+      //     before the user.
+      //   - subscriptions has ON DELETE RESTRICT against users → same.
+      // The rest are CASCADE/SET NULL and would auto-clean, but we delete
+      // them explicitly so behavior is identical across migration states
+      // and easy to assert in tests.
+      await addressRepo.delete({ userId });
+      if (phone) {
+        await otpRepo.delete({ phone });
+      }
+      await subRepo.delete({ userId });
+      await rentalRepo.delete({ userId });
+      await creditRepo.delete({ userId });
+      await pointsRepo.delete({ userId });
+      await promoterCommissionRepo.delete({ promoterId: userId });
+      await payoutRepo.delete({ promoterId: userId });
+
+      // FIX HIGH-G6 — durable audit row BEFORE the user is deleted, so the
+      // insert and the user delete share a transaction. If the insert fails
+      // (DB constraint, table missing), the whole deletion rolls back. No
+      // FK to users — the users row is gone moments later.
+      await accountDeletionRepo.save(
+        accountDeletionRepo.create({
+          hashedPhone,
+          hashedEmail,
+          stripeCustomerId: stripeCustomerId ?? null,
+          requestedVia: 'in-app',
+        }),
+      );
+
+      // Final step — hard-delete the user. DB-level FKs handle the rest:
+      // referredById on other users is SET NULL; orders.customer_id was
+      // already nulled above; payouts.created_by_user_id is SET NULL after
+      // FIX HIGH-G5.
+      await userRepo.delete(userId);
+    });
+
+    // Stripe cleanup AFTER the DB transaction commits. If Stripe is down
+    // we'd rather log an alert than roll back a successful deletion.
+    if (stripeCustomerId && this.stripe) {
+      try {
+        await this.stripe.customers.del(stripeCustomerId);
+      } catch (err: unknown) {
+        const code = (err as { code?: string } | null)?.code;
+        if (code === 'resource_missing') {
+          this.logger.warn(
+            `[ACCOUNT_DELETE] Stripe customer ${stripeCustomerId} was already deleted`,
+          );
+        } else {
+          // Re-throw so callers can see and alert. The DB rows are already
+          // gone — that's intentional, the user's PII deletion is the
+          // load-bearing part of this flow.
+          throw err;
+        }
+      }
+    }
+
+    this.logger.warn(
+      `[ACCOUNT_DELETE] user=${userId} phone=${phone ?? '(none)'} stripeCustomerId=${stripeCustomerId ?? '(none)'}`,
+    );
   }
 }

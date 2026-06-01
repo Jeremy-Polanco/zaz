@@ -26,8 +26,11 @@ export interface InvoiceView {
     paymentMethod: string;
     createdAt: Date;
   };
+  // `id` is null when the customer's account was deleted (FIX C2). In that
+  // case `fullName` carries the redaction marker (default 'Cuenta eliminada')
+  // and `phone` is null.
   customer: {
-    id: string;
+    id: string | null;
     fullName: string;
     phone: string | null;
   };
@@ -78,10 +81,7 @@ export class InvoicesService {
     return `INV-${year}-${counter.value.toString().padStart(6, '0')}`;
   }
 
-  async createForOrder(
-    orderId: string,
-    tx?: EntityManager,
-  ): Promise<Invoice> {
+  async createForOrder(orderId: string, tx?: EntityManager): Promise<Invoice> {
     const run = async (mgr: EntityManager) => {
       const invoiceRepo = mgr.getRepository(Invoice);
       const orderRepo = mgr.getRepository(Order);
@@ -153,11 +153,20 @@ export class InvoicesService {
         paymentMethod: order.paymentMethod,
         createdAt: order.createdAt,
       },
-      customer: {
-        id: order.customer.id,
-        fullName: order.customer.fullName,
-        phone: order.customer.phone,
-      },
+      // If the customer's account was deleted (FIX C2), order.customer is null
+      // and the snapshot columns carry forward the redacted display. We
+      // preserve the invoice for tax retention but expose no PII.
+      customer: order.customer
+        ? {
+            id: order.customer.id,
+            fullName: order.customer.fullName,
+            phone: order.customer.phone,
+          }
+        : {
+            id: null,
+            fullName: order.customerNameSnapshot ?? 'Cuenta eliminada',
+            phone: order.customerPhoneSnapshot,
+          },
       items: (order.items ?? []).map((item) => {
         const priceCents = Math.round(parseFloat(item.priceAtOrder) * 100);
         const lineCents = priceCents * item.quantity;

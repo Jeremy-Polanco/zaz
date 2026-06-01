@@ -18,13 +18,41 @@ export class Order {
   @PrimaryGeneratedColumn('uuid')
   id!: string;
 
+  // customer_id is NULLABLE so we can SET NULL on account deletion (FIX C2).
+  // Tax/accounting law in RD requires up to 7-year invoice retention, so we
+  // can't hard-delete orders. Instead, on AuthService.deleteAccount, we set
+  // customer_id=NULL and copy a redaction marker into customer_name_snapshot.
   @Index()
-  @Column({ name: 'customer_id', type: 'uuid' })
-  customerId!: string;
+  @Column({ name: 'customer_id', type: 'uuid', nullable: true })
+  customerId!: string | null;
 
-  @ManyToOne(() => User, (user) => user.orders, { onDelete: 'RESTRICT' })
+  @ManyToOne(() => User, (user) => user.orders, {
+    nullable: true,
+    onDelete: 'SET NULL',
+  })
   @JoinColumn({ name: 'customer_id' })
-  customer!: User;
+  customer!: User | null;
+
+  // Snapshot fields populated ONLY when the customer's account is deleted
+  // (FIX C2). At rest, they are null and joining `customer` gives the live
+  // user. After deletion: customer_name_snapshot='Cuenta eliminada',
+  // customer_phone_snapshot=null. The remaining order columns
+  // (subtotal, totalAmount, taxRate, …) carry the business record forward.
+  @Column({
+    name: 'customer_name_snapshot',
+    type: 'varchar',
+    length: 255,
+    nullable: true,
+  })
+  customerNameSnapshot!: string | null;
+
+  @Column({
+    name: 'customer_phone_snapshot',
+    type: 'varchar',
+    length: 40,
+    nullable: true,
+  })
+  customerPhoneSnapshot!: string | null;
 
   @Index()
   @Column({

@@ -19,8 +19,12 @@ export enum PaymentMethod {
   DIGITAL = 'digital',
 }
 
+// FIX CRITICAL-N1 — widened lat/lng to `number | null` so the anonymized
+// state after account deletion is representable: { text: 'Cuenta eliminada',
+// lat: null, lng: null }. Live addresses still use number; only the
+// post-deletion scrub overwrites with null.
 export interface GeoAddress {
   text: string;
-  lat?: number;
-  lng?: number;
+  lat?: number | null;
+  lng?: number | null;
 }

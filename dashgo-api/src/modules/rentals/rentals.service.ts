@@ -18,6 +18,7 @@ import { Product } from '../../entities/product.entity';
 import { CustomerRentalResponseDto } from './dto/customer-rental-response.dto';
 import { AdminRentalResponseDto } from './dto/admin-rental-response.dto';
 import { ChargeLateFeeResponseDto } from './dto/charge-late-fee-response.dto';
+import { assertStripeProductionConfig } from '../../common/stripe/stripe-runtime-guard';
 
 type StripeClient = InstanceType<typeof Stripe>;
 
@@ -65,8 +66,19 @@ export class RentalsService implements OnModuleInit {
 
   async onModuleInit(): Promise<void> {
     const secret = this.config.get<string>('STRIPE_SECRET_KEY');
+    // FIX C6 — fail boot in production if Stripe credentials are misconfigured.
+    assertStripeProductionConfig({
+      nodeEnv: this.config.get<string>('NODE_ENV') ?? 'development',
+      stripeSecretKey: secret,
+      stripeWebhookSecret: this.config.get<string>('STRIPE_WEBHOOK_SECRET'),
+      stripeSubscriptionPriceId: this.config.get<string>(
+        'STRIPE_SUBSCRIPTION_PRICE_ID',
+      ),
+    });
     if (!secret) {
-      this.logger.warn('STRIPE_SECRET_KEY missing — rental Stripe integration disabled');
+      this.logger.warn(
+        'STRIPE_SECRET_KEY missing — rental Stripe integration disabled',
+      );
       return;
     }
     this.stripe = new Stripe(secret);
@@ -74,7 +86,9 @@ export class RentalsService implements OnModuleInit {
 
   private requireStripe(): StripeClient {
     if (!this.stripe) {
-      throw new Error('Stripe client not initialized — STRIPE_SECRET_KEY missing');
+      throw new Error(
+        'Stripe client not initialized — STRIPE_SECRET_KEY missing',
+      );
     }
     return this.stripe;
   }
@@ -87,7 +101,10 @@ export class RentalsService implements OnModuleInit {
   // No Stripe call here — Stripe subscription is created in activateForOrder.
   // ─────────────────────────────────────────────────────────────────────────
 
-  async createForOrder(params: CreateForOrderParams, tx?: EntityManager): Promise<Rental> {
+  async createForOrder(
+    params: CreateForOrderParams,
+    tx?: EntityManager,
+  ): Promise<Rental> {
     const { userId, productId, orderId, product } = params;
 
     // When an external TX is provided (e.g., from OrdersService.create), use it directly
@@ -141,7 +158,7 @@ export class RentalsService implements OnModuleInit {
       userId,
       productId,
       orderId,
-      stripePriceId: product.stripePriceId!,
+      stripePriceId: product.stripePriceId,
       monthlyRentCents: product.monthlyRentCents,
       lateFeeCents: product.lateFeeCents,
       status: RentalStatus.PENDING_SETUP,
@@ -197,14 +214,18 @@ export class RentalsService implements OnModuleInit {
     }
 
     if (rental.status !== RentalStatus.PENDING_SETUP) {
-      this.logger.warn(`activateForOrder: rental ${rentalId} is not pending_setup (status=${rental.status}), skipping`);
+      this.logger.warn(
+        `activateForOrder: rental ${rentalId} is not pending_setup (status=${rental.status}), skipping`,
+      );
       return rental;
     }
 
     // Step 2: Load user
     const user = await this.users.findOne({ where: { id: rental.userId } });
     if (!user?.stripeCustomerId) {
-      this.logger.warn(`activateForOrder: user ${rental.userId} has no stripeCustomerId`);
+      this.logger.warn(
+        `activateForOrder: user ${rental.userId} has no stripeCustomerId`,
+      );
       return rental;
     }
 
@@ -212,7 +233,9 @@ export class RentalsService implements OnModuleInit {
       return await this.performActivation(rental, user);
     } catch (err) {
       // T24: Stripe failure — keep pending_setup, log, return unchanged
-      this.logger.error(`activateForOrder: Stripe subscriptions.create failed for rental ${rentalId}: ${(err as Error).message}`);
+      this.logger.error(
+        `activateForOrder: Stripe subscriptions.create failed for rental ${rentalId}: ${(err as Error).message}`,
+      );
       Sentry.captureException(err, {
         tags: { module: 'rentals', phase: 'activation' },
         extra: { rentalId, userId: rental.userId, productId: rental.productId },
@@ -235,7 +258,7 @@ export class RentalsService implements OnModuleInit {
 
     const sub = await stripe.subscriptions.create(
       {
-        customer: user.stripeCustomerId!,
+        customer: user.stripeCustomerId,
         items: [{ price: rental.stripePriceId }],
         trial_end: trialEnd,
         billing_cycle_anchor: trialEnd,
@@ -245,7 +268,7 @@ export class RentalsService implements OnModuleInit {
           userId: rental.userId,
           productId: rental.productId,
         },
-      } as Parameters<StripeClient['subscriptions']['create']>[0],
+      },
       { idempotencyKey: `rental-setup-${rentalId}` },
     );
 
@@ -253,16 +276,29 @@ export class RentalsService implements OnModuleInit {
       id: string;
       current_period_start?: number;
       current_period_end?: number;
-      items?: { data?: Array<{ current_period_start?: number; current_period_end?: number }> };
+      items?: {
+        data?: Array<{
+          current_period_start?: number;
+          current_period_end?: number;
+        }>;
+      };
     };
 
-    const periodStart = subObj.items?.data?.[0]?.current_period_start ?? subObj.current_period_start ?? null;
-    const periodEnd = subObj.items?.data?.[0]?.current_period_end ?? subObj.current_period_end ?? null;
+    const periodStart =
+      subObj.items?.data?.[0]?.current_period_start ??
+      subObj.current_period_start ??
+      null;
+    const periodEnd =
+      subObj.items?.data?.[0]?.current_period_end ??
+      subObj.current_period_end ??
+      null;
 
     rental.status = RentalStatus.ACTIVE;
     rental.stripeSubscriptionId = subObj.id;
     rental.activatedAt = new Date();
-    rental.currentPeriodStart = periodStart ? new Date(periodStart * 1000) : null;
+    rental.currentPeriodStart = periodStart
+      ? new Date(periodStart * 1000)
+      : null;
     rental.currentPeriodEnd = periodEnd ? new Date(periodEnd * 1000) : null;
 
     return this.rentals.save(rental);
@@ -338,8 +374,16 @@ export class RentalsService implements OnModuleInit {
   // T30 — listAdmin
   // ─────────────────────────────────────────────────────────────────────────
 
-  async listAdmin(filters: ListAdminFilters): Promise<{ items: AdminRentalResponseDto[]; total: number }> {
-    const { status, userId, productId, page = 1, pageSize = DEFAULT_PAGE_SIZE } = filters;
+  async listAdmin(
+    filters: ListAdminFilters,
+  ): Promise<{ items: AdminRentalResponseDto[]; total: number }> {
+    const {
+      status,
+      userId,
+      productId,
+      page = 1,
+      pageSize = DEFAULT_PAGE_SIZE,
+    } = filters;
 
     const qb = this.rentals
       .createQueryBuilder('rental')
@@ -409,7 +453,10 @@ export class RentalsService implements OnModuleInit {
   // alsoCancel=true → call cancelAdmin after PI success.
   // ─────────────────────────────────────────────────────────────────────────
 
-  async chargeLateFee(rentalId: string, alsoCancel: boolean): Promise<ChargeLateFeeResponseDto> {
+  async chargeLateFee(
+    rentalId: string,
+    alsoCancel: boolean,
+  ): Promise<ChargeLateFeeResponseDto> {
     // Load rental
     const rental = await this.rentals.findOne({ where: { id: rentalId } });
     if (!rental) {
@@ -418,7 +465,10 @@ export class RentalsService implements OnModuleInit {
 
     // T38: pre-check — lateFeeCents must be > 0
     if (rental.lateFeeCents === 0) {
-      throw new HttpException('LATE_FEE_NOT_CONFIGURED', HttpStatus.SERVICE_UNAVAILABLE);
+      throw new HttpException(
+        'LATE_FEE_NOT_CONFIGURED',
+        HttpStatus.SERVICE_UNAVAILABLE,
+      );
     }
 
     // Load user for stripeCustomerId
@@ -448,12 +498,14 @@ export class RentalsService implements OnModuleInit {
             rentalId,
             userId: rental.userId,
           },
-        } as Parameters<StripeClient['paymentIntents']['create']>[0],
+        },
         { idempotencyKey },
       );
     } catch (err) {
       // T40: Stripe PI failure → 502 STRIPE_PAYMENT_FAILED
-      this.logger.error(`chargeLateFee: PaymentIntent failed for rental ${rentalId}: ${(err as Error).message}`);
+      this.logger.error(
+        `chargeLateFee: PaymentIntent failed for rental ${rentalId}: ${(err as Error).message}`,
+      );
       throw new HttpException('STRIPE_PAYMENT_FAILED', HttpStatus.BAD_GATEWAY);
     }
 
@@ -530,10 +582,9 @@ export class RentalsService implements OnModuleInit {
     // Cancel Stripe subscription if one exists
     if (rental.stripeSubscriptionId) {
       const stripe = this.requireStripe();
-      await stripe.subscriptions.cancel(
-        rental.stripeSubscriptionId,
-        { invoice_now: false } as Parameters<StripeClient['subscriptions']['cancel']>[1],
-      );
+      await stripe.subscriptions.cancel(rental.stripeSubscriptionId, {
+        invoice_now: false,
+      });
     }
 
     // Update DB
@@ -583,7 +634,9 @@ export class RentalsService implements OnModuleInit {
       const updated = await this.performActivation(rental, user);
       return this.toAdminDto(updated);
     } catch (err) {
-      this.logger.error(`retrySetup: Stripe subscriptions.create failed for rental ${rentalId}: ${(err as Error).message}`);
+      this.logger.error(
+        `retrySetup: Stripe subscriptions.create failed for rental ${rentalId}: ${(err as Error).message}`,
+      );
       throw new HttpException('STRIPE_PAYMENT_FAILED', HttpStatus.BAD_GATEWAY);
     }
   }
@@ -600,7 +653,10 @@ export class RentalsService implements OnModuleInit {
   //   invoice.payment_succeeded     → refresh Rental period bounds
   // ─────────────────────────────────────────────────────────────────────────
 
-  async handleWebhook(event: { type: string; data: { object: unknown } }): Promise<void> {
+  async handleWebhook(event: {
+    type: string;
+    data: { object: unknown };
+  }): Promise<void> {
     switch (event.type) {
       case 'customer.subscription.updated':
         await this.handleSubscriptionUpdated(event.data.object);
@@ -636,7 +692,9 @@ export class RentalsService implements OnModuleInit {
       where: { stripeSubscriptionId: sub.id },
     });
     if (!rental) {
-      this.logger.warn(`handleSubscriptionUpdated: no rental found for sub ${sub.id}`);
+      this.logger.warn(
+        `handleSubscriptionUpdated: no rental found for sub ${sub.id}`,
+      );
       return;
     }
 
@@ -658,7 +716,9 @@ export class RentalsService implements OnModuleInit {
     }
 
     await this.rentals.save(rental);
-    this.logger.log(`handleSubscriptionUpdated: rental ${rental.id} status=${rental.status}`);
+    this.logger.log(
+      `handleSubscriptionUpdated: rental ${rental.id} status=${rental.status}`,
+    );
   }
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -678,7 +738,9 @@ export class RentalsService implements OnModuleInit {
       where: { stripeSubscriptionId: sub.id },
     });
     if (!rental) {
-      this.logger.warn(`handleSubscriptionDeleted: no rental found for sub ${sub.id}`);
+      this.logger.warn(
+        `handleSubscriptionDeleted: no rental found for sub ${sub.id}`,
+      );
       return;
     }
 
@@ -723,7 +785,7 @@ export class RentalsService implements OnModuleInit {
     // Fetch the Stripe subscription to get the current period bounds
     // and find the matching rental
     const stripe = this.requireStripe();
-    const sub = await stripe.subscriptions.retrieve(subId) as unknown as {
+    const sub = (await stripe.subscriptions.retrieve(subId)) as unknown as {
       id: string;
       current_period_start?: number;
       current_period_end?: number;
@@ -733,7 +795,9 @@ export class RentalsService implements OnModuleInit {
       where: { stripeSubscriptionId: subId },
     });
     if (!rental) {
-      this.logger.warn(`handleInvoicePaymentSucceeded: no rental found for sub ${subId}`);
+      this.logger.warn(
+        `handleInvoicePaymentSucceeded: no rental found for sub ${subId}`,
+      );
       return;
     }
 
@@ -745,7 +809,9 @@ export class RentalsService implements OnModuleInit {
     }
 
     await this.rentals.save(rental);
-    this.logger.log(`handleInvoicePaymentSucceeded: rental ${rental.id} period updated`);
+    this.logger.log(
+      `handleInvoicePaymentSucceeded: rental ${rental.id} period updated`,
+    );
   }
 
   // ─────────────────────────────────────────────────────────────────────────

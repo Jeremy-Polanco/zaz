@@ -12,13 +12,17 @@ import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import Stripe = require('stripe');
-import { Subscription, SubscriptionStatus } from '../../entities/subscription.entity';
+import {
+  Subscription,
+  SubscriptionStatus,
+} from '../../entities/subscription.entity';
 import { User } from '../../entities/user.entity';
 import { SubscriptionPlan } from '../../entities/subscription-plan.entity';
 import { SubscriptionResponseDto } from './dto/subscription-response.dto';
 import { PlanDto } from './dto/plan.dto';
 import { AdminPlanResponseDto } from './dto/admin-plan-response.dto';
 import { plainToInstance } from 'class-transformer';
+import { assertStripeProductionConfig } from '../../common/stripe/stripe-runtime-guard';
 
 type StripeClient = InstanceType<typeof Stripe>;
 
@@ -85,12 +89,22 @@ export class SubscriptionService implements OnModuleInit {
 
   async onModuleInit(): Promise<void> {
     const secret = this.config.get<string>('STRIPE_SECRET_KEY');
+    // FIX C6 — fail boot in production if Stripe credentials are misconfigured.
+    assertStripeProductionConfig({
+      nodeEnv: this.config.get<string>('NODE_ENV') ?? 'development',
+      stripeSecretKey: secret,
+      stripeWebhookSecret: this.config.get<string>('STRIPE_WEBHOOK_SECRET'),
+      stripeSubscriptionPriceId: this.config.get<string>(
+        'STRIPE_SUBSCRIPTION_PRICE_ID',
+      ),
+    });
     if (!secret) {
       this.logger.warn('STRIPE_SECRET_KEY missing — subscriptions disabled');
       return;
     }
     this.stripe = new Stripe(secret);
-    const envPriceId = this.config.get<string>('STRIPE_SUBSCRIPTION_PRICE_ID') ?? '';
+    const envPriceId =
+      this.config.get<string>('STRIPE_SUBSCRIPTION_PRICE_ID') ?? '';
 
     // Bootstrap seed: only seed if no row exists yet
     const existing = await this.plans.findOne({ where: {} });
@@ -109,7 +123,9 @@ export class SubscriptionService implements OnModuleInit {
     try {
       const price = await this.stripe.prices.retrieve(envPriceId);
       const productId =
-        typeof price.product === 'string' ? price.product : (price.product as { id: string }).id;
+        typeof price.product === 'string'
+          ? price.product
+          : (price.product as { id: string }).id;
 
       const plan = this.plans.create({
         stripeProductId: productId,
@@ -119,7 +135,9 @@ export class SubscriptionService implements OnModuleInit {
         interval: price.recurring?.interval ?? 'month',
       });
       await this.plans.save(plan);
-      this.logger.log('subscription_plan seeded from env STRIPE_SUBSCRIPTION_PRICE_ID');
+      this.logger.log(
+        'subscription_plan seeded from env STRIPE_SUBSCRIPTION_PRICE_ID',
+      );
     } catch (e) {
       this.logger.error(
         `bootstrap seed failed at prices.retrieve(${envPriceId}) — leaving subscription_plan empty; will retry on next boot: ${(e as Error).message}`,
@@ -145,13 +163,21 @@ export class SubscriptionService implements OnModuleInit {
     // Validate redirect URLs against allowlist
     if (!SUBSCRIPTION_ALLOWLIST.includes(successUrl)) {
       throw new HttpException(
-        { statusCode: 400, code: 'SUBSCRIPTION_INVALID_REDIRECT', message: 'success_url no permitida' },
+        {
+          statusCode: 400,
+          code: 'SUBSCRIPTION_INVALID_REDIRECT',
+          message: 'success_url no permitida',
+        },
         HttpStatus.BAD_REQUEST,
       );
     }
     if (!SUBSCRIPTION_ALLOWLIST.includes(cancelUrl)) {
       throw new HttpException(
-        { statusCode: 400, code: 'SUBSCRIPTION_INVALID_REDIRECT', message: 'cancel_url no permitida' },
+        {
+          statusCode: 400,
+          code: 'SUBSCRIPTION_INVALID_REDIRECT',
+          message: 'cancel_url no permitida',
+        },
         HttpStatus.BAD_REQUEST,
       );
     }
@@ -178,7 +204,7 @@ export class SubscriptionService implements OnModuleInit {
       cancel_url: cancelUrl,
     });
 
-    return { url: session.url! };
+    return { url: session.url };
   }
 
   async createPortalSession(userId: string): Promise<{ url: string }> {
@@ -232,7 +258,8 @@ export class SubscriptionService implements OnModuleInit {
         {
           statusCode: 400,
           code: 'SUBSCRIPTION_PAST_DUE',
-          message: 'Tenés un pago pendiente. Actualizá tu medio de pago en el portal.',
+          message:
+            'Tenés un pago pendiente. Actualizá tu medio de pago en el portal.',
         },
         HttpStatus.BAD_REQUEST,
       );
@@ -243,10 +270,14 @@ export class SubscriptionService implements OnModuleInit {
     // DB write will come via webhook
   }
 
-  async getMySubscription(userId: string): Promise<SubscriptionResponseDto | null> {
+  async getMySubscription(
+    userId: string,
+  ): Promise<SubscriptionResponseDto | null> {
     const sub = await this.subscriptions.findOne({ where: { userId } });
     if (!sub) return null;
-    return plainToInstance(SubscriptionResponseDto, sub, { excludeExtraneousValues: true });
+    return plainToInstance(SubscriptionResponseDto, sub, {
+      excludeExtraneousValues: true,
+    });
   }
 
   async getPlan(): Promise<PlanDto | null> {
@@ -283,7 +314,9 @@ export class SubscriptionService implements OnModuleInit {
           recurring: { interval: plan.interval as 'month' },
           product: plan.stripeProductId,
         },
-        { idempotencyKey: `plan-price:${plan.id}:${unitAmountCents}:${Date.now()}` },
+        {
+          idempotencyKey: `plan-price:${plan.id}:${unitAmountCents}:${Date.now()}`,
+        },
       );
     } catch (e) {
       this.logger.error(
@@ -301,7 +334,9 @@ export class SubscriptionService implements OnModuleInit {
 
     // Step 2: set new Price as Product default_price
     try {
-      await stripe.products.update(plan.stripeProductId, { default_price: newPrice.id });
+      await stripe.products.update(plan.stripeProductId, {
+        default_price: newPrice.id,
+      });
     } catch (e) {
       this.logger.error(
         `updatePlan: stripe.products.update failed (orphaned new price ${newPrice.id}): ${(e as Error).message}`,
@@ -388,17 +423,19 @@ export class SubscriptionService implements OnModuleInit {
 
     switch (event.type) {
       case 'checkout.session.completed': {
-        const session = event.data.object as unknown as StripeSessionObject;
+        const session = event.data.object as StripeSessionObject;
         if (session.mode !== 'subscription') return;
         if (!session.subscription) return;
         const subId =
           typeof session.subscription === 'string'
             ? session.subscription
-            : (session.subscription as { id: string }).id;
+            : session.subscription.id;
 
         // If metadata.userId not on session, try to get it from the subscription
         if (!session.metadata?.userId) {
-          this.logger.warn(`checkout.session ${session.id} has no metadata.userId — skipping`);
+          this.logger.warn(
+            `checkout.session ${session.id} has no metadata.userId — skipping`,
+          );
           return;
         }
 
@@ -406,17 +443,17 @@ export class SubscriptionService implements OnModuleInit {
         const stripeSub = stripeSubRaw as unknown as StripeSubscriptionObject;
         // Carry userId from session metadata to subscription metadata if not present
         if (!stripeSub.metadata?.userId) {
-          (stripeSub.metadata as Record<string, string>).userId = session.metadata.userId;
+          stripeSub.metadata.userId = session.metadata.userId;
         }
         await this.upsertSubscription(stripeSub);
         // Persist stripe customer ID on the user if not yet saved
-        await this.persistCustomerId(session.metadata.userId, session.customer as string);
+        await this.persistCustomerId(session.metadata.userId, session.customer);
         return;
       }
 
       case 'customer.subscription.created':
       case 'customer.subscription.updated': {
-        const sub = event.data.object as unknown as StripeSubscriptionObject;
+        const sub = event.data.object as StripeSubscriptionObject;
         // Guard: rental subscriptions carry metadata.rentalId — they are handled
         // by RentalsService.handleWebhook and must NOT pollute the subscriptions table.
         if (sub.metadata?.rentalId) return;
@@ -425,7 +462,7 @@ export class SubscriptionService implements OnModuleInit {
       }
 
       case 'customer.subscription.deleted': {
-        const sub = event.data.object as unknown as StripeSubscriptionObject;
+        const sub = event.data.object as StripeSubscriptionObject;
         // Guard: rental subscriptions carry metadata.rentalId — skip SaaS upsert.
         if (sub.metadata?.rentalId) return;
         // Force canceled status
@@ -436,14 +473,14 @@ export class SubscriptionService implements OnModuleInit {
 
       case 'invoice.payment_succeeded':
       case 'invoice.payment_failed': {
-        const invoice = event.data.object as unknown as StripeInvoiceObject;
+        const invoice = event.data.object as StripeInvoiceObject;
         if (!invoice.subscription) return;
         const subId =
           typeof invoice.subscription === 'string'
             ? invoice.subscription
-            : (invoice.subscription as { id: string }).id;
+            : invoice.subscription.id;
         const stripeSubRaw2 = await stripe.subscriptions.retrieve(subId);
-        await this.upsertSubscription(stripeSubRaw2 as unknown as StripeSubscriptionObject);
+        await this.upsertSubscription(stripeSubRaw2);
         return;
       }
 
@@ -516,7 +553,10 @@ export class SubscriptionService implements OnModuleInit {
     return plan;
   }
 
-  private async persistCustomerId(userId: string, customerId: string): Promise<void> {
+  private async persistCustomerId(
+    userId: string,
+    customerId: string,
+  ): Promise<void> {
     if (!customerId) return;
     const user = await this.users.findOne({
       where: { id: userId },
@@ -532,11 +572,13 @@ export class SubscriptionService implements OnModuleInit {
    * legacy API (pre-2025-04-30, fields on subscription) and newer API
    * (2025-04-30+, fields moved to items.data[0]).
    */
-  private extractPeriodBounds(
-    stripeSub: StripeSubscriptionObject,
-  ): { start: Date | null; end: Date | null } {
+  private extractPeriodBounds(stripeSub: StripeSubscriptionObject): {
+    start: Date | null;
+    end: Date | null;
+  } {
     const item = stripeSub.items?.data?.[0];
-    const startUnix = stripeSub.current_period_start ?? item?.current_period_start;
+    const startUnix =
+      stripeSub.current_period_start ?? item?.current_period_start;
     const endUnix = stripeSub.current_period_end ?? item?.current_period_end;
     return {
       start: typeof startUnix === 'number' ? new Date(startUnix * 1000) : null,
@@ -544,10 +586,14 @@ export class SubscriptionService implements OnModuleInit {
     };
   }
 
-  private async upsertSubscription(stripeSub: StripeSubscriptionObject): Promise<void> {
+  private async upsertSubscription(
+    stripeSub: StripeSubscriptionObject,
+  ): Promise<void> {
     const userId = stripeSub.metadata?.userId;
     if (!userId) {
-      this.logger.warn(`subscription ${stripeSub.id} has no metadata.userId — skipping upsert`);
+      this.logger.warn(
+        `subscription ${stripeSub.id} has no metadata.userId — skipping upsert`,
+      );
       return;
     }
 
@@ -579,7 +625,9 @@ export class SubscriptionService implements OnModuleInit {
       },
       ['stripeSubscriptionId'],
     );
-    this.logger.log(`upserted subscription ${stripeSub.id} for user ${userId} — status: ${stripeSub.status}`);
+    this.logger.log(
+      `upserted subscription ${stripeSub.id} for user ${userId} — status: ${stripeSub.status}`,
+    );
   }
 
   private normalizeStatus(stripeStatus: string): SubscriptionStatus {
@@ -598,7 +646,9 @@ export class SubscriptionService implements OnModuleInit {
         return SubscriptionStatus.INCOMPLETE_EXPIRED;
       default:
         // Forward-compat: unknown future statuses map to INCOMPLETE
-        this.logger.warn(`Unknown Stripe subscription status: ${stripeStatus} — mapping to INCOMPLETE`);
+        this.logger.warn(
+          `Unknown Stripe subscription status: ${stripeStatus} — mapping to INCOMPLETE`,
+        );
         return SubscriptionStatus.INCOMPLETE;
     }
   }

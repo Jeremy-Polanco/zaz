@@ -26,13 +26,21 @@ describe('envSchema', () => {
   });
 
   describe('defaults', () => {
-    it("defaults NODE_ENV to 'development' when absent", () => {
+    // FIX HIGH-G4 — NODE_ENV no longer has a silent 'development' default.
+    // A missing NODE_ENV was silently treated as 'development', which
+    // disables every production-only guard (Sentry DSN, sk_live_* check,
+    // AUTH_BYPASS guard, DB_SYNCHRONIZE rejection). Now it MUST be set
+    // explicitly to one of development | test | production.
+    it("rejects when NODE_ENV is absent (no default — must be set explicitly)", () => {
       const env = validEnv() as Record<string, unknown>;
       delete env['NODE_ENV'];
       const result = envSchema.safeParse(env);
-      expect(result.success).toBe(true);
-      if (result.success) {
-        expect(result.data.NODE_ENV).toBe('development');
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        const issue = result.error.issues.find(
+          (i) => Array.isArray(i.path) && i.path[0] === 'NODE_ENV',
+        );
+        expect(issue).toBeDefined();
       }
     });
 
@@ -384,6 +392,166 @@ describe('envSchema', () => {
         );
         expect(issue).toBeDefined();
       }
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // FIX C1 — AUTH_BYPASS production guard
+  //
+  // In production, if AUTH_BYPASS_PHONES is non-empty, the OTP code and phones
+  // must be safe:
+  //   - AUTH_BYPASS_OTP_CODE must NOT be '000000', must be 6+ digits, all digits
+  //   - every entry in AUTH_BYPASS_PHONES must be in the NANP test range
+  //     (+1555555XXXX). Any other phone is rejected.
+  //
+  // In non-production (development/test) the guard is off — no restriction.
+  // ---------------------------------------------------------------------------
+  describe('production: AUTH_BYPASS guard', () => {
+    const prod = () => ({
+      ...validEnv(),
+      NODE_ENV: 'production',
+      DB_SYNCHRONIZE: 'false',
+    });
+
+    it('fails when prod + AUTH_BYPASS_PHONES set + AUTH_BYPASS_OTP_CODE is the default 000000', () => {
+      const result = envSchema.safeParse({
+        ...prod(),
+        AUTH_BYPASS_PHONES: '+15555550100',
+        AUTH_BYPASS_OTP_CODE: '000000',
+      });
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        const paths = result.error.issues.map((i) => i.path[0]);
+        expect(paths).toContain('AUTH_BYPASS_OTP_CODE');
+      }
+    });
+
+    it('fails when prod + AUTH_BYPASS_PHONES set + AUTH_BYPASS_OTP_CODE is not all digits', () => {
+      const result = envSchema.safeParse({
+        ...prod(),
+        AUTH_BYPASS_PHONES: '+15555550100',
+        AUTH_BYPASS_OTP_CODE: 'abc123',
+      });
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        const paths = result.error.issues.map((i) => i.path[0]);
+        expect(paths).toContain('AUTH_BYPASS_OTP_CODE');
+      }
+    });
+
+    it('fails when prod + AUTH_BYPASS_PHONES contains a non-NANP-test phone like +18095551234', () => {
+      const result = envSchema.safeParse({
+        ...prod(),
+        AUTH_BYPASS_PHONES: '+18095551234',
+        AUTH_BYPASS_OTP_CODE: '482917',
+      });
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        const paths = result.error.issues.map((i) => i.path[0]);
+        expect(paths).toContain('AUTH_BYPASS_PHONES');
+      }
+    });
+
+    it('succeeds when prod + AUTH_BYPASS_PHONES has a NANP test phone + a non-default 6-digit code', () => {
+      const result = envSchema.safeParse({
+        ...prod(),
+        AUTH_BYPASS_PHONES: '+15555550100',
+        AUTH_BYPASS_OTP_CODE: '482917',
+      });
+      expect(result.success).toBe(true);
+    });
+
+    it('succeeds when prod + AUTH_BYPASS_PHONES is empty (no bypass in prod is fine)', () => {
+      const result = envSchema.safeParse({
+        ...prod(),
+        AUTH_BYPASS_PHONES: '',
+        AUTH_BYPASS_OTP_CODE: '000000',
+      });
+      expect(result.success).toBe(true);
+    });
+
+    it('succeeds when prod + AUTH_BYPASS_PHONES has multiple NANP test phones', () => {
+      const result = envSchema.safeParse({
+        ...prod(),
+        AUTH_BYPASS_PHONES: '+15555550100,+15555550199',
+        AUTH_BYPASS_OTP_CODE: '482917',
+      });
+      expect(result.success).toBe(true);
+    });
+
+    it('fails when prod + AUTH_BYPASS_PHONES mixes a NANP test phone with a real phone', () => {
+      const result = envSchema.safeParse({
+        ...prod(),
+        AUTH_BYPASS_PHONES: '+15555550100,+18095551234',
+        AUTH_BYPASS_OTP_CODE: '482917',
+      });
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        const paths = result.error.issues.map((i) => i.path[0]);
+        expect(paths).toContain('AUTH_BYPASS_PHONES');
+      }
+    });
+
+    it("does NOT enforce the guard in development", () => {
+      const result = envSchema.safeParse({
+        ...validEnv(),
+        NODE_ENV: 'development',
+        AUTH_BYPASS_PHONES: '+18095551234',
+        AUTH_BYPASS_OTP_CODE: '000000',
+      });
+      expect(result.success).toBe(true);
+    });
+
+    it("does NOT enforce the guard in test", () => {
+      const result = envSchema.safeParse({
+        ...validEnv(),
+        NODE_ENV: 'test',
+        AUTH_BYPASS_PHONES: '+18095551234',
+        AUTH_BYPASS_OTP_CODE: '000000',
+      });
+      expect(result.success).toBe(true);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // FIX CRITICAL-G2 — STRIPE_SECRET_KEY / STRIPE_WEBHOOK_SECRET empty-string
+  // bypass. An empty string was silently accepted as "set", which the runtime
+  // guard then treated as "payments disabled". An operator who wrote
+  // STRIPE_SECRET_KEY="" expecting to "turn it off" actually punched a hole
+  // in the Stripe production-key guard. Now: unset (undefined) is allowed
+  // and means "payments disabled"; "" is rejected at schema time.
+  // ---------------------------------------------------------------------------
+  describe('STRIPE_SECRET_KEY / STRIPE_WEBHOOK_SECRET non-empty when set', () => {
+    it('rejects STRIPE_SECRET_KEY when set to empty string', () => {
+      const result = envSchema.safeParse({
+        ...validEnv(),
+        STRIPE_SECRET_KEY: '',
+      });
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        const paths = result.error.issues.map((i) => i.path[0]);
+        expect(paths).toContain('STRIPE_SECRET_KEY');
+      }
+    });
+
+    it('rejects STRIPE_WEBHOOK_SECRET when set to empty string', () => {
+      const result = envSchema.safeParse({
+        ...validEnv(),
+        STRIPE_WEBHOOK_SECRET: '',
+      });
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        const paths = result.error.issues.map((i) => i.path[0]);
+        expect(paths).toContain('STRIPE_WEBHOOK_SECRET');
+      }
+    });
+
+    it('accepts a non-empty STRIPE_SECRET_KEY', () => {
+      const result = envSchema.safeParse({
+        ...validEnv(),
+        STRIPE_SECRET_KEY: 'sk_test_abc123',
+      });
+      expect(result.success).toBe(true);
     });
   });
 

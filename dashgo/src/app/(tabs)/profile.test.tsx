@@ -14,6 +14,7 @@ import { renderWithProviders } from '../../test/test-utils'
 jest.mock('../../lib/queries', () => ({
   useCurrentUser: jest.fn(),
   useLogout: jest.fn(),
+  useDeleteAccount: jest.fn(),
 }))
 
 jest.mock('expo-router', () => {
@@ -65,9 +66,17 @@ jest.mock('../../components/ui', () => {
   }
 })
 
+jest.mock('../../components/DeleteAccountModal', () => {
+  const { Text } = require('react-native')
+  return {
+    DeleteAccountModal: ({ visible }: { visible: boolean }) =>
+      visible ? <Text>DeleteAccountModal</Text> : null,
+  }
+})
+
 // ── imports after mocks ───────────────────────────────────────────────────────
 
-import { useCurrentUser, useLogout } from '../../lib/queries'
+import { useCurrentUser, useDeleteAccount, useLogout } from '../../lib/queries'
 import { router } from 'expo-router'
 import ProfileTab from './profile'
 
@@ -75,6 +84,7 @@ import ProfileTab from './profile'
 
 const mockUseCurrentUser = useCurrentUser as jest.MockedFunction<typeof useCurrentUser>
 const mockUseLogout = useLogout as jest.MockedFunction<typeof useLogout>
+const mockUseDeleteAccount = useDeleteAccount as jest.MockedFunction<typeof useDeleteAccount>
 const mockRouter = router as jest.Mocked<typeof router>
 
 function setupMocks(role: 'client' | 'super_admin_delivery' = 'client') {
@@ -93,6 +103,11 @@ function setupMocks(role: 'client' | 'super_admin_delivery' = 'client') {
   } as unknown as ReturnType<typeof useCurrentUser>)
 
   mockUseLogout.mockReturnValue(jest.fn() as unknown as ReturnType<typeof useLogout>)
+
+  mockUseDeleteAccount.mockReturnValue({
+    mutateAsync: jest.fn().mockResolvedValue(undefined),
+    isPending: false,
+  } as unknown as ReturnType<typeof useDeleteAccount>)
 }
 
 afterEach(() => {
@@ -113,5 +128,25 @@ describe('ProfileTab — Mis alquileres link', () => {
     const { getByText } = renderWithProviders(<ProfileTab />)
     fireEvent.press(getByText('Mis alquileres'))
     expect(mockRouter.navigate).toHaveBeenCalledWith('/rentals')
+  })
+})
+
+// ── Account deletion (Apple Guideline 5.1.1(v)) ───────────────────────────────
+
+describe('ProfileTab — Eliminar mi cuenta', () => {
+  it('shows the "Eliminar mi cuenta" button for a client user', () => {
+    setupMocks('client')
+    const { getByTestId } = renderWithProviders(<ProfileTab />)
+    expect(getByTestId('delete-account-button')).toBeTruthy()
+  })
+
+  it('opens the DeleteAccountModal when the button is pressed', () => {
+    setupMocks('client')
+    const { getByTestId, getByText, queryByText } = renderWithProviders(
+      <ProfileTab />,
+    )
+    expect(queryByText('DeleteAccountModal')).toBeNull()
+    fireEvent.press(getByTestId('delete-account-button'))
+    expect(getByText('DeleteAccountModal')).toBeTruthy()
   })
 })

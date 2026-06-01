@@ -15,6 +15,7 @@ import { getEffectivePrice } from '../products/pricing';
 import { PointsService } from '../points/points.service';
 import { ShippingService } from '../shipping/shipping.service';
 import { CreditService } from '../credit/credit.service';
+import { assertStripeProductionConfig } from '../../common/stripe/stripe-runtime-guard';
 
 type StripeClient = InstanceType<typeof Stripe>;
 
@@ -56,6 +57,16 @@ export class PaymentsService implements OnModuleInit {
 
   onModuleInit() {
     const secret = this.config.get<string>('STRIPE_SECRET_KEY');
+    // FIX C6 — fail boot in production if Stripe credentials are misconfigured
+    // (test key in prod, missing webhook secret, missing subscription price).
+    assertStripeProductionConfig({
+      nodeEnv: this.config.get<string>('NODE_ENV') ?? 'development',
+      stripeSecretKey: secret,
+      stripeWebhookSecret: this.config.get<string>('STRIPE_WEBHOOK_SECRET'),
+      stripeSubscriptionPriceId: this.config.get<string>(
+        'STRIPE_SUBSCRIPTION_PRICE_ID',
+      ),
+    });
     if (!secret) {
       this.logger.warn('STRIPE_SECRET_KEY missing — payments disabled');
       return;
@@ -216,13 +227,16 @@ export class PaymentsService implements OnModuleInit {
         orderId: input.orderId,
       },
       ...(input.customerId ? { customer: input.customerId } : {}),
-      ...(input.setupFutureUsage ? { setup_future_usage: input.setupFutureUsage as 'off_session' | 'on_session' } : {}),
+      ...(input.setupFutureUsage
+        ? {
+            setup_future_usage: input.setupFutureUsage,
+          }
+        : {}),
     };
 
-    const intent = await stripe.paymentIntents.create(
-      intentParams as Parameters<StripeClient['paymentIntents']['create']>[0],
-      { idempotencyKey: `order_${input.orderId}_intent` },
-    );
+    const intent = await stripe.paymentIntents.create(intentParams, {
+      idempotencyKey: `order_${input.orderId}_intent`,
+    });
     return {
       paymentIntentId: intent.id,
       clientSecret: intent.client_secret ?? '',
@@ -248,7 +262,11 @@ export class PaymentsService implements OnModuleInit {
     if (!signature) {
       throw new BadRequestException('Stripe-Signature header requerido');
     }
-    return stripe.webhooks.constructEvent(rawBody, signature, this.webhookSecret);
+    return stripe.webhooks.constructEvent(
+      rawBody,
+      signature,
+      this.webhookSecret,
+    );
   }
 
   async markPaidByIntentId(intentId: string): Promise<void> {

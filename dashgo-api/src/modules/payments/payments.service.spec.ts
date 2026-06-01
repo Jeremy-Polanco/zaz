@@ -48,6 +48,8 @@ function fakeOrder(overrides: Partial<Order> = {}): Order {
   return {
     id: 'order-1',
     customerId: 'user-1',
+    customerNameSnapshot: null,
+    customerPhoneSnapshot: null,
     status: OrderStatus.QUOTED,
     deliveryAddress: { text: '123 Test' },
     subtotal: '10.00',

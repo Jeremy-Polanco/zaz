@@ -1,6 +1,7 @@
 import { ConfigService } from '@nestjs/config';
 import { TypeOrmModuleOptions } from '@nestjs/typeorm';
 import {
+  AccountDeletion,
   Category,
   Counter,
   CreditAccount,
@@ -64,6 +65,7 @@ export const buildDatabaseConfig = (
     Subscription,
     SubscriptionPlan,
     UserAddress,
+    AccountDeletion,
   ],
   // Belt-and-suspenders: hard-disable synchronize in production regardless of env var.
   // The env schema also enforces DB_SYNCHRONIZE='false' in production.

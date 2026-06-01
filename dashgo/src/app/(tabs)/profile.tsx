@@ -1,10 +1,12 @@
+import { useState } from 'react'
 import { View, Text, ActivityIndicator, ScrollView, Pressable } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { router } from 'expo-router'
 import { SymbolView, type AndroidSymbol } from 'expo-symbols'
 import type { SFSymbol } from 'sf-symbols-typescript'
-import { useCurrentUser, useLogout } from '../../lib/queries'
+import { useCurrentUser, useDeleteAccount, useLogout } from '../../lib/queries'
 import { Button, Eyebrow, Hairline } from '../../components/ui'
+import { DeleteAccountModal } from '../../components/DeleteAccountModal'
 
 type AccountLinkProps = {
   label: string
@@ -48,7 +50,12 @@ const ROLE_LABEL: Record<string, string> = {
 export default function ProfileTab() {
   const { data: user, isPending } = useCurrentUser()
   const logout = useLogout()
+  const deleteAccount = useDeleteAccount()
   const isClient = user?.role === 'client'
+
+  const [deleteModalOpen, setDeleteModalOpen] = useState(false)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
+  const [successToast, setSuccessToast] = useState(false)
 
   if (isPending) {
     return (
@@ -61,6 +68,26 @@ export default function ProfileTab() {
   const handleLogout = async () => {
     await logout()
     router.replace('/(auth)/login')
+  }
+
+  const handleDeleteConfirm = async () => {
+    setDeleteError(null)
+    try {
+      await deleteAccount.mutateAsync()
+      setDeleteModalOpen(false)
+      setSuccessToast(true)
+      // Brief delay so the user sees confirmation before navigation.
+      setTimeout(() => {
+        setSuccessToast(false)
+        router.replace('/(auth)/login')
+      }, 1200)
+    } catch (err) {
+      setDeleteError(
+        (err as Error & { response?: { data?: { message?: string } } })
+          ?.response?.data?.message ??
+          'No pudimos eliminar tu cuenta. Intenta de nuevo.',
+      )
+    }
   }
 
   const initial = user?.fullName?.[0]?.toUpperCase() ?? '·'
@@ -148,6 +175,14 @@ export default function ProfileTab() {
           </>
         )}
 
+        {successToast && (
+          <View className="mt-6 border border-ok/40 bg-ok/10 px-4 py-3">
+            <Text className="font-sans text-[12px] text-ok">
+              Cuenta eliminada. Te vamos a extrañar.
+            </Text>
+          </View>
+        )}
+
         <Hairline className="mt-10" />
 
         <View className="mt-8">
@@ -155,7 +190,35 @@ export default function ProfileTab() {
             Cerrar sesión →
           </Button>
         </View>
+
+        {/* Apple 5.1.1(v) — in-app account deletion. Visible to every signed-in
+            user (not gated by role), in destructive style, sufficiently below
+            the logout action to discourage misclicks. */}
+        <View className="mt-4">
+          <Pressable
+            onPress={() => {
+              setDeleteError(null)
+              setDeleteModalOpen(true)
+            }}
+            accessibilityRole="button"
+            accessibilityLabel="Eliminar mi cuenta permanentemente"
+            testID="delete-account-button"
+            className="h-14 flex-row items-center justify-center border border-bad/40 px-6 active:bg-bad/5"
+          >
+            <Text className="font-sans-medium text-[12px] uppercase tracking-label text-bad">
+              Eliminar mi cuenta
+            </Text>
+          </Pressable>
+        </View>
       </ScrollView>
+
+      <DeleteAccountModal
+        visible={deleteModalOpen}
+        onClose={() => setDeleteModalOpen(false)}
+        onConfirm={handleDeleteConfirm}
+        isPending={deleteAccount.isPending}
+        errorMessage={deleteError}
+      />
     </SafeAreaView>
   )
 }

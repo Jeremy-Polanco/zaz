@@ -63,6 +63,8 @@ function fakeOrder(
   return {
     id: 'order-1',
     customerId: 'user-1',
+    customerNameSnapshot: null,
+    customerPhoneSnapshot: null,
     status: 'pending_quote' as never,
     deliveryAddress: { text: '123 Test' },
     subtotal: '10.00',
