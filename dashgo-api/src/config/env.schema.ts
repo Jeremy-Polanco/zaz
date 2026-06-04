@@ -86,8 +86,22 @@ export const envSchema = z
     PUBLIC_WEB_URL: z.string().default('http://localhost:5173'),
 
     // Sentry
-    SENTRY_DSN: z.union([z.string().url(), z.literal('')]).optional(),
+    // Optional by design — dev/test boots without it. But if set, the value
+    // must be a real DSN: a URL starting with `https://`. We reject `http://`
+    // outright because Sentry's ingest endpoints are always HTTPS, and a
+    // typo'd `http://` would silently drop every event. An empty string is
+    // accepted as "not set" so operators can clear the secret via tooling
+    // that doesn't support delete (most secret managers don't).
+    SENTRY_DSN: z
+      .union([
+        z.string().startsWith('https://', {
+          message: 'SENTRY_DSN must start with https://',
+        }),
+        z.literal(''),
+      ])
+      .optional(),
     SENTRY_TRACES_SAMPLE_RATE: z.coerce.number().min(0).max(1).default(0.1),
+    SENTRY_PROFILES_SAMPLE_RATE: z.coerce.number().min(0).max(1).default(0.1),
   })
   .superRefine((env, ctx) => {
     // Rule 1 — DB_SSL='ca' requires DB_SSL_CA.

@@ -176,8 +176,13 @@ function buildSignedSubscriptionEvent(opts: {
   productId: string;
   webhookSecret: string;
 }): { payload: string; signature: string } {
+  // id + created are required by the webhook idempotency + freshness checks.
+  // Use a randomized event id so repeat calls in a single test session do not
+  // collide with the unique constraint on stripe_event_id.
   const payload = JSON.stringify({
+    id: `evt_e2e_${opts.type}_${opts.subscriptionId}_${Math.random().toString(36).slice(2, 10)}`,
     type: opts.type,
+    created: NOW_UNIX,
     data: {
       object: {
         id: opts.subscriptionId,

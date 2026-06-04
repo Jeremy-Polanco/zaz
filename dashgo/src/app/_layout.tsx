@@ -1,8 +1,34 @@
+// =============================================================================
+// MODULE ORDERING — DO NOT REORDER THESE IMPORTS
+// =============================================================================
+// The VERY FIRST line of this file MUST be the side-effect import of
+// `../lib/sentry`. That module calls `Sentry.init()` at top-level so the SDK
+// is armed BEFORE any other import evaluates — including `global.css`, axios,
+// expo-router, Stripe, AsyncStorage, fonts, queries, geo, and NetworkBanner.
+//
+// Why this matters:
+//   ES module imports are evaluated in source order. Anything imported above
+//   `../lib/sentry` would run with Sentry uninitialized, so a boot-time crash
+//   in axios/Stripe/expo-router would never be reported. Keep the sentry
+//   import at the very top, and add new imports BELOW it, never above.
+//
+// `../lib/sentry` also re-exports `Sentry`, so this single import handles
+// both the side-effect init and the named binding used by ErrorBoundary +
+// `Sentry.wrap(RootLayout)` at the bottom of this file.
+// =============================================================================
+import { Sentry } from '../lib/sentry'
+
 import '../global.css'
 import { useEffect, useRef } from 'react'
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native'
 import { Stack, router, usePathname } from 'expo-router'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import {
+  MutationCache,
+  QueryCache,
+  QueryClient,
+  QueryClientProvider,
+} from '@tanstack/react-query'
+import axios from 'axios'
 import { StatusBar } from 'expo-status-bar'
 import { SafeAreaProvider } from 'react-native-safe-area-context'
 import { GestureHandlerRootView } from 'react-native-gesture-handler'
@@ -20,13 +46,18 @@ import {
 import { useFonts } from 'expo-font'
 import { useCurrentUser, useUpdateMe } from '../lib/queries'
 import { requestDeviceLocation, reverseGeocode } from '../lib/geo'
-
-// Sentry hook point — install sentry-expo and replace this block when ready.
-if (process.env.EXPO_PUBLIC_SENTRY_DSN) {
-  /* TODO: init Sentry when sentry-expo is installed */
-}
+import { NetworkBanner, notifyNetworkError } from '../components/NetworkBanner'
 
 export function ErrorBoundary({ error, retry }: { error: Error; retry: () => void }) {
+  // Forward the error to Sentry before rendering the fallback. Expo Router's
+  // ErrorBoundary catches render-time errors that escape useEffect / event
+  // handlers — exactly the surface that would otherwise crash the app with
+  // no breadcrumb. When Sentry isn't initialized (no DSN), captureException
+  // is a no-op, so this is safe to call unconditionally.
+  useEffect(() => {
+    Sentry.captureException(error)
+  }, [error])
+
   return (
     <View style={styles.errorContainer}>
       <Text style={styles.errorTitle}>Something went wrong</Text>
@@ -123,7 +154,34 @@ function useCreditLockoutGate() {
 
 SplashScreen.preventAutoHideAsync().catch(() => {})
 
+/**
+ * Detect axios-reported network failures so we can surface a friendly toast
+ * via NetworkBanner instead of bubbling up a generic error.
+ */
+function isNetworkError(err: unknown): boolean {
+  if (!axios.isAxiosError(err)) return false
+  return err.code === 'ERR_NETWORK'
+}
+
 const queryClient = new QueryClient({
+  queryCache: new QueryCache({
+    onError: (err) => {
+      if (isNetworkError(err)) {
+        notifyNetworkError()
+        return
+      }
+      console.error('[query]', err)
+    },
+  }),
+  mutationCache: new MutationCache({
+    onError: (err) => {
+      if (isNetworkError(err)) {
+        notifyNetworkError()
+        return
+      }
+      console.error('[mutation]', err)
+    },
+  }),
   defaultOptions: {
     queries: { staleTime: 30_000, retry: 1 },
   },
@@ -215,7 +273,7 @@ function StripeUnavailableScreen() {
   )
 }
 
-export default function RootLayout() {
+function RootLayout() {
   const [loaded] = useFonts({
     InterTight_400Regular,
     InterTight_500Medium,
@@ -255,9 +313,21 @@ export default function RootLayout() {
           <SafeAreaProvider>
             <StatusBar style="dark" />
             <AppStack />
+            <NetworkBanner />
           </SafeAreaProvider>
         </StripeProvider>
       </QueryClientProvider>
     </GestureHandlerRootView>
   )
 }
+
+/**
+ * Wrap the root component with `Sentry.wrap()` per @sentry/react-native v8.
+ *
+ * `Sentry.wrap` installs the touch-event breadcrumb integration and the
+ * automatic component-tree error boundary (separate from Expo Router's
+ * `ErrorBoundary` export above — the two layer cleanly). Per the SDK docs,
+ * this MUST be applied to the default export of the root layout. If
+ * `Sentry.init` was skipped (no DSN), `Sentry.wrap` is a passthrough.
+ */
+export default Sentry.wrap(RootLayout)

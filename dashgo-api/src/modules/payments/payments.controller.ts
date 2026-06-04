@@ -4,6 +4,7 @@ import {
   Headers,
   HttpCode,
   HttpStatus,
+  InternalServerErrorException,
   Logger,
   Post,
   Req,
@@ -19,6 +20,7 @@ import { CreatePaymentIntentDto } from './dto/create-payment-intent.dto';
 import { SubscriptionService } from '../subscription/subscription.service';
 import { CreditService } from '../credit/credit.service';
 import { RentalsService } from '../rentals/rentals.service';
+import { StripeWebhookIdempotencyService } from './stripe-webhook-idempotency.service';
 
 interface StripePaymentIntentLike {
   id: string;
@@ -45,6 +47,7 @@ export class PaymentsController {
     private readonly subscriptionService: SubscriptionService,
     private readonly credit: CreditService,
     private readonly rentalsService: RentalsService,
+    private readonly idempotency: StripeWebhookIdempotencyService,
   ) {}
 
   @UseGuards(JwtAuthGuard)
@@ -67,7 +70,75 @@ export class PaymentsController {
     @Req() req: RawBodyRequest<Request>,
     @Headers('stripe-signature') signature: string,
   ) {
-    const event = this.payments.constructWebhookEvent(req.rawBody!, signature);
+    const event = this.payments.constructWebhookEvent(req.rawBody, signature);
+
+    // Replay-attack protection. The freshness primary signal is the
+    // Stripe-Signature `t=` (signed delivery timestamp). event.created is
+    // the ORIGINAL creation time and does NOT advance on Stripe retries,
+    // so using it as the freshness clamp silently killed every Stripe
+    // retry past 5 minutes (NC2).
+    const signatureTimestamp =
+      this.idempotency.parseSignatureTimestamp(signature);
+    this.idempotency.assertFresh(
+      {
+        id: event.id,
+        type: event.type,
+        created: event.created,
+      },
+      signatureTimestamp,
+    );
+
+    // Idempotency + concurrency. runOnce takes an advisory lock keyed by
+    // event.id so concurrent deliveries serialise; it also re-drives
+    // pending/failed rows so Stripe retries can recover from transient
+    // failures (NC3).
+    const outcome = await this.idempotency.runOnce(
+      {
+        id: event.id,
+        type: event.type,
+        created: event.created,
+      },
+      () => this.dispatch(event),
+    );
+
+    if (outcome.status === 'failed') {
+      // Handler failure on this attempt. We have NOT yet exhausted
+      // retries — return a non-2xx so Stripe redelivers with backoff
+      // and our next runOnce() bumps retry_count.
+      this.logger.error(
+        `stripe webhook business logic failed (event ${event.id}): ${outcome.error.message}`,
+      );
+      throw new InternalServerErrorException(
+        `webhook handler failed for ${event.id}: ${outcome.error.message}`,
+      );
+    }
+
+    if (outcome.status === 'dead') {
+      // Exhausted MAX_WEBHOOK_RETRIES. The row is parked as `dead`. We
+      // return 500 here so Stripe stops retrying as fast as its own
+      // backoff schedule allows. Ops gets paged via the ledger query.
+      this.logger.error(
+        `stripe webhook event ${event.id} marked DEAD after retry exhaustion: ${outcome.error.message}`,
+      );
+      throw new InternalServerErrorException(
+        `webhook event ${event.id} exhausted retries`,
+      );
+    }
+
+    // processed or duplicate → 200, payload is the historic shape so
+    // downstream Stripe Dashboard checks still parse it cleanly.
+    return { received: true };
+  }
+
+  /**
+   * The original switch/case routing, extracted so the idempotency wrapper
+   * can run it inside a single transaction. Behaviour is unchanged from
+   * pre-idempotency code; only the surrounding plumbing changed.
+   */
+  private async dispatch(event: {
+    type: string;
+    data: { object: unknown };
+  }): Promise<void> {
     const intent = event.data.object as StripePaymentIntentLike;
     const kind = intent.metadata?.kind;
     switch (event.type) {
@@ -127,7 +198,6 @@ export class PaymentsController {
       default:
         break;
     }
-    return { received: true };
   }
 
   /**
@@ -142,7 +212,10 @@ export class PaymentsController {
    *
    * Returns the rentalId string if present, or null if absent.
    */
-  private async resolveRentalId(event: { type: string; data: { object: unknown } }): Promise<string | null> {
+  private async resolveRentalId(event: {
+    type: string;
+    data: { object: unknown };
+  }): Promise<string | null> {
     const obj = event.data.object as Record<string, unknown>;
 
     // Direct metadata on subscription events

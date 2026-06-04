@@ -11,6 +11,7 @@ const helmet = require('helmet');
 const compression = require('compression');
 import { AppModule } from './app.module';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
+import { applySentryMiddleware } from './common/sentry/sentry.module';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, {
@@ -31,6 +32,18 @@ async function bootstrap() {
   app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
   app.use(compression());
 
+  // Sentry middleware MUST be wired before routes (request + tracing
+  // handlers) and the error handler MUST run last. `applySentryMiddleware`
+  // owns that ordering — see sentry.module.ts for the rationale. When
+  // SENTRY_DSN is unset the handlers are inert no-ops, so this stays a
+  // single-shape boot path in dev and prod.
+  //
+  // The AllExceptionsFilter is the base filter wrapped by Sentry's Nest
+  // integration. Without that wrap, Sentry doesn't see exceptions that
+  // the global filter catches and formats.
+  const allExceptionsFilter = new AllExceptionsFilter();
+  applySentryMiddleware(app, allExceptionsFilter);
+
   app.setGlobalPrefix('api');
   app.useGlobalPipes(
     new ValidationPipe({
@@ -39,7 +52,7 @@ async function bootstrap() {
       forbidNonWhitelisted: true,
     }),
   );
-  app.useGlobalFilters(new AllExceptionsFilter());
+  app.useGlobalFilters(allExceptionsFilter);
 
   const port = parseInt(process.env.API_PORT ?? '3001', 10);
   await app.listen(port, '0.0.0.0');

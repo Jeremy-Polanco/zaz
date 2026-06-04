@@ -1,8 +1,11 @@
 import { forwardRef, Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { Order, Product } from '../../entities';
+import { Order, Product, StripeWebhookEvent } from '../../entities';
 import { PaymentsService } from './payments.service';
 import { PaymentsController } from './payments.controller';
+import { StripeWebhookIdempotencyService } from './stripe-webhook-idempotency.service';
+import { StripeWebhookEventCleanupCron } from './stripe-webhook-event-cleanup.cron';
+import { StripeWebhookEventJanitorCron } from './stripe-webhook-event-janitor.cron';
 import { PointsModule } from '../points/points.module';
 import { ShippingModule } from '../shipping/shipping.module';
 import { CreditModule } from '../credit/credit.module';
@@ -11,7 +14,7 @@ import { RentalsModule } from '../rentals/rentals.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Product, Order]),
+    TypeOrmModule.forFeature([Product, Order, StripeWebhookEvent]),
     PointsModule,
     ShippingModule,
     forwardRef(() => CreditModule),
@@ -19,7 +22,12 @@ import { RentalsModule } from '../rentals/rentals.module';
     forwardRef(() => RentalsModule),
   ],
   controllers: [PaymentsController],
-  providers: [PaymentsService],
-  exports: [PaymentsService],
+  providers: [
+    PaymentsService,
+    StripeWebhookIdempotencyService,
+    StripeWebhookEventCleanupCron,
+    StripeWebhookEventJanitorCron,
+  ],
+  exports: [PaymentsService, StripeWebhookIdempotencyService],
 })
 export class PaymentsModule {}

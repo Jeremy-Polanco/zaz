@@ -12,6 +12,7 @@ import { useCurrentUser, useLogout } from '../lib/auth'
 import { useUpdateMe } from '../lib/queries'
 import { requestBrowserLocation, reverseGeocode } from '../lib/geo'
 import { Button, DashGoMark } from '../components/ui'
+import { NetworkBanner } from '../components/NetworkBanner'
 
 const LOCKOUT_ALLOWLIST = new Set<string>(['/credit/pay', '/login'])
 
@@ -228,6 +229,7 @@ function RootLayout() {
   useCreditLockoutGate()
   return (
     <div className="flex min-h-full flex-col">
+      <NetworkBanner />
       <header className="sticky top-0 z-40 border-b border-ink/10 bg-paper/85 backdrop-blur-md">
         <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-6 py-4">
           <Link to="/" className="group flex items-center gap-3">

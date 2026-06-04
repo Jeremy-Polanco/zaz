@@ -82,4 +82,41 @@ describe('AllExceptionsFilter', () => {
       message: 'I am a teapot',
     });
   });
+
+  describe('NC1 HIGH: strips query string before exposing request URL', () => {
+    // The OTP verify endpoint is the canonical leak: clients hit
+    // `/api/auth/verify-otp?phone=%2B...&code=123456` and we used to
+    // attach `request.url` verbatim to Sentry context and the JSON
+    // response body. This test pins the path-only behavior.
+    function makeHostWithUrl(url: string): ArgumentsHost {
+      return {
+        switchToHttp: () => ({
+          getResponse: () => ({ status: statusSpy }),
+          getRequest: () => ({ method: 'POST', url }),
+        }),
+      } as unknown as ArgumentsHost;
+    }
+
+    it('strips ?phone=...&code=... from the response body path', () => {
+      const exc = new BadRequestException('bad otp');
+      filter.catch(
+        exc,
+        makeHostWithUrl('/api/auth/verify-otp?phone=%2B15145551212&code=123456'),
+      );
+      expect(lastJsonPayload).toMatchObject({
+        path: '/api/auth/verify-otp',
+      });
+      // Defensive: no fragment of the query string slips through anywhere
+      // serializable in the response body.
+      const serialized = JSON.stringify(lastJsonPayload);
+      expect(serialized).not.toContain('phone=');
+      expect(serialized).not.toContain('code=123456');
+    });
+
+    it('leaves URLs without a query string unchanged', () => {
+      const exc = new BadRequestException('plain');
+      filter.catch(exc, makeHostWithUrl('/api/orders'));
+      expect(lastJsonPayload).toMatchObject({ path: '/api/orders' });
+    });
+  });
 });

@@ -38,6 +38,58 @@ function assertProductionStripeKey() {
   }
 }
 
+/**
+ * Versioning strategy — single source of truth
+ * ---------------------------------------------
+ *
+ * `version` (semver, user-visible):
+ *   Source of truth = git release tags (e.g. `v1.2.3`).
+ *   Bumped by the release engineer when cutting a release branch/tag.
+ *   At build time, EAS reads this string and ships it as
+ *   CFBundleShortVersionString (iOS) / versionName (Android).
+ *   Both App Store Connect and EAS Update expect strict semver.
+ *
+ * `ios.buildNumber` (CFBundleVersion, App Store unique-per-upload):
+ *   Source of truth = EAS remote version service.
+ *   eas.json sets `"autoIncrement": true` for the production profile, so
+ *   EAS bumps and persists the next buildNumber on every `eas build`.
+ *   The literal `'1'` below is ONLY a local-dev placeholder for
+ *   `expo prebuild` / `expo run:ios`. It is OVERRIDDEN at build time by:
+ *     1. `process.env.EAS_BUILD_NUMBER` when EAS injects it, or
+ *     2. EAS's own native-project mutation during the build.
+ *
+ * `android.versionCode` (Play Store monotonically-increasing integer):
+ *   Same pattern as buildNumber — managed by EAS autoIncrement, with the
+ *   literal `1` as a local-dev fallback. Overridden by
+ *   `process.env.EAS_BUILD_VERSION_CODE` at EAS build time.
+ *
+ * Why this matters:
+ *   - Apple REJECTS duplicate buildNumbers on a given version. A hardcoded
+ *     `'1'` across multiple TestFlight uploads is the #1 cause of rejected
+ *     submissions. Letting EAS own the counter eliminates that class of bug.
+ *   - Play Store similarly rejects duplicate versionCodes per package.
+ *   - Keeping `version` in source (and tied to git tags) means OTA updates
+ *     via EAS Update can target the right runtime version channel.
+ */
+function resolveIosBuildNumber(): string {
+  // EAS injects EAS_BUILD_NUMBER for the current build when autoIncrement
+  // is enabled in eas.json. Falls back to '1' for local prebuild/dev runs.
+  const fromEas = process.env.EAS_BUILD_NUMBER
+  if (fromEas && fromEas.length > 0) return fromEas
+  return '1'
+}
+
+function resolveAndroidVersionCode(): number {
+  // EAS injects EAS_BUILD_VERSION_CODE for production Android builds when
+  // autoIncrement is enabled. Must be a positive integer.
+  const fromEas = process.env.EAS_BUILD_VERSION_CODE
+  if (fromEas && fromEas.length > 0) {
+    const parsed = Number.parseInt(fromEas, 10)
+    if (Number.isFinite(parsed) && parsed > 0) return parsed
+  }
+  return 1
+}
+
 export default ({ config }: ConfigContext): ExpoConfig => {
   assertProductionStripeKey()
 
@@ -45,6 +97,8 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     ...config,
     name: 'dashgo',
     slug: 'dashgo',
+    // Semver — bump when cutting a release tag (e.g. `git tag v1.0.1`).
+    // EAS Update + App Store both require strict semver here.
     version: '1.0.0',
     orientation: 'portrait',
     icon: './assets/images/icon.png',
@@ -52,7 +106,9 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     userInterfaceStyle: 'light',
     ios: {
       bundleIdentifier: 'com.dashgo.app',
-      buildNumber: '1',
+      // Managed by EAS autoIncrement (see eas.json). The '1' here is a
+      // local-dev placeholder only — never trusted for App Store uploads.
+      buildNumber: resolveIosBuildNumber(),
       // Phone-only app — disabling tablet support keeps the App Store
       // review surface small and prevents iPad screenshot requirements.
       supportsTablet: false,
@@ -79,7 +135,9 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       },
       predictiveBackGestureEnabled: false,
       package: 'com.dashgo.app',
-      versionCode: 1,
+      // Managed by EAS autoIncrement (see eas.json). The `1` here is a
+      // local-dev placeholder only — never trusted for Play Store uploads.
+      versionCode: resolveAndroidVersionCode(),
       permissions: ['ACCESS_COARSE_LOCATION', 'ACCESS_FINE_LOCATION'],
     },
     web: {
@@ -111,6 +169,16 @@ export default ({ config }: ConfigContext): ExpoConfig => {
         },
       ],
       'expo-secure-store',
+      // Sentry config plugin. Wires the native iOS / Android crash reporter
+      // into prebuild. Source maps and dSYMs are uploaded automatically when
+      // SENTRY_AUTH_TOKEN is present in the EAS build environment. With no
+      // token the plugin still installs the native module — JS errors are
+      // captured, native symbolication just isn't uploaded.
+      //
+      // We deliberately do NOT pass `setUser` or any identifying option. The
+      // mobile app's Apple privacy manifest declares "Not Linked" data
+      // collection; identifying the user to Sentry would contradict that.
+      '@sentry/react-native/expo',
       // Copies assets/PrivacyInfo.xcprivacy into the iOS app target's
       // Resources build phase. Required by Apple since May 2024.
       //

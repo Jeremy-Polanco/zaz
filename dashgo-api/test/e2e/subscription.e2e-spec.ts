@@ -135,9 +135,13 @@ describe('Subscription E2E', () => {
     });
 
     it('Simulated webhook creates subscription row in DB', async () => {
-      // Simulate a customer.subscription.updated event via the webhook endpoint
+      // Simulate a customer.subscription.updated event via the webhook endpoint.
+      // The top-level `id` + `created` are required by the idempotency/freshness
+      // checks added in StripeWebhookIdempotencyService.
       const webhookPayload = JSON.stringify({
+        id: `evt_e2e_${Date.now()}`,
         type: 'customer.subscription.updated',
+        created: NOW_UNIX,
         data: {
           object: {
             id: 'sub_e2e_test',

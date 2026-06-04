@@ -231,3 +231,9 @@ body {
 ::-webkit-scrollbar-thumb:hover {
   background: rgba(26, 21, 48, 0.38);
 }
+
+/* NetworkBanner — slide-down entry animation */
+@keyframes dashgo-banner-slide-down {
+  from { transform: translateY(-100%); opacity: 0; }
+  to   { transform: translateY(0);     opacity: 1; }
+}

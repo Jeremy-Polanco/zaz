@@ -15,6 +15,7 @@ import { PaymentsService } from './payments.service';
 import { SubscriptionService } from '../subscription/subscription.service';
 import { CreditService } from '../credit/credit.service';
 import { RentalsService } from '../rentals/rentals.service';
+import { StripeWebhookIdempotencyService } from './stripe-webhook-idempotency.service';
 import type { RawBodyRequest } from '@nestjs/common';
 import type { Request } from 'express';
 
@@ -28,9 +29,15 @@ function makeRawRequest(body: object): RawBodyRequest<Request> {
   } as RawBodyRequest<Request>;
 }
 
-function fakeEvent(type: string, data: object): object {
+function fakeEvent(
+  type: string,
+  data: object,
+  overrides: { id?: string; created?: number } = {},
+): object {
   return {
+    id: overrides.id ?? `evt_${Math.random().toString(36).slice(2)}`,
     type,
+    created: overrides.created ?? Math.floor(Date.now() / 1000),
     data: {
       object: data,
     },
@@ -46,7 +53,9 @@ const mockPaymentsService = {
   markAuthorizedByIntentId: jest.fn().mockResolvedValue(undefined),
   markPaidByIntentId: jest.fn().mockResolvedValue(undefined),
   handleAuthFailureByIntentId: jest.fn().mockResolvedValue(undefined),
-  retrieveSubscription: jest.fn().mockResolvedValue({ id: 'sub_default', metadata: {} }),
+  retrieveSubscription: jest
+    .fn()
+    .mockResolvedValue({ id: 'sub_default', metadata: {} }),
 };
 
 const mockSubscriptionService = {
@@ -61,6 +70,29 @@ const mockRentalsService = {
   handleWebhook: jest.fn().mockResolvedValue(undefined),
 };
 
+// The controller delegates idempotency + freshness to this service. Tests in
+// THIS file focus on dispatch routing, so we stub it to a pass-through that
+// always runs the handler.
+type RunOnceOutcome =
+  | { status: 'processed' }
+  | { status: 'duplicate' }
+  | { status: 'failed'; error: Error }
+  | { status: 'dead'; error: Error };
+
+const mockIdempotencyService = {
+  parseSignatureTimestamp: jest.fn().mockReturnValue(Math.floor(Date.now() / 1000)),
+  assertFresh: jest.fn(),
+  runOnce: jest.fn(
+    async (
+      _event: unknown,
+      handler: () => Promise<void>,
+    ): Promise<RunOnceOutcome> => {
+      await handler();
+      return { status: 'processed' };
+    },
+  ),
+};
+
 // ---------------------------------------------------------------------------
 // Test suite
 // ---------------------------------------------------------------------------
@@ -70,6 +102,19 @@ describe('PaymentsController — webhook rental dispatch (T49/T50)', () => {
 
   beforeEach(async () => {
     jest.clearAllMocks();
+    // Re-arm the idempotency stub after clearAllMocks() wipes its default impl.
+    mockIdempotencyService.parseSignatureTimestamp.mockReturnValue(
+      Math.floor(Date.now() / 1000),
+    );
+    mockIdempotencyService.runOnce.mockImplementation(
+      async (
+        _event: unknown,
+        handler: () => Promise<void>,
+      ): Promise<RunOnceOutcome> => {
+        await handler();
+        return { status: 'processed' };
+      },
+    );
 
     const module: TestingModule = await Test.createTestingModule({
       controllers: [PaymentsController],
@@ -78,6 +123,10 @@ describe('PaymentsController — webhook rental dispatch (T49/T50)', () => {
         { provide: SubscriptionService, useValue: mockSubscriptionService },
         { provide: CreditService, useValue: mockCreditService },
         { provide: RentalsService, useValue: mockRentalsService },
+        {
+          provide: StripeWebhookIdempotencyService,
+          useValue: mockIdempotencyService,
+        },
       ],
     }).compile();
 
@@ -230,7 +279,9 @@ describe('PaymentsController — webhook rental dispatch (T49/T50)', () => {
       await controller.webhook(req, 'sig_test');
 
       // After T50 implementation, controller fetches subscription and dispatches to rentalsService
-      expect(mockPaymentsService.retrieveSubscription).toHaveBeenCalledWith('sub_rental_for_invoice');
+      expect(mockPaymentsService.retrieveSubscription).toHaveBeenCalledWith(
+        'sub_rental_for_invoice',
+      );
       expect(mockRentalsService.handleWebhook).toHaveBeenCalledTimes(1);
       expect(mockRentalsService.handleWebhook).toHaveBeenCalledWith(event);
     });
@@ -279,13 +330,115 @@ describe('PaymentsController — webhook rental dispatch (T49/T50)', () => {
       });
 
       mockPaymentsService.constructWebhookEvent.mockReturnValueOnce(event);
-      mockRentalsService.handleWebhook.mockRejectedValueOnce(new Error('Rental DB down'));
+      mockRentalsService.handleWebhook.mockRejectedValueOnce(
+        new Error('Rental DB down'),
+      );
 
       const req = makeRawRequest(event);
       const result = await controller.webhook(req, 'sig_test');
 
       // Does not throw; returns {received: true}
       expect(result).toEqual({ received: true });
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Idempotency + replay protection wiring (controller-level)
+  // ─────────────────────────────────────────────────────────────────────────
+
+  describe('webhook idempotency + replay protection wiring', () => {
+    it('parses Stripe-Signature t= and calls idempotency.assertFresh with it BEFORE running the handler', async () => {
+      const event = fakeEvent('payment_intent.succeeded', { id: 'pi_fresh' });
+      mockPaymentsService.constructWebhookEvent.mockReturnValueOnce(event);
+      mockIdempotencyService.parseSignatureTimestamp.mockReturnValueOnce(
+        1700000000,
+      );
+
+      await controller.webhook(makeRawRequest(event), 'sig_test');
+
+      expect(
+        mockIdempotencyService.parseSignatureTimestamp,
+      ).toHaveBeenCalledWith('sig_test');
+
+      const eventWithId = event as { id: string };
+      const created: unknown = expect.any(Number);
+      expect(mockIdempotencyService.assertFresh).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: eventWithId.id,
+          type: 'payment_intent.succeeded',
+          created,
+        }),
+        1700000000,
+      );
+    });
+
+    it('returns {received:true} without re-running the handler on duplicate events', async () => {
+      const event = fakeEvent('payment_intent.succeeded', { id: 'pi_dup' });
+      mockPaymentsService.constructWebhookEvent.mockReturnValueOnce(event);
+
+      // Idempotency reports a duplicate → handler must NOT run
+      mockIdempotencyService.runOnce.mockImplementationOnce(() =>
+        Promise.resolve({ status: 'duplicate' as const }),
+      );
+
+      const result = await controller.webhook(
+        makeRawRequest(event),
+        'sig_test',
+      );
+
+      expect(result).toEqual({ received: true });
+      // The handler never fired, so the order-marking method was never called
+      expect(mockPaymentsService.markPaidByIntentId).not.toHaveBeenCalled();
+    });
+
+    it('THROWS 500 when handler fails so Stripe retries (NC3 fix)', async () => {
+      const event = fakeEvent('payment_intent.succeeded', { id: 'pi_fail' });
+      mockPaymentsService.constructWebhookEvent.mockReturnValueOnce(event);
+      mockIdempotencyService.runOnce.mockImplementationOnce(() =>
+        Promise.resolve({
+          status: 'failed' as const,
+          error: new Error('downstream DB unreachable'),
+        }),
+      );
+
+      // Previous behaviour returned {received:true} on failed — that 200'd
+      // Stripe and DROPPED the event. New behaviour: throw 500 so Stripe
+      // re-delivers and our retry_count bumps.
+      await expect(
+        controller.webhook(makeRawRequest(event), 'sig_test'),
+      ).rejects.toBeInstanceOf(Error);
+    });
+
+    it('THROWS 500 on dead status so Stripe stops retrying after we exhaust MAX_WEBHOOK_RETRIES', async () => {
+      const event = fakeEvent('payment_intent.succeeded', { id: 'pi_dead' });
+      mockPaymentsService.constructWebhookEvent.mockReturnValueOnce(event);
+      mockIdempotencyService.runOnce.mockImplementationOnce(() =>
+        Promise.resolve({
+          status: 'dead' as const,
+          error: new Error('exceeded MAX_WEBHOOK_RETRIES=5'),
+        }),
+      );
+
+      await expect(
+        controller.webhook(makeRawRequest(event), 'sig_test'),
+      ).rejects.toBeInstanceOf(Error);
+    });
+
+    it('propagates BadRequestException from assertFresh (stale event → HTTP 400)', async () => {
+      const event = fakeEvent('payment_intent.succeeded', { id: 'pi_stale' });
+      mockPaymentsService.constructWebhookEvent.mockReturnValueOnce(event);
+
+      const staleErr = Object.assign(new Error('too old'), { status: 400 });
+      mockIdempotencyService.assertFresh.mockImplementationOnce(() => {
+        throw staleErr;
+      });
+
+      await expect(
+        controller.webhook(makeRawRequest(event), 'sig_test'),
+      ).rejects.toBe(staleErr);
+
+      // Handler must NOT be reached when freshness fails
+      expect(mockIdempotencyService.runOnce).not.toHaveBeenCalled();
     });
   });
 });

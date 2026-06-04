@@ -17,3 +17,4 @@ export * from './subscription-plan.entity';
 export * from './user-address.entity';
 export * from './rental.entity';
 export * from './account-deletion.entity';
+export * from './stripe-webhook-event.entity';

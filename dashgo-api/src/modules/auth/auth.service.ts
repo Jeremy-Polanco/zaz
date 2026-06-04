@@ -4,6 +4,7 @@ import {
   Logger,
   NotFoundException,
   OnModuleInit,
+  ServiceUnavailableException,
   UnauthorizedException,
 } from '@nestjs/common';
 import { createHash, randomInt } from 'crypto';
@@ -28,6 +29,11 @@ import { SendOtpDto } from './dto/send-otp.dto';
 import { VerifyOtpDto } from './dto/verify-otp.dto';
 import { TwilioService } from '../twilio/twilio.service';
 import { PromotersService } from '../promoters/promoters.service';
+import {
+  classifyTwilioError,
+  PERMANENT_WHATSAPP_ERROR_CODES,
+  WHATSAPP_ERROR_MESSAGES,
+} from './whatsapp-error-codes';
 
 type StripeClient = InstanceType<typeof Stripe>;
 
@@ -122,7 +128,12 @@ export class AuthService implements OnModuleInit {
     const codeHash = await bcrypt.hash(code, BCRYPT_ROUNDS);
     const expiresAt = new Date(Date.now() + OTP_TTL_MINUTES * 60 * 1000);
 
-    await this.otps.save(
+    // FIX MOBILE-G1 — persist the OTP first so verifyOtp can match against it,
+    // BUT capture the row id so we can roll it back if WhatsApp delivery fails.
+    // Without the rollback the mobile client would be stuck on cooldown for
+    // 30s while no code ever arrives, and a retry inside that window would
+    // bounce off the "esperá Xs antes de pedir otro código" check.
+    const savedOtp = await this.otps.save(
       this.otps.create({ phone, codeHash, expiresAt, attempts: 0 }),
     );
 
@@ -139,10 +150,53 @@ export class AuthService implements OnModuleInit {
     } else {
       // WhatsApp-only OTP. SMS path is reserved for admin order notifications
       // because A2P 10DLC SMS registration is heavy compared to the WhatsApp
-      // Business path — see DEPLOYMENT.md §Twilio WhatsApp setup. If we ever
-      // need an SMS fallback (users without WhatsApp), wrap this in a
-      // try/catch and call this.twilio.sendSms() in the catch.
-      await this.twilio.sendWhatsAppOtp(phone, code);
+      // Business path — see DEPLOYMENT.md §Twilio WhatsApp setup.
+      //
+      // FIX HIGH-G7 — Twilio failures are NOT one error class. We classify
+      // each into one of four codes so the mobile UI can show the right UX:
+      //   • WHATSAPP_RATE_LIMITED      (HTTP 429)   → retry with longer backoff
+      //   • WHATSAPP_RECIPIENT_INVALID (21211/21614) → user fixes phone, no retry
+      //   • WHATSAPP_RECIPIENT_NOT_REACHABLE (63003/63016) → no WhatsApp, call us
+      //   • WHATSAPP_SEND_FAILED       (anything else) → generic retry
+      //
+      // The HTTP status communicates retry semantics at the protocol level
+      // (503 = transient retry-after, 400 = permanent client-fix), while the
+      // structured `code` body communicates the specific reason so the client
+      // can switch on it. We also roll back the just-saved OTP row in every
+      // failure branch so the user is not punished with the 30s cooldown for
+      // a server-side problem they cannot remediate.
+      try {
+        await this.twilio.sendWhatsAppOtp(phone, code);
+      } catch (err) {
+        const classified = classifyTwilioError(err);
+        const message =
+          err instanceof Error ? err.message : 'unknown twilio error';
+        this.logger.error(`[${classified}] phone=${phone} cause=${message}`);
+        // Best-effort cleanup — if this delete itself fails we still want to
+        // surface the original Twilio failure to the client, so we don't
+        // re-throw from inside the catch.
+        try {
+          await this.otps.delete(savedOtp.id);
+        } catch (cleanupErr) {
+          this.logger.warn(
+            `[${classified}] OTP rollback failed for ${phone}: ${
+              (cleanupErr as Error).message
+            }`,
+          );
+        }
+        const body = {
+          code: classified,
+          message: WHATSAPP_ERROR_MESSAGES[classified],
+        };
+        // Permanent codes (invalid number, not on WhatsApp) → 400 BadRequest
+        // because the user must change input before any retry can succeed.
+        // Transient codes (rate-limited, generic catch-all) → 503 so HTTP
+        // semantics carry the "retry safe" signal in addition to the body.
+        if (PERMANENT_WHATSAPP_ERROR_CODES.has(classified)) {
+          throw new BadRequestException(body);
+        }
+        throw new ServiceUnavailableException(body);
+      }
     }
 
     return { sent: true, expiresAt: expiresAt.toISOString() };
@@ -326,7 +380,9 @@ export class AuthService implements OnModuleInit {
       .update((phone ?? '') + hashSecret)
       .digest('hex');
     const hashedEmail = email
-      ? createHash('sha256').update(email + hashSecret).digest('hex')
+      ? createHash('sha256')
+          .update(email + hashSecret)
+          .digest('hex')
       : null;
 
     await this.dataSource.transaction(async (mgr) => {
