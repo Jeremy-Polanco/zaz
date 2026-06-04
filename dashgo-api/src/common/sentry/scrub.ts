@@ -103,3 +103,44 @@ export function stripQueryString(url: string): string {
   if (q < 0) return url;
   return url.slice(0, q);
 }
+
+/**
+ * Patterns of raw PII that show up in STRING-VALUED Sentry fields
+ * (exception.value, event.message, breadcrumb.message) where the
+ * key-name scrubber can't help.
+ *
+ * Realistic leak surfaces this closes:
+ *   - "Código inválido para teléfono +18095551234"
+ *   - "Failed to verify OTP 123456 for user xyz"
+ *   - "Invalid input: user@example.com is malformed"
+ *
+ * We deliberately over-match a little (e.g. 6–10 digit runs catch OTPs
+ * AND timestamps). Over-redaction is cheap; leaked PII is not.
+ */
+const E164_PHONE_REGEX = /\+\d{8,15}/g;
+const EMAIL_REGEX = /[\w.+-]+@[\w-]+\.[\w.-]+/g;
+// 6–10 standalone digits with word boundaries — matches OTPs, ZIP+plus4, and
+// short numeric account IDs while avoiding UUID fragments (which have hex
+// letters / dashes) and currency amounts (which have decimal points).
+const DIGIT_RUN_REGEX = /\b\d{6,10}\b/g;
+
+/**
+ * Redact PII patterns inside a raw string. Pass anything; non-strings
+ * return as-is. Safe inside Sentry hooks — never throws.
+ *
+ * Applied to:
+ *   - event.exception.values[i].value
+ *   - event.message
+ *   - event.breadcrumbs[i].message
+ *   - breadcrumb.message (in beforeBreadcrumb)
+ *
+ * Ordering matters: emails first (the leading-+ pattern could overlap with
+ * E.164 inside a malformed email), then phones, then bare digit runs.
+ */
+export function scrubString(input: unknown): unknown {
+  if (typeof input !== 'string') return input;
+  return input
+    .replace(EMAIL_REGEX, '[redacted-email]')
+    .replace(E164_PHONE_REGEX, '[redacted-phone]')
+    .replace(DIGIT_RUN_REGEX, '[redacted-digits]');
+}

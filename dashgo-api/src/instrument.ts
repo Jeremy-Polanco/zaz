@@ -8,7 +8,7 @@
 // its very first import.
 import * as Sentry from '@sentry/node';
 import { nodeProfilingIntegration } from '@sentry/profiling-node';
-import { scrubObject, stripQueryString } from './common/sentry/scrub';
+import { scrubObject, scrubString, stripQueryString } from './common/sentry/scrub';
 
 if (process.env.SENTRY_DSN) {
   // ─────────────────────────────────────────────────────────────────────────
@@ -98,9 +98,30 @@ if (process.env.SENTRY_DSN) {
       if (event.breadcrumbs) {
         event.breadcrumbs = event.breadcrumbs.map((b) => ({
           ...b,
+          message:
+            typeof b.message === 'string'
+              ? (scrubString(b.message) as string)
+              : b.message,
           data: b.data
             ? (scrubObject(b.data) as Record<string, unknown>)
             : undefined,
+        }));
+      }
+      // NC1 follow-up — string-value PII scrub. The key-name scrubber above
+      // can't help when raw phones/OTPs are interpolated into messages like
+      // "Código inválido para teléfono +18095551234". scrubString applies
+      // regex redaction (E.164 phones, emails, 6–10 digit runs) to the
+      // remaining string fields.
+      if (typeof event.message === 'string') {
+        event.message = scrubString(event.message) as string;
+      }
+      if (event.exception?.values) {
+        event.exception.values = event.exception.values.map((v) => ({
+          ...v,
+          value:
+            typeof v.value === 'string'
+              ? (scrubString(v.value) as string)
+              : v.value,
         }));
       }
       return event;
@@ -117,6 +138,9 @@ if (process.env.SENTRY_DSN) {
         ) {
           breadcrumb.data.url = stripQueryString(breadcrumb.data.url);
         }
+      }
+      if (typeof breadcrumb.message === 'string') {
+        breadcrumb.message = scrubString(breadcrumb.message) as string;
       }
       return breadcrumb;
     },

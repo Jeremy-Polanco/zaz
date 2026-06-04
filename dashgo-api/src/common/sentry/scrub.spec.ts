@@ -15,6 +15,7 @@
 import {
   SENTRY_SCRUB_DEPTH_LIMIT,
   scrubObject,
+  scrubString,
   stripQueryString,
 } from './scrub';
 
@@ -195,5 +196,60 @@ describe('stripQueryString', () => {
   it('returns malformed input as-is rather than throwing', () => {
     expect(stripQueryString('not-a-url')).toBe('not-a-url');
     expect(stripQueryString('')).toBe('');
+  });
+});
+
+describe('scrubString (NC1 follow-up: string-value PII)', () => {
+  it('redacts E.164 phone numbers interpolated into a message', () => {
+    expect(
+      scrubString('Código inválido para teléfono +18095551234'),
+    ).toBe('Código inválido para teléfono [redacted-phone]');
+  });
+
+  it('redacts 6–10 digit runs (OTP codes)', () => {
+    expect(scrubString('Failed to verify OTP 123456 for user xyz')).toBe(
+      'Failed to verify OTP [redacted-digits] for user xyz',
+    );
+  });
+
+  it('redacts email addresses', () => {
+    expect(scrubString('Invalid input: user@example.com is malformed')).toBe(
+      'Invalid input: [redacted-email] is malformed',
+    );
+  });
+
+  it('redacts multiple PII patterns in one string', () => {
+    expect(
+      scrubString(
+        'OTP 654321 sent to user@example.com for phone +14155550100',
+      ),
+    ).toBe(
+      'OTP [redacted-digits] sent to [redacted-email] for phone [redacted-phone]',
+    );
+  });
+
+  it('leaves short digit runs alone (under 6 digits)', () => {
+    expect(scrubString('Order #1234 status updated')).toBe(
+      'Order #1234 status updated',
+    );
+  });
+
+  it('does not match UUID fragments (hex + dashes)', () => {
+    expect(
+      scrubString('Order 1f2e3d4c-aaaa-bbbb-cccc-ddddeeeeffff failed'),
+    ).toBe('Order 1f2e3d4c-aaaa-bbbb-cccc-ddddeeeeffff failed');
+  });
+
+  it('passes through non-string input unchanged', () => {
+    expect(scrubString(null)).toBeNull();
+    expect(scrubString(undefined)).toBeUndefined();
+    expect(scrubString(42)).toBe(42);
+    expect(scrubString({})).toEqual({});
+  });
+
+  it('returns the string unchanged when no PII pattern matches', () => {
+    expect(scrubString('All good, nothing to scrub here.')).toBe(
+      'All good, nothing to scrub here.',
+    );
   });
 });

@@ -103,6 +103,30 @@ export function stripQueryString(url: string): string {
 }
 
 /**
+ * NC1 follow-up — redact raw PII patterns that appear in STRING-VALUED
+ * Sentry fields (exception.value, event.message, breadcrumb.message) where
+ * the key-name scrubObject can't help.
+ *
+ * Closes leak paths like:
+ *   - "Código inválido para teléfono +18095551234"
+ *   - "Failed to verify OTP 123456"
+ *   - "user@example.com is not registered"
+ *
+ * Over-matches a little (digit runs catch OTPs AND timestamps). Cheap.
+ */
+const E164_PHONE_REGEX = /\+\d{8,15}/g
+const EMAIL_REGEX = /[\w.+-]+@[\w-]+\.[\w.-]+/g
+const DIGIT_RUN_REGEX = /\b\d{6,10}\b/g
+
+export function scrubString(input: unknown): unknown {
+  if (typeof input !== 'string') return input
+  return input
+    .replace(EMAIL_REGEX, '[REDACTED_EMAIL]')
+    .replace(E164_PHONE_REGEX, '[REDACTED_PHONE]')
+    .replace(DIGIT_RUN_REGEX, '[REDACTED_DIGITS]')
+}
+
+/**
  * Recursively walk an object/array and replace the value of any key whose
  * lowercased name contains one of `PII_KEYS` with `'[REDACTED]'`. Returns a
  * NEW object — the input is never mutated, so callers can safely scrub a
@@ -210,6 +234,30 @@ if (DSN) {
       if (scrubbed?.request?.url && typeof scrubbed.request.url === 'string') {
         scrubbed.request.url = stripQueryString(scrubbed.request.url)
       }
+      // String-value PII scrub (NC1 follow-up). Key-name scrubbing above
+      // can't help when raw phones/OTPs/emails are interpolated into the
+      // exception message itself.
+      if (typeof scrubbed?.message === 'string') {
+        scrubbed.message = scrubString(scrubbed.message) as string
+      }
+      if (scrubbed?.exception?.values) {
+        scrubbed.exception.values = scrubbed.exception.values.map((v) => ({
+          ...v,
+          value:
+            typeof v.value === 'string'
+              ? (scrubString(v.value) as string)
+              : v.value,
+        }))
+      }
+      if (scrubbed?.breadcrumbs) {
+        scrubbed.breadcrumbs = scrubbed.breadcrumbs.map((b) => ({
+          ...b,
+          message:
+            typeof b.message === 'string'
+              ? (scrubString(b.message) as string)
+              : b.message,
+        }))
+      }
       return scrubbed
     },
     /**
@@ -227,6 +275,9 @@ if (DSN) {
       ) {
         const data = scrubbed.data as { url: string }
         data.url = stripQueryString(data.url)
+      }
+      if (typeof scrubbed?.message === 'string') {
+        scrubbed.message = scrubString(scrubbed.message) as string
       }
       return scrubbed
     },
