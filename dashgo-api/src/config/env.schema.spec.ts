@@ -764,4 +764,62 @@ describe('envSchema', () => {
       });
     });
   });
+
+  // Rule 6 — AUTH_OTP_MODE='disabled' requires explicit production
+  // acknowledgement. Boot must fail loudly if disabled mode reaches
+  // production without AUTH_OTP_DISABLED_ACK=yes.
+  describe('production: AUTH_OTP_MODE=disabled guard', () => {
+    it('fails when prod + AUTH_OTP_MODE=disabled and AUTH_OTP_DISABLED_ACK absent', () => {
+      const result = envSchema.safeParse({
+        ...validEnv(),
+        NODE_ENV: 'production',
+        AUTH_OTP_MODE: 'disabled',
+        // AUTH_OTP_DISABLED_ACK omitted — defaults to 'no'
+      });
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        const paths = result.error.issues.map((i) => i.path.join('.'));
+        expect(paths).toContain('AUTH_OTP_DISABLED_ACK');
+      }
+    });
+
+    it("fails when prod + AUTH_OTP_MODE=disabled and AUTH_OTP_DISABLED_ACK='no'", () => {
+      const result = envSchema.safeParse({
+        ...validEnv(),
+        NODE_ENV: 'production',
+        AUTH_OTP_MODE: 'disabled',
+        AUTH_OTP_DISABLED_ACK: 'no',
+      });
+      expect(result.success).toBe(false);
+    });
+
+    it("succeeds when prod + AUTH_OTP_MODE=disabled and AUTH_OTP_DISABLED_ACK='yes'", () => {
+      const result = envSchema.safeParse({
+        ...validEnv(),
+        NODE_ENV: 'production',
+        AUTH_OTP_MODE: 'disabled',
+        AUTH_OTP_DISABLED_ACK: 'yes',
+      });
+      expect(result.success).toBe(true);
+    });
+
+    it("succeeds when prod + AUTH_OTP_MODE='whatsapp' (default) and AUTH_OTP_DISABLED_ACK absent", () => {
+      const result = envSchema.safeParse({
+        ...validEnv(),
+        NODE_ENV: 'production',
+        // AUTH_OTP_MODE omitted — defaults to 'whatsapp'
+      });
+      expect(result.success).toBe(true);
+    });
+
+    it("does not enforce the guard in non-production environments", () => {
+      const result = envSchema.safeParse({
+        ...validEnv(),
+        NODE_ENV: 'development',
+        AUTH_OTP_MODE: 'disabled',
+        // AUTH_OTP_DISABLED_ACK omitted — defaults to 'no' — allowed in dev
+      });
+      expect(result.success).toBe(true);
+    });
+  });
 });

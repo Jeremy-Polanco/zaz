@@ -106,6 +106,24 @@ export class AuthService implements OnModuleInit {
   async sendOtp(dto: SendOtpDto, opts: { skipCooldown?: boolean } = {}) {
     const phone = dto.phone.trim();
 
+    // Closed-beta short-circuit. In `disabled` mode we don't send any code
+    // and verifyOtp will accept any (or empty) code. The web client uses
+    // the `requiresCode: false` flag to skip the code step in the UI.
+    // env.schema.ts Rule 6 prevents this from silently surviving to prod
+    // without an explicit AUTH_OTP_DISABLED_ACK=yes acknowledgement.
+    if (this.config.get<string>('AUTH_OTP_MODE') === 'disabled') {
+      this.logger.warn(
+        `[AUTH_OTP_DISABLED] sendOtp no-op for ${phone} — closed-beta mode`,
+      );
+      return {
+        sent: true,
+        expiresAt: new Date(
+          Date.now() + OTP_TTL_MINUTES * 60 * 1000,
+        ).toISOString(),
+        requiresCode: false,
+      };
+    }
+
     if (!opts.skipCooldown) {
       const recent = await this.otps.findOne({
         where: { phone, consumedAt: IsNull() },
@@ -222,6 +240,18 @@ export class AuthService implements OnModuleInit {
   async verifyOtp(dto: VerifyOtpDto) {
     const phone = dto.phone.trim();
 
+    // Closed-beta short-circuit. In `disabled` mode no code was sent in
+    // sendOtp, so there is nothing to verify — just look up (or create) the
+    // user and issue tokens. ANYONE who can hit this endpoint with a known
+    // phone can log in as that user; env.schema.ts Rule 6 ensures this
+    // requires explicit production acknowledgement.
+    if (this.config.get<string>('AUTH_OTP_MODE') === 'disabled') {
+      this.logger.warn(
+        `[AUTH_OTP_DISABLED] verifyOtp accepting any code for ${phone} — closed-beta mode`,
+      );
+      return this.completeLogin(phone, dto);
+    }
+
     const otp = await this.otps.findOne({
       where: { phone, consumedAt: IsNull() },
       order: { createdAt: 'DESC' },
@@ -246,14 +276,32 @@ export class AuthService implements OnModuleInit {
       throw new UnauthorizedException('Código inválido');
     }
 
+    const result = await this.completeLogin(phone, dto);
+
+    // OTP is consumed only after we're committed to issuing tokens, so any
+    // earlier validation failure leaves the code reusable within its TTL.
+    await this.otps.update(otp.id, { consumedAt: new Date() });
+    await this.otps.delete({ phone, expiresAt: LessThan(new Date()) });
+
+    return result;
+  }
+
+  /**
+   * Shared tail of the login flow — runs after OTP validation (or after the
+   * disabled-mode short-circuit). Looks up the user by phone, creates a new
+   * row if none exists (requires `fullName`), wires referrals + bootstrap
+   * admin role, and returns tokens + isNewUser.
+   */
+  private async completeLogin(phone: string, dto: VerifyOtpDto) {
     let user = await this.users.findOne({ where: { phone } });
     let isNewUser = false;
 
     if (!user) {
       if (!dto.fullName) {
-        // Don't consume the OTP yet — the client will resubmit with the name
-        // using the same still-valid code. Consuming here would force the
-        // user to request a brand new SMS for what is really one login flow.
+        // In the normal OTP flow this preserves the still-valid code so the
+        // client can resubmit with the name without a brand new SMS round
+        // trip. In disabled mode the client should send name on the first
+        // request anyway — this is a defensive fallback.
         throw new BadRequestException(
           'Es tu primer ingreso — mandá también tu nombre',
         );
@@ -289,11 +337,6 @@ export class AuthService implements OnModuleInit {
         );
       }
     }
-
-    // OTP is consumed only after we're committed to issuing tokens, so any
-    // earlier validation failure leaves the code reusable within its TTL.
-    await this.otps.update(otp.id, { consumedAt: new Date() });
-    await this.otps.delete({ phone, expiresAt: LessThan(new Date()) });
 
     const tokens = await this.issueTokens(user);
     return { ...tokens, isNewUser };

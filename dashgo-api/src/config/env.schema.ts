@@ -80,6 +80,30 @@ export const envSchema = z
     AUTH_BYPASS_OTP_CODE: z.string().length(6).default('000000'),
     AUTH_BOOTSTRAP_ADMIN_PHONES: z.string().default(''),
 
+    // ─────────────────────────────────────────────────────────────────────
+    // OTP delivery mode — controls whether codes are actually sent + verified.
+    //
+    //   whatsapp  — production: send via Twilio WhatsApp Business template.
+    //               TWILIO_WHATSAPP_FROM + TEMPLATE_SID must be set.
+    //   sandbox   — dev/staging: send via Twilio WhatsApp Sandbox (free-form
+    //               text). Each tester opts in by texting `join <code>` once.
+    //               TWILIO_WHATSAPP_FROM=whatsapp:+14155238886.
+    //   disabled  — beta/soft-launch: no code is sent and any code (or empty)
+    //               passes verification. ONLY usable while the audience is a
+    //               closed list of trusted users you onboard manually.
+    //
+    // Rule 6 below loudly rejects `disabled` in production WITHOUT an explicit
+    // override env var so it can never quietly stay live past the soft-launch.
+    AUTH_OTP_MODE: z
+      .enum(['whatsapp', 'sandbox', 'disabled'])
+      .default('whatsapp'),
+
+    // Acknowledgement that the operator KNOWS auth is disabled in production.
+    // Required when AUTH_OTP_MODE=disabled AND NODE_ENV=production. Without
+    // this, boot fails — preventing a forgotten flag from leaving the door
+    // open after the closed beta ends. Set to `yes` to confirm.
+    AUTH_OTP_DISABLED_ACK: z.enum(['yes', 'no']).default('no'),
+
     // App
     CORS_ORIGIN: z.string().default('http://localhost:5173'),
     API_PORT: z.coerce.number().default(3001),
@@ -195,6 +219,28 @@ export const envSchema = z
           message: `AUTH_BYPASS_PHONES in production must only contain NANP test phones (+1555555XXXX); rejected: ${badPhones.join(', ')}`,
         });
       }
+    }
+    // Rule 6 — AUTH_OTP_MODE=disabled requires explicit production
+    // acknowledgement.
+    //
+    // 'disabled' mode lets ANYONE who knows a phone number sign in as that
+    // user — there is no second factor. That's intentional for closed-beta
+    // soft-launch where the operator personally invites every user, but it
+    // MUST NOT silently survive into general availability. We require an
+    // explicit AUTH_OTP_DISABLED_ACK=yes env var when shipping disabled
+    // mode to production. The act of setting that flag forces a human to
+    // make the choice; an unset flag fails boot loudly.
+    if (
+      env.NODE_ENV === 'production' &&
+      env.AUTH_OTP_MODE === 'disabled' &&
+      env.AUTH_OTP_DISABLED_ACK !== 'yes'
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['AUTH_OTP_DISABLED_ACK'],
+        message:
+          'AUTH_OTP_MODE=disabled in production REQUIRES AUTH_OTP_DISABLED_ACK=yes — this acknowledges that any caller with a known phone can sign in as that user (closed-beta only). Set to "yes" to confirm, or change AUTH_OTP_MODE.',
+      });
     }
   });
 

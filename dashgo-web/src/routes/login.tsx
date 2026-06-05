@@ -35,11 +35,74 @@ function isFirstLoginError(err: unknown): boolean {
   return typeof msg === 'string' && msg.toLowerCase().includes('primer ingreso')
 }
 
+// Closed-beta soft-launch toggle. When VITE_AUTH_OTP_MODE='disabled' the
+// login flow collapses to a single screen (phone + name → in) and never
+// renders the code step. Build-time so Vite tree-shakes the unused branch.
+const OTP_DISABLED = import.meta.env.VITE_AUTH_OTP_MODE === 'disabled'
+
 function LoginPage() {
   const { next, ref } = useSearch({ from: '/login' })
   const [step, setStep] = useState<'phone' | 'code'>('phone')
   const [phone, setPhone] = useState('')
   const [expiresAt, setExpiresAt] = useState<string | null>(null)
+
+  const handleVerified = (role: string) => {
+    const dest =
+      next ??
+      (role === 'super_admin_delivery'
+        ? '/super/orders'
+        : role === 'promoter'
+          ? '/promoter'
+          : '/catalog')
+    window.location.assign(dest)
+  }
+
+  if (OTP_DISABLED) {
+    return (
+      <div className="grid min-h-[calc(100vh-10rem)] grid-cols-1 md:grid-cols-2">
+        <div className="relative hidden overflow-hidden border-r border-ink/15 bg-ink p-10 text-paper md:flex md:flex-col md:justify-between">
+          <div className="flex items-center justify-between">
+            <span className="text-[0.7rem] uppercase tracking-[0.24em] text-paper/70">
+              DashGo / Beta cerrado
+            </span>
+            <span className="text-[0.7rem] uppercase tracking-[0.24em] text-brand">
+              NYC
+            </span>
+          </div>
+          <div>
+            <p className="text-[0.7rem] uppercase tracking-[0.24em] text-paper/60">
+              Edición diaria
+            </p>
+            <h2 className="display mt-3 text-6xl font-semibold leading-[0.95] tracking-[-0.02em]">
+              Bienvenido
+              <br />
+              <span className="italic text-brand">de vuelta.</span>
+            </h2>
+            <p className="mt-6 max-w-md text-base leading-relaxed text-paper/80">
+              Tu colmado ya te espera. Estamos en beta cerrado — entrá con tu
+              teléfono y nombre.
+            </p>
+          </div>
+          <div className="flex items-end justify-between">
+            <span className="text-[0.7rem] uppercase tracking-[0.24em] text-paper/60">
+              Vol. 01 / Login
+            </span>
+            <span className="display text-9xl font-bold leading-none text-brand">
+              01
+            </span>
+          </div>
+        </div>
+        <div className="page-rise flex items-center justify-center px-6 py-16">
+          <div className="w-full max-w-md">
+            <DisabledModeStep
+              referralCode={ref}
+              onVerified={handleVerified}
+            />
+          </div>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="grid min-h-[calc(100vh-10rem)] grid-cols-1 md:grid-cols-2">
@@ -113,6 +176,114 @@ function LoginPage() {
         </div>
       </div>
     </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// DisabledModeStep — closed-beta single-screen login.
+//
+// When VITE_AUTH_OTP_MODE=disabled, no OTP is sent and no code is verified.
+// The user submits phone + name in one step and the backend's verifyOtp
+// short-circuit just looks up (or creates) the user and issues tokens.
+//
+// SECURITY CAVEAT: anyone who knows another user's phone number can sign
+// in as them. This is intentional for closed-beta where the operator
+// personally invites every user. env.schema.ts Rule 6 prevents this from
+// silently shipping to production without an explicit AUTH_OTP_DISABLED_ACK.
+// ─────────────────────────────────────────────────────────────────────────
+function DisabledModeStep({
+  referralCode,
+  onVerified,
+}: {
+  referralCode: string | undefined
+  onVerified: (role: string) => void
+}) {
+  const verifyOtp = useVerifyOtp()
+  const form = useForm<VerifyOtpInput>({
+    resolver: zodResolver(verifyOtpSchema),
+    defaultValues: {
+      phone: '',
+      // 6-digit placeholder satisfies the client schema. Backend ignores
+      // the value entirely when AUTH_OTP_MODE=disabled.
+      code: '000000',
+      fullName: undefined,
+      referralCode: referralCode ?? undefined,
+    },
+  })
+
+  const onSubmit = form.handleSubmit(async (values) => {
+    const trimmedName = values.fullName?.trim()
+    if (!trimmedName) {
+      form.setError('fullName', {
+        type: 'required',
+        message: 'Poné tu nombre',
+      })
+      form.setFocus('fullName')
+      return
+    }
+    const payload: VerifyOtpInput = {
+      phone: values.phone,
+      code: '000000',
+      fullName: trimmedName,
+      referralCode: referralCode ?? values.referralCode ?? undefined,
+    }
+    const res = await verifyOtp.mutateAsync(payload)
+    onVerified(res.user.role)
+  })
+
+  return (
+    <>
+      <span className="eyebrow">Entrar</span>
+      <h1 className="display mt-3 text-5xl font-semibold leading-[1] tracking-[-0.02em]">
+        Iniciar sesión
+      </h1>
+      <p className="mt-3 text-base text-ink-soft">
+        Estamos en beta cerrado. Entrá con tu teléfono y nombre.
+      </p>
+
+      <form onSubmit={onSubmit} className="mt-10 flex flex-col gap-6">
+        <div>
+          <Label htmlFor="phone">Teléfono</Label>
+          <Input
+            id="phone"
+            type="tel"
+            autoComplete="tel"
+            inputMode="tel"
+            placeholder="+18091234567"
+            className="text-lg"
+            {...form.register('phone')}
+          />
+          <FieldError message={form.formState.errors.phone?.message} />
+        </div>
+        <div>
+          <Label htmlFor="fullName">Nombre</Label>
+          <Input
+            id="fullName"
+            type="text"
+            autoComplete="name"
+            placeholder="Tu nombre"
+            className="text-lg"
+            {...form.register('fullName')}
+          />
+          <FieldError message={form.formState.errors.fullName?.message} />
+        </div>
+        {verifyOtp.isError && (
+          <p className="border-l-2 border-bad pl-3 text-sm font-medium text-bad">
+            {serverMessage(verifyOtp.error, 'No pudimos iniciar sesión')}
+          </p>
+        )}
+        <Button type="submit" size="lg" disabled={verifyOtp.isPending}>
+          {verifyOtp.isPending ? 'Entrando…' : 'Entrar →'}
+        </Button>
+        <p className="text-xs text-ink-muted">
+          Al continuar aceptás nuestra{' '}
+          <Link to="/privacidad" className="underline">
+            política de privacidad
+          </Link>
+          .
+        </p>
+      </form>
+    </>
   )
 }
 
