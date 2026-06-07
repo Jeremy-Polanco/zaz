@@ -5,6 +5,16 @@ on:
   push:
     branches: [main]
 
+# ── Gate policy ───────────────────────────────────────────────────────────
+# BLOCKING (no continue-on-error): build + unit tests for the two DEPLOYED
+#   apps (api, web). Verified green (api: 620 unit, web: 195 unit) and they
+#   gate every merge into `main` via branch protection. A red here = no merge
+#   = nothing reaches the auto-deploying branch.
+# INFORMATIONAL (continue-on-error): integration, e2e, mobile, coverage. They
+#   run for visibility but don't block yet — integration/e2e need external
+#   creds and mobile ships via EAS (not this deploy path). Promote to blocking
+#   once each is reliably green in CI.
+
 jobs:
   api-tests:
     name: Backend (dashgo-api)
@@ -34,10 +44,13 @@ jobs:
           cache: 'npm'
           cache-dependency-path: dashgo-api/package-lock.json
       - run: npm ci
-      - name: Run unit tests
+      # ── BLOCKING gate — must pass to merge ──────────────────────────
+      - name: Build (blocking)
+        run: npm run build
+      - name: Unit tests (blocking)
         run: npm test
-        continue-on-error: true
-      - name: Run integration tests
+      # ── Informational — runs for visibility, won't block the merge ──
+      - name: Integration tests (informational)
         env:
           DB_HOST: localhost
           DB_PORT: 5433
@@ -52,7 +65,7 @@ jobs:
           DB_SYNCHRONIZE: 'false'
         run: npm run test:integration
         continue-on-error: true
-      - name: Run E2E tests
+      - name: E2E tests (informational)
         env:
           DB_HOST: localhost
           DB_PORT: 5433
@@ -88,10 +101,13 @@ jobs:
           cache: 'npm'
           cache-dependency-path: dashgo-web/package-lock.json
       - run: npm ci
-      - name: Run tests
+      # ── BLOCKING gate — this is literally what Vercel runs ──────────
+      - name: Build (blocking)
+        run: npm run build
+      - name: Unit tests (blocking)
         run: npm test
-        continue-on-error: true
-      - name: Run coverage
+      # ── Informational ──────────────────────────────────────────────
+      - name: Coverage (informational)
         run: npm run test:cov
         continue-on-error: true
       - name: Upload coverage
@@ -105,6 +121,8 @@ jobs:
   mobile-tests:
     name: Mobile (dashgo)
     runs-on: ubuntu-latest
+    # Mobile ships via EAS, not this web+api deploy path — kept fully
+    # informational so a mobile-only failure never blocks an api/web deploy.
     defaults:
       run:
         working-directory: dashgo
@@ -116,10 +134,11 @@ jobs:
           cache: 'npm'
           cache-dependency-path: dashgo/package-lock.json
       - run: npm ci
-      - name: Run tests
+        continue-on-error: true
+      - name: Run tests (informational)
         run: npm test
         continue-on-error: true
-      - name: Run coverage
+      - name: Run coverage (informational)
         run: npm run test:cov
         continue-on-error: true
       - name: Upload coverage

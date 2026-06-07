@@ -113,15 +113,20 @@ services:
       - key: JWT_REFRESH_TTL
         scope: RUN_TIME
         value: "30d"
-      # ─── Auth bypass — temp while A2P 10DLC is being registered ──────
-      # Inocuous defaults. Keep in spec so they're versioned & visible in
-      # PRs; flip values via dashboard if needed without touching git.
+      # ─── Auth bypass — DISABLED in production ───────────────────────
+      # AUTH_OTP_MODE=disabled makes login phone-only, so the dev/test bypass
+      # is unnecessary here. It is ALSO rejected at boot in production:
+      # env.schema.ts Rule 5 fails startup when AUTH_BYPASS_PHONES is non-empty
+      # unless AUTH_BYPASS_OTP_CODE is a real 6+ digit code AND every phone is a
+      # +1555555XXXX reserved-test number. Keep AUTH_BYPASS_PHONES EMPTY in prod.
       - key: AUTH_BYPASS_PHONES
         scope: RUN_TIME
-        value: "+19172541473"
+        value: ""
       - key: AUTH_BYPASS_OTP_CODE
         scope: RUN_TIME
         value: "000000"
+      # Founder's phone → super-admin on first boot. NOT a bypass (no schema
+      # restriction) — this is the admin allow-list. Login stays phone-only.
       - key: AUTH_BOOTSTRAP_ADMIN_PHONES
         scope: RUN_TIME
         value: "+19172541473"
