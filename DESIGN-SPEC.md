@@ -11,6 +11,8 @@
 
 DashGo is a hyper-local delivery service launching in **New York City**. The core product is **water delivery** (jugs, gallons, bottled), with adjacent categories (cold drinks, ice, household accessories). The model is on-demand: customer places an order through the app → admin reviews and quotes shipping → customer authorizes payment → driver delivers.
 
+> **Payments — launch status (iteration 1):** DashGo launches accepting **cash on delivery only**. Card / digital payments (Stripe) are **fully implemented and tested in the codebase**, but **gated pending approval of the Stripe production account** — they are enabled as soon as the Stripe live account is approved. Nothing is removed; this is a launch-timing decision waiting on an external (Stripe) approval.
+
 The brand evolved through four names: Colmapp → Bodeguita → ZAZ → **DashGo**. The current DashGo identity (black surface + electric orange + lightning bolt) signals **speed and energy** — orders arrive fast, like a bolt.
 
 ### Operating principles
@@ -191,7 +193,7 @@ A single scrollable screen with 5 numbered sections. Each section header is an i
 **Sections**:
 1. **Lista de compra** — items in cart with thumbnails, names, qty, line totals. Editable count or remove. If a product is on offer, the line price is shown in `text-accent` (orange).
 2. **Dirección de entrega** — read-only display of the saved default address. "Cambiar →" link reroutes to address selection (not in scope here).
-3. **Método de pago** — two large radio tiles side by side: "Efectivo" and "Digital". Active tile is filled with `bg-ink` and white label; inactive is bordered. Below: a small explanatory line about each.
+3. **Método de pago** — two large radio tiles side by side: "Efectivo" and "Digital". Active tile is filled with `bg-ink` and white label; inactive is bordered. Below: a small explanatory line about each. **At launch (iteration 1) only "Efectivo" (cash on delivery) is offered to customers; the "Digital" (Stripe card) tile is built & tested but gated pending Stripe production approval and is enabled as soon as the Stripe live account is approved.**
 4. **Puntos & Crédito** — two toggle rows. "Usar puntos" shows the available claimable amount; "Usar crédito" shows the available credit balance. Each toggle has a checkmark in DashGo black when active. Below the toggles: a recomputed price preview.
 5. **Resumen** — itemized list:
    - Subtotal: $X.XX
@@ -222,12 +224,12 @@ Tap a row → order detail.
 - Section "Pago": method, breakdown (subtotal / shipping / tax / points / credit / total). If order is quoted, all numbers are real; if not yet quoted, shipping and tax show "Pendiente de cotización" in muted style.
 - Action footer (varies by status):
   - `pending_quote` / `quoted`: "Cancelar pedido" button (red outline)
-  - `quoted` (digital payment): "Autorizar pago →" orange accent button
+  - `quoted` (digital payment): "Autorizar pago →" orange accent button *(digital/Stripe path — built & tested, gated until Stripe prod approval; at launch quoted cash orders skip straight to admin validation)*
   - `delivered`: "Ver factura →" link
 
 ### 4.7 Crédito
 
-**Purpose**: A buy-now-pay-later account managed by the operator. Customers can borrow up to a limit set by admin and repay via Stripe.
+**Purpose**: A buy-now-pay-later account managed by the operator. Customers can borrow up to a limit set by admin and repay via Stripe. *(Stripe-based repayment is built & tested but gated pending Stripe production approval; at launch, cash repayments are recorded off-platform by the admin via "Aceptar pago".)*
 
 **Empty state** (no credit account): "Aún no tenés crédito asignado." — minimal, encouraging.
 
@@ -436,7 +438,7 @@ The super admin's own profile page. Identity block, role badge, store/business a
 
 ## 7. Order Status State Machine
 
-Every order moves through this graph. The status badge color and label are consistent across mobile and web.
+Every order moves through this graph. The status badge color and label are consistent across mobile and web. *(The Stripe authorize/capture transitions noted below are built & tested but gated pending Stripe production approval; at launch the cash path drives the same state machine — the customer confirms cash instead of authorizing Stripe, and there is no card capture on delivery.)*
 
 ```
 [CREATED]
@@ -462,6 +464,8 @@ DELIVERED          "Entregado"        green dot
 
 ## 8. Pricing & Money Logic
 
+> **Payments — launch status (iteration 1):** DashGo launches accepting **cash on delivery only**. Card / digital payments (Stripe) are **fully implemented and tested in the codebase**, but **gated pending approval of the Stripe production account** — they are enabled as soon as the Stripe live account is approved. The price computation, breakdown, and money-logic below apply identically to both cash and Stripe-card flows; nothing is removed.
+
 This logic must be visible in the UI; never hide it.
 
 ### 8.1 Price computation order
@@ -483,6 +487,8 @@ This logic must be visible in the UI; never hide it.
 ---
 
 ## 9. Critical Flows
+
+> **Note (launch status):** The Stripe/digital steps in the flows below (e.g. "Autorizar pago →", Stripe Payment Sheet, capture on delivery) are **built & tested but gated pending Stripe production approval**. At launch (iteration 1) customers pay **cash on delivery**: where a flow says "authorizes Stripe", the launch behavior is "confirms cash" and the order proceeds to admin validation without a card capture. The flows are kept intact because they go live unchanged once the Stripe live account is approved.
 
 ### 9.1 Flow: First-time customer signup → first delivery
 1. User opens app → sees auth poster ("Bienvenido de vuelta. 01") → enters phone.
@@ -592,7 +598,7 @@ Spinner color: `ink` (#1A1530) in light theme — neutral chrome, not branded. P
 
 - **Mobile**: Expo SDK 55 (React Native, NativeWind v5). Spanish-only. iOS-first, Android second. No tablet design.
 - **Web admin**: React 19 + Vite + TanStack Router + Tailwind v4. Desktop-first (operator works on a laptop or large monitor). Tablet-acceptable, mobile-web is secondary.
-- **Backend**: NestJS, Postgres, Stripe (manual capture), Twilio (SMS OTP), single-tenant.
+- **Backend**: NestJS, Postgres, Stripe (manual capture — built & tested, gated pending Stripe production approval), Twilio (SMS OTP), single-tenant. Cash on delivery is the only customer-facing payment method at launch (iteration 1); Stripe card payments enable once the live account is approved.
 - **Status updates** are not real-time; they require pull-to-refresh or polling.
 - **Bilingual support is NOT a current requirement** — Spanish only.
 

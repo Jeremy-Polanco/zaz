@@ -36,6 +36,7 @@ import type {
   CheckoutInput,
   GrantCreditInput,
   InvitePromoterInput,
+  LoginInput,
   ManualAdjustmentInput,
   RecordPaymentInput,
   SendOtpInput,
@@ -66,6 +67,30 @@ export function useCurrentUser() {
     retry: false,
   })
 }
+
+/**
+ * Phone-only login (the default flow). Posts phone (+ name on first login) to
+ * the verify endpoint and establishes the IDENTICAL session that OTP
+ * verification produces. No code is sent.
+ */
+export function useLogin() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (input: LoginInput) => {
+      const { data } = await api.post<LoginResponse & { isNewUser: boolean }>(
+        '/auth/otp/verify',
+        input,
+      )
+      return data
+    },
+    onSuccess: async (data) => {
+      await setSession(data)
+      qc.setQueryData(['auth', 'me'], data.user)
+    },
+  })
+}
+
+// ── Dormant OTP path (re-enabled via EXPO_PUBLIC_AUTH_OTP_MODE=whatsapp|sandbox) ──
 
 export function useSendOtp() {
   return useMutation({

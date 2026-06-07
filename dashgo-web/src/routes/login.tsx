@@ -1,14 +1,22 @@
 import { useEffect, useState } from 'react'
 import { createFileRoute, Link, useSearch } from '@tanstack/react-router'
-import { useForm } from 'react-hook-form'
+import {
+  Controller,
+  useForm,
+  type Control,
+  type FieldValues,
+  type Path,
+} from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import {
+  loginSchema,
   sendOtpSchema,
   verifyOtpSchema,
+  type LoginInput,
   type SendOtpInput,
   type VerifyOtpInput,
 } from '../lib/schemas'
-import { useSendOtp, useVerifyOtp } from '../lib/auth'
+import { useLogin, useSendOtp, useVerifyOtp } from '../lib/auth'
 import { Button, FieldError, Input, Label } from '../components/ui'
 
 export const Route = createFileRoute('/login')({
@@ -29,16 +37,118 @@ function serverMessage(err: unknown, fallback: string) {
   )
 }
 
-function isFirstLoginError(err: unknown): boolean {
+export function isFirstLoginError(err: unknown): boolean {
   const msg = (err as Error & { response?: { data?: { message?: string } } })
     ?.response?.data?.message
   return typeof msg === 'string' && msg.toLowerCase().includes('primer ingreso')
 }
 
-// Closed-beta soft-launch toggle. When VITE_AUTH_OTP_MODE='disabled' the
-// login flow collapses to a single screen (phone + name → in) and never
-// renders the code step. Build-time so Vite tree-shakes the unused branch.
-const OTP_DISABLED = import.meta.env.VITE_AUTH_OTP_MODE === 'disabled'
+export function destForRole(role: string, next?: string): string {
+  return (
+    next ??
+    (role === 'super_admin_delivery'
+      ? '/super/orders'
+      : role === 'promoter'
+        ? '/promoter'
+        : '/catalog')
+  )
+}
+
+// Phone-only login is the DEFAULT. OTP is dormant and only renders when an
+// operator re-enables it via VITE_AUTH_OTP_MODE=whatsapp|sandbox (build-time so
+// Vite tree-shakes the unused branch).
+const OTP_ENABLED =
+  import.meta.env.VITE_AUTH_OTP_MODE === 'whatsapp' ||
+  import.meta.env.VITE_AUTH_OTP_MODE === 'sandbox'
+
+// Phone input with a fixed "+" affordance. The user types digits only — any
+// "+", spaces or dashes are stripped on the fly — and we store the E.164
+// "+<digits>" value the schema expects. One less thing for people to get wrong.
+function PhoneField<T extends FieldValues>({
+  control,
+  name,
+  error,
+}: {
+  control: Control<T>
+  name: Path<T>
+  error?: string
+}) {
+  return (
+    <div>
+      <Label htmlFor="phone">Teléfono</Label>
+      <Controller
+        control={control}
+        name={name}
+        render={({ field }) => (
+          <div className="flex items-center border-b border-ink/30 px-1 transition-colors focus-within:border-ink">
+            <span
+              aria-hidden
+              className="select-none text-lg font-medium text-ink-muted"
+            >
+              +
+            </span>
+            <input
+              id="phone"
+              type="tel"
+              inputMode="numeric"
+              autoComplete="tel"
+              placeholder="1 809 123 4567"
+              className="h-11 w-full bg-transparent pl-0.5 text-lg font-medium text-ink placeholder:text-ink-muted/60 focus:outline-none"
+              value={String(field.value ?? '').replace(/^\+/, '')}
+              onChange={(e) => {
+                const digits = e.target.value.replace(/\D/g, '')
+                field.onChange(digits ? `+${digits}` : '')
+              }}
+              onBlur={field.onBlur}
+              name={field.name}
+              ref={field.ref}
+            />
+          </div>
+        )}
+      />
+      <FieldError message={error} />
+    </div>
+  )
+}
+
+function LoginPoster({ tagline }: { tagline: string }) {
+  return (
+    <div className="relative hidden overflow-hidden border-r border-ink/15 bg-ink p-10 text-paper md:flex md:flex-col md:justify-between">
+      <div className="flex items-center justify-between">
+        <img
+          src="/brand/udash-logo.png"
+          alt="Udash logo"
+          width={128}
+          className="w-32 rounded-xl bg-paper p-3 shadow-lg shadow-black/30 ring-1 ring-black/5"
+        />
+        <span className="text-[0.7rem] uppercase tracking-[0.24em] text-accent">
+          NJ
+        </span>
+      </div>
+      <div>
+        <p className="text-[0.7rem] uppercase tracking-[0.24em] text-paper/60">
+          Edición diaria
+        </p>
+        <h2 className="display mt-3 text-6xl font-semibold leading-[0.95] tracking-[-0.02em]">
+          Bienvenido
+          <br />
+          <span className="italic text-accent">de vuelta.</span>
+        </h2>
+        <p className="mt-6 max-w-md text-base leading-relaxed text-paper/80">
+          {tagline}
+        </p>
+      </div>
+      <div className="flex items-end justify-between">
+        <span className="text-[0.7rem] uppercase tracking-[0.24em] text-paper/60">
+          Vol. 01 / Login
+        </span>
+        <span className="display text-9xl font-bold leading-none text-accent">
+          01
+        </span>
+      </div>
+    </div>
+  )
+}
 
 function LoginPage() {
   const { next, ref } = useSearch({ from: '/login' })
@@ -47,57 +157,16 @@ function LoginPage() {
   const [expiresAt, setExpiresAt] = useState<string | null>(null)
 
   const handleVerified = (role: string) => {
-    const dest =
-      next ??
-      (role === 'super_admin_delivery'
-        ? '/super/orders'
-        : role === 'promoter'
-          ? '/promoter'
-          : '/catalog')
-    window.location.assign(dest)
+    window.location.assign(destForRole(role, next))
   }
 
-  if (OTP_DISABLED) {
+  if (!OTP_ENABLED) {
     return (
       <div className="grid min-h-[calc(100vh-10rem)] grid-cols-1 md:grid-cols-2">
-        <div className="relative hidden overflow-hidden border-r border-ink/15 bg-ink p-10 text-paper md:flex md:flex-col md:justify-between">
-          <div className="flex items-center justify-between">
-            <span className="text-[0.7rem] uppercase tracking-[0.24em] text-paper/70">
-              DashGo / Beta cerrado
-            </span>
-            <span className="text-[0.7rem] uppercase tracking-[0.24em] text-brand">
-              NYC
-            </span>
-          </div>
-          <div>
-            <p className="text-[0.7rem] uppercase tracking-[0.24em] text-paper/60">
-              Edición diaria
-            </p>
-            <h2 className="display mt-3 text-6xl font-semibold leading-[0.95] tracking-[-0.02em]">
-              Bienvenido
-              <br />
-              <span className="italic text-brand">de vuelta.</span>
-            </h2>
-            <p className="mt-6 max-w-md text-base leading-relaxed text-paper/80">
-              Tu colmado ya te espera. Estamos en beta cerrado — entrá con tu
-              teléfono y nombre.
-            </p>
-          </div>
-          <div className="flex items-end justify-between">
-            <span className="text-[0.7rem] uppercase tracking-[0.24em] text-paper/60">
-              Vol. 01 / Login
-            </span>
-            <span className="display text-9xl font-bold leading-none text-brand">
-              01
-            </span>
-          </div>
-        </div>
+        <LoginPoster tagline="Tu colmado ya te espera. Entrá con tu teléfono." />
         <div className="page-rise flex items-center justify-center px-6 py-16">
           <div className="w-full max-w-md">
-            <DisabledModeStep
-              referralCode={ref}
-              onVerified={handleVerified}
-            />
+            <PhoneOnlyLogin referralCode={ref} onAuthenticated={handleVerified} />
           </div>
         </div>
       </div>
@@ -106,43 +175,7 @@ function LoginPage() {
 
   return (
     <div className="grid min-h-[calc(100vh-10rem)] grid-cols-1 md:grid-cols-2">
-      {/* left — poster */}
-      <div className="relative hidden overflow-hidden border-r border-ink/15 bg-ink p-10 text-paper md:flex md:flex-col md:justify-between">
-        <div className="flex items-center justify-between">
-          <span className="text-[0.7rem] uppercase tracking-[0.24em] text-paper/70">
-            DashGo / Entrar
-          </span>
-          <span className="text-[0.7rem] uppercase tracking-[0.24em] text-brand">
-            NYC
-          </span>
-        </div>
-
-        <div>
-          <p className="text-[0.7rem] uppercase tracking-[0.24em] text-paper/60">
-            Edición diaria
-          </p>
-          <h2 className="display mt-3 text-6xl font-semibold leading-[0.95] tracking-[-0.02em]">
-            Bienvenido
-            <br />
-            <span className="italic text-brand">de vuelta.</span>
-          </h2>
-          <p className="mt-6 max-w-md text-base leading-relaxed text-paper/80">
-            Tu colmado ya te espera. Entra con tu teléfono — te mandamos un
-            código por SMS.
-          </p>
-        </div>
-
-        <div className="flex items-end justify-between">
-          <span className="text-[0.7rem] uppercase tracking-[0.24em] text-paper/60">
-            Vol. 01 / Login
-          </span>
-          <span className="display text-9xl font-bold leading-none text-brand">
-            01
-          </span>
-        </div>
-      </div>
-
-      {/* right — form */}
+      <LoginPoster tagline="Tu colmado ya te espera. Entra con tu teléfono — te mandamos un código por WhatsApp." />
       <div className="page-rise flex items-center justify-center px-6 py-16">
         <div className="w-full max-w-md">
           {step === 'phone' ? (
@@ -161,16 +194,7 @@ function LoginPage() {
               referralCode={ref}
               onBack={() => setStep('phone')}
               onResent={(exp) => setExpiresAt(exp)}
-              onVerified={(role) => {
-                const dest =
-                  next ??
-                  (role === 'super_admin_delivery'
-                    ? '/super/orders'
-                    : role === 'promoter'
-                      ? '/promoter'
-                      : '/catalog')
-                window.location.assign(dest)
-              }}
+              onVerified={handleVerified}
             />
           )}
         </div>
@@ -180,32 +204,29 @@ function LoginPage() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────
-// DisabledModeStep — closed-beta single-screen login.
+// PhoneOnlyLogin — the default, canonical login (no OTP).
 //
-// When VITE_AUTH_OTP_MODE=disabled, no OTP is sent and no code is verified.
-// The user submits phone + name in one step and the backend's verifyOtp
-// short-circuit just looks up (or creates) the user and issues tokens.
+// The user enters their phone and submits. Existing users are logged in
+// immediately; brand-new users get a name field revealed on the spot
+// ("primer ingreso") and resubmit with it. This mirrors the mobile flow.
 //
-// SECURITY CAVEAT: anyone who knows another user's phone number can sign
-// in as them. This is intentional for closed-beta where the operator
-// personally invites every user. env.schema.ts Rule 6 prevents this from
-// silently shipping to production without an explicit AUTH_OTP_DISABLED_ACK.
+// SECURITY CAVEAT: with OTP disabled, anyone who knows a registered phone can
+// sign in as that user. This is an accepted product decision — see the backend
+// AUTH_OTP_MODE notes (env.schema.ts) for how to re-enable verified login.
 // ─────────────────────────────────────────────────────────────────────────
-function DisabledModeStep({
+export function PhoneOnlyLogin({
   referralCode,
-  onVerified,
+  onAuthenticated,
 }: {
   referralCode: string | undefined
-  onVerified: (role: string) => void
+  onAuthenticated: (role: string) => void
 }) {
-  const verifyOtp = useVerifyOtp()
-  const form = useForm<VerifyOtpInput>({
-    resolver: zodResolver(verifyOtpSchema),
+  const login = useLogin()
+  const [needsName, setNeedsName] = useState(false)
+  const form = useForm<LoginInput>({
+    resolver: zodResolver(loginSchema),
     defaultValues: {
       phone: '',
-      // 6-digit placeholder satisfies the client schema. Backend ignores
-      // the value entirely when AUTH_OTP_MODE=disabled.
-      code: '000000',
       fullName: undefined,
       referralCode: referralCode ?? undefined,
     },
@@ -213,22 +234,29 @@ function DisabledModeStep({
 
   const onSubmit = form.handleSubmit(async (values) => {
     const trimmedName = values.fullName?.trim()
-    if (!trimmedName) {
+    if (needsName && !trimmedName) {
       form.setError('fullName', {
         type: 'required',
-        message: 'Poné tu nombre',
+        message: 'Poné tu nombre para crear tu cuenta',
       })
       form.setFocus('fullName')
       return
     }
-    const payload: VerifyOtpInput = {
-      phone: values.phone,
-      code: '000000',
-      fullName: trimmedName,
-      referralCode: referralCode ?? values.referralCode ?? undefined,
+    try {
+      const res = await login.mutateAsync({
+        phone: values.phone,
+        fullName: trimmedName ? trimmedName : undefined,
+        referralCode: referralCode ?? values.referralCode ?? undefined,
+      })
+      onAuthenticated(res.user.role)
+    } catch (err) {
+      // First-ever login for this phone: reveal the name field and let the
+      // user resubmit. Any other error surfaces via login.isError below.
+      if (isFirstLoginError(err) && !needsName) {
+        setNeedsName(true)
+        setTimeout(() => form.setFocus('fullName'), 0)
+      }
     }
-    const res = await verifyOtp.mutateAsync(payload)
-    onVerified(res.user.role)
   })
 
   return (
@@ -238,42 +266,50 @@ function DisabledModeStep({
         Iniciar sesión
       </h1>
       <p className="mt-3 text-base text-ink-soft">
-        Estamos en beta cerrado. Entrá con tu teléfono y nombre.
+        Poné tu teléfono y entrás al toque.
       </p>
 
+      {referralCode ? (
+        <div className="mt-6 inline-flex items-center gap-2 border border-accent/30 bg-accent/10 px-3 py-1.5">
+          <span className="h-1.5 w-1.5 rounded-full bg-accent" />
+          <span className="text-[0.7rem] uppercase tracking-[0.2em] text-accent-dark">
+            Registrándote con código:{' '}
+            <span className="text-brand">{referralCode}</span>
+          </span>
+        </div>
+      ) : null}
+
       <form onSubmit={onSubmit} className="mt-10 flex flex-col gap-6">
-        <div>
-          <Label htmlFor="phone">Teléfono</Label>
-          <Input
-            id="phone"
-            type="tel"
-            autoComplete="tel"
-            inputMode="tel"
-            placeholder="+18091234567"
-            className="text-lg"
-            {...form.register('phone')}
-          />
-          <FieldError message={form.formState.errors.phone?.message} />
-        </div>
-        <div>
-          <Label htmlFor="fullName">Nombre</Label>
-          <Input
-            id="fullName"
-            type="text"
-            autoComplete="name"
-            placeholder="Tu nombre"
-            className="text-lg"
-            {...form.register('fullName')}
-          />
-          <FieldError message={form.formState.errors.fullName?.message} />
-        </div>
-        {verifyOtp.isError && (
+        <PhoneField
+          control={form.control}
+          name="phone"
+          error={form.formState.errors.phone?.message}
+        />
+        {needsName && (
+          <div>
+            <p className="mb-2 border-l-2 border-accent pl-3 text-sm font-medium text-ink">
+              Primer ingreso detectado — dinos cómo te llamas para crear tu
+              cuenta.
+            </p>
+            <Label htmlFor="fullName">Tu nombre</Label>
+            <Input
+              id="fullName"
+              type="text"
+              autoComplete="name"
+              placeholder="Juan Pérez"
+              className="text-lg"
+              {...form.register('fullName')}
+            />
+            <FieldError message={form.formState.errors.fullName?.message} />
+          </div>
+        )}
+        {login.isError && !isFirstLoginError(login.error) && (
           <p className="border-l-2 border-bad pl-3 text-sm font-medium text-bad">
-            {serverMessage(verifyOtp.error, 'No pudimos iniciar sesión')}
+            {serverMessage(login.error, 'No pudimos iniciar sesión')}
           </p>
         )}
-        <Button type="submit" size="lg" disabled={verifyOtp.isPending}>
-          {verifyOtp.isPending ? 'Entrando…' : 'Entrar →'}
+        <Button type="submit" size="lg" disabled={login.isPending}>
+          {login.isPending ? 'Entrando…' : 'Entrar →'}
         </Button>
         <p className="text-xs text-ink-muted">
           Al continuar aceptás nuestra{' '}
@@ -287,6 +323,11 @@ function DisabledModeStep({
   )
 }
 
+// ─────────────────────────────────────────────────────────────────────────
+// Dormant OTP flow (PhoneStep + CodeStep) — only rendered when
+// VITE_AUTH_OTP_MODE=whatsapp|sandbox. Kept so verified login can be turned
+// back on via config without a code revert.
+// ─────────────────────────────────────────────────────────────────────────
 function PhoneStep({
   next: _next,
   onSent,
@@ -316,19 +357,11 @@ function PhoneStep({
       </p>
 
       <form onSubmit={onSubmit} className="mt-10 flex flex-col gap-6">
-        <div>
-          <Label htmlFor="phone">Teléfono</Label>
-          <Input
-            id="phone"
-            type="tel"
-            autoComplete="tel"
-            inputMode="tel"
-            placeholder="+18091234567"
-            className="text-lg"
-            {...form.register('phone')}
-          />
-          <FieldError message={form.formState.errors.phone?.message} />
-        </div>
+        <PhoneField
+          control={form.control}
+          name="phone"
+          error={form.formState.errors.phone?.message}
+        />
         {sendOtp.isError && (
           <p className="border-l-2 border-bad pl-3 text-sm font-medium text-bad">
             {serverMessage(sendOtp.error, 'No pudimos mandar el código')}
@@ -439,7 +472,7 @@ function CodeStep({
     <>
       <span className="eyebrow">Código</span>
       <h1 className="display mt-3 text-5xl font-semibold leading-[1] tracking-[-0.02em]">
-        Revisá tu SMS
+        Revisá tu WhatsApp
       </h1>
       <p className="mt-3 text-base text-ink-soft">
         Mandamos un código a{' '}

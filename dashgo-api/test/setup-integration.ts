@@ -118,6 +118,17 @@ export default async function globalSetup(): Promise<void> {
   process.env.STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY ?? 'sk_test_dummy';
   process.env.STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET ?? 'whsec_test';
   process.env.STRIPE_SUBSCRIPTION_PRICE_ID = process.env.STRIPE_SUBSCRIPTION_PRICE_ID ?? 'price_test_monthly';
+  // Twilio creds are required by envSchema (z.string()) which is validated at
+  // app.module IMPORT time (ConfigModule.forRoot). Workers inherit env from this
+  // globalSetup, so they MUST be set here — setting them inside createTestingApp
+  // is too late (the import already ran validation). Empty strings satisfy the
+  // schema and make TwilioService skip client construction (the unconfigured path,
+  // matching how docker-compose runs the API); order-SMS specs spy on sendSms and
+  // OTP is disabled, so no real Twilio client is needed.
+  process.env.TWILIO_ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID ?? '';
+  process.env.TWILIO_API_KEY_SID = process.env.TWILIO_API_KEY_SID ?? '';
+  process.env.TWILIO_API_KEY_SECRET = process.env.TWILIO_API_KEY_SECRET ?? '';
+  process.env.TWILIO_FROM_NUMBER = process.env.TWILIO_FROM_NUMBER ?? '';
 
   loadEnvTest();
 

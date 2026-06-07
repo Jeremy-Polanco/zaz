@@ -25,10 +25,13 @@ import type {
   PromoterDashboard,
   PromoterMyStats,
   PromoterPublicInfo,
+  CreateAddressInput,
+  Rental,
   RentalFilter,
   ShippingQuote,
   Subscription,
   SubscriptionPlan,
+  UpdateAddressInput,
   UserAddress,
 } from './types'
 import type {
@@ -798,6 +801,71 @@ export function useAdminSubscriptionPlan() {
   })
 }
 
+// ── My address book (customer) ───────────────────────────────────────────────
+
+const MY_ADDRESSES_KEY = ['me', 'addresses'] as const
+
+/** GET /me/addresses — the caller's saved addresses (default-first). */
+export function useMyAddresses() {
+  return useQuery<UserAddress[]>({
+    queryKey: MY_ADDRESSES_KEY,
+    queryFn: async () => (await api.get<UserAddress[]>('/me/addresses')).data,
+    staleTime: 30_000,
+  })
+}
+
+/** POST /me/addresses — create a saved address (first one auto-defaults). */
+export function useCreateAddress() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (input: CreateAddressInput) =>
+      (await api.post<UserAddress>('/me/addresses', input)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: MY_ADDRESSES_KEY }),
+  })
+}
+
+/** PATCH /me/addresses/:id — update whitelisted address fields. */
+export function useUpdateAddress() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async ({ id, ...patch }: UpdateAddressInput & { id: string }) =>
+      (await api.patch<UserAddress>(`/me/addresses/${id}`, patch)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: MY_ADDRESSES_KEY }),
+  })
+}
+
+/** PATCH /me/addresses/:id/set-default — promote an address to default. */
+export function useSetDefaultAddress() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (id: string) =>
+      (await api.patch<UserAddress>(`/me/addresses/${id}/set-default`)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: MY_ADDRESSES_KEY }),
+  })
+}
+
+/** DELETE /me/addresses/:id — remove an address (promotes most recent). */
+export function useDeleteAddress() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (id: string) => {
+      await api.delete(`/me/addresses/${id}`)
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: MY_ADDRESSES_KEY }),
+  })
+}
+
+// ── My rentals (customer) ────────────────────────────────────────────────────
+
+/** GET /me/rentals — the caller's own rentals. */
+export function useMyRentals() {
+  return useQuery<Rental[]>({
+    queryKey: ['me', 'rentals'],
+    queryFn: async () => (await api.get<Rental[]>('/me/rentals')).data,
+    staleTime: 30_000,
+  })
+}
+
 // ── User addresses (super-admin) ─────────────────────────────────────────────
 
 /** Super-admin: GET /admin/users/:userId/addresses — read-only address list */
@@ -844,8 +912,14 @@ export function useAdminRentals(filters: RentalFilter) {
   const qs = q.toString()
   return useQuery<AdminRentalResponse[]>({
     queryKey: ['admin', 'rentals', filters],
+    // /admin/rentals returns a paginated { items, page, ... } wrapper — unwrap to
+    // the items array the page maps over (matches the AdminRentalResponse[] type).
     queryFn: async () =>
-      (await api.get<AdminRentalResponse[]>(qs ? `/admin/rentals?${qs}` : '/admin/rentals')).data,
+      (
+        await api.get<{ items: AdminRentalResponse[] }>(
+          qs ? `/admin/rentals?${qs}` : '/admin/rentals',
+        )
+      ).data.items,
   })
 }
 

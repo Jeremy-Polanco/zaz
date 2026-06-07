@@ -28,6 +28,7 @@ import { renderWithProviders } from '../../test/test-utils'
 jest.mock('../../lib/queries', () => ({
   useSendOtp: jest.fn(),
   useVerifyOtp: jest.fn(),
+  useLogin: jest.fn(),
 }))
 
 jest.mock('expo-router', () => {
@@ -110,7 +111,7 @@ jest.mock('../../components/ui', () => {
 
 // ── imports after mocks ───────────────────────────────────────────────────────
 
-import { useSendOtp, useVerifyOtp } from '../../lib/queries'
+import { useLogin, useSendOtp, useVerifyOtp } from '../../lib/queries'
 import LoginScreen, {
   isWhatsAppSendFailure,
   WHATSAPP_RETRY_COOLDOWN_SECONDS,
@@ -124,6 +125,7 @@ import {
 
 const mockUseSendOtp = useSendOtp as jest.MockedFunction<typeof useSendOtp>
 const mockUseVerifyOtp = useVerifyOtp as jest.MockedFunction<typeof useVerifyOtp>
+const mockUseLogin = useLogin as jest.MockedFunction<typeof useLogin>
 
 type SendOtpMutationState = {
   mutateAsync: jest.Mock
@@ -188,9 +190,17 @@ function whatsappFailureWithCode(
   }
 }
 
+// The OTP two-step flow is dormant by default (phone-only login is default).
+// These suites exercise the OTP path, so re-enable it for every test. The
+// phone-only suite at the bottom disables it again in its own beforeEach.
+beforeEach(() => {
+  process.env.EXPO_PUBLIC_AUTH_OTP_MODE = 'whatsapp'
+})
+
 afterEach(() => {
   jest.clearAllMocks()
   jest.useRealTimers()
+  delete process.env.EXPO_PUBLIC_AUTH_OTP_MODE
 })
 
 // ── isWhatsAppSendFailure helper ──────────────────────────────────────────────
@@ -547,5 +557,126 @@ describe('LoginScreen — per-code WhatsApp failure UX (FIX HIGH-G7)', () => {
     ).toBeTruthy()
     expect(getByText(/Verificá que tenés WhatsApp instalado/i)).toBeTruthy()
     expect(getByTestId('whatsapp-failure-retry-btn')).toBeTruthy()
+  })
+})
+
+// ── Phone-only login (the DEFAULT flow — no OTP) ──────────────────────────────
+//
+// With EXPO_PUBLIC_AUTH_OTP_MODE unset (the default), LoginScreen renders the
+// single-screen phone-only flow: phone → in, no code step, name revealed only
+// on first login. These tests drive useLogin directly.
+
+describe('LoginScreen — phone-only default flow', () => {
+  type LoginMutationState = {
+    mutateAsync: jest.Mock
+    isPending: boolean
+    isError: boolean
+    error: unknown
+  }
+  function makeLoginMock(
+    overrides: Partial<LoginMutationState> = {},
+  ): LoginMutationState {
+    return {
+      mutateAsync: jest.fn(),
+      isPending: false,
+      isError: false,
+      error: null,
+      ...overrides,
+    }
+  }
+
+  beforeEach(() => {
+    // Phone-only is the default — make sure OTP is OFF for this suite even
+    // though the top-level beforeEach turned it on.
+    delete process.env.EXPO_PUBLIC_AUTH_OTP_MODE
+    mockUseSendOtp.mockReturnValue(
+      makeSendOtpMock() as unknown as ReturnType<typeof useSendOtp>,
+    )
+    mockUseVerifyOtp.mockReturnValue(
+      makeVerifyOtpMock() as unknown as ReturnType<typeof useVerifyOtp>,
+    )
+  })
+
+  it('renders a phone field and NO OTP code field', () => {
+    mockUseLogin.mockReturnValue(
+      makeLoginMock() as unknown as ReturnType<typeof useLogin>,
+    )
+    const { getByTestId, queryByTestId } = renderWithProviders(<LoginScreen />)
+    expect(getByTestId('login-phone-input')).toBeTruthy()
+    expect(getByTestId('login-submit-btn')).toBeTruthy()
+    // The OTP code field and "send code" button do not exist in this flow.
+    expect(queryByTestId('login-code-input')).toBeNull()
+    expect(queryByTestId('login-send-code-btn')).toBeNull()
+  })
+
+  it('logs in an existing user with phone alone (no code in payload)', async () => {
+    const mutateAsync = jest.fn().mockResolvedValue({
+      accessToken: 'a',
+      refreshToken: 'r',
+      user: { role: 'client' },
+      isNewUser: false,
+    })
+    mockUseLogin.mockReturnValue(
+      makeLoginMock({ mutateAsync }) as unknown as ReturnType<typeof useLogin>,
+    )
+
+    const { getByTestId } = renderWithProviders(<LoginScreen />)
+    await act(async () => {
+      fireEvent.changeText(getByTestId('login-phone-input'), '+18095550000')
+      fireEvent.press(getByTestId('login-submit-btn'))
+    })
+
+    await waitFor(() => expect(mutateAsync).toHaveBeenCalledTimes(1))
+    expect(mutateAsync).toHaveBeenCalledWith({
+      phone: '+18095550000',
+      fullName: undefined,
+      referralCode: undefined,
+    })
+  })
+
+  it('reveals a name field on first login and resubmits with the name', async () => {
+    const mutateAsync = jest
+      .fn()
+      .mockRejectedValueOnce({
+        response: {
+          status: 400,
+          data: { message: 'Es tu primer ingreso — mandá también tu nombre' },
+        },
+      })
+      .mockResolvedValueOnce({
+        accessToken: 'a',
+        refreshToken: 'r',
+        user: { role: 'client' },
+        isNewUser: true,
+      })
+    mockUseLogin.mockReturnValue(
+      makeLoginMock({ mutateAsync }) as unknown as ReturnType<typeof useLogin>,
+    )
+
+    const { getByTestId, queryByTestId } = renderWithProviders(<LoginScreen />)
+
+    await act(async () => {
+      fireEvent.changeText(getByTestId('login-phone-input'), '+18095551111')
+      fireEvent.press(getByTestId('login-submit-btn'))
+    })
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    // The name field appears after the first-login error.
+    await waitFor(() => expect(queryByTestId('login-name-input')).toBeTruthy())
+
+    await act(async () => {
+      fireEvent.changeText(getByTestId('login-name-input'), 'Juan Pérez')
+      fireEvent.press(getByTestId('login-submit-btn'))
+    })
+
+    await waitFor(() => expect(mutateAsync).toHaveBeenCalledTimes(2))
+    expect(mutateAsync).toHaveBeenLastCalledWith({
+      phone: '+18095551111',
+      fullName: 'Juan Pérez',
+      referralCode: undefined,
+    })
   })
 })

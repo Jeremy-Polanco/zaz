@@ -170,7 +170,7 @@ export function SectionHeading({
   )
 }
 
-// ─── DashGo brand mark + bolt (no react-native-svg needed for web) ───
+// ─── Udash brand mark + bolt (no react-native-svg needed for web) ───
 
 export function BoltIcon({
   size = 14,
@@ -195,43 +195,32 @@ export function BoltIcon({
   )
 }
 
-export function DashGoMark({ size = 26 }: { size?: number }) {
-  // Wordmark: "Dash ⚡ Go" — type in currentColor, bolt in DashGo orange.
-  // Single inline SVG so it scales crisp at any size and inherits text color.
-  const aspect = 4.4
+export function UdashMark({ size = 26 }: { size?: number }) {
+  // Wordmark: orange speed lines + "Udash" (orange "U", rest in currentColor).
+  // Single inline SVG so it scales crisp at any size and adapts to light/dark.
+  const aspect = 3.7
   return (
     <svg
       width={size * aspect}
       height={size}
-      viewBox="0 0 220 50"
+      viewBox="0 0 185 50"
       fill="none"
-      aria-label="DashGo"
+      aria-label="Udash"
     >
+      {/* speed lines — echo the motion marks in the Udash logo */}
+      <rect x="0" y="16" width="24" height="5" rx="2.5" fill="#FF8000" />
+      <rect x="6" y="25" width="30" height="5" rx="2.5" fill="#FF8000" />
+      <rect x="2" y="34" width="18" height="5" rx="2.5" fill="#FF8000" />
       <text
-        x="0"
-        y="38"
+        x="46"
+        y="39"
         fontFamily="'Inter Tight', system-ui, -apple-system, 'Helvetica Neue', sans-serif"
         fontWeight="700"
         fontSize="42"
         letterSpacing="-1.8"
-        fill="currentColor"
       >
-        Dash
-      </text>
-      <path
-        d="M115 5 L101 28 L113 28 L107 45 L129 21 L117 21 L122 5 Z"
-        fill="#FF8000"
-      />
-      <text
-        x="134"
-        y="38"
-        fontFamily="'Inter Tight', system-ui, -apple-system, 'Helvetica Neue', sans-serif"
-        fontWeight="700"
-        fontSize="42"
-        letterSpacing="-1.8"
-        fill="currentColor"
-      >
-        Go
+        <tspan fill="#FF8000">U</tspan>
+        <tspan fill="currentColor">dash</tspan>
       </text>
     </svg>
   )

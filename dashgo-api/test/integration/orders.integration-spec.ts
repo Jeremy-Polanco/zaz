@@ -139,6 +139,10 @@ describe('OrdersService (integration)', () => {
           `DELETE FROM credit_account WHERE user_id = $1`,
           [userId],
         );
+        await dataSource.query(
+          `DELETE FROM subscriptions WHERE user_id = $1`,
+          [userId],
+        );
         await dataSource.getRepository(User).delete({ id: userId });
       }
     }
@@ -588,8 +592,9 @@ describe('OrdersService (integration)', () => {
         await dataSource.query(`DELETE FROM rentals WHERE id = $1`, [id]);
       }
       for (const userId of mixedCartUserIds) {
-        await dataSource.query(`DELETE FROM "order_item" WHERE order_id IN (SELECT id FROM "order" WHERE customer_id = $1)`, [userId]);
-        await dataSource.query(`DELETE FROM "order" WHERE customer_id = $1`, [userId]);
+        await dataSource.query(`DELETE FROM "order_items" WHERE order_id IN (SELECT id FROM "orders" WHERE customer_id = $1)`, [userId]);
+        await dataSource.query(`DELETE FROM "orders" WHERE customer_id = $1`, [userId]);
+        await dataSource.query(`DELETE FROM subscriptions WHERE user_id = $1`, [userId]);
         await dataSource.getRepository(User).delete({ id: userId });
       }
       await dataSource.getRepository(Product).delete({ id: singleProduct.id });
@@ -597,45 +602,37 @@ describe('OrdersService (integration)', () => {
       await dataSource.getRepository(Category).delete({ id: mixedTestCategory.id });
     });
 
-    it('mixed cart total = singlePaymentCents + rentalMonthlyRentCents', async () => {
-      // single product: 2 × $5.00 = $10.00 = 1000 cents
-      // rental product: 1 × $20.00/mo = 2000 cents
-      // Expected total: 3000 cents = $30.00
-
+    it('rejects a mixed cart (single_payment + rental) with MIXED_CART_NOT_ALLOWED', async () => {
+      // Mixed carts were disallowed by the cycle-5 server guard (commit cfa9c0b),
+      // added AFTER this block was first written. Combining a single_payment item
+      // with a rental item in one order now throws MIXED_CART_NOT_ALLOWED — the same
+      // contract the rental-cycle E2E "BUG-3 fix" asserts at the wire level.
       const userData = makeUser({ role: UserRole.CLIENT, stripeCustomerId: 'cus_mixed_cart_test' });
       const user = await dataSource.getRepository(User).save(userData as unknown as User);
       mixedCartUserIds.push(user.id);
 
       const authUser = { id: user.id, role: UserRole.CLIENT, email: null };
 
-      const order = await ordersService.create(authUser, {
-        items: [
-          { productId: singleProduct.id, quantity: 2 },
-          { productId: rentalProduct.id, quantity: 1 },
-        ],
-        deliveryAddress: { text: 'Mixed Cart Test St', lat: 18.4, lng: -69.9 },
-        paymentMethod: PaymentMethod.DIGITAL,
-        usePoints: false,
-        useCredit: false,
+      await expect(
+        ordersService.create(authUser, {
+          items: [
+            { productId: singleProduct.id, quantity: 2 },
+            { productId: rentalProduct.id, quantity: 1 },
+          ],
+          deliveryAddress: { text: 'Mixed Cart Test St', lat: 18.4, lng: -69.9 },
+          paymentMethod: PaymentMethod.DIGITAL,
+          usePoints: false,
+          useCredit: false,
+        }),
+      ).rejects.toMatchObject({
+        response: expect.objectContaining({ code: 'MIXED_CART_NOT_ALLOWED' }),
       });
-
-      // subtotal = 1000 (2 × 500 single_payment priceToPublic $5.00 → 500 cents) + 2000 rental = 3000
-      // Note: priceToPublic '5.00' → 500 cents; 2 × 500 = 1000; + 2000 = 3000 = $30.00
-      expect(parseFloat(order.subtotal) * 100).toBe(3000);
-      expect(order.status).toBe(OrderStatus.PENDING_QUOTE);
-
-      // Per ADR-1 + ADR-6: Rental rows are created at DELIVERED (markDelivered), NOT at order create.
-      // orders.create() only creates the Order and OrderItems.
-      // No Rental rows should exist at this point.
-      const { Rental: RentalEntity } = await import('../../src/entities/rental.entity.js');
-      const rentalRows = await dataSource.getRepository(RentalEntity).find({
-        where: { userId: user.id, productId: rentalProduct.id },
-      });
-      expect(rentalRows).toHaveLength(0); // Rental rows created at markDelivered, not create()
     });
 
-    it('free-shipping subscription regression — subscriber order still gets shippingCents=0 with rental in cart', async () => {
-      // Arrange: subscriber user with mixed cart
+    it('mixed cart is rejected even for an active subscriber (guard not bypassed)', async () => {
+      // Regression: the mixed-cart guard must fire regardless of subscription status.
+      // Free shipping for subscribers on a valid, non-mixed cart is covered by the
+      // "setQuote — free-shipping override for active subscribers" test above.
       const userData = makeUser({ role: UserRole.CLIENT, stripeCustomerId: 'cus_fs_rental_test' });
       const user = await dataSource.getRepository(User).save(userData as unknown as User);
       mixedCartUserIds.push(user.id);
@@ -666,35 +663,22 @@ describe('OrdersService (integration)', () => {
         canceledAt: null,
       } as unknown as Subscription);
 
-      // Create an order for this subscriber
+      // Even an active subscriber cannot place a mixed cart — the guard fires first.
       const authUser = { id: user.id, role: UserRole.CLIENT, email: null };
-      const order = await ordersService.create(authUser, {
-        items: [
-          { productId: singleProduct.id, quantity: 1 },
-          { productId: rentalProduct.id, quantity: 1 },
-        ],
-        deliveryAddress: { text: 'FS Rental Test St', lat: 18.4, lng: -69.9 },
-        paymentMethod: PaymentMethod.DIGITAL,
-        usePoints: false,
-        useCredit: false,
+      await expect(
+        ordersService.create(authUser, {
+          items: [
+            { productId: singleProduct.id, quantity: 1 },
+            { productId: rentalProduct.id, quantity: 1 },
+          ],
+          deliveryAddress: { text: 'FS Rental Test St', lat: 18.4, lng: -69.9 },
+          paymentMethod: PaymentMethod.DIGITAL,
+          usePoints: false,
+          useCredit: false,
+        }),
+      ).rejects.toMatchObject({
+        response: expect.objectContaining({ code: 'MIXED_CART_NOT_ALLOWED' }),
       });
-
-      // Admin quotes with non-zero shipping
-      const superAdmin = { id: user.id, role: UserRole.SUPER_ADMIN_DELIVERY, email: null };
-      const quoted = await ordersService.setQuote(order.id, 750, superAdmin);
-
-      // Assert: free shipping override still applies
-      expect(quoted.shipping).toBe('0.00');
-      expect(quoted.wasSubscriberAtQuote).toBe(true);
-
-      // Cleanup rentals
-      const { Rental: RentalEntity } = await import('../../src/entities/rental.entity.js');
-      const rentalRows = await dataSource.getRepository(RentalEntity).find({
-        where: { userId: user.id, productId: rentalProduct.id },
-      });
-      for (const r of rentalRows) {
-        mixedCartRentalIds.push(r.id);
-      }
     });
   });
 });

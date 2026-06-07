@@ -104,7 +104,15 @@
         ],
         "transform": {
           "^.+\\.(t|j)s$": "ts-jest"
-        }
+        },
+        "collectCoverageFrom": [
+          "**/*.(t|j)s",
+          "!**/*.spec.ts",
+          "!**/*.e2e-spec.ts",
+          "!**/*.integration-spec.ts",
+          "!test-utils/**",
+          "!main.ts"
+        ]
       },
       {
         "displayName": "integration",
@@ -122,14 +130,6 @@
         "globalSetup": "./test/setup-integration.ts",
         "globalTeardown": "./test/teardown-integration.ts"
       }
-    ],
-    "collectCoverageFrom": [
-      "src/**/*.(t|j)s",
-      "!src/**/*.spec.ts",
-      "!src/**/*.e2e-spec.ts",
-      "!src/**/*.integration-spec.ts",
-      "!src/test-utils/**",
-      "!src/main.ts"
     ],
     "coverageDirectory": "./coverage",
     "coverageThreshold": {

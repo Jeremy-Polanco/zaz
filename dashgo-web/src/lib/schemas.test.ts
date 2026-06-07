@@ -3,12 +3,69 @@ import {
   phoneSchema,
   sendOtpSchema,
   verifyOtpSchema,
+  loginSchema,
+  savedAddressSchema,
   checkoutSchema,
   grantCreditSchema,
   subscriptionSchema,
   subscriptionStatusSchema,
 } from './schemas'
 import { z } from 'zod'
+
+// ── loginSchema (phone-only login) ──────────────────────────────────────────
+
+describe('loginSchema', () => {
+  it('accepts a phone alone (no code)', () => {
+    expect(loginSchema.safeParse({ phone: '+18091234567' }).success).toBe(true)
+  })
+
+  it('accepts an optional name and 8-char referral code', () => {
+    const r = loginSchema.safeParse({
+      phone: '+18091234567',
+      fullName: 'Juan',
+      referralCode: 'ABCD1234',
+    })
+    expect(r.success).toBe(true)
+  })
+
+  it('rejects a bad phone', () => {
+    expect(loginSchema.safeParse({ phone: '123' }).success).toBe(false)
+  })
+})
+
+// ── savedAddressSchema (address book) ───────────────────────────────────────
+
+describe('savedAddressSchema', () => {
+  const valid = {
+    label: 'Casa',
+    line1: 'Av. 27 de Febrero 123',
+    lat: 40.84,
+    lng: -73.93,
+  }
+
+  it('accepts a minimal valid address', () => {
+    expect(savedAddressSchema.safeParse(valid).success).toBe(true)
+  })
+
+  it('accepts empty optional line2/instructions', () => {
+    expect(
+      savedAddressSchema.safeParse({ ...valid, line2: '', instructions: '' })
+        .success,
+    ).toBe(true)
+  })
+
+  it('requires a label', () => {
+    expect(savedAddressSchema.safeParse({ ...valid, label: '' }).success).toBe(
+      false,
+    )
+  })
+
+  it('rejects out-of-range coordinates', () => {
+    expect(savedAddressSchema.safeParse({ ...valid, lat: 200 }).success).toBe(
+      false,
+    )
+  })
+})
 
 // ── phoneSchema ───────────────────────────────────────────────────────────────
 

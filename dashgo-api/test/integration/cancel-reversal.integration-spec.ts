@@ -99,7 +99,7 @@ describe('OrdersService cancel — full reversal', () => {
       for (const userId of createdUserIds) {
         await dataSource.query('DELETE FROM rentals WHERE user_id = $1', [userId]);
         await dataSource.query(
-          'DELETE FROM points_ledger_entry WHERE user_id = $1',
+          'DELETE FROM points_ledger_entries WHERE user_id = $1',
           [userId],
         );
         await dataSource.query(

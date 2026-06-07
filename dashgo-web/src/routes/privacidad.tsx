@@ -5,7 +5,7 @@ export const Route = createFileRoute('/privacidad')({
 })
 
 const LAST_UPDATED = '1 de junio de 2026'
-const LEGAL_NAME = 'DashGo LLC'
+const LEGAL_NAME = 'Urban Dash LLC'
 const CONTACT_EMAIL = 'urban@dashgo.dev'
 const PHYSICAL_ADDRESS = '45 Cypress Ave, Bogota, NJ 07603'
 
@@ -34,8 +34,8 @@ function PrivacyPolicy() {
 
       <Section title="1. Quiénes somos">
         <p>
-          DashGo es operada por {LEGAL_NAME} (&quot;DashGo&quot;, &quot;nosotros&quot;).
-          Esta política explica qué datos recolectamos cuando usás la app DashGo o
+          Udash es operada por {LEGAL_NAME} (&quot;Udash&quot;, &quot;nosotros&quot;).
+          Esta política explica qué datos recolectamos cuando usás la app Udash o
           el sitio web, cómo los usamos, con quién los compartimos y qué derechos
           tenés sobre ellos.
         </p>
@@ -224,7 +224,7 @@ function PrivacyPolicy() {
 
       <Section title="7. Niños menores de 13 años">
         <p>
-          DashGo no está dirigido a menores de 13 años. No recolectamos
+          Udash no está dirigido a menores de 13 años. No recolectamos
           conscientemente datos de menores de 13. Si descubrimos que recolectamos
           datos de un menor sin consentimiento parental, los borramos. Si sos
           padre o tutor y creés que tu hijo nos dio datos, escribinos a{' '}
@@ -245,7 +245,7 @@ function PrivacyPolicy() {
 
       <Section title="9. Transferencias internacionales">
         <p>
-          DashGo opera principalmente en los Estados Unidos. Nuestros servidores
+          Udash opera principalmente en los Estados Unidos. Nuestros servidores
           están alojados en EE.UU. Si nos escribís desde fuera del país, tus
           datos pueden ser procesados en EE.UU. bajo nuestras protecciones
           estándar.

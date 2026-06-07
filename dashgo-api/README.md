@@ -4,12 +4,14 @@ Backend de DashGo. NestJS 11 · TypeORM · Postgres · JWT · Twilio OTP · Stri
 
 > Setup del stack completo (docker, seed, envs): ver [../README.md](../README.md).
 
+> **Pagos — estado de lanzamiento (iteración 1):** DashGo lanza aceptando **solo efectivo contra entrega**. Los pagos con tarjeta (Stripe) están **completamente implementados y probados en el código**, pero **a la espera de la aprobación de la cuenta de producción de Stripe** — se habilitan en cuanto se apruebe la cuenta en vivo. No se elimina nada; es una decisión de tiempos de lanzamiento que depende de una aprobación externa (Stripe).
+
 ## Stack
 
 - **NestJS 11** con `@nestjs/config`, `@nestjs/jwt`, `@nestjs/passport`, `@nestjs/schedule`
 - **TypeORM** + `pg` (Postgres 16). `synchronize: true` en dev, migraciones en prod.
 - **Auth:** phone + OTP (Twilio), JWT access (1h) + refresh (30d)
-- **Pagos:** Stripe (setup inicial, Connect pendiente)
+- **Pagos:** efectivo contra entrega en el lanzamiento; Stripe (tarjeta) construido y probado pero gateado a la espera de la aprobación de la cuenta de producción de Stripe (setup inicial, Connect pendiente)
 - **SMS:** Twilio con dev bypass para `+1555555XXXX`
 
 ## Módulos
@@ -120,6 +122,8 @@ npm run seed                       # popula DB (requiere API down o DB vacía)
 En docker: `docker compose exec api npm install <pkg> --legacy-peer-deps && docker compose restart api` — el volumen anónimo de `/app/node_modules` impide que `npm install` en host propague.
 
 ## Stripe — local webhook setup
+
+> **Estado de lanzamiento:** gateado hasta la aprobación de la cuenta de producción de Stripe. El flujo, los env vars y el webhook descritos abajo son válidos y se activan en cuanto Stripe apruebe la cuenta en vivo; en el lanzamiento se opera solo con efectivo contra entrega.
 
 ```bash
 # install Stripe CLI once

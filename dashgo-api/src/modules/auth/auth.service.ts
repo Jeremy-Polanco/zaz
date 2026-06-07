@@ -106,15 +106,10 @@ export class AuthService implements OnModuleInit {
   async sendOtp(dto: SendOtpDto, opts: { skipCooldown?: boolean } = {}) {
     const phone = dto.phone.trim();
 
-    // Closed-beta short-circuit. In `disabled` mode we don't send any code
-    // and verifyOtp will accept any (or empty) code. The web client uses
-    // the `requiresCode: false` flag to skip the code step in the UI.
-    // env.schema.ts Rule 6 prevents this from silently surviving to prod
-    // without an explicit AUTH_OTP_DISABLED_ACK=yes acknowledgement.
-    if (this.config.get<string>('AUTH_OTP_MODE') === 'disabled') {
-      this.logger.warn(
-        `[AUTH_OTP_DISABLED] sendOtp no-op for ${phone} — closed-beta mode`,
-      );
+    // Phone-only login is the default — no code is sent. `requiresCode: false`
+    // tells clients to skip the code step entirely. OTP delivery only runs
+    // when an operator explicitly re-enables it (AUTH_OTP_MODE=whatsapp|sandbox).
+    if (!this.isOtpEnabled()) {
       return {
         sent: true,
         expiresAt: new Date(
@@ -220,6 +215,18 @@ export class AuthService implements OnModuleInit {
     return { sent: true, expiresAt: expiresAt.toISOString() };
   }
 
+  /**
+   * Phone-only login is the DEFAULT. OTP send + verification only run when an
+   * operator explicitly re-enables them via AUTH_OTP_MODE=whatsapp|sandbox.
+   * Any other value (including the 'disabled' default or an unset var) means
+   * phone-only. Keeping the OTP code dormant behind this flag makes verified
+   * login a config change away, not a code revert.
+   */
+  private isOtpEnabled(): boolean {
+    const mode = this.config.get<string>('AUTH_OTP_MODE');
+    return mode === 'whatsapp' || mode === 'sandbox';
+  }
+
   private isBypassPhone(phone: string): boolean {
     return this.parsePhoneList('AUTH_BYPASS_PHONES').includes(phone);
   }
@@ -240,16 +247,18 @@ export class AuthService implements OnModuleInit {
   async verifyOtp(dto: VerifyOtpDto) {
     const phone = dto.phone.trim();
 
-    // Closed-beta short-circuit. In `disabled` mode no code was sent in
-    // sendOtp, so there is nothing to verify — just look up (or create) the
-    // user and issue tokens. ANYONE who can hit this endpoint with a known
-    // phone can log in as that user; env.schema.ts Rule 6 ensures this
-    // requires explicit production acknowledgement.
-    if (this.config.get<string>('AUTH_OTP_MODE') === 'disabled') {
-      this.logger.warn(
-        `[AUTH_OTP_DISABLED] verifyOtp accepting any code for ${phone} — closed-beta mode`,
-      );
+    // Phone-only login is the default — there is no code to verify, so just
+    // look up (or create) the user and issue tokens. SECURITY: anyone who can
+    // hit this endpoint with a known phone can log in as that user. OTP
+    // verification is dormant and only runs when re-enabled via AUTH_OTP_MODE.
+    if (!this.isOtpEnabled()) {
       return this.completeLogin(phone, dto);
+    }
+
+    // OTP re-enabled: a code is mandatory (the DTO makes it optional so the
+    // phone-only path validates, so enforce presence here).
+    if (!dto.code) {
+      throw new BadRequestException('Falta el código de verificación');
     }
 
     const otp = await this.otps.findOne({
@@ -270,7 +279,7 @@ export class AuthService implements OnModuleInit {
       );
     }
 
-    const ok = await bcrypt.compare(dto.code, otp.codeHash);
+    const ok = await bcrypt.compare(dto.code as string, otp.codeHash);
     if (!ok) {
       await this.otps.update(otp.id, { attempts: otp.attempts + 1 });
       throw new UnauthorizedException('Código inválido');

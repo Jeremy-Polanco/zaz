@@ -58,10 +58,10 @@ function InvoicePage() {
           <div>
             <span className="eyebrow">Factura</span>
             <h1 className="display mt-3 text-5xl font-semibold tracking-[-0.03em] text-ink">
-              DashGo
+              Udash
             </h1>
             <p className="mt-2 text-[0.7rem] uppercase tracking-[0.18em] text-ink-muted">
-              Agua al timbre · New York
+              Agua al timbre · New Jersey
             </p>
           </div>
           <div className="text-right">
@@ -186,7 +186,7 @@ function InvoicePage() {
             Gracias por tu pedido
           </p>
           <p className="mt-2 text-[0.6rem] uppercase tracking-[0.14em] text-ink-muted">
-            DashGo · dashgo.dev
+            Udash · dashgo.dev
           </p>
         </footer>
       </div>

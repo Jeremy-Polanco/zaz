@@ -1330,4 +1330,1088 @@ describe('OrdersService', () => {
       expect(dataSource.transaction).toHaveBeenCalledTimes(1);
     });
   });
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // findAll / findOne — scope + not-found branches
+  // ─────────────────────────────────────────────────────────────────────────
+
+  describe('findAll', () => {
+    it('SUPER_ADMIN_DELIVERY scope returns all orders (empty where scope)', async () => {
+      const list = [fakeOrder(), fakeOrder({ id: 'order-2' })];
+      ordersRepo.find.mockResolvedValue(list);
+
+      const result = await service.findAll(fakeUser(UserRole.SUPER_ADMIN_DELIVERY));
+
+      expect(result).toBe(list);
+      const callArg = ordersRepo.find.mock.calls[0][0] as Record<string, unknown>;
+      // SUPER_ADMIN_DELIVERY → unrestricted scope ({})
+      expect(callArg.where).toEqual({});
+    });
+
+    it('CLIENT scope restricts to customerId', async () => {
+      ordersRepo.find.mockResolvedValue([]);
+
+      await service.findAll(fakeUser(UserRole.CLIENT));
+
+      const callArg = ordersRepo.find.mock.calls[0][0] as Record<string, unknown>;
+      expect(callArg.where).toEqual({ customerId: 'user-1' });
+    });
+  });
+
+  describe('findOne', () => {
+    it('returns the order when found', async () => {
+      const order = fakeOrder();
+      ordersRepo.findOne.mockResolvedValue(order);
+
+      const result = await service.findOne('order-1', fakeUser(UserRole.CLIENT));
+
+      expect(result).toBe(order);
+    });
+
+    it('throws NotFoundException when order is missing', async () => {
+      ordersRepo.findOne.mockResolvedValue(null);
+
+      await expect(
+        service.findOne('missing', fakeUser(UserRole.CLIENT)),
+      ).rejects.toThrow(NotFoundException);
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // create — product validation guard branches (lines 110/113/118)
+  // ─────────────────────────────────────────────────────────────────────────
+
+  describe('create — product validation guards', () => {
+    const baseDto = {
+      items: [{ productId: 'prod-1', quantity: 1 }],
+      deliveryAddress: { text: '123 Test', lat: 18.4861, lng: -69.9312 },
+      paymentMethod: PaymentMethod.CASH,
+      usePoints: false,
+      useCredit: false,
+    } as import('./dto/create-order.dto').CreateOrderDto;
+
+    it('throws BadRequest when a product does not exist (not in byId map)', async () => {
+      // products.find returns empty → byId.get(productId) is undefined
+      productsRepo.find.mockResolvedValue([]);
+
+      await expect(
+        service.create(fakeUser(UserRole.CLIENT), baseDto),
+      ).rejects.toThrow('Uno o más productos no existen');
+
+      expect(dataSource.transaction).not.toHaveBeenCalled();
+    });
+
+    it('throws BadRequest when a product is not available', async () => {
+      productsRepo.find.mockResolvedValue([
+        fakeProduct({ id: 'prod-1', isAvailable: false }),
+      ]);
+
+      await expect(
+        service.create(fakeUser(UserRole.CLIENT), baseDto),
+      ).rejects.toThrow('no está disponible');
+    });
+
+    it('throws BadRequest when stock is insufficient', async () => {
+      productsRepo.find.mockResolvedValue([
+        fakeProduct({ id: 'prod-1', stock: 0 }),
+      ]);
+
+      await expect(
+        service.create(fakeUser(UserRole.CLIENT), {
+          ...baseDto,
+          items: [{ productId: 'prod-1', quantity: 5 }],
+        } as import('./dto/create-order.dto').CreateOrderDto),
+      ).rejects.toThrow('Stock insuficiente');
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // create — points redemption + credit no-account catch (lines 187-189, 203)
+  // ─────────────────────────────────────────────────────────────────────────
+
+  describe('create — points + credit branches', () => {
+    const baseDto = {
+      items: [{ productId: 'prod-1', quantity: 1 }],
+      deliveryAddress: { text: '123 Test', lat: 18.4861, lng: -69.9312 },
+      paymentMethod: PaymentMethod.CASH,
+      usePoints: true,
+      useCredit: false,
+    } as import('./dto/create-order.dto').CreateOrderDto;
+
+    function setupCreateTx(savedOverride: Partial<Order> = {}) {
+      const savedOrder = fakeOrder({ ...savedOverride });
+      (dataSource.transaction as jest.Mock).mockImplementation(
+        async (cb: (mgr: EntityManager) => Promise<unknown>) => {
+          const orderRepo = makeRepoMock<Order>();
+          const itemRepo = makeRepoMock<OrderItem>();
+          orderRepo.create.mockImplementation((d) => ({ ...d, id: 'order-1' }) as Order);
+          orderRepo.save.mockResolvedValue(savedOrder);
+          orderRepo.update.mockResolvedValue({ affected: 1 } as never);
+          itemRepo.save.mockResolvedValue({} as never);
+          itemRepo.create.mockImplementation((d) => d as OrderItem);
+
+          const mgr = {
+            getRepository: (entity: unknown) => {
+              if (entity === Order) return orderRepo;
+              if (entity === OrderItem) return itemRepo;
+              return makeRepoMock();
+            },
+          };
+          return cb(mgr as unknown as EntityManager);
+        },
+      );
+      ordersRepo.findOne.mockResolvedValue(
+        fakeOrder({ customer: fakeUser() as never, items: [] }),
+      );
+    }
+
+    it('redeems points when usePoints=true and claimable balance > 0', async () => {
+      productsRepo.find.mockResolvedValue([fakeProduct()]);
+      pointsService.getBalance.mockResolvedValue({ claimableCents: 300 } as never);
+      pointsService.redeemAllClaimable.mockResolvedValue(undefined as never);
+      setupCreateTx();
+
+      await service.create(fakeUser(UserRole.CLIENT), baseDto);
+
+      // claimableCents (300) < subtotal (500) → 300 redeemed → redeemAllClaimable called
+      expect(pointsService.getBalance).toHaveBeenCalledWith('user-1');
+      expect(pointsService.redeemAllClaimable).toHaveBeenCalledWith(
+        'user-1',
+        'order-1',
+        expect.anything(),
+      );
+    });
+
+    it('does NOT redeem points when claimable balance is 0', async () => {
+      productsRepo.find.mockResolvedValue([fakeProduct()]);
+      pointsService.getBalance.mockResolvedValue({ claimableCents: 0 } as never);
+      setupCreateTx();
+
+      await service.create(fakeUser(UserRole.CLIENT), baseDto);
+
+      expect(pointsService.redeemAllClaimable).not.toHaveBeenCalled();
+    });
+
+    it('silently skips credit when no credit account exists (getAccountWithLock throws)', async () => {
+      productsRepo.find.mockResolvedValue([fakeProduct()]);
+      creditService.getAccountWithLock.mockRejectedValue(
+        new Error('No account'),
+      );
+      setupCreateTx();
+
+      await service.create(fakeUser(UserRole.CLIENT), {
+        ...baseDto,
+        usePoints: false,
+        useCredit: true,
+      } as import('./dto/create-order.dto').CreateOrderDto);
+
+      // The catch swallows the error → applyCharge never runs, create() succeeds
+      expect(creditService.getAccountWithLock).toHaveBeenCalled();
+      expect(creditService.applyCharge).not.toHaveBeenCalled();
+    });
+
+    it('does NOT apply credit when available credit is 0 or negative', async () => {
+      productsRepo.find.mockResolvedValue([fakeProduct()]);
+      creditService.getAccountWithLock.mockResolvedValue({
+        balanceCents: -100,
+        creditLimitCents: 100,
+        userId: 'user-1',
+      } as never);
+      setupCreateTx();
+
+      await service.create(fakeUser(UserRole.CLIENT), {
+        ...baseDto,
+        usePoints: false,
+        useCredit: true,
+      } as import('./dto/create-order.dto').CreateOrderDto);
+
+      // available = -100 + 100 = 0 → no charge
+      expect(creditService.applyCharge).not.toHaveBeenCalled();
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // setQuote — guard branches (lines 315, 318, 327)
+  // ─────────────────────────────────────────────────────────────────────────
+
+  describe('setQuote — guards', () => {
+    it('throws Forbidden when user is not SUPER_ADMIN_DELIVERY', async () => {
+      await expect(
+        service.setQuote('order-1', 300, fakeUser(UserRole.CLIENT)),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('throws BadRequest when shippingCents is not an integer', async () => {
+      await expect(
+        service.setQuote('order-1', 12.5, fakeUser(UserRole.SUPER_ADMIN_DELIVERY)),
+      ).rejects.toThrow('shippingCents inválido');
+    });
+
+    it('throws BadRequest when shippingCents is negative', async () => {
+      await expect(
+        service.setQuote('order-1', -1, fakeUser(UserRole.SUPER_ADMIN_DELIVERY)),
+      ).rejects.toThrow('shippingCents inválido');
+    });
+
+    it('throws BadRequest when order is in a non-quotable status', async () => {
+      const order = fakeOrder({
+        status: OrderStatus.DELIVERED,
+        customer: fakeUser() as never,
+      });
+      ordersRepo.findOne.mockResolvedValue(order);
+
+      await expect(
+        service.setQuote('order-1', 300, fakeUser(UserRole.SUPER_ADMIN_DELIVERY)),
+      ).rejects.toThrow('No se puede cotizar un pedido en estado');
+    });
+
+    it('allows re-quoting a QUOTED order and preserves existing quotedAt', async () => {
+      const existingQuotedAt = new Date('2026-01-01T00:00:00.000Z');
+      const order = fakeOrder({
+        status: OrderStatus.QUOTED,
+        quotedAt: existingQuotedAt,
+        customer: fakeUser() as never,
+      });
+      ordersRepo.findOne
+        .mockResolvedValueOnce(order)
+        .mockResolvedValueOnce(order);
+      subscriptionService.isActiveSubscriber.mockResolvedValue(false);
+      ordersRepo.update.mockResolvedValue({ affected: 1 } as never);
+
+      await service.setQuote('order-1', 300, fakeUser(UserRole.SUPER_ADMIN_DELIVERY));
+
+      const updateCall = ordersRepo.update.mock.calls[0][1] as Record<string, unknown>;
+      // quotedAt preserved via the ?? fallback
+      expect(updateCall.quotedAt).toBe(existingQuotedAt);
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // authorize — guard + idempotency + credit-covered branches
+  // (lines 372, 375, 380, 385-392, 412)
+  // ─────────────────────────────────────────────────────────────────────────
+
+  describe('authorize — guards and idempotency', () => {
+    it('throws Forbidden when the order belongs to a different customer', async () => {
+      ordersRepo.findOne.mockResolvedValue(
+        fakeOrder({ customerId: 'other-user', customer: fakeUser() as never }),
+      );
+
+      await expect(
+        service.authorize('order-1', fakeUser(UserRole.CLIENT)),
+      ).rejects.toThrow('No sos el dueño de este pedido');
+    });
+
+    it('throws BadRequest when order is not in QUOTED status', async () => {
+      ordersRepo.findOne.mockResolvedValue(
+        fakeOrder({
+          customerId: 'user-1',
+          status: OrderStatus.PENDING_QUOTE,
+          paymentMethod: PaymentMethod.DIGITAL,
+          customer: fakeUser() as never,
+        }),
+      );
+
+      await expect(
+        service.authorize('order-1', fakeUser(UserRole.CLIENT)),
+      ).rejects.toThrow('No se puede autorizar un pedido en estado');
+    });
+
+    it('throws BadRequest when the order is cash (not digital)', async () => {
+      ordersRepo.findOne.mockResolvedValue(
+        fakeOrder({
+          customerId: 'user-1',
+          status: OrderStatus.QUOTED,
+          paymentMethod: PaymentMethod.CASH,
+          customer: fakeUser() as never,
+        }),
+      );
+
+      await expect(
+        service.authorize('order-1', fakeUser(UserRole.CLIENT)),
+      ).rejects.toThrow('Este pedido es en efectivo');
+    });
+
+    it('idempotent: returns the existing intent client secret when intent is still active', async () => {
+      ordersRepo.findOne.mockResolvedValue(
+        fakeOrder({
+          customerId: 'user-1',
+          status: OrderStatus.QUOTED,
+          paymentMethod: PaymentMethod.DIGITAL,
+          stripePaymentIntentId: 'pi_existing',
+          customer: fakeUser() as never,
+        }),
+      );
+      paymentsService.retrieveIntent.mockResolvedValue({
+        id: 'pi_existing',
+        status: 'requires_payment_method',
+        client_secret: 'secret_existing',
+        amount: 1000,
+        currency: 'usd',
+      } as never);
+
+      const result = await service.authorize('order-1', fakeUser(UserRole.CLIENT));
+
+      expect(result).toEqual({
+        paymentIntentId: 'pi_existing',
+        clientSecret: 'secret_existing',
+        amount: 1000,
+        currency: 'usd',
+      });
+      // Must short-circuit before creating a new intent
+      expect(paymentsService.createAuthorizationIntent).not.toHaveBeenCalled();
+    });
+
+    it('idempotent fallback: empty client_secret coalesces to "" via ?? operator', async () => {
+      ordersRepo.findOne.mockResolvedValue(
+        fakeOrder({
+          customerId: 'user-1',
+          status: OrderStatus.QUOTED,
+          paymentMethod: PaymentMethod.DIGITAL,
+          stripePaymentIntentId: 'pi_existing',
+          customer: fakeUser() as never,
+        }),
+      );
+      paymentsService.retrieveIntent.mockResolvedValue({
+        id: 'pi_existing',
+        status: 'requires_confirmation',
+        client_secret: null,
+        amount: 1000,
+        currency: 'usd',
+      } as never);
+
+      const result = await service.authorize('order-1', fakeUser(UserRole.CLIENT));
+
+      expect(result.clientSecret).toBe('');
+    });
+
+    it('creates a fresh intent when the existing intent is canceled', async () => {
+      ordersRepo.findOne.mockResolvedValue(
+        fakeOrder({
+          customerId: 'user-1',
+          status: OrderStatus.QUOTED,
+          paymentMethod: PaymentMethod.DIGITAL,
+          totalAmount: '10.00',
+          creditApplied: '0.00',
+          stripePaymentIntentId: 'pi_canceled',
+          items: [],
+          customer: fakeUser() as never,
+        }),
+      );
+      paymentsService.retrieveIntent.mockResolvedValue({
+        id: 'pi_canceled',
+        status: 'canceled',
+        client_secret: 'x',
+        amount: 1000,
+        currency: 'usd',
+      } as never);
+      paymentsService.createAuthorizationIntent.mockResolvedValue({
+        paymentIntentId: 'pi_new',
+        clientSecret: 'secret_new',
+        amount: 1000,
+        currency: 'usd',
+      });
+      ordersRepo.update.mockResolvedValue({ affected: 1 } as never);
+
+      await service.authorize('order-1', fakeUser(UserRole.CLIENT));
+
+      // Canceled intent → proceed to create a new one
+      expect(paymentsService.createAuthorizationIntent).toHaveBeenCalledTimes(1);
+      expect(ordersRepo.update).toHaveBeenCalledWith('order-1', {
+        stripePaymentIntentId: 'pi_new',
+      });
+    });
+
+    it('throws BadRequest when the order is fully covered by credit (stripeAmount <= 0)', async () => {
+      ordersRepo.findOne.mockResolvedValue(
+        fakeOrder({
+          customerId: 'user-1',
+          status: OrderStatus.QUOTED,
+          paymentMethod: PaymentMethod.DIGITAL,
+          totalAmount: '10.00',
+          creditApplied: '10.00',
+          stripePaymentIntentId: null,
+          items: [],
+          customer: fakeUser() as never,
+        }),
+      );
+
+      await expect(
+        service.authorize('order-1', fakeUser(UserRole.CLIENT)),
+      ).rejects.toThrow('cubierto por crédito');
+    });
+
+    it('handles null creditApplied via "|| 0" fallback when computing stripe amount', async () => {
+      ordersRepo.findOne.mockResolvedValue(
+        fakeOrder({
+          customerId: 'user-1',
+          status: OrderStatus.QUOTED,
+          paymentMethod: PaymentMethod.DIGITAL,
+          totalAmount: '10.00',
+          creditApplied: null as never,
+          stripePaymentIntentId: null,
+          items: [],
+          customer: fakeUser() as never,
+        }),
+      );
+      paymentsService.createAuthorizationIntent.mockResolvedValue({
+        paymentIntentId: 'pi_new',
+        clientSecret: 'secret_new',
+        amount: 1000,
+        currency: 'usd',
+      });
+      ordersRepo.update.mockResolvedValue({ affected: 1 } as never);
+
+      const result = await service.authorize('order-1', fakeUser(UserRole.CLIENT));
+
+      // creditApplied null → '0' fallback → full 1000 cents to Stripe
+      expect(paymentsService.createAuthorizationIntent).toHaveBeenCalledWith(
+        expect.objectContaining({ amountCents: 1000 }),
+      );
+      expect(result.paymentIntentId).toBe('pi_new');
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // confirmNonStripeOrder / confirmCashOrder (lines 460-486)
+  // ─────────────────────────────────────────────────────────────────────────
+
+  describe('confirmNonStripeOrder', () => {
+    it('throws Forbidden when order belongs to another customer', async () => {
+      ordersRepo.findOne.mockResolvedValue(
+        fakeOrder({ customerId: 'other', customer: fakeUser() as never }),
+      );
+
+      await expect(
+        service.confirmNonStripeOrder('order-1', fakeUser(UserRole.CLIENT)),
+      ).rejects.toThrow('No sos el dueño de este pedido');
+    });
+
+    it('throws BadRequest when order is not QUOTED', async () => {
+      ordersRepo.findOne.mockResolvedValue(
+        fakeOrder({
+          customerId: 'user-1',
+          status: OrderStatus.PENDING_QUOTE,
+          customer: fakeUser() as never,
+        }),
+      );
+
+      await expect(
+        service.confirmNonStripeOrder('order-1', fakeUser(UserRole.CLIENT)),
+      ).rejects.toThrow('No se puede confirmar un pedido en estado');
+    });
+
+    it('throws BadRequest when an active Stripe intent exists', async () => {
+      ordersRepo.findOne.mockResolvedValue(
+        fakeOrder({
+          customerId: 'user-1',
+          status: OrderStatus.QUOTED,
+          stripePaymentIntentId: 'pi_active',
+          customer: fakeUser() as never,
+        }),
+      );
+
+      await expect(
+        service.confirmNonStripeOrder('order-1', fakeUser(UserRole.CLIENT)),
+      ).rejects.toThrow('pago digital pendiente');
+    });
+
+    it('confirms a cash/full-credit order → transitions to PENDING_VALIDATION', async () => {
+      const quoted = fakeOrder({
+        customerId: 'user-1',
+        status: OrderStatus.QUOTED,
+        stripePaymentIntentId: null,
+        customer: fakeUser() as never,
+      });
+      const confirmed = fakeOrder({
+        customerId: 'user-1',
+        status: OrderStatus.PENDING_VALIDATION,
+        customer: fakeUser() as never,
+      });
+      ordersRepo.findOne
+        .mockResolvedValueOnce(quoted)
+        .mockResolvedValueOnce(confirmed);
+      ordersRepo.update.mockResolvedValue({ affected: 1 } as never);
+
+      const result = await service.confirmNonStripeOrder(
+        'order-1',
+        fakeUser(UserRole.CLIENT),
+      );
+
+      expect(ordersRepo.update).toHaveBeenCalledWith('order-1', {
+        status: OrderStatus.PENDING_VALIDATION,
+      });
+      expect(result).toBe(confirmed);
+    });
+
+    it('confirmCashOrder delegates to confirmNonStripeOrder (deprecated alias)', async () => {
+      const quoted = fakeOrder({
+        customerId: 'user-1',
+        status: OrderStatus.QUOTED,
+        stripePaymentIntentId: null,
+        customer: fakeUser() as never,
+      });
+      const confirmed = fakeOrder({
+        customerId: 'user-1',
+        status: OrderStatus.PENDING_VALIDATION,
+        customer: fakeUser() as never,
+      });
+      ordersRepo.findOne
+        .mockResolvedValueOnce(quoted)
+        .mockResolvedValueOnce(confirmed);
+      ordersRepo.update.mockResolvedValue({ affected: 1 } as never);
+
+      const result = await service.confirmCashOrder(
+        'order-1',
+        fakeUser(UserRole.CLIENT),
+      );
+
+      expect(result).toBe(confirmed);
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // updateStatus — invalid transition + assertCanTransition client branches
+  // (lines 499, 666-675)
+  // ─────────────────────────────────────────────────────────────────────────
+
+  describe('updateStatus — transition guards', () => {
+    it('throws BadRequest for a disallowed status transition', async () => {
+      // DELIVERED has no allowed transitions
+      ordersRepo.findOne.mockResolvedValue(
+        fakeOrder({ status: OrderStatus.DELIVERED, customer: fakeUser() as never }),
+      );
+
+      await expect(
+        service.updateStatus(
+          'order-1',
+          { status: OrderStatus.CANCELLED },
+          fakeUser(UserRole.SUPER_ADMIN_DELIVERY),
+        ),
+      ).rejects.toThrow('Transición inválida');
+    });
+
+    it('CLIENT may cancel from a cancellable status', async () => {
+      const order = fakeOrder({
+        status: OrderStatus.QUOTED,
+        creditApplied: '0.00',
+        customer: fakeUser() as never,
+      });
+      const cancelled = fakeOrder({
+        status: OrderStatus.CANCELLED,
+        customer: fakeUser() as never,
+      });
+      ordersRepo.findOne
+        .mockResolvedValueOnce(order)
+        .mockResolvedValueOnce(cancelled);
+      (dataSource.transaction as jest.Mock).mockImplementation(
+        async (cb: (mgr: EntityManager) => Promise<unknown>) => {
+          const orderRepo = makeRepoMock<Order>();
+          orderRepo.update.mockResolvedValue({ affected: 1 } as never);
+          const mgr = {
+            getRepository: (entity: unknown) =>
+              entity === Order ? orderRepo : makeRepoMock(),
+          };
+          return cb(mgr as unknown as EntityManager);
+        },
+      );
+
+      await expect(
+        service.updateStatus(
+          'order-1',
+          { status: OrderStatus.CANCELLED },
+          fakeUser(UserRole.CLIENT),
+        ),
+      ).resolves.toBeDefined();
+    });
+
+    it('CLIENT cannot perform a non-cancel transition (assertCanTransition throws)', async () => {
+      // PENDING_VALIDATION → CONFIRMED_BY_COLMADO is allowed by ALLOWED_TRANSITIONS
+      // but assertCanTransition forbids a CLIENT from doing it.
+      ordersRepo.findOne.mockResolvedValue(
+        fakeOrder({
+          status: OrderStatus.PENDING_VALIDATION,
+          customer: fakeUser() as never,
+        }),
+      );
+
+      await expect(
+        service.updateStatus(
+          'order-1',
+          { status: OrderStatus.CONFIRMED_BY_COLMADO },
+          fakeUser(UserRole.CLIENT),
+        ),
+      ).rejects.toThrow('Cliente no puede ejecutar esta transición');
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // updateStatus — cancel with stock re-increment (lines 542-555)
+  // ─────────────────────────────────────────────────────────────────────────
+
+  describe('updateStatus — cancel restores stock when previously decremented', () => {
+    it('re-increments product stock for each item when cancelling a CONFIRMED order', async () => {
+      const item1 = { productId: 'prod-1', quantity: 2 } as OrderItem;
+      const item2 = { productId: 'prod-2', quantity: 3 } as OrderItem;
+
+      const order = fakeOrder({
+        status: OrderStatus.CONFIRMED_BY_COLMADO,
+        creditApplied: '0.00',
+        customer: fakeUser() as never,
+      });
+      ordersRepo.findOne
+        .mockResolvedValueOnce(order)
+        .mockResolvedValueOnce(
+          fakeOrder({ status: OrderStatus.CANCELLED, customer: fakeUser() as never }),
+        );
+
+      const incrementCalls: Array<{ id: string; qty: number }> = [];
+
+      (dataSource.transaction as jest.Mock).mockImplementation(
+        async (cb: (mgr: EntityManager) => Promise<unknown>) => {
+          const orderRepo = makeRepoMock<Order>();
+          const itemRepo = makeRepoMock<OrderItem>();
+          const productRepo = makeRepoMock<Product>();
+          orderRepo.update.mockResolvedValue({ affected: 1 } as never);
+          itemRepo.find.mockResolvedValue([item1, item2]);
+          (productRepo as unknown as { increment: jest.Mock }).increment = jest
+            .fn()
+            .mockImplementation((where: { id: string }, _col: string, qty: number) => {
+              incrementCalls.push({ id: where.id, qty });
+              return Promise.resolve({ affected: 1 });
+            });
+
+          const mgr = {
+            getRepository: (entity: unknown) => {
+              if (entity === Order) return orderRepo;
+              if (entity === OrderItem) return itemRepo;
+              if (entity === Product) return productRepo;
+              return makeRepoMock();
+            },
+          };
+          return cb(mgr as unknown as EntityManager);
+        },
+      );
+
+      await service.updateStatus(
+        'order-1',
+        { status: OrderStatus.CANCELLED },
+        fakeUser(UserRole.SUPER_ADMIN_DELIVERY),
+      );
+
+      expect(incrementCalls).toEqual([
+        { id: 'prod-1', qty: 2 },
+        { id: 'prod-2', qty: 3 },
+      ]);
+      // points + rental reversals always run on cancel
+      expect(pointsService.reverseRedemptionForOrder).toHaveBeenCalledWith(
+        'order-1',
+        expect.anything(),
+      );
+      expect(rentalsService.cancelPendingForOrder).toHaveBeenCalledWith(
+        'order-1',
+        expect.anything(),
+      );
+    });
+
+    it('does NOT re-increment stock when cancelling an order that was never confirmed', async () => {
+      const order = fakeOrder({
+        status: OrderStatus.PENDING_QUOTE,
+        creditApplied: '0.00',
+        customer: fakeUser() as never,
+      });
+      ordersRepo.findOne
+        .mockResolvedValueOnce(order)
+        .mockResolvedValueOnce(
+          fakeOrder({ status: OrderStatus.CANCELLED, customer: fakeUser() as never }),
+        );
+
+      const incrementSpy = jest.fn();
+
+      (dataSource.transaction as jest.Mock).mockImplementation(
+        async (cb: (mgr: EntityManager) => Promise<unknown>) => {
+          const orderRepo = makeRepoMock<Order>();
+          const productRepo = makeRepoMock<Product>();
+          orderRepo.update.mockResolvedValue({ affected: 1 } as never);
+          (productRepo as unknown as { increment: jest.Mock }).increment = incrementSpy;
+
+          const mgr = {
+            getRepository: (entity: unknown) => {
+              if (entity === Order) return orderRepo;
+              if (entity === Product) return productRepo;
+              return makeRepoMock();
+            },
+          };
+          return cb(mgr as unknown as EntityManager);
+        },
+      );
+
+      await service.updateStatus(
+        'order-1',
+        { status: OrderStatus.CANCELLED },
+        fakeUser(UserRole.SUPER_ADMIN_DELIVERY),
+      );
+
+      expect(incrementSpy).not.toHaveBeenCalled();
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // markDelivered — non-stripe / already-paid else branch (line 589)
+  // ─────────────────────────────────────────────────────────────────────────
+
+  describe('updateStatus → markDelivered — capture vs no-capture', () => {
+    function setupDeliverTx(order: Order) {
+      ordersRepo.findOne
+        .mockResolvedValueOnce(order)
+        .mockResolvedValueOnce({ ...order, status: OrderStatus.DELIVERED } as Order);
+
+      (dataSource.transaction as jest.Mock).mockImplementation(
+        async (cb: (mgr: EntityManager) => Promise<unknown>) => {
+          const orderRepo = makeRepoMock<Order>();
+          orderRepo.findOne.mockResolvedValue({ ...order, id: 'order-1' } as never);
+          orderRepo.update.mockResolvedValue({ affected: 1 } as never);
+          const mgr = {
+            getRepository: (entity: unknown) =>
+              entity === Order ? orderRepo : makeRepoMock(),
+          };
+          return cb(mgr as unknown as EntityManager);
+        },
+      );
+    }
+
+    it('does NOT capture for a cash order — uses the no-capture else branch', async () => {
+      const cashOrder = fakeOrder({
+        status: OrderStatus.IN_DELIVERY_ROUTE,
+        paymentMethod: PaymentMethod.CASH,
+        stripePaymentIntentId: null,
+        paidAt: null,
+        customer: fakeUser() as never,
+        items: [],
+      });
+      setupDeliverTx(cashOrder);
+
+      await service.updateStatus(
+        'order-1',
+        { status: OrderStatus.DELIVERED },
+        fakeUser(UserRole.SUPER_ADMIN_DELIVERY),
+      );
+
+      expect(paymentsService.captureIntent).not.toHaveBeenCalled();
+      expect(pointsService.creditForOrder).toHaveBeenCalled();
+      expect(invoicesService.createForOrder).toHaveBeenCalled();
+      expect(promotersService.creditCommissionsForOrder).toHaveBeenCalled();
+    });
+
+    it('does NOT capture for an already-paid digital order (paidAt set)', async () => {
+      const paidOrder = fakeOrder({
+        status: OrderStatus.IN_DELIVERY_ROUTE,
+        paymentMethod: PaymentMethod.DIGITAL,
+        stripePaymentIntentId: 'pi_already',
+        paidAt: new Date(),
+        customer: fakeUser() as never,
+        items: [],
+      });
+      setupDeliverTx(paidOrder);
+
+      await service.updateStatus(
+        'order-1',
+        { status: OrderStatus.DELIVERED },
+        fakeUser(UserRole.SUPER_ADMIN_DELIVERY),
+      );
+
+      expect(paymentsService.captureIntent).not.toHaveBeenCalled();
+    });
+
+    it('throws NotFound when the order disappears inside the markDelivered TX', async () => {
+      const order = fakeOrder({
+        status: OrderStatus.IN_DELIVERY_ROUTE,
+        paymentMethod: PaymentMethod.CASH,
+        customer: fakeUser() as never,
+        items: [],
+      });
+      ordersRepo.findOne.mockResolvedValueOnce(order);
+
+      (dataSource.transaction as jest.Mock).mockImplementation(
+        async (cb: (mgr: EntityManager) => Promise<unknown>) => {
+          const orderRepo = makeRepoMock<Order>();
+          orderRepo.findOne.mockResolvedValue(null); // gone inside TX
+          const mgr = {
+            getRepository: (entity: unknown) =>
+              entity === Order ? orderRepo : makeRepoMock(),
+          };
+          return cb(mgr as unknown as EntityManager);
+        },
+      );
+
+      await expect(
+        service.updateStatus(
+          'order-1',
+          { status: OrderStatus.DELIVERED },
+          fakeUser(UserRole.SUPER_ADMIN_DELIVERY),
+        ),
+      ).rejects.toThrow('Pedido no encontrado');
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // confirmAndDecrementStock — guard branches (lines 627, 642, 639)
+  // ─────────────────────────────────────────────────────────────────────────
+
+  describe('updateStatus → confirmAndDecrementStock — guards', () => {
+    it('throws NotFound when the order disappears inside the confirm TX', async () => {
+      const order = fakeOrder({
+        status: OrderStatus.PENDING_VALIDATION,
+        customer: fakeUser() as never,
+        items: [],
+      });
+      ordersRepo.findOne.mockResolvedValueOnce(order);
+
+      (dataSource.transaction as jest.Mock).mockImplementation(
+        async (cb: (mgr: EntityManager) => Promise<unknown>) => {
+          const orderRepo = makeRepoMock<Order>();
+          orderRepo.findOne.mockResolvedValue(null);
+          const mgr = {
+            getRepository: (entity: unknown) =>
+              entity === Order ? orderRepo : makeRepoMock(),
+          };
+          return cb(mgr as unknown as EntityManager);
+        },
+      );
+
+      await expect(
+        service.updateStatus(
+          'order-1',
+          { status: OrderStatus.CONFIRMED_BY_COLMADO },
+          fakeUser(UserRole.SUPER_ADMIN_DELIVERY),
+        ),
+      ).rejects.toThrow('Pedido no encontrado');
+    });
+
+    it('throws BadRequest when the order is no longer PENDING_VALIDATION inside the TX', async () => {
+      const order = fakeOrder({
+        status: OrderStatus.PENDING_VALIDATION,
+        customer: fakeUser() as never,
+        items: [],
+      });
+      ordersRepo.findOne.mockResolvedValueOnce(order);
+
+      (dataSource.transaction as jest.Mock).mockImplementation(
+        async (cb: (mgr: EntityManager) => Promise<unknown>) => {
+          const orderRepo = makeRepoMock<Order>();
+          // Inside TX the locked row shows a different status (race lost)
+          orderRepo.findOne.mockResolvedValue({
+            ...order,
+            status: OrderStatus.CONFIRMED_BY_COLMADO,
+          } as never);
+          const mgr = {
+            getRepository: (entity: unknown) =>
+              entity === Order ? orderRepo : makeRepoMock(),
+          };
+          return cb(mgr as unknown as EntityManager);
+        },
+      );
+
+      await expect(
+        service.updateStatus(
+          'order-1',
+          { status: OrderStatus.CONFIRMED_BY_COLMADO },
+          fakeUser(UserRole.SUPER_ADMIN_DELIVERY),
+        ),
+      ).rejects.toThrow('ya no está pendiente de validación');
+    });
+
+    it('skips a missing product (productRepo.findOne returns null) and continues', async () => {
+      const item = { productId: 'prod-gone', quantity: 1 } as OrderItem;
+      const order = fakeOrder({
+        status: OrderStatus.PENDING_VALIDATION,
+        customer: fakeUser() as never,
+        items: [],
+      });
+      ordersRepo.findOne
+        .mockResolvedValueOnce(order)
+        .mockResolvedValueOnce({
+          ...order,
+          status: OrderStatus.CONFIRMED_BY_COLMADO,
+        } as Order);
+
+      let productUpdateCalled = false;
+
+      (dataSource.transaction as jest.Mock).mockImplementation(
+        async (cb: (mgr: EntityManager) => Promise<unknown>) => {
+          const orderRepo = makeRepoMock<Order>();
+          const itemRepo = makeRepoMock<OrderItem>();
+          const productRepo = makeRepoMock<Product>();
+          orderRepo.findOne.mockResolvedValue({
+            ...order,
+            id: 'order-1',
+            status: OrderStatus.PENDING_VALIDATION,
+          } as never);
+          orderRepo.update.mockResolvedValue({ affected: 1 } as never);
+          itemRepo.find.mockResolvedValue([item]);
+          productRepo.findOne.mockResolvedValue(null); // product gone → continue
+          productRepo.update.mockImplementation(() => {
+            productUpdateCalled = true;
+            return Promise.resolve({ affected: 1 }) as never;
+          });
+
+          const mgr = {
+            getRepository: (entity: unknown) => {
+              if (entity === Order) return orderRepo;
+              if (entity === OrderItem) return itemRepo;
+              if (entity === Product) return productRepo;
+              return makeRepoMock();
+            },
+          };
+          return cb(mgr as unknown as EntityManager);
+        },
+      );
+
+      await service.updateStatus(
+        'order-1',
+        { status: OrderStatus.CONFIRMED_BY_COLMADO },
+        fakeUser(UserRole.SUPER_ADMIN_DELIVERY),
+      );
+
+      // No stock update because the product was missing
+      expect(productUpdateCalled).toBe(false);
+    });
+
+    it('throws BadRequest when stock is insufficient at confirm time', async () => {
+      const item = { productId: 'prod-low', quantity: 5 } as OrderItem;
+      const order = fakeOrder({
+        status: OrderStatus.PENDING_VALIDATION,
+        customer: fakeUser() as never,
+        items: [],
+      });
+      ordersRepo.findOne.mockResolvedValueOnce(order);
+
+      (dataSource.transaction as jest.Mock).mockImplementation(
+        async (cb: (mgr: EntityManager) => Promise<unknown>) => {
+          const orderRepo = makeRepoMock<Order>();
+          const itemRepo = makeRepoMock<OrderItem>();
+          const productRepo = makeRepoMock<Product>();
+          orderRepo.findOne.mockResolvedValue({
+            ...order,
+            id: 'order-1',
+            status: OrderStatus.PENDING_VALIDATION,
+          } as never);
+          itemRepo.find.mockResolvedValue([item]);
+          productRepo.findOne.mockResolvedValue(
+            fakeProduct({ id: 'prod-low', stock: 2, name: 'Low Stock' }),
+          );
+
+          const mgr = {
+            getRepository: (entity: unknown) => {
+              if (entity === Order) return orderRepo;
+              if (entity === OrderItem) return itemRepo;
+              if (entity === Product) return productRepo;
+              return makeRepoMock();
+            },
+          };
+          return cb(mgr as unknown as EntityManager);
+        },
+      );
+
+      await expect(
+        service.updateStatus(
+          'order-1',
+          { status: OrderStatus.CONFIRMED_BY_COLMADO },
+          fakeUser(UserRole.SUPER_ADMIN_DELIVERY),
+        ),
+      ).rejects.toThrow('Stock insuficiente para el producto');
+    });
+
+    it('sets isAvailable=false when stock hits 0 on confirm', async () => {
+      const item = { productId: 'prod-last', quantity: 4 } as OrderItem;
+      const order = fakeOrder({
+        status: OrderStatus.PENDING_VALIDATION,
+        customer: fakeUser() as never,
+        items: [],
+      });
+      ordersRepo.findOne
+        .mockResolvedValueOnce(order)
+        .mockResolvedValueOnce({
+          ...order,
+          status: OrderStatus.CONFIRMED_BY_COLMADO,
+        } as Order);
+
+      let captured: Partial<Product> | undefined;
+
+      (dataSource.transaction as jest.Mock).mockImplementation(
+        async (cb: (mgr: EntityManager) => Promise<unknown>) => {
+          const orderRepo = makeRepoMock<Order>();
+          const itemRepo = makeRepoMock<OrderItem>();
+          const productRepo = makeRepoMock<Product>();
+          orderRepo.findOne.mockResolvedValue({
+            ...order,
+            id: 'order-1',
+            status: OrderStatus.PENDING_VALIDATION,
+          } as never);
+          orderRepo.update.mockResolvedValue({ affected: 1 } as never);
+          itemRepo.find.mockResolvedValue([item]);
+          // stock exactly equals quantity → nextStock = 0 → isAvailable forced false
+          productRepo.findOne.mockResolvedValue(
+            fakeProduct({ id: 'prod-last', stock: 4, isAvailable: true }),
+          );
+          productRepo.update.mockImplementation(
+            (_id: string, data: Partial<Product>) => {
+              captured = data;
+              return Promise.resolve({ affected: 1 }) as never;
+            },
+          );
+
+          const mgr = {
+            getRepository: (entity: unknown) => {
+              if (entity === Order) return orderRepo;
+              if (entity === OrderItem) return itemRepo;
+              if (entity === Product) return productRepo;
+              return makeRepoMock();
+            },
+          };
+          return cb(mgr as unknown as EntityManager);
+        },
+      );
+
+      await service.updateStatus(
+        'order-1',
+        { status: OrderStatus.CONFIRMED_BY_COLMADO },
+        fakeUser(UserRole.SUPER_ADMIN_DELIVERY),
+      );
+
+      expect(captured).toEqual({ stock: 0, isAvailable: false });
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // updateStatus — plain status update (else branch, line 555)
+  // ─────────────────────────────────────────────────────────────────────────
+
+  describe('updateStatus — plain transition (no side effects)', () => {
+    it('updates status directly for CONFIRMED → IN_DELIVERY_ROUTE', async () => {
+      const order = fakeOrder({
+        status: OrderStatus.CONFIRMED_BY_COLMADO,
+        customer: fakeUser() as never,
+      });
+      ordersRepo.findOne
+        .mockResolvedValueOnce(order)
+        .mockResolvedValueOnce({
+          ...order,
+          status: OrderStatus.IN_DELIVERY_ROUTE,
+        } as Order);
+      ordersRepo.update.mockResolvedValue({ affected: 1 } as never);
+
+      await service.updateStatus(
+        'order-1',
+        { status: OrderStatus.IN_DELIVERY_ROUTE },
+        fakeUser(UserRole.SUPER_ADMIN_DELIVERY),
+      );
+
+      expect(ordersRepo.update).toHaveBeenCalledWith('order-1', {
+        status: OrderStatus.IN_DELIVERY_ROUTE,
+      });
+      // Direct update path → no transaction, no stock changes
+      expect(dataSource.transaction).not.toHaveBeenCalled();
+    });
+  });
 });

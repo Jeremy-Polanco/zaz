@@ -85,8 +85,12 @@ export type Session = { accessToken: string; refreshToken: string }
 const sessionCache = new Map<string, Session>()
 
 /**
- * Full auth: OTP send + verify + return both tokens. Cached per-phone for the
- * lifetime of the test run.
+ * Full auth: phone-only login (no OTP). Posts the phone to /auth/otp/verify and
+ * returns both tokens. Cached per-phone for the lifetime of the test run.
+ *
+ * Seeded users already exist, so no fullName is needed. If OTP is ever
+ * re-enabled (AUTH_OTP_MODE=whatsapp|sandbox) use requestAndReadOtp +
+ * a {phone, code} body instead.
  */
 export async function loginAs(
   request: APIRequestContext,
@@ -95,11 +99,10 @@ export async function loginAs(
   const cached = sessionCache.get(phone)
   if (cached) return cached
 
-  const code = await requestAndReadOtp(request, phone)
   const verify = await request.post(`${API_URL}/auth/otp/verify`, {
-    data: { phone, code },
+    data: { phone },
   })
-  expect(verify.status(), `OTP verify for ${phone}`).toBe(200)
+  expect(verify.status(), `login for ${phone}`).toBe(200)
   const body = await verify.json()
   expect(body.accessToken, 'accessToken').toBeTruthy()
   expect(body.refreshToken, 'refreshToken').toBeTruthy()

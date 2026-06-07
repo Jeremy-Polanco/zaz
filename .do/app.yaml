@@ -47,7 +47,7 @@ services:
     github:
       branch: main
       deploy_on_push: true
-      repo: Jeremy-Polanco/dashgo
+      repo: Jeremy-Polanco/zaz
     source_dir: dashgo-api
     # NOTE: dockerfile_path is relative to the REPO ROOT (not to source_dir).
     # source_dir sets the build context; dockerfile_path locates the Dockerfile

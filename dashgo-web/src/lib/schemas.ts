@@ -5,6 +5,20 @@ export const phoneSchema = z
   .regex(/^\+\d{8,15}$/, 'Formato E.164 (ej: +18091234567)')
 export const sendOtpSchema = z.object({ phone: phoneSchema })
 export type SendOtpInput = z.infer<typeof sendOtpSchema>
+
+// Phone-only login is the default. No code is collected — the user enters a
+// phone (and, only on first login, a name). `code` is intentionally absent.
+export const loginSchema = z.object({
+  phone: phoneSchema,
+  fullName: z.string().min(2, 'Tu nombre').or(z.literal('')).optional(),
+  referralCode: z
+    .string()
+    .length(8, 'El código tiene 8 caracteres')
+    .or(z.literal(''))
+    .optional(),
+})
+export type LoginInput = z.infer<typeof loginSchema>
+
 export const verifyOtpSchema = z.object({
   phone: phoneSchema,
   code: z.string().regex(/^\d{6}$/, 'Son 6 dígitos'),
@@ -33,6 +47,19 @@ export const addressSchema = z.object({
   lng: z.number().optional(),
 })
 export type AddressInput = z.infer<typeof addressSchema>
+
+// Saved address book (CRUD against /me/addresses). Mirrors the backend
+// CreateAddressDto: label/line1 required, line2/instructions optional, and a
+// map-picked lat/lng.
+export const savedAddressSchema = z.object({
+  label: z.string().min(1, 'Nombre requerido').max(60),
+  line1: z.string().min(1, 'Dirección requerida').max(255),
+  line2: z.string().max(255).or(z.literal('')).optional(),
+  lat: z.number({ message: 'Ubicá el pin en el mapa' }).min(-90).max(90),
+  lng: z.number({ message: 'Ubicá el pin en el mapa' }).min(-180).max(180),
+  instructions: z.string().max(500).or(z.literal('')).optional(),
+})
+export type SavedAddressInput = z.infer<typeof savedAddressSchema>
 
 export const checkoutAddressSchema = z.object({
   text: z.string().min(5, 'Dirección requerida'),

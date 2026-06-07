@@ -437,3 +437,27 @@ export type UserAddress = {
   createdAt: string
   updatedAt: string
 }
+
+export type CreateAddressInput = {
+  label: string
+  line1: string
+  line2?: string
+  lat: number
+  lng: number
+  instructions?: string
+}
+
+export type UpdateAddressInput = Partial<CreateAddressInput>
+
+// ── Customer rental (GET /me/rentals) ──────────────────────────────────────────
+
+export interface Rental {
+  id: string
+  productId: string
+  productName: string
+  productImageUrl: string | null
+  monthlyRentCents: number
+  status: RentalStatus
+  nextChargeAt: string | null
+  activatedAt: string | null
+}

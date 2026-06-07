@@ -38,6 +38,15 @@ export const phoneSchema = z
   .string()
   .regex(/^\+\d{8,15}$/, 'Formato E.164 (ej: +18091234567)')
 export const sendOtpSchema = z.object({ phone: phoneSchema })
+
+// Phone-only login is the default — no code is collected. A name is requested
+// only on first login (revealed in-place), mirroring the web flow.
+export const loginSchema = z.object({
+  phone: phoneSchema,
+  fullName: z.string().min(2, 'Tu nombre').optional(),
+  referralCode: z.string().length(8, 'El código tiene 8 caracteres').optional(),
+})
+
 export const verifyOtpSchema = z.object({
   phone: phoneSchema,
   code: z.string().regex(/^\d{6}$/, 'Son 6 dígitos'),
@@ -53,6 +62,7 @@ export type InvitePromoterInput = z.infer<typeof invitePromoterSchema>
 
 export type CheckoutInput = z.infer<typeof checkoutSchema>
 export type SendOtpInput = z.infer<typeof sendOtpSchema>
+export type LoginInput = z.infer<typeof loginSchema>
 export type VerifyOtpInput = z.infer<typeof verifyOtpSchema>
 
 // ── Credit schemas (Zod 3) ────────────────────────────────────────────────────

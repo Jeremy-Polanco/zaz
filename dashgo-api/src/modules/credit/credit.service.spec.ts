@@ -10,6 +10,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { DataSource, EntityManager, QueryRunner, Repository } from 'typeorm';
 import { CreditService } from './credit.service';
+import { CreditAccountStatus } from './dto/list-accounts-query.dto';
 import {
   CreditAccount,
   CreditMovement,
@@ -821,6 +822,674 @@ describe('CreditService', () => {
       await expect(
         service.getAccountWithLock('user-1', mgr as unknown as EntityManager),
       ).rejects.toThrow(BadRequestException);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // getAccount — plain read
+  // -------------------------------------------------------------------------
+
+  describe('getAccount', () => {
+    it('returns the account when found', async () => {
+      const account = fakeAccount();
+      accountsRepo.findOne.mockResolvedValue(account);
+
+      const result = await service.getAccount('user-1');
+
+      expect(accountsRepo.findOne).toHaveBeenCalledWith({
+        where: { userId: 'user-1' },
+      });
+      expect(result).toBe(account);
+    });
+
+    it('returns null when no account exists', async () => {
+      accountsRepo.findOne.mockResolvedValue(null);
+      await expect(service.getAccount('nobody')).resolves.toBeNull();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // getMyCredit — read + recent movements
+  // -------------------------------------------------------------------------
+
+  describe('getMyCredit', () => {
+    it('returns null account and empty movements when no account exists', async () => {
+      accountsRepo.findOne.mockResolvedValue(null);
+
+      const result = await service.getMyCredit('user-1');
+
+      expect(result).toEqual({ account: null, recentMovements: [] });
+      // movements.find MUST NOT be called when there is no account.
+      expect(movementsRepo.find).not.toHaveBeenCalled();
+    });
+
+    it('returns account plus the 20 most recent movements when account exists', async () => {
+      const account = fakeAccount();
+      const movements = [fakeMovement({ id: 'mv-a' }), fakeMovement({ id: 'mv-b' })];
+      accountsRepo.findOne.mockResolvedValue(account);
+      movementsRepo.find.mockResolvedValue(movements);
+
+      const result = await service.getMyCredit('user-1');
+
+      expect(movementsRepo.find).toHaveBeenCalledWith({
+        where: { creditAccountId: 'user-1' },
+        order: { createdAt: 'DESC' },
+        take: 20,
+      });
+      expect(result.account).toBe(account);
+      expect(result.recentMovements).toBe(movements);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // listAccounts — pagination + filters built via QueryBuilder
+  // -------------------------------------------------------------------------
+
+  describe('listAccounts', () => {
+    function makeQbMock(items: CreditAccount[], totalCount: number) {
+      const qb = {
+        leftJoinAndSelect: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        skip: jest.fn().mockReturnThis(),
+        take: jest.fn().mockReturnThis(),
+        getManyAndCount: jest.fn().mockResolvedValue([items, totalCount]),
+      };
+      const repo = {
+        createQueryBuilder: jest.fn().mockReturnValue(qb),
+      };
+      (dataSource.getRepository as jest.Mock).mockReturnValue(repo);
+      return qb;
+    }
+
+    it('applies default page/pageSize and computes pagination when filter is empty', async () => {
+      const items = [fakeAccount()];
+      const qb = makeQbMock(items, 1);
+
+      const result = await service.listAccounts({});
+
+      // Defaults: page=1, pageSize=50, skip=0
+      expect(qb.skip).toHaveBeenCalledWith(0);
+      expect(qb.take).toHaveBeenCalledWith(50);
+      // No search / status filters → andWhere never called
+      expect(qb.andWhere).not.toHaveBeenCalled();
+      expect(result).toEqual({
+        items,
+        page: 1,
+        pageSize: 50,
+        totalCount: 1,
+        totalPages: 1,
+      });
+    });
+
+    it('honors explicit page/pageSize and computes skip', async () => {
+      const qb = makeQbMock([], 0);
+
+      const result = await service.listAccounts({ page: 3, pageSize: 10 });
+
+      expect(qb.skip).toHaveBeenCalledWith(20); // (3-1)*10
+      expect(qb.take).toHaveBeenCalledWith(10);
+      expect(result.page).toBe(3);
+      expect(result.pageSize).toBe(10);
+      expect(result.totalPages).toBe(0);
+    });
+
+    it('adds an ILIKE search filter when search term is present', async () => {
+      const qb = makeQbMock([], 0);
+
+      await service.listAccounts({ search: 'juan' });
+
+      expect(qb.andWhere).toHaveBeenCalledWith(
+        'u.full_name ILIKE :search OR u.phone ILIKE :search',
+        { search: '%juan%' },
+      );
+    });
+
+    it('filters VENCIDO (overdue) accounts', async () => {
+      const qb = makeQbMock([], 0);
+
+      await service.listAccounts({ status: CreditAccountStatus.VENCIDO });
+
+      const sql = (qb.andWhere as jest.Mock).mock.calls[0][0] as string;
+      expect(sql).toContain('ca.balance_cents < 0');
+      expect(sql).toContain('ca.due_date < :now');
+    });
+
+    it('filters AL_DIA (current debt) accounts', async () => {
+      const qb = makeQbMock([], 0);
+
+      await service.listAccounts({ status: CreditAccountStatus.AL_DIA });
+
+      const sql = (qb.andWhere as jest.Mock).mock.calls[0][0] as string;
+      expect(sql).toContain('ca.due_date IS NULL OR ca.due_date >= :now');
+    });
+
+    it('filters SIN_DEUDA (no debt) accounts', async () => {
+      const qb = makeQbMock([], 0);
+
+      await service.listAccounts({ status: CreditAccountStatus.SIN_DEUDA });
+
+      expect(qb.andWhere).toHaveBeenCalledWith('ca.balance_cents >= 0');
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // getMovements — paginated movement list
+  // -------------------------------------------------------------------------
+
+  describe('getMovements', () => {
+    it('returns a paginated movement result with computed totalPages', async () => {
+      const items = [fakeMovement(), fakeMovement({ id: 'mv-2' })];
+      movementsRepo.findAndCount.mockResolvedValue([items, 25]);
+
+      const result = await service.getMovements('user-1', 2, 10);
+
+      expect(movementsRepo.findAndCount).toHaveBeenCalledWith({
+        where: { creditAccountId: 'user-1' },
+        order: { createdAt: 'DESC' },
+        skip: 10, // (2-1)*10
+        take: 10,
+      });
+      expect(result).toEqual({
+        items,
+        page: 2,
+        pageSize: 10,
+        totalCount: 25,
+        totalPages: 3, // ceil(25/10)
+      });
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // getOrCreateAccount — upsert with optional manager
+  // -------------------------------------------------------------------------
+
+  describe('getOrCreateAccount', () => {
+    function setupRepo(existing: CreditAccount | null) {
+      const acctRepo = makeRepoMock<CreditAccount>();
+      acctRepo.findOne.mockResolvedValue(existing);
+      acctRepo.save.mockImplementation(async (dto: unknown) => dto as CreditAccount);
+      const mgr = makeEntityManagerMock();
+      mgr.getRepository.mockImplementation(() => acctRepo as unknown as Repository<unknown>);
+      return { acctRepo, mgr };
+    }
+
+    it('returns existing account without saving when one exists (manager path)', async () => {
+      const account = fakeAccount();
+      const { acctRepo, mgr } = setupRepo(account);
+
+      const result = await service.getOrCreateAccount(
+        'user-1',
+        mgr as unknown as EntityManager,
+      );
+
+      expect(result).toBe(account);
+      expect(acctRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('creates a zero-balance account when none exists (manager path)', async () => {
+      const { acctRepo, mgr } = setupRepo(null);
+
+      const result = await service.getOrCreateAccount(
+        'new-user',
+        mgr as unknown as EntityManager,
+      );
+
+      expect(acctRepo.save).toHaveBeenCalled();
+      expect(result).toMatchObject({
+        userId: 'new-user',
+        balanceCents: 0,
+        creditLimitCents: 0,
+        dueDate: null,
+        currency: 'usd',
+      });
+    });
+
+    it('runs inside a self-managed transaction when no manager is supplied', async () => {
+      const account = fakeAccount();
+      const { acctRepo, mgr } = setupRepo(account);
+      (dataSource.transaction as jest.Mock).mockImplementation(
+        async (cb: (mgr: EntityManager) => Promise<unknown>) =>
+          cb(mgr as unknown as EntityManager),
+      );
+
+      const result = await service.getOrCreateAccount('user-1');
+
+      expect(dataSource.transaction).toHaveBeenCalled();
+      expect(result).toBe(account);
+      expect(acctRepo.save).not.toHaveBeenCalled();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // grantCredit — creates the account when it does not yet exist
+  // -------------------------------------------------------------------------
+
+  describe('grantCredit (no existing account)', () => {
+    it('creates the account first, then applies the grant and default due-date', async () => {
+      const acctRepo = makeRepoMock<CreditAccount>();
+      // findOne returns null (no account yet) → triggers the save() branch.
+      acctRepo.findOne.mockResolvedValue(null);
+      acctRepo.save.mockImplementation(async (dto: unknown) => dto as CreditAccount);
+      acctRepo.update.mockResolvedValue({ affected: 1 } as never);
+
+      const savedMovement = fakeMovement({
+        type: CreditMovementType.GRANT,
+        amountCents: 1000,
+      });
+      const mvRepo = makeRepoMock<CreditMovement>();
+      mvRepo.save.mockResolvedValue(savedMovement);
+      mvRepo.create.mockImplementation((dto) => ({ ...dto }) as CreditMovement);
+
+      const mgr = makeEntityManagerMock();
+      mgr.getRepository.mockImplementation((entity: unknown) => {
+        if (entity === CreditAccount) return acctRepo as unknown as Repository<unknown>;
+        if (entity === CreditMovement) return mvRepo as unknown as Repository<unknown>;
+        return makeRepoMock() as unknown as Repository<unknown>;
+      });
+      (dataSource.transaction as jest.Mock).mockImplementation(
+        async (cb: (mgr: EntityManager) => Promise<unknown>) =>
+          cb(mgr as unknown as EntityManager),
+      );
+
+      const result = await service.grantCredit('new-user', 1000, 'admin-1');
+
+      // The freshly created account starts at 0, so the update lifts it to 1000.
+      expect(acctRepo.save).toHaveBeenCalled();
+      const updateCall = acctRepo.update.mock.calls[0][1] as Partial<CreditAccount>;
+      expect(updateCall.balanceCents).toBe(1000);
+      expect(updateCall.dueDate).toBeInstanceOf(Date); // default due-date applied
+      expect(result.type).toBe(CreditMovementType.GRANT);
+    });
+
+    it('delegates to a passed-in manager without opening its own transaction', async () => {
+      const acctRepo = makeRepoMock<CreditAccount>();
+      acctRepo.findOne.mockResolvedValue(fakeAccount({ dueDate: new Date('2030-01-01') }));
+      acctRepo.update.mockResolvedValue({ affected: 1 } as never);
+      const mvRepo = makeRepoMock<CreditMovement>();
+      mvRepo.save.mockResolvedValue(fakeMovement({ type: CreditMovementType.GRANT }));
+      mvRepo.create.mockImplementation((dto) => ({ ...dto }) as CreditMovement);
+
+      const mgr = makeEntityManagerMock();
+      mgr.getRepository.mockImplementation((entity: unknown) => {
+        if (entity === CreditAccount) return acctRepo as unknown as Repository<unknown>;
+        if (entity === CreditMovement) return mvRepo as unknown as Repository<unknown>;
+        return makeRepoMock() as unknown as Repository<unknown>;
+      });
+      (dataSource.transaction as jest.Mock).mockClear();
+
+      await service.grantCredit(
+        'user-1',
+        500,
+        'admin-1',
+        undefined,
+        undefined,
+        mgr as unknown as EntityManager,
+      );
+
+      // Manager supplied → must NOT open its own transaction.
+      expect(dataSource.transaction).not.toHaveBeenCalled();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // recordPaymentFromStripe — re-throw on non-unique errors
+  // -------------------------------------------------------------------------
+
+  describe('recordPaymentFromStripe (error re-throw)', () => {
+    it('re-throws a non-unique-violation error from save()', async () => {
+      const acctRepo = makeRepoMock<CreditAccount>();
+      acctRepo.findOne.mockResolvedValue(fakeAccount({ balanceCents: -1000 }));
+      const mvRepo = makeRepoMock<CreditMovement>();
+      mvRepo.findOne.mockResolvedValue(null); // fast-path miss
+      mvRepo.create.mockImplementation((dto) => ({ ...dto }) as CreditMovement);
+      mvRepo.save.mockRejectedValue(
+        Object.assign(new Error('db down'), { code: '08006' }),
+      );
+
+      const mgr = makeEntityManagerMock();
+      mgr.getRepository.mockImplementation((entity: unknown) => {
+        if (entity === CreditAccount) return acctRepo as unknown as Repository<unknown>;
+        if (entity === CreditMovement) return mvRepo as unknown as Repository<unknown>;
+        return makeRepoMock() as unknown as Repository<unknown>;
+      });
+      (dataSource.transaction as jest.Mock).mockImplementation(
+        async (cb: (mgr: EntityManager) => Promise<unknown>) =>
+          cb(mgr as unknown as EntityManager),
+      );
+
+      await expect(
+        service.recordPaymentFromStripe({
+          userId: 'user-1',
+          amountCents: 1000,
+          stripePaymentIntentId: 'pi_err',
+        }),
+      ).rejects.toThrow('db down');
+    });
+
+    it('re-throws when unique-violation races but winner cannot be found', async () => {
+      const acctRepo = makeRepoMock<CreditAccount>();
+      acctRepo.findOne.mockResolvedValue(fakeAccount({ balanceCents: -1000 }));
+      const mvRepo = makeRepoMock<CreditMovement>();
+      // fast-path miss, then no winner found after the conflict.
+      mvRepo.findOne.mockResolvedValueOnce(null).mockResolvedValueOnce(null);
+      mvRepo.create.mockImplementation((dto) => ({ ...dto }) as CreditMovement);
+      mvRepo.save.mockRejectedValue(
+        Object.assign(new Error('dup'), { code: '23505' }),
+      );
+
+      const mgr = makeEntityManagerMock();
+      mgr.getRepository.mockImplementation((entity: unknown) => {
+        if (entity === CreditAccount) return acctRepo as unknown as Repository<unknown>;
+        if (entity === CreditMovement) return mvRepo as unknown as Repository<unknown>;
+        return makeRepoMock() as unknown as Repository<unknown>;
+      });
+      (dataSource.transaction as jest.Mock).mockImplementation(
+        async (cb: (mgr: EntityManager) => Promise<unknown>) =>
+          cb(mgr as unknown as EntityManager),
+      );
+
+      await expect(
+        service.recordPaymentFromStripe({
+          userId: 'user-1',
+          amountCents: 1000,
+          stripePaymentIntentId: 'pi_dup',
+        }),
+      ).rejects.toThrow('dup');
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // reverseCharge — additional branches
+  // -------------------------------------------------------------------------
+
+  describe('reverseCharge (additional branches)', () => {
+    function setupReverse(opts: {
+      order: Order | null;
+      account?: CreditAccount | null;
+      existingReversal?: CreditMovement | null;
+      saveImpl?: () => never | Promise<CreditMovement>;
+    }) {
+      const orderRepo = makeRepoMock<Order>();
+      orderRepo.findOne.mockResolvedValue(opts.order);
+      orderRepo.update.mockResolvedValue({ affected: 1 } as never);
+
+      const acctRepo = makeRepoMock<CreditAccount>();
+      acctRepo.findOne.mockResolvedValue(opts.account ?? null);
+      acctRepo.update.mockResolvedValue({ affected: 1 } as never);
+
+      const mvRepo = makeRepoMock<CreditMovement>();
+      mvRepo.findOne.mockResolvedValue(opts.existingReversal ?? null);
+      mvRepo.create.mockImplementation((dto) => ({ ...dto }) as CreditMovement);
+      if (opts.saveImpl) {
+        mvRepo.save.mockImplementation(opts.saveImpl as never);
+      } else {
+        mvRepo.save.mockResolvedValue(
+          fakeMovement({ type: CreditMovementType.REVERSAL }),
+        );
+      }
+
+      const mgr = makeEntityManagerMock();
+      mgr.getRepository.mockImplementation((entity: unknown) => {
+        if (entity === Order) return orderRepo as unknown as Repository<unknown>;
+        if (entity === CreditAccount) return acctRepo as unknown as Repository<unknown>;
+        if (entity === CreditMovement) return mvRepo as unknown as Repository<unknown>;
+        return makeRepoMock() as unknown as Repository<unknown>;
+      });
+      (dataSource.transaction as jest.Mock).mockImplementation(
+        async (cb: (mgr: EntityManager) => Promise<unknown>) =>
+          cb(mgr as unknown as EntityManager),
+      );
+      return { orderRepo, acctRepo, mvRepo };
+    }
+
+    it('returns null when the order does not exist', async () => {
+      setupReverse({ order: null });
+      await expect(service.reverseCharge('missing')).resolves.toBeNull();
+    });
+
+    it('returns null when no credit account exists for the order customer', async () => {
+      setupReverse({
+        order: fakeOrder({ creditApplied: '5.00', customerId: 'user-1' }),
+        account: null,
+      });
+      await expect(service.reverseCharge('order-1')).resolves.toBeNull();
+    });
+
+    it('returns null (swallows) when a unique-violation (23505) is thrown on save', async () => {
+      setupReverse({
+        order: fakeOrder({ creditApplied: '5.00', customerId: 'user-1' }),
+        account: fakeAccount({ userId: 'user-1', balanceCents: -500 }),
+        existingReversal: null,
+        saveImpl: () => {
+          throw Object.assign(new Error('dup reversal'), { code: '23505' });
+        },
+      });
+      await expect(service.reverseCharge('order-1')).resolves.toBeNull();
+    });
+
+    it('re-throws a non-unique error thrown on save (also covers isUniqueViolation non-23505)', async () => {
+      setupReverse({
+        order: fakeOrder({ creditApplied: '5.00', customerId: 'user-1' }),
+        account: fakeAccount({ userId: 'user-1', balanceCents: -500 }),
+        existingReversal: null,
+        saveImpl: () => {
+          throw Object.assign(new Error('boom'), { code: '99999' });
+        },
+      });
+      await expect(service.reverseCharge('order-1')).rejects.toThrow('boom');
+    });
+
+    it('runs through a self-managed transaction and restores balance + zeroes creditApplied', async () => {
+      const { acctRepo, orderRepo } = setupReverse({
+        order: fakeOrder({ creditApplied: '2.50', customerId: 'user-1' }),
+        account: fakeAccount({ userId: 'user-1', balanceCents: -500 }),
+        existingReversal: null,
+      });
+
+      const result = await service.reverseCharge('order-1');
+
+      // 2.50 * 100 = 250 cents restored: -500 + 250 = -250
+      expect(acctRepo.update).toHaveBeenCalledWith('user-1', {
+        balanceCents: -250,
+      });
+      expect(orderRepo.update).toHaveBeenCalledWith('order-1', {
+        creditApplied: '0.00',
+      });
+      expect(result?.type).toBe(CreditMovementType.REVERSAL);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // recordPayment — no-account guard
+  // -------------------------------------------------------------------------
+
+  describe('recordPayment (no account)', () => {
+    it('throws BadRequestException when the account does not exist', async () => {
+      const acctRepo = makeRepoMock<CreditAccount>();
+      acctRepo.findOne.mockResolvedValue(null);
+      const mgr = makeEntityManagerMock();
+      mgr.getRepository.mockImplementation(() => acctRepo as unknown as Repository<unknown>);
+      (dataSource.transaction as jest.Mock).mockImplementation(
+        async (cb: (mgr: EntityManager) => Promise<unknown>) =>
+          cb(mgr as unknown as EntityManager),
+      );
+
+      await expect(
+        service.recordPayment('user-1', 100, 'admin-1'),
+      ).rejects.toThrow(BadRequestException);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // adjustLimit — create-on-missing branch + manager path
+  // -------------------------------------------------------------------------
+
+  describe('adjustLimit (account creation)', () => {
+    it('creates a new account with the given limit when none exists', async () => {
+      const acctRepo = makeRepoMock<CreditAccount>();
+      acctRepo.findOne.mockResolvedValue(null);
+      acctRepo.save.mockImplementation(async (dto: unknown) => dto as CreditAccount);
+
+      const mgr = makeEntityManagerMock();
+      mgr.getRepository.mockImplementation(() => acctRepo as unknown as Repository<unknown>);
+      (dataSource.transaction as jest.Mock).mockImplementation(
+        async (cb: (mgr: EntityManager) => Promise<unknown>) =>
+          cb(mgr as unknown as EntityManager),
+      );
+
+      const result = await service.adjustLimit('new-user', 1500, 'admin-1');
+
+      expect(acctRepo.save).toHaveBeenCalled();
+      expect(acctRepo.update).not.toHaveBeenCalled();
+      expect(result).toMatchObject({
+        userId: 'new-user',
+        creditLimitCents: 1500,
+        balanceCents: 0,
+      });
+    });
+
+    it('uses the supplied manager directly without opening a transaction', async () => {
+      const acctRepo = makeRepoMock<CreditAccount>();
+      acctRepo.findOne.mockResolvedValue(fakeAccount({ creditLimitCents: 100 }));
+      acctRepo.update.mockResolvedValue({ affected: 1 } as never);
+      acctRepo.findOneOrFail.mockResolvedValue(fakeAccount({ creditLimitCents: 999 }));
+
+      const mgr = makeEntityManagerMock();
+      mgr.getRepository.mockImplementation(() => acctRepo as unknown as Repository<unknown>);
+      (dataSource.transaction as jest.Mock).mockClear();
+
+      const result = await service.adjustLimit(
+        'user-1',
+        999,
+        'admin-1',
+        mgr as unknown as EntityManager,
+      );
+
+      expect(dataSource.transaction).not.toHaveBeenCalled();
+      expect(result.creditLimitCents).toBe(999);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // setDueDate
+  // -------------------------------------------------------------------------
+
+  describe('setDueDate', () => {
+    it('updates the due date on an existing account and re-fetches it', async () => {
+      const newDue = new Date('2031-12-31');
+      const acctRepo = makeRepoMock<CreditAccount>();
+      acctRepo.findOne.mockResolvedValue(fakeAccount({ dueDate: null }));
+      acctRepo.update.mockResolvedValue({ affected: 1 } as never);
+      acctRepo.findOneOrFail.mockResolvedValue(fakeAccount({ dueDate: newDue }));
+
+      const mgr = makeEntityManagerMock();
+      mgr.getRepository.mockImplementation(() => acctRepo as unknown as Repository<unknown>);
+      (dataSource.transaction as jest.Mock).mockImplementation(
+        async (cb: (mgr: EntityManager) => Promise<unknown>) =>
+          cb(mgr as unknown as EntityManager),
+      );
+
+      const result = await service.setDueDate('user-1', newDue, 'admin-1');
+
+      expect(acctRepo.update).toHaveBeenCalledWith('user-1', { dueDate: newDue });
+      expect(acctRepo.findOneOrFail).toHaveBeenCalled();
+      expect(result.dueDate).toEqual(newDue);
+    });
+
+    it('creates a new account carrying the due date when none exists', async () => {
+      const newDue = new Date('2032-01-01');
+      const acctRepo = makeRepoMock<CreditAccount>();
+      acctRepo.findOne.mockResolvedValue(null);
+      acctRepo.save.mockImplementation(async (dto: unknown) => dto as CreditAccount);
+
+      const mgr = makeEntityManagerMock();
+      mgr.getRepository.mockImplementation(() => acctRepo as unknown as Repository<unknown>);
+      (dataSource.transaction as jest.Mock).mockImplementation(
+        async (cb: (mgr: EntityManager) => Promise<unknown>) =>
+          cb(mgr as unknown as EntityManager),
+      );
+
+      const result = await service.setDueDate('new-user', newDue, 'admin-1');
+
+      expect(acctRepo.save).toHaveBeenCalled();
+      expect(acctRepo.update).not.toHaveBeenCalled();
+      expect(result).toMatchObject({
+        userId: 'new-user',
+        dueDate: newDue,
+        balanceCents: 0,
+      });
+    });
+
+    it('accepts null to clear the due date and runs via supplied manager', async () => {
+      const acctRepo = makeRepoMock<CreditAccount>();
+      acctRepo.findOne.mockResolvedValue(fakeAccount({ dueDate: new Date('2030-01-01') }));
+      acctRepo.update.mockResolvedValue({ affected: 1 } as never);
+      acctRepo.findOneOrFail.mockResolvedValue(fakeAccount({ dueDate: null }));
+
+      const mgr = makeEntityManagerMock();
+      mgr.getRepository.mockImplementation(() => acctRepo as unknown as Repository<unknown>);
+      (dataSource.transaction as jest.Mock).mockClear();
+
+      const result = await service.setDueDate(
+        'user-1',
+        null,
+        'admin-1',
+        mgr as unknown as EntityManager,
+      );
+
+      expect(dataSource.transaction).not.toHaveBeenCalled();
+      expect(acctRepo.update).toHaveBeenCalledWith('user-1', { dueDate: null });
+      expect(result.dueDate).toBeNull();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // manualAdjustment — no-account guard
+  // -------------------------------------------------------------------------
+
+  describe('manualAdjustment (no account)', () => {
+    it('throws BadRequestException when the account does not exist', async () => {
+      const acctRepo = makeRepoMock<CreditAccount>();
+      acctRepo.findOne.mockResolvedValue(null);
+      const mgr = makeEntityManagerMock();
+      mgr.getRepository.mockImplementation(() => acctRepo as unknown as Repository<unknown>);
+      (dataSource.transaction as jest.Mock).mockImplementation(
+        async (cb: (mgr: EntityManager) => Promise<unknown>) =>
+          cb(mgr as unknown as EntityManager),
+      );
+
+      await expect(
+        service.manualAdjustment('user-1', 100, 'admin-1', 'note'),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('uses the supplied manager directly without opening a transaction', async () => {
+      const acctRepo = makeRepoMock<CreditAccount>();
+      acctRepo.findOne.mockResolvedValue(fakeAccount({ balanceCents: 100 }));
+      acctRepo.update.mockResolvedValue({ affected: 1 } as never);
+      const mvRepo = makeRepoMock<CreditMovement>();
+      mvRepo.save.mockImplementation(async (dto: unknown) => dto as CreditMovement);
+      mvRepo.create.mockImplementation((dto) => ({ ...dto }) as CreditMovement);
+
+      const mgr = makeEntityManagerMock();
+      mgr.getRepository.mockImplementation((entity: unknown) => {
+        if (entity === CreditAccount) return acctRepo as unknown as Repository<unknown>;
+        if (entity === CreditMovement) return mvRepo as unknown as Repository<unknown>;
+        return makeRepoMock() as unknown as Repository<unknown>;
+      });
+      (dataSource.transaction as jest.Mock).mockClear();
+
+      const result = await service.manualAdjustment(
+        'user-1',
+        250,
+        'admin-1',
+        'note',
+        mgr as unknown as EntityManager,
+      );
+
+      expect(dataSource.transaction).not.toHaveBeenCalled();
+      expect(result.type).toBe(CreditMovementType.ADJUSTMENT_INCREASE);
     });
   });
 });

@@ -30,7 +30,7 @@ const reactSource = readFileSync(
 )
 
 const LEGAL_FACTS = {
-  legalName: 'DashGo LLC',
+  legalName: 'Urban Dash LLC',
   contactEmail: 'urban@dashgo.dev',
   address: '45 Cypress Ave, Bogota, NJ 07603',
   lastUpdated: '1 de junio de 2026',

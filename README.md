@@ -6,6 +6,8 @@ SaaS para pedidos de agua a domicilio en New York. Tres roles:
 - **promotor (PROMOTER)** — referidor con código único; gana comisión sobre pedidos de sus referidos
 - **super-admin (SUPER_ADMIN_DELIVERY)** — único con inventario físico. Confirma, entrega, cobra, paga comisiones, y gestiona crédito de clientes
 
+> 💵 **Pagos — estado de lanzamiento (iteración 1):** DashGo lanza aceptando **solo efectivo contra entrega**. Los pagos con tarjeta (Stripe) están **completamente implementados y probados en el código**, pero **a la espera de la aprobación de la cuenta de producción de Stripe** — se habilitan en cuanto se apruebe la cuenta en vivo. No se elimina nada; es una decisión de tiempos de lanzamiento que depende de una aprobación externa (Stripe).
+
 > ⚠️ **READ FIRST** — sección [Pending User Actions](#-pending-user-actions-before-deploy) abajo. Hay 5 cosas que vos tenés que hacer antes de poder deployar prod o correr tests de integración.
 
 ## Stack
@@ -168,12 +170,13 @@ Sistema de cuenta corriente gestionado por super-admin:
 - Super grants/adjusts/payment via `/super/credit/$userId`
 - `credit_limit_cents` define cuánto puede deber el cliente
 - `due_date` define plazo de pago
-- En checkout, cliente puede aplicar crédito + Stripe combinados (crédito primero, Stripe el remainder)
+- En checkout, cliente puede aplicar crédito + Stripe combinados (crédito primero, Stripe el remainder). _En lanzamiento se cobra en efectivo contra entrega; el cargo con tarjeta Stripe está construido y probado pero gated hasta la aprobación de producción de Stripe._
 - Si `due_date` pasó y balance < 0 → **bloqueo TOTAL** de compras (incluso con tarjeta) hasta saldar
 - Webhook fail / cancelación de order → reversal idempotente del cargo de crédito
 - Solo CLIENT role puede usar crédito (PROMOTER/SUPER lo ignora silenciosamente)
 
 ### Suscripción ($10/mes — Stripe)
+_(gated hasta la aprobación de producción de Stripe — construido y probado; se habilita al aprobarse la cuenta en vivo)_
 Plan único mensual que da envío gratis en todos los pedidos:
 - Subscribe via Stripe Checkout (hosted)
 - Manage / cancel / update payment-method via Stripe Customer Portal
@@ -196,6 +199,7 @@ referralCode 8-char alfanumérico (sin 0/O/1/I), landing `/r/:code`, dashboard c
 Manual por ahora — super admin ve promotor, presiona "Pagar ahora", se registra en `Payout` con notes. (Stripe Connect deferred).
 
 ### Alquileres (Rentals)
+_(la facturación recurrente vía Stripe está gated hasta la aprobación de producción de Stripe — construida y probada; se habilita al aprobarse la cuenta en vivo)_
 Productos configurables como `pricingMode = rental` vía admin UI. Al entregar una orden con ítems de alquiler, el sistema crea automáticamente una Stripe Subscription para el cliente. Estado del alquiler sincronizado vía webhooks (`ACTIVE` → `PAST_DUE` → `CANCELED`). Cargo por mora (`lateFeeCents`) vía cron diario (`LateFeeCron`). Ver `DEPLOYMENT.md §11` para el runbook operacional.
 
 ---
@@ -254,6 +258,8 @@ curl -s -o /dev/null -w "%{http_code}\n" \
 ---
 
 ## Flow end-to-end
+
+> 💵 En lanzamiento (iteración 1) se cobra en **efectivo contra entrega**. Los pasos de Stripe abajo (authorize / capture del paymentIntent) están construidos y probados pero **gated hasta la aprobación de producción de Stripe**; el resto del flujo (cotización, confirmación, stock, entrega, puntos, comisiones, factura) aplica tal cual desde el día 1.
 
 1. Cliente elige productos → pasa checkout → opcionalmente aplica puntos / crédito → `status: pending_quote`
 2. Super admin cotiza shipping (si suscriptor → shipping=0) → `quoted`

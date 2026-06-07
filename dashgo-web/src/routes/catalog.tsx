@@ -38,18 +38,10 @@ function CatalogPage() {
   const navigate = useNavigate({ from: '/catalog' })
   const [query, setQuery] = useState('')
 
-  if (isPending) {
-    return (
-      <div className="mx-auto max-w-6xl px-6 py-20 text-center">
-        <span className="eyebrow">Cargando catálogo…</span>
-      </div>
-    )
-  }
-
   const q = query.trim().toLowerCase()
   const firstName = user?.fullName?.split(' ')[0] ?? ''
   const neighborhood =
-    user?.addressDefault?.text?.split('·').pop()?.trim() ?? 'New York'
+    user?.addressDefault?.text?.split('·').pop()?.trim() ?? 'New Jersey'
 
   const filtered = (products ?? []).filter((p) => {
     if (cat && p.category?.slug !== cat) return false
@@ -61,6 +53,8 @@ function CatalogPage() {
     return true
   })
 
+  // Rules of Hooks: useMemo must run on EVERY render, before any early return.
+  // The guards inside handle the still-loading (products === undefined) case.
   const suggested = useMemo(() => {
     if (!products || q !== '') return []
     const inFilter = new Set(filtered.map((p) => p.id))
@@ -69,6 +63,14 @@ function CatalogPage() {
       .sort((a, b) => Number(b.offerActive) - Number(a.offerActive))
       .slice(0, 4)
   }, [products, filtered, q])
+
+  if (isPending) {
+    return (
+      <div className="mx-auto max-w-6xl px-6 py-20 text-center">
+        <span className="eyebrow">Cargando catálogo…</span>
+      </div>
+    )
+  }
 
   const totalCents = (products ?? []).reduce((sum, p) => {
     const qty = items[p.id] ?? 0

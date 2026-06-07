@@ -13,9 +13,13 @@ export class VerifyOtpDto {
   })
   phone!: string;
 
+  // Phone-only login is the default, so `code` is optional at the boundary.
+  // When OTP is re-enabled (AUTH_OTP_MODE=whatsapp|sandbox) the service
+  // enforces presence + correctness; if provided here it must be 6 digits.
+  @IsOptional()
   @IsString()
   @Length(6, 6, { message: 'El código debe tener 6 dígitos' })
-  code!: string;
+  code?: string;
 
   @IsOptional()
   @IsString()

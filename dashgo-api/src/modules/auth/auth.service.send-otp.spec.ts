@@ -74,6 +74,9 @@ describe('AuthService.sendOtp — Twilio / WhatsApp failure handling (FIX MOBILE
     STRIPE_SECRET_KEY: 'sk_test_dummy',
     AUTH_BYPASS_OTP_CODE: '000000',
     AUTH_BYPASS_PHONES: '+15555550000',
+    // OTP is opt-in now (phone-only is the default). These specs exercise the
+    // re-enabled WhatsApp delivery path, so turn it on explicitly.
+    AUTH_OTP_MODE: 'whatsapp',
   };
 
   beforeEach(async () => {

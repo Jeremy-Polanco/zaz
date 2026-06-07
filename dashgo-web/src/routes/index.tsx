@@ -46,7 +46,7 @@ function Marquee() {
             className="mx-8 flex items-center gap-8 text-[0.72rem] uppercase tracking-[0.24em]"
           >
             {it}
-            <span className="text-brand">✦</span>
+            <span className="text-accent">✦</span>
           </span>
         ))}
       </div>
@@ -63,7 +63,7 @@ function Landing() {
           <div className="md:col-span-7 flex flex-col justify-center gap-8">
             <div className="flex items-center gap-3">
               <span className="h-px w-10 bg-ink" />
-              <span className="eyebrow">Nº 001 — New York, {new Date().getFullYear()}</span>
+              <span className="eyebrow">Nº 001 — New Jersey, {new Date().getFullYear()}</span>
             </div>
 
             <h1 className="display text-[3.5rem] font-semibold leading-[0.95] tracking-[-0.035em] text-ink sm:text-[5rem] md:text-[6.5rem]">
@@ -171,7 +171,7 @@ function Landing() {
                 Multi-tenant · Multi-barrio
               </div>
             </div>
-            <div className="absolute bottom-4 right-4 eyebrow">NYC/RD</div>
+            <div className="absolute bottom-4 right-4 eyebrow">NJ/RD</div>
           </div>
         </div>
       </section>
@@ -255,13 +255,13 @@ function HeroPoster() {
 
       {/* corner tags */}
       <div className="absolute left-4 top-4 text-[0.65rem] uppercase tracking-[0.2em] text-paper/80">
-        NYC
+        NJ
       </div>
       <div className="absolute right-4 top-4 text-[0.65rem] uppercase tracking-[0.2em] text-paper/80">
         24/7
       </div>
       <div className="absolute bottom-4 left-4 right-4 flex items-center justify-between text-[0.65rem] uppercase tracking-[0.2em] text-paper/80">
-        <span>DashGo</span>
+        <span>Udash</span>
         <span>— Agua</span>
       </div>
     </div>

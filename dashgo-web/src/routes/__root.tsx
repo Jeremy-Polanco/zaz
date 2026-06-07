@@ -11,7 +11,7 @@ import { useEffect, useRef } from 'react'
 import { useCurrentUser, useLogout } from '../lib/auth'
 import { useUpdateMe } from '../lib/queries'
 import { requestBrowserLocation, reverseGeocode } from '../lib/geo'
-import { Button, DashGoMark } from '../components/ui'
+import { Button, UdashMark } from '../components/ui'
 import { NetworkBanner } from '../components/NetworkBanner'
 
 const LOCKOUT_ALLOWLIST = new Set<string>(['/credit/pay', '/login'])
@@ -92,6 +92,9 @@ function RoleNav({ role }: { role: string }) {
         <Link to="/super/rentals" className={navLinkClass}>
           Alquileres
         </Link>
+        <Link to="/cuenta" className={navLinkClass}>
+          Mi cuenta
+        </Link>
       </nav>
     )
   }
@@ -109,6 +112,9 @@ function RoleNav({ role }: { role: string }) {
         </Link>
         <Link to="/points" className={navLinkClass}>
           Mis puntos
+        </Link>
+        <Link to="/cuenta" className={navLinkClass}>
+          Mi cuenta
         </Link>
       </nav>
     )
@@ -129,6 +135,9 @@ function RoleNav({ role }: { role: string }) {
       </Link>
       <Link to="/subscription" className={navLinkClass}>
         Suscripción
+      </Link>
+      <Link to="/cuenta" className={navLinkClass}>
+        Mi cuenta
       </Link>
     </nav>
   )
@@ -234,11 +243,11 @@ function RootLayout() {
         <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-6 py-4">
           <Link to="/" className="group flex items-center gap-3">
             <span className="text-ink">
-              <DashGoMark size={22} />
+              <UdashMark size={22} />
             </span>
             <span className="hidden h-1.5 w-1.5 rounded-full bg-accent sm:block" />
             <span className="eyebrow hidden sm:block">
-              Agua · New York
+              Agua · New Jersey
             </span>
           </Link>
           <NavUser />
@@ -249,12 +258,12 @@ function RootLayout() {
       </main>
       <footer className="border-t border-ink/10 bg-paper/60 py-6">
         <div className="mx-auto flex max-w-7xl flex-col items-start justify-between gap-2 px-6 sm:flex-row sm:items-center">
-          <span className="eyebrow">© DashGo · El colmado, al timbre</span>
+          <span className="eyebrow">© Udash · El colmado, al timbre</span>
           <div className="flex items-center gap-4">
             <Link to="/privacidad" className="eyebrow underline">
               Privacidad
             </Link>
-            <span className="eyebrow">New York City · ES / EN</span>
+            <span className="eyebrow">New Jersey · ES / EN</span>
           </div>
         </div>
       </footer>

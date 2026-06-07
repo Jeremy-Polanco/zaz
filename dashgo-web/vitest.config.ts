@@ -8,6 +8,11 @@ export default defineConfig({
     alias: { '@': path.resolve(__dirname, './src') },
   },
   test: {
+    // Vitest owns the unit/component suite (src/**/*.test.*). Playwright owns
+    // the browser e2e suite (e2e/**/*.spec.ts) — exclude it so vitest's default
+    // glob doesn't try to run Playwright specs.
+    include: ['src/**/*.test.{ts,tsx}'],
+    exclude: ['e2e/**', 'node_modules/**'],
     environment: 'jsdom',
     setupFiles: ['./src/test/setup.ts'],
     globals: true,

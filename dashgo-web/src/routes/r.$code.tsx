@@ -26,7 +26,7 @@ function ReferralLanding() {
           </p>
           <Link to="/login" search={{ next: undefined, ref: undefined }} className="mt-10">
             <button className="inline-flex h-12 items-center justify-center rounded-xs border border-ink bg-ink px-6 font-medium uppercase tracking-[0.08em] text-paper hover:bg-ink-soft">
-              Entrar a DashGo
+              Entrar a Udash
             </button>
           </Link>
         </>
@@ -40,7 +40,7 @@ function ReferralLanding() {
             </span>
           </h1>
           <p className="mt-6 max-w-md text-base text-ink-muted">
-            Creá tu cuenta usando este código y súmate a DashGo — tu colmado
+            Creá tu cuenta usando este código y súmate a Udash — tu colmado
             al timbre.
           </p>
           <p className="mt-8 nums text-sm uppercase tracking-[0.3em] text-ink">

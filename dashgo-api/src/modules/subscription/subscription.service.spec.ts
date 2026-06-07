@@ -1225,3 +1225,686 @@ describe('SubscriptionService — getPlan (T9)', () => {
     expect(result).toBeNull();
   });
 });
+
+// ---------------------------------------------------------------------------
+// Coverage-completion suite
+//
+// Exercises every remaining branch/function not covered by the task-specific
+// suites above: redirect-allowlist guards, the 409 already-active guard,
+// portal/cancel/reactivate/getMySubscription, the webhook default + invoice +
+// customer.subscription.created paths, persistCustomerId, upsertSubscription
+// skip guards, normalizeStatus mappings, and the Stripe-disabled (503) path.
+// ---------------------------------------------------------------------------
+
+describe('SubscriptionService — coverage completion', () => {
+  let service: SubscriptionService;
+  let plansRepo: jest.Mocked<Repository<SubscriptionPlan>>;
+  let subscriptionsRepo: jest.Mocked<Repository<Subscription>>;
+  let usersRepo: jest.Mocked<Repository<User>>;
+  let configService: jest.Mocked<ConfigService>;
+
+  const SUCCESS_URL = 'https://app.dashgo.dev/subscription?session=success';
+  const CANCEL_URL = 'https://app.dashgo.dev/subscription?session=canceled';
+
+  function makeRepoMockLocal<T>(): jest.Mocked<Repository<T>> {
+    return {
+      findOne: jest.fn(),
+      find: jest.fn(),
+      save: jest.fn(),
+      update: jest.fn(),
+      create: jest.fn((dto: Partial<T>) => dto as T),
+      upsert: jest.fn(),
+      createQueryBuilder: jest.fn(),
+      count: jest.fn(),
+    } as unknown as jest.Mocked<Repository<T>>;
+  }
+
+  // Helper: query builder stub for isActiveSubscriber. `active` controls whether
+  // getRawOne resolves to a row (active) or undefined (inactive).
+  function stubIsActive(active: boolean): void {
+    const mockQb = {
+      select: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      limit: jest.fn().mockReturnThis(),
+      getRawOne: jest.fn().mockResolvedValue(active ? { '1': '1' } : undefined),
+    };
+    subscriptionsRepo.createQueryBuilder.mockReturnValue(mockQb as never);
+  }
+
+  async function buildService(opts: { stripeKey?: string } = {}): Promise<void> {
+    mockStripeInstance = createMockStripe();
+
+    plansRepo = makeRepoMockLocal<SubscriptionPlan>();
+    subscriptionsRepo = makeRepoMockLocal<Subscription>();
+    usersRepo = makeRepoMockLocal<User>();
+    configService = {
+      get: jest.fn(),
+      getOrThrow: jest.fn(),
+    } as unknown as jest.Mocked<ConfigService>;
+
+    const stripeKey = 'stripeKey' in opts ? opts.stripeKey : 'sk_test_dummy';
+    configService.get.mockImplementation((key: string) => {
+      if (key === 'STRIPE_SECRET_KEY') return stripeKey;
+      if (key === 'STRIPE_SUBSCRIPTION_PRICE_ID') return 'price_test_monthly';
+      return undefined;
+    });
+
+    // DB row exists so onModuleInit skips seeding when Stripe is enabled
+    plansRepo.findOne.mockResolvedValue({
+      id: 'plan-uuid',
+      stripeProductId: 'prod_x',
+      activeStripePriceId: 'price_x',
+      unitAmountCents: 1000,
+      currency: 'usd',
+      interval: 'month',
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    } as SubscriptionPlan);
+
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        SubscriptionService,
+        { provide: getRepositoryToken(Subscription), useValue: subscriptionsRepo },
+        { provide: getRepositoryToken(User), useValue: usersRepo },
+        { provide: getRepositoryToken(SubscriptionPlan), useValue: plansRepo },
+        { provide: ConfigService, useValue: configService },
+      ],
+    }).compile();
+
+    service = module.get<SubscriptionService>(SubscriptionService);
+    await service.onModuleInit();
+    jest.clearAllMocks();
+    // Re-apply the seeded-plan stub after clearing call history
+    plansRepo.findOne.mockResolvedValue({
+      id: 'plan-uuid',
+      stripeProductId: 'prod_x',
+      activeStripePriceId: 'price_x',
+      unitAmountCents: 1000,
+      currency: 'usd',
+      interval: 'month',
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    } as SubscriptionPlan);
+  }
+
+  // -------------------------------------------------------------------------
+  // onModuleInit — Stripe secret missing + isEnabled
+  // -------------------------------------------------------------------------
+
+  describe('onModuleInit / isEnabled — Stripe disabled', () => {
+    it('warns and leaves Stripe disabled when STRIPE_SECRET_KEY is missing', async () => {
+      await buildService({ stripeKey: undefined });
+
+      // No seeding happened (no secret → early return before plans.findOne path)
+      expect(service.isEnabled()).toBe(false);
+      expect(mockStripeInstance.prices.retrieve).not.toHaveBeenCalled();
+    });
+
+    it('isEnabled returns true when STRIPE_SECRET_KEY is present', async () => {
+      await buildService();
+      expect(service.isEnabled()).toBe(true);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // requireStripe — 503 when Stripe disabled
+  // -------------------------------------------------------------------------
+
+  describe('requireStripe — Stripe disabled (503)', () => {
+    it('createPortalSession throws ServiceUnavailableException with SUBSCRIPTION_STRIPE_DISABLED', async () => {
+      await buildService({ stripeKey: undefined });
+
+      let caught: HttpException | null = null;
+      try {
+        await service.createPortalSession('user-1');
+      } catch (err) {
+        caught = err as HttpException;
+      }
+      expect(caught).toBeInstanceOf(ServiceUnavailableException);
+      const body = caught!.getResponse() as Record<string, unknown>;
+      expect(body.code).toBe('SUBSCRIPTION_STRIPE_DISABLED');
+    });
+
+    it('handleWebhook throws ServiceUnavailableException when Stripe disabled', async () => {
+      await buildService({ stripeKey: undefined });
+
+      await expect(
+        service.handleWebhook({
+          type: 'customer.subscription.updated',
+          data: { object: fakeStripeSub() },
+        }),
+      ).rejects.toThrow(ServiceUnavailableException);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // createCheckoutSession — guards
+  // -------------------------------------------------------------------------
+
+  describe('createCheckoutSession — redirect + active guards', () => {
+    it('throws 400 SUBSCRIPTION_INVALID_REDIRECT for a non-allowlisted success_url', async () => {
+      await buildService();
+
+      let caught: HttpException | null = null;
+      try {
+        await service.createCheckoutSession('user-1', 'https://evil.example/steal', CANCEL_URL);
+      } catch (err) {
+        caught = err as HttpException;
+      }
+      expect(caught).toBeInstanceOf(HttpException);
+      expect(caught!.getStatus()).toBe(HttpStatus.BAD_REQUEST);
+      const body = caught!.getResponse() as Record<string, unknown>;
+      expect(body.code).toBe('SUBSCRIPTION_INVALID_REDIRECT');
+      expect(String(body.message)).toContain('success_url');
+      expect(mockStripeInstance.checkout.sessions.create).not.toHaveBeenCalled();
+    });
+
+    it('throws 400 SUBSCRIPTION_INVALID_REDIRECT for a non-allowlisted cancel_url', async () => {
+      await buildService();
+
+      let caught: HttpException | null = null;
+      try {
+        await service.createCheckoutSession('user-1', SUCCESS_URL, 'https://evil.example/cancel');
+      } catch (err) {
+        caught = err as HttpException;
+      }
+      expect(caught).toBeInstanceOf(HttpException);
+      expect(caught!.getStatus()).toBe(HttpStatus.BAD_REQUEST);
+      const body = caught!.getResponse() as Record<string, unknown>;
+      expect(String(body.message)).toContain('cancel_url');
+      expect(mockStripeInstance.checkout.sessions.create).not.toHaveBeenCalled();
+    });
+
+    it('throws 409 SUBSCRIPTION_ALREADY_ACTIVE when the user is already an active subscriber', async () => {
+      await buildService();
+      stubIsActive(true);
+
+      let caught: ConflictException | null = null;
+      try {
+        await service.createCheckoutSession('user-1', SUCCESS_URL, CANCEL_URL);
+      } catch (err) {
+        caught = err as ConflictException;
+      }
+      expect(caught).toBeInstanceOf(ConflictException);
+      const body = caught!.getResponse() as Record<string, unknown>;
+      expect(body.code).toBe('SUBSCRIPTION_ALREADY_ACTIVE');
+      expect(mockStripeInstance.checkout.sessions.create).not.toHaveBeenCalled();
+    });
+
+    it('returns the session url on the happy path', async () => {
+      await buildService();
+      stubIsActive(false);
+      usersRepo.findOne.mockResolvedValue(
+        fakeUser({ stripeCustomerId: 'cus_existing' }),
+      );
+      mockStripeInstance.checkout.sessions.create.mockResolvedValue({
+        url: 'https://stripe.test/checkout',
+      } as never);
+
+      const result = await service.createCheckoutSession('user-1', SUCCESS_URL, CANCEL_URL);
+
+      expect(result).toEqual({ url: 'https://stripe.test/checkout' });
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // createPortalSession — happy path
+  // -------------------------------------------------------------------------
+
+  describe('createPortalSession', () => {
+    it('returns the portal url for an existing customer', async () => {
+      await buildService();
+      usersRepo.findOne.mockResolvedValue(
+        fakeUser({ stripeCustomerId: 'cus_portal' }),
+      );
+      mockStripeInstance.billingPortal.sessions.create.mockResolvedValue({
+        url: 'https://stripe.test/portal-url',
+      } as never);
+
+      const result = await service.createPortalSession('user-1');
+
+      expect(result).toEqual({ url: 'https://stripe.test/portal-url' });
+      expect(mockStripeInstance.billingPortal.sessions.create).toHaveBeenCalledWith({
+        customer: 'cus_portal',
+        return_url: 'https://app.dashgo.dev/subscription',
+      });
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // cancelAtPeriodEnd
+  // -------------------------------------------------------------------------
+
+  describe('cancelAtPeriodEnd', () => {
+    it('calls stripe.subscriptions.update with cancel_at_period_end:true when sub exists', async () => {
+      await buildService();
+      subscriptionsRepo.findOne.mockResolvedValue(
+        fakeSubscription({ stripeSubscriptionId: 'sub_cancel_me' }),
+      );
+
+      await service.cancelAtPeriodEnd('user-1');
+
+      expect(mockStripeInstance.subscriptions.update).toHaveBeenCalledWith('sub_cancel_me', {
+        cancel_at_period_end: true,
+      });
+    });
+
+    it('throws NotFoundException with SUBSCRIPTION_NOT_FOUND when no sub exists', async () => {
+      await buildService();
+      subscriptionsRepo.findOne.mockResolvedValue(null);
+
+      let caught: NotFoundException | null = null;
+      try {
+        await service.cancelAtPeriodEnd('user-1');
+      } catch (err) {
+        caught = err as NotFoundException;
+      }
+      expect(caught).toBeInstanceOf(NotFoundException);
+      const body = caught!.getResponse() as Record<string, unknown>;
+      expect(body.code).toBe('SUBSCRIPTION_NOT_FOUND');
+      expect(mockStripeInstance.subscriptions.update).not.toHaveBeenCalled();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // reactivate
+  // -------------------------------------------------------------------------
+
+  describe('reactivate', () => {
+    it('clears cancel_at_period_end on Stripe when the sub is active', async () => {
+      await buildService();
+      subscriptionsRepo.findOne.mockResolvedValue(
+        fakeSubscription({
+          stripeSubscriptionId: 'sub_reactivate',
+          status: SubscriptionStatus.ACTIVE,
+        }),
+      );
+
+      await service.reactivate('user-1');
+
+      expect(mockStripeInstance.subscriptions.update).toHaveBeenCalledWith('sub_reactivate', {
+        cancel_at_period_end: false,
+      });
+    });
+
+    it('throws NotFoundException when no sub exists', async () => {
+      await buildService();
+      subscriptionsRepo.findOne.mockResolvedValue(null);
+
+      await expect(service.reactivate('user-1')).rejects.toThrow(NotFoundException);
+      expect(mockStripeInstance.subscriptions.update).not.toHaveBeenCalled();
+    });
+
+    it('throws 400 SUBSCRIPTION_CANNOT_REACTIVATE when the sub is canceled', async () => {
+      await buildService();
+      subscriptionsRepo.findOne.mockResolvedValue(
+        fakeSubscription({ status: SubscriptionStatus.CANCELED }),
+      );
+
+      let caught: HttpException | null = null;
+      try {
+        await service.reactivate('user-1');
+      } catch (err) {
+        caught = err as HttpException;
+      }
+      expect(caught).toBeInstanceOf(HttpException);
+      expect(caught!.getStatus()).toBe(HttpStatus.BAD_REQUEST);
+      const body = caught!.getResponse() as Record<string, unknown>;
+      expect(body.code).toBe('SUBSCRIPTION_CANNOT_REACTIVATE');
+      expect(mockStripeInstance.subscriptions.update).not.toHaveBeenCalled();
+    });
+
+    it('throws 400 SUBSCRIPTION_PAST_DUE when the sub is past_due', async () => {
+      await buildService();
+      subscriptionsRepo.findOne.mockResolvedValue(
+        fakeSubscription({ status: SubscriptionStatus.PAST_DUE }),
+      );
+
+      let caught: HttpException | null = null;
+      try {
+        await service.reactivate('user-1');
+      } catch (err) {
+        caught = err as HttpException;
+      }
+      expect(caught).toBeInstanceOf(HttpException);
+      expect(caught!.getStatus()).toBe(HttpStatus.BAD_REQUEST);
+      const body = caught!.getResponse() as Record<string, unknown>;
+      expect(body.code).toBe('SUBSCRIPTION_PAST_DUE');
+      expect(mockStripeInstance.subscriptions.update).not.toHaveBeenCalled();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // getMySubscription
+  // -------------------------------------------------------------------------
+
+  describe('getMySubscription', () => {
+    it('returns null when the user has no subscription row', async () => {
+      await buildService();
+      subscriptionsRepo.findOne.mockResolvedValue(null);
+
+      const result = await service.getMySubscription('user-1');
+      expect(result).toBeNull();
+    });
+
+    it('returns a SubscriptionResponseDto when a row exists', async () => {
+      await buildService();
+      const sub = fakeSubscription({ status: SubscriptionStatus.ACTIVE });
+      subscriptionsRepo.findOne.mockResolvedValue(sub);
+
+      const result = await service.getMySubscription('user-1');
+
+      expect(result).not.toBeNull();
+      expect(result!.status).toBe(SubscriptionStatus.ACTIVE);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // handleWebhook — remaining branches
+  // -------------------------------------------------------------------------
+
+  describe('handleWebhook — remaining event paths', () => {
+    it('returns silently for an unhandled event type (default case)', async () => {
+      await buildService();
+
+      await service.handleWebhook({
+        type: 'customer.created',
+        data: { object: { id: 'cus_x' } },
+      });
+
+      expect(subscriptionsRepo.upsert).not.toHaveBeenCalled();
+      expect(mockStripeInstance.subscriptions.retrieve).not.toHaveBeenCalled();
+    });
+
+    it('processes customer.subscription.created via upsert', async () => {
+      await buildService();
+      subscriptionsRepo.upsert.mockResolvedValue({} as never);
+
+      await service.handleWebhook({
+        type: 'customer.subscription.created',
+        data: { object: fakeStripeSub() },
+      });
+
+      expect(subscriptionsRepo.upsert).toHaveBeenCalledTimes(1);
+    });
+
+    it('customer.subscription.deleted skips upsert when metadata.rentalId is present', async () => {
+      await buildService();
+      subscriptionsRepo.upsert.mockResolvedValue({} as never);
+
+      await service.handleWebhook({
+        type: 'customer.subscription.deleted',
+        data: {
+          object: fakeStripeSub({ metadata: { userId: 'user-1', rentalId: 'r-1' } }),
+        },
+      });
+
+      expect(subscriptionsRepo.upsert).not.toHaveBeenCalled();
+    });
+
+    it('invoice.payment_succeeded retrieves the sub and upserts', async () => {
+      await buildService();
+      mockStripeInstance.subscriptions.retrieve.mockResolvedValue(
+        fakeStripeSub({ status: 'active' }) as never,
+      );
+      subscriptionsRepo.upsert.mockResolvedValue({} as never);
+
+      await service.handleWebhook({
+        type: 'invoice.payment_succeeded',
+        data: { object: { id: 'inv_ok', subscription: 'sub_stripe_1' } },
+      });
+
+      expect(mockStripeInstance.subscriptions.retrieve).toHaveBeenCalledWith('sub_stripe_1');
+      expect(subscriptionsRepo.upsert).toHaveBeenCalledTimes(1);
+    });
+
+    it('invoice.payment_succeeded resolves subscription id from an object reference', async () => {
+      await buildService();
+      mockStripeInstance.subscriptions.retrieve.mockResolvedValue(
+        fakeStripeSub() as never,
+      );
+      subscriptionsRepo.upsert.mockResolvedValue({} as never);
+
+      await service.handleWebhook({
+        type: 'invoice.payment_succeeded',
+        data: { object: { id: 'inv_obj', subscription: { id: 'sub_from_obj' } } },
+      });
+
+      expect(mockStripeInstance.subscriptions.retrieve).toHaveBeenCalledWith('sub_from_obj');
+    });
+
+    it('invoice.payment_failed returns early when invoice has no subscription', async () => {
+      await buildService();
+
+      await service.handleWebhook({
+        type: 'invoice.payment_failed',
+        data: { object: { id: 'inv_nosub', subscription: null } },
+      });
+
+      expect(mockStripeInstance.subscriptions.retrieve).not.toHaveBeenCalled();
+      expect(subscriptionsRepo.upsert).not.toHaveBeenCalled();
+    });
+
+    it('checkout.session.completed returns early when session.subscription is null', async () => {
+      await buildService();
+
+      await service.handleWebhook({
+        type: 'checkout.session.completed',
+        data: {
+          object: {
+            id: 'cs_nosub',
+            mode: 'subscription',
+            subscription: null,
+            customer: 'cus_1',
+            metadata: { userId: 'user-1' },
+          },
+        },
+      });
+
+      expect(mockStripeInstance.subscriptions.retrieve).not.toHaveBeenCalled();
+    });
+
+    it('checkout.session.completed resolves subscription id from object form and persists customer id', async () => {
+      await buildService();
+      // Returned sub has no metadata.userId → service carries it from the session
+      mockStripeInstance.subscriptions.retrieve.mockResolvedValue(
+        fakeStripeSub({ metadata: {} }) as never,
+      );
+      subscriptionsRepo.upsert.mockResolvedValue({} as never);
+      // persistCustomerId: user exists with no stripeCustomerId → triggers update
+      usersRepo.findOne.mockResolvedValue(fakeUser({ stripeCustomerId: null }));
+      usersRepo.update.mockResolvedValue({ affected: 1 } as never);
+
+      await service.handleWebhook({
+        type: 'checkout.session.completed',
+        data: {
+          object: {
+            id: 'cs_obj',
+            mode: 'subscription',
+            subscription: { id: 'sub_obj_form' },
+            customer: 'cus_persist',
+            metadata: { userId: 'user-1' },
+          },
+        },
+      });
+
+      expect(mockStripeInstance.subscriptions.retrieve).toHaveBeenCalledWith('sub_obj_form');
+      expect(subscriptionsRepo.upsert).toHaveBeenCalledTimes(1);
+      // persistCustomerId wrote the customer id onto the user
+      expect(usersRepo.update).toHaveBeenCalledWith('user-1', {
+        stripeCustomerId: 'cus_persist',
+      });
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // persistCustomerId — branch coverage
+  // -------------------------------------------------------------------------
+
+  describe('persistCustomerId (via checkout.session.completed)', () => {
+    it('does NOT update the user when customer id is empty', async () => {
+      await buildService();
+      mockStripeInstance.subscriptions.retrieve.mockResolvedValue(
+        fakeStripeSub() as never,
+      );
+      subscriptionsRepo.upsert.mockResolvedValue({} as never);
+
+      await service.handleWebhook({
+        type: 'checkout.session.completed',
+        data: {
+          object: {
+            id: 'cs_nocust',
+            mode: 'subscription',
+            subscription: 'sub_stripe_1',
+            customer: null,
+            metadata: { userId: 'user-1' },
+          },
+        },
+      });
+
+      expect(usersRepo.update).not.toHaveBeenCalled();
+    });
+
+    it('does NOT update the user when it already has a stripeCustomerId', async () => {
+      await buildService();
+      mockStripeInstance.subscriptions.retrieve.mockResolvedValue(
+        fakeStripeSub() as never,
+      );
+      subscriptionsRepo.upsert.mockResolvedValue({} as never);
+      usersRepo.findOne.mockResolvedValue(
+        fakeUser({ stripeCustomerId: 'cus_already_set' }),
+      );
+
+      await service.handleWebhook({
+        type: 'checkout.session.completed',
+        data: {
+          object: {
+            id: 'cs_hascust',
+            mode: 'subscription',
+            subscription: 'sub_stripe_1',
+            customer: 'cus_new_but_ignored',
+            metadata: { userId: 'user-1' },
+          },
+        },
+      });
+
+      expect(usersRepo.update).not.toHaveBeenCalled();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // upsertSubscription — skip guards (via webhook)
+  // -------------------------------------------------------------------------
+
+  describe('upsertSubscription — skip guards', () => {
+    it('skips upsert when the subscription has no metadata.userId', async () => {
+      await buildService();
+      subscriptionsRepo.upsert.mockResolvedValue({} as never);
+
+      await service.handleWebhook({
+        type: 'customer.subscription.updated',
+        data: { object: fakeStripeSub({ metadata: {} }) },
+      });
+
+      expect(subscriptionsRepo.upsert).not.toHaveBeenCalled();
+    });
+
+    it('skips upsert when period bounds are missing on both subscription and items[0]', async () => {
+      await buildService();
+      subscriptionsRepo.upsert.mockResolvedValue({} as never);
+
+      await service.handleWebhook({
+        type: 'customer.subscription.updated',
+        data: {
+          object: {
+            id: 'sub_noperiod',
+            status: 'active',
+            // no current_period_start/end, no items
+            cancel_at_period_end: false,
+            canceled_at: null,
+            metadata: { userId: 'user-1' },
+          },
+        },
+      });
+
+      expect(subscriptionsRepo.upsert).not.toHaveBeenCalled();
+    });
+
+    it('uses provided canceled_at timestamp when Stripe supplies it', async () => {
+      await buildService();
+      subscriptionsRepo.upsert.mockResolvedValue({} as never);
+      const canceledAtUnix = NOW_UNIX - 100;
+
+      await service.handleWebhook({
+        type: 'customer.subscription.updated',
+        data: {
+          object: fakeStripeSub({ status: 'canceled', canceled_at: canceledAtUnix }),
+        },
+      });
+
+      const arg = subscriptionsRepo.upsert.mock.calls[0][0] as Record<string, unknown>;
+      const canceledAt = arg.canceledAt as Date;
+      expect(canceledAt).toBeInstanceOf(Date);
+      expect(canceledAt.getTime()).toBe(canceledAtUnix * 1000);
+    });
+
+    it('leaves canceledAt null for a non-canceled sub without canceled_at', async () => {
+      await buildService();
+      subscriptionsRepo.upsert.mockResolvedValue({} as never);
+
+      await service.handleWebhook({
+        type: 'customer.subscription.updated',
+        data: { object: fakeStripeSub({ status: 'active', canceled_at: null }) },
+      });
+
+      const arg = subscriptionsRepo.upsert.mock.calls[0][0] as Record<string, unknown>;
+      expect(arg.canceledAt).toBeNull();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // normalizeStatus — every mapping (via webhook upsert)
+  // -------------------------------------------------------------------------
+
+  describe('normalizeStatus — status mappings', () => {
+    async function upsertStatus(stripeStatus: string): Promise<SubscriptionStatus> {
+      subscriptionsRepo.upsert.mockResolvedValue({} as never);
+      await service.handleWebhook({
+        type: 'customer.subscription.updated',
+        data: { object: fakeStripeSub({ status: stripeStatus }) },
+      });
+      const arg = subscriptionsRepo.upsert.mock.calls[0][0] as Record<string, unknown>;
+      return arg.status as SubscriptionStatus;
+    }
+
+    it('maps unpaid → UNPAID', async () => {
+      await buildService();
+      expect(await upsertStatus('unpaid')).toBe(SubscriptionStatus.UNPAID);
+    });
+
+    it('maps incomplete → INCOMPLETE', async () => {
+      await buildService();
+      expect(await upsertStatus('incomplete')).toBe(SubscriptionStatus.INCOMPLETE);
+    });
+
+    it('maps incomplete_expired → INCOMPLETE_EXPIRED', async () => {
+      await buildService();
+      expect(await upsertStatus('incomplete_expired')).toBe(
+        SubscriptionStatus.INCOMPLETE_EXPIRED,
+      );
+    });
+
+    it('maps past_due → PAST_DUE', async () => {
+      await buildService();
+      expect(await upsertStatus('past_due')).toBe(SubscriptionStatus.PAST_DUE);
+    });
+
+    it('maps an unknown future status → INCOMPLETE (forward-compat default)', async () => {
+      await buildService();
+      expect(await upsertStatus('some_future_status')).toBe(
+        SubscriptionStatus.INCOMPLETE,
+      );
+    });
+  });
+});

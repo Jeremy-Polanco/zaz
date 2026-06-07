@@ -1,44 +1,43 @@
 import { expect, test } from '@playwright/test'
 
 test.describe('Brand surface', () => {
-  test('login page renders with DashGo title + meta + brand colors', async ({ page }) => {
+  test('login page renders with Udash title + meta + brand colors', async ({ page }) => {
     await page.goto('/login')
-    await expect(page).toHaveTitle(/DashGo/i)
+    await expect(page).toHaveTitle(/Udash/i)
 
     const description = await page.locator('meta[name="description"]').getAttribute('content')
-    expect(description).toMatch(/DashGo/)
+    expect(description).toMatch(/Udash/)
 
     const themeColor = await page.locator('meta[name="theme-color"]').getAttribute('content')
-    expect(themeColor).toBe('#000000')
+    expect(themeColor).toBe('#16223C')
   })
 
-  test('favicon.svg serves a black square with the orange bolt', async ({ page }) => {
+  test('favicon.svg serves the navy UD monogram with the orange accent', async ({ page }) => {
     const response = await page.request.get('/favicon.svg')
     expect(response.status()).toBe(200)
     expect(response.headers()['content-type']).toContain('image/svg')
     const body = await response.text()
-    // Black background.
-    expect(body).toContain('fill="#000000"')
-    // Orange bolt path (DashGo accent color).
+    // Udash navy background.
+    expect(body).toContain('#16223C')
+    // Orange accent (Udash brand color).
     expect(body).toContain('#FF8000')
     // No legacy ZAZ purple anywhere.
     expect(body).not.toContain('#220247')
     expect(body).not.toContain('#F5E447')
   })
 
-  test('dashgo-logo.svg includes the Dash⚡Go wordmark with DELIVERY · NEW YORK eyebrow', async ({
-    page,
-  }) => {
-    const response = await page.request.get('/dashgo-logo.svg')
+  test('udash-logo.png brand asset is served', async ({ page }) => {
+    const response = await page.request.get('/brand/udash-logo.png')
     expect(response.status()).toBe(200)
-    const body = await response.text()
-    expect(body).toContain('Dash')
-    expect(body).toContain('Go')
-    expect(body).toContain('DELIVERY · NEW YORK')
-    expect(body).toContain('#FF8000') // bolt orange
+    expect(response.headers()['content-type']).toContain('image/png')
   })
 
-  test('no legacy ZAZ branding in rendered HTML head + body text', async ({ page }) => {
+  test('login poster shows the Udash logo', async ({ page }) => {
+    await page.goto('/login')
+    await expect(page.getByAltText('Udash logo')).toBeVisible()
+  })
+
+  test('no legacy ZAZ / Colmapp branding in rendered HTML head + body text', async ({ page }) => {
     await page.goto('/login')
     // Check user-visible text, not the full DOM (dev-mode vite shims sometimes
     // leak module paths containing legacy names which aren't user-facing).

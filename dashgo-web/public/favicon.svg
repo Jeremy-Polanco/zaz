@@ -1,6 +1,17 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024" role="img" aria-label="DashGo">
-  <rect width="1024" height="1024" fill="#000000"/>
-  <g transform="translate(267 162) scale(35)">
-    <path d="M9 0 L1 11 L7 11 L5 20 L13 8 L7 8 L9 0 Z" fill="#FF8000"/>
-  </g>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024" role="img" aria-label="Udash">
+  <rect width="1024" height="1024" rx="220" fill="#16223C"/>
+  <!-- speed lines echoing the Udash logo -->
+  <rect x="150" y="455" width="150" height="34" rx="17" fill="#FF8000"/>
+  <rect x="186" y="515" width="180" height="34" rx="17" fill="#FF8000"/>
+  <rect x="162" y="575" width="120" height="34" rx="17" fill="#FF8000"/>
+  <text
+    x="560"
+    y="512"
+    text-anchor="middle"
+    dominant-baseline="central"
+    font-family="-apple-system, BlinkMacSystemFont, 'Inter Tight', system-ui, 'Helvetica Neue', Helvetica, Arial, sans-serif"
+    font-size="520"
+    font-weight="800"
+    letter-spacing="-20"
+  ><tspan fill="#FAFAFC">U</tspan><tspan fill="#FF8000">D</tspan></text>
 </svg>

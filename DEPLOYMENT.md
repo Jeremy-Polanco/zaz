@@ -8,6 +8,8 @@ This guide assumes:
 - You have accounts on **DigitalOcean**, **Vercel**, **Sentry**, **Stripe** (test mode for now), and **Twilio** (production credentials).
 - You're deploying without a custom domain — using the platform-provided URLs (`*.ondigitalocean.app` and `*.vercel.app`). Adding a custom domain later is a 5-minute step on each platform.
 
+> **Payments — launch status (iteration 1):** DashGo launches accepting **cash on delivery only**. Card / digital payments (Stripe) are **fully implemented and tested in the codebase**, but **gated pending approval of the Stripe production account** — they are enabled as soon as the Stripe live account is approved. Nothing is removed; this is a launch-timing decision waiting on an external (Stripe) approval. All the Stripe setup steps below remain valid — complete them now so card payments switch on the moment Stripe approves.
+
 ---
 
 ## 1. Pre-flight: install dependencies
@@ -94,6 +96,8 @@ curl https://dashgo-XXXX.ondigitalocean.app/api/health
 If `db` is `down`, check that `DB_SSL=true` is set and the database is healthy in the DO dashboard.
 
 ### 3.4 Configure the Stripe webhook
+
+> **Gated until Stripe prod approval.** At launch DashGo runs cash-only, so card payments are not yet live to customers. Still configure the webhook now (test mode) — the integration is built and tested, and this wiring goes live the moment the Stripe production account is approved.
 
 1. In the [Stripe dashboard](https://dashboard.stripe.com/test/webhooks), click **Add endpoint**.
 2. Endpoint URL: `https://dashgo-XXXX.ondigitalocean.app/api/payments/stripe/webhook`
@@ -240,11 +244,11 @@ Run these in order to verify everything's working end-to-end:
 - [ ] **Web loads**: open the Vercel URL — login screen should render.
 - [ ] **Auth (Twilio)**: enter your phone, receive an SMS code, log in.
 - [ ] **Catalog loads**: products and categories render.
-- [ ] **Stripe webhook**: Stripe dashboard → Webhooks → your endpoint → "Send test event" with `payment_intent.succeeded`. Should return 200.
+- [ ] **Stripe webhook** _(gated until Stripe prod approval — verify in test mode)_: Stripe dashboard → Webhooks → your endpoint → "Send test event" with `payment_intent.succeeded`. Should return 200. Card payments stay gated at launch (cash-only); this confirms the built-and-tested integration is wired and ready for when Stripe approves production.
 - [ ] **Sentry**: trigger a 500 (e.g. hit a bogus admin endpoint as a normal user). Confirm an event appears in `dashgo-api` Sentry project.
 - [ ] **CORS**: open the web app, look at network tab — API requests should succeed without CORS errors.
 - [ ] **Rental product**: create a test rental product via admin UI (`/super/products`), set `pricingMode = rental`, fill in `monthlyRentCents`, `lateFeeCents`, `stripeProductId`, and `stripePriceId`. Save and verify all four fields persist (check DB or re-open the edit form).
-- [ ] **Rental order activation**: place a test rental order as a client, then advance it through the full status lifecycle to `DELIVERED` as admin. Verify a Stripe Subscription is created in the Stripe dashboard and the Rental row in the DB flips to `status = ACTIVE`.
+- [ ] **Rental order activation** _(Stripe-gated — verify in test mode)_: place a test rental order as a client, then advance it through the full status lifecycle to `DELIVERED` as admin. Verify a Stripe Subscription is created in the Stripe dashboard and the Rental row in the DB flips to `status = ACTIVE`. Rental billing rides on Stripe, so it stays gated alongside card payments until the Stripe production account is approved — this verifies the built-and-tested flow in test mode.
 - [ ] **(Optional — manual) past_due webhook**: in the Stripe test dashboard, mark the test subscription as `past_due` (or use `stripe trigger customer.subscription.updated`). Verify the Rental row in the DB flips to `status = PAST_DUE`.
 - [ ] **(Optional — manual) late-fee cron**: wait for the 03:00 UTC tick, or inject `LateFeeCron` and call `runDaily()` from a one-off script. Verify `last_late_fee_at` is set on any PAST_DUE rental that is ≥ 3 days past due. Re-run within the same UTC day and confirm the charge is NOT repeated (`lastLateFeeAt` is already today).
 
@@ -299,6 +303,8 @@ Scale up the API to `basic-xs` ($12) and Postgres to a non-dev cluster ($15+) wh
 ---
 
 ## 9. Going to Stripe live
+
+> **This is the gate.** At launch (iteration 1) DashGo accepts **cash on delivery only** — card / digital payments are built and tested but stay gated until the **Stripe production account is approved**. The steps below are exactly what flips card payments on. Run them once you receive your live keys; until then the codebase ships card support dormant and the product runs cash-only.
 
 When you have your live keys:
 
@@ -413,6 +419,8 @@ The `LateFeeCron` runs at **03:00 server time** daily (cron: `0 3 * * *`).
 ---
 
 ## 11. Rentals — Live Stripe products runbook
+
+> **Gated until Stripe prod approval.** Live rental billing depends on Stripe live mode, so this runbook applies once the Stripe production account is approved and §9 is done. At launch (cash-only), the rental flow is built and tested but not yet charging customers via Stripe.
 
 This section covers the steps needed to go live with rental products. It supplements the general Stripe live-mode steps in §9.
 

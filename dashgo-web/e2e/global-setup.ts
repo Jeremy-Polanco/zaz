@@ -35,7 +35,8 @@ export default async function globalSetup(): Promise<void> {
       const res = await fetch(`${apiUrl}/health`)
       if (res.ok) {
         const body = await res.json()
-        if (body.status === 'ok' && body.db === 'up') {
+        // Health shape: { status: 'ok', uptime, checks: { db: 'ok' } }.
+        if (body.status === 'ok' && body.checks?.db === 'ok') {
           console.log(
             `[e2e:global-setup] api healthy after ${Math.round((Date.now() - start) / 1000)}s`,
           )

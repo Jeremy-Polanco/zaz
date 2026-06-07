@@ -50,6 +50,7 @@ function fakeEvent(
 
 const mockPaymentsService = {
   constructWebhookEvent: jest.fn(),
+  createIntentForItems: jest.fn(),
   markAuthorizedByIntentId: jest.fn().mockResolvedValue(undefined),
   markPaidByIntentId: jest.fn().mockResolvedValue(undefined),
   handleAuthFailureByIntentId: jest.fn().mockResolvedValue(undefined),
@@ -439,6 +440,328 @@ describe('PaymentsController — webhook rental dispatch (T49/T50)', () => {
 
       // Handler must NOT be reached when freshness fails
       expect(mockIdempotencyService.runOnce).not.toHaveBeenCalled();
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // createIntent — authenticated payment-intent creation
+  // ─────────────────────────────────────────────────────────────────────────
+
+  describe('createIntent', () => {
+    it('delegates to paymentsService.createIntentForItems with the user id and dto fields', () => {
+      const intentResult = { clientSecret: 'cs_123', paymentIntentId: 'pi_1' };
+      mockPaymentsService.createIntentForItems.mockReturnValueOnce(intentResult);
+
+      const user = { id: 'user-42', email: 'u@example.com' } as never;
+      const dto = {
+        items: [{ productId: 'prod-1', quantity: 2 }],
+        usePoints: true,
+        deliveryAddress: { text: '123 Main St', lat: 1, lng: 2 },
+      } as never;
+
+      const result = controller.createIntent(user, dto);
+
+      expect(result).toBe(intentResult);
+      expect(mockPaymentsService.createIntentForItems).toHaveBeenCalledWith({
+        userId: 'user-42',
+        items: [{ productId: 'prod-1', quantity: 2 }],
+        usePoints: true,
+        deliveryAddress: { text: '123 Main St', lat: 1, lng: 2 },
+      });
+    });
+
+    it('forwards undefined optional fields (usePoints/deliveryAddress) unchanged', () => {
+      mockPaymentsService.createIntentForItems.mockReturnValueOnce({
+        clientSecret: 'cs_x',
+      });
+
+      const user = { id: 'user-7' } as never;
+      const dto = { items: [{ productId: 'p', quantity: 1 }] } as never;
+
+      controller.createIntent(user, dto);
+
+      expect(mockPaymentsService.createIntentForItems).toHaveBeenCalledWith({
+        userId: 'user-7',
+        items: [{ productId: 'p', quantity: 1 }],
+        usePoints: undefined,
+        deliveryAddress: undefined,
+      });
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // dispatch switch — payment_intent.* order-flow branches
+  // ─────────────────────────────────────────────────────────────────────────
+
+  describe('dispatch — payment_intent.amount_capturable_updated', () => {
+    it('calls markAuthorizedByIntentId with the intent id', async () => {
+      const event = fakeEvent('payment_intent.amount_capturable_updated', {
+        id: 'pi_auth',
+      });
+      mockPaymentsService.constructWebhookEvent.mockReturnValueOnce(event);
+
+      await controller.webhook(makeRawRequest(event), 'sig_test');
+
+      expect(mockPaymentsService.markAuthorizedByIntentId).toHaveBeenCalledWith(
+        'pi_auth',
+      );
+      expect(mockPaymentsService.markPaidByIntentId).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('dispatch — payment_intent.succeeded (order flow, no credit kind)', () => {
+    it('calls markPaidByIntentId when metadata.kind is not credit_payment', async () => {
+      const event = fakeEvent('payment_intent.succeeded', {
+        id: 'pi_order',
+        metadata: { kind: 'order' },
+      });
+      mockPaymentsService.constructWebhookEvent.mockReturnValueOnce(event);
+
+      await controller.webhook(makeRawRequest(event), 'sig_test');
+
+      expect(mockPaymentsService.markPaidByIntentId).toHaveBeenCalledWith(
+        'pi_order',
+      );
+      expect(mockCreditService.recordPaymentFromStripe).not.toHaveBeenCalled();
+    });
+
+    it('calls markPaidByIntentId when there is no metadata at all', async () => {
+      const event = fakeEvent('payment_intent.succeeded', { id: 'pi_nometa' });
+      mockPaymentsService.constructWebhookEvent.mockReturnValueOnce(event);
+
+      await controller.webhook(makeRawRequest(event), 'sig_test');
+
+      expect(mockPaymentsService.markPaidByIntentId).toHaveBeenCalledWith(
+        'pi_nometa',
+      );
+    });
+  });
+
+  describe('dispatch — payment_intent.succeeded (credit_payment kind)', () => {
+    it('records the credit payment using amount_received when present', async () => {
+      const event = fakeEvent('payment_intent.succeeded', {
+        id: 'pi_credit',
+        amount: 5000,
+        amount_received: 4200,
+        metadata: { kind: 'credit_payment', userId: 'user-credit' },
+      });
+      mockPaymentsService.constructWebhookEvent.mockReturnValueOnce(event);
+
+      await controller.webhook(makeRawRequest(event), 'sig_test');
+
+      expect(mockCreditService.recordPaymentFromStripe).toHaveBeenCalledWith({
+        userId: 'user-credit',
+        amountCents: 4200, // amount_received preferred over amount
+        stripePaymentIntentId: 'pi_credit',
+      });
+      // Order-flow path must NOT fire for credit payments
+      expect(mockPaymentsService.markPaidByIntentId).not.toHaveBeenCalled();
+    });
+
+    it('falls back to amount when amount_received is missing', async () => {
+      const event = fakeEvent('payment_intent.succeeded', {
+        id: 'pi_credit2',
+        amount: 7777,
+        // no amount_received
+        metadata: { kind: 'credit_payment', userId: 'user-credit-2' },
+      });
+      mockPaymentsService.constructWebhookEvent.mockReturnValueOnce(event);
+
+      await controller.webhook(makeRawRequest(event), 'sig_test');
+
+      expect(mockCreditService.recordPaymentFromStripe).toHaveBeenCalledWith({
+        userId: 'user-credit-2',
+        amountCents: 7777, // amount fallback
+        stripePaymentIntentId: 'pi_credit2',
+      });
+    });
+
+    it('does NOT record when userId is missing', async () => {
+      const event = fakeEvent('payment_intent.succeeded', {
+        id: 'pi_credit_nouser',
+        amount: 1000,
+        amount_received: 1000,
+        metadata: { kind: 'credit_payment' }, // no userId
+      });
+      mockPaymentsService.constructWebhookEvent.mockReturnValueOnce(event);
+
+      await controller.webhook(makeRawRequest(event), 'sig_test');
+
+      expect(mockCreditService.recordPaymentFromStripe).not.toHaveBeenCalled();
+    });
+
+    it('does NOT record when amount resolves to 0 (no amount/amount_received)', async () => {
+      const event = fakeEvent('payment_intent.succeeded', {
+        id: 'pi_credit_zero',
+        // no amount, no amount_received → 0
+        metadata: { kind: 'credit_payment', userId: 'user-zero' },
+      });
+      mockPaymentsService.constructWebhookEvent.mockReturnValueOnce(event);
+
+      await controller.webhook(makeRawRequest(event), 'sig_test');
+
+      expect(mockCreditService.recordPaymentFromStripe).not.toHaveBeenCalled();
+    });
+
+    it('swallows and logs an error from credit.recordPaymentFromStripe (does not throw)', async () => {
+      const event = fakeEvent('payment_intent.succeeded', {
+        id: 'pi_credit_err',
+        amount_received: 999,
+        metadata: { kind: 'credit_payment', userId: 'user-err' },
+      });
+      mockPaymentsService.constructWebhookEvent.mockReturnValueOnce(event);
+      mockCreditService.recordPaymentFromStripe.mockRejectedValueOnce(
+        new Error('credit ledger down'),
+      );
+
+      const result = await controller.webhook(
+        makeRawRequest(event),
+        'sig_test',
+      );
+
+      // Error is caught internally → webhook still resolves 200
+      expect(result).toEqual({ received: true });
+      expect(mockCreditService.recordPaymentFromStripe).toHaveBeenCalled();
+    });
+  });
+
+  describe('dispatch — payment_intent auth failure branches', () => {
+    it('calls handleAuthFailureByIntentId on payment_intent.canceled', async () => {
+      const event = fakeEvent('payment_intent.canceled', { id: 'pi_cancel' });
+      mockPaymentsService.constructWebhookEvent.mockReturnValueOnce(event);
+
+      await controller.webhook(makeRawRequest(event), 'sig_test');
+
+      expect(
+        mockPaymentsService.handleAuthFailureByIntentId,
+      ).toHaveBeenCalledWith('pi_cancel');
+    });
+
+    it('calls handleAuthFailureByIntentId on payment_intent.payment_failed', async () => {
+      const event = fakeEvent('payment_intent.payment_failed', {
+        id: 'pi_failed',
+      });
+      mockPaymentsService.constructWebhookEvent.mockReturnValueOnce(event);
+
+      await controller.webhook(makeRawRequest(event), 'sig_test');
+
+      expect(
+        mockPaymentsService.handleAuthFailureByIntentId,
+      ).toHaveBeenCalledWith('pi_failed');
+    });
+  });
+
+  describe('dispatch — subscription handler error isolation', () => {
+    it('catches and logs a subscriptionService.handleWebhook failure, still returns 200', async () => {
+      const event = fakeEvent('customer.subscription.created', {
+        id: 'sub_err',
+        metadata: {},
+      });
+      mockPaymentsService.constructWebhookEvent.mockReturnValueOnce(event);
+      mockSubscriptionService.handleWebhook.mockRejectedValueOnce(
+        new Error('subscription service exploded'),
+      );
+
+      const result = await controller.webhook(
+        makeRawRequest(event),
+        'sig_test',
+      );
+
+      expect(result).toEqual({ received: true });
+      expect(mockSubscriptionService.handleWebhook).toHaveBeenCalledTimes(1);
+      // rental path not triggered (no rentalId)
+      expect(mockRentalsService.handleWebhook).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('dispatch — default case (unhandled event type)', () => {
+    it('does nothing for an unrecognized event type', async () => {
+      const event = fakeEvent('charge.refunded', { id: 'ch_1' });
+      mockPaymentsService.constructWebhookEvent.mockReturnValueOnce(event);
+
+      const result = await controller.webhook(
+        makeRawRequest(event),
+        'sig_test',
+      );
+
+      expect(result).toEqual({ received: true });
+      expect(mockPaymentsService.markPaidByIntentId).not.toHaveBeenCalled();
+      expect(mockSubscriptionService.handleWebhook).not.toHaveBeenCalled();
+      expect(mockRentalsService.handleWebhook).not.toHaveBeenCalled();
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // resolveRentalId — invoice subscription resolution edge cases
+  // ─────────────────────────────────────────────────────────────────────────
+
+  describe('resolveRentalId — invoice subscription edge cases', () => {
+    it('returns null (rental NOT dispatched) when invoice has no subscription', async () => {
+      const event = fakeEvent('invoice.payment_failed', {
+        id: 'in_no_sub',
+        // no subscription field
+      });
+      mockPaymentsService.constructWebhookEvent.mockReturnValueOnce(event);
+
+      await controller.webhook(makeRawRequest(event), 'sig_test');
+
+      expect(mockPaymentsService.retrieveSubscription).not.toHaveBeenCalled();
+      expect(mockRentalsService.handleWebhook).not.toHaveBeenCalled();
+      // subscription path still runs
+      expect(mockSubscriptionService.handleWebhook).toHaveBeenCalledTimes(1);
+    });
+
+    it('resolves subscription id from an object-shaped invoice.subscription', async () => {
+      const event = fakeEvent('invoice.payment_succeeded', {
+        id: 'in_obj_sub',
+        subscription: { id: 'sub_obj_123' },
+      });
+      mockPaymentsService.constructWebhookEvent.mockReturnValueOnce(event);
+      mockPaymentsService.retrieveSubscription.mockResolvedValueOnce({
+        id: 'sub_obj_123',
+        metadata: { rentalId: 'r-obj' },
+      });
+
+      await controller.webhook(makeRawRequest(event), 'sig_test');
+
+      expect(mockPaymentsService.retrieveSubscription).toHaveBeenCalledWith(
+        'sub_obj_123',
+      );
+      expect(mockRentalsService.handleWebhook).toHaveBeenCalledTimes(1);
+    });
+
+    it('returns null when fetched subscription has no metadata', async () => {
+      const event = fakeEvent('invoice.payment_succeeded', {
+        id: 'in_no_meta',
+        subscription: 'sub_no_meta',
+      });
+      mockPaymentsService.constructWebhookEvent.mockReturnValueOnce(event);
+      mockPaymentsService.retrieveSubscription.mockResolvedValueOnce({
+        id: 'sub_no_meta',
+        // no metadata key at all
+      });
+
+      await controller.webhook(makeRawRequest(event), 'sig_test');
+
+      expect(mockPaymentsService.retrieveSubscription).toHaveBeenCalledWith(
+        'sub_no_meta',
+      );
+      expect(mockRentalsService.handleWebhook).not.toHaveBeenCalled();
+    });
+
+    it('does not dispatch rental for checkout.session.completed without rentalId (non-subscription, non-invoice type)', async () => {
+      const event = fakeEvent('checkout.session.completed', {
+        id: 'cs_1',
+        // checkout.session.* is neither customer.subscription.* nor invoice.*
+        // so resolveRentalId returns null via the final fallthrough
+      });
+      mockPaymentsService.constructWebhookEvent.mockReturnValueOnce(event);
+
+      await controller.webhook(makeRawRequest(event), 'sig_test');
+
+      expect(mockPaymentsService.retrieveSubscription).not.toHaveBeenCalled();
+      expect(mockRentalsService.handleWebhook).not.toHaveBeenCalled();
+      expect(mockSubscriptionService.handleWebhook).toHaveBeenCalledTimes(1);
     });
   });
 });

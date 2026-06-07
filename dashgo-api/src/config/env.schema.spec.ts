@@ -765,61 +765,60 @@ describe('envSchema', () => {
     });
   });
 
-  // Rule 6 — AUTH_OTP_MODE='disabled' requires explicit production
-  // acknowledgement. Boot must fail loudly if disabled mode reaches
-  // production without AUTH_OTP_DISABLED_ACK=yes.
-  describe('production: AUTH_OTP_MODE=disabled guard', () => {
-    it('fails when prod + AUTH_OTP_MODE=disabled and AUTH_OTP_DISABLED_ACK absent', () => {
-      const result = envSchema.safeParse({
-        ...validEnv(),
-        NODE_ENV: 'production',
-        AUTH_OTP_MODE: 'disabled',
-        // AUTH_OTP_DISABLED_ACK omitted — defaults to 'no'
-      });
-      expect(result.success).toBe(false);
-      if (!result.success) {
-        const paths = result.error.issues.map((i) => i.path.join('.'));
-        expect(paths).toContain('AUTH_OTP_DISABLED_ACK');
+  // AUTH_OTP_MODE — phone-only login is the DEFAULT (product pivot). OTP is
+  // opt-in via AUTH_OTP_MODE=whatsapp|sandbox. The old prod-acknowledgement
+  // gate (Rule 6 / AUTH_OTP_DISABLED_ACK) is gone: phone-only is now an
+  // accepted, default product behavior, not an emergency soft-launch flag.
+  describe('AUTH_OTP_MODE — phone-only default + OTP opt-in', () => {
+    it("defaults AUTH_OTP_MODE to 'disabled' (phone-only) when omitted", () => {
+      const result = envSchema.safeParse({ ...validEnv() });
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.AUTH_OTP_MODE).toBe('disabled');
       }
     });
 
-    it("fails when prod + AUTH_OTP_MODE=disabled and AUTH_OTP_DISABLED_ACK='no'", () => {
+    it('boots in production with the phone-only default (no ack required)', () => {
+      const result = envSchema.safeParse({
+        ...validEnv(),
+        NODE_ENV: 'production',
+        // AUTH_OTP_MODE omitted — defaults to 'disabled' (phone-only)
+      });
+      expect(result.success).toBe(true);
+    });
+
+    it("boots in production with AUTH_OTP_MODE='disabled' set explicitly", () => {
       const result = envSchema.safeParse({
         ...validEnv(),
         NODE_ENV: 'production',
         AUTH_OTP_MODE: 'disabled',
-        AUTH_OTP_DISABLED_ACK: 'no',
+      });
+      expect(result.success).toBe(true);
+    });
+
+    it("allows re-enabling OTP in production via AUTH_OTP_MODE='whatsapp'", () => {
+      const result = envSchema.safeParse({
+        ...validEnv(),
+        NODE_ENV: 'production',
+        AUTH_OTP_MODE: 'whatsapp',
+      });
+      expect(result.success).toBe(true);
+    });
+
+    it("allows AUTH_OTP_MODE='sandbox'", () => {
+      const result = envSchema.safeParse({
+        ...validEnv(),
+        AUTH_OTP_MODE: 'sandbox',
+      });
+      expect(result.success).toBe(true);
+    });
+
+    it('rejects an unknown AUTH_OTP_MODE value', () => {
+      const result = envSchema.safeParse({
+        ...validEnv(),
+        AUTH_OTP_MODE: 'sms',
       });
       expect(result.success).toBe(false);
-    });
-
-    it("succeeds when prod + AUTH_OTP_MODE=disabled and AUTH_OTP_DISABLED_ACK='yes'", () => {
-      const result = envSchema.safeParse({
-        ...validEnv(),
-        NODE_ENV: 'production',
-        AUTH_OTP_MODE: 'disabled',
-        AUTH_OTP_DISABLED_ACK: 'yes',
-      });
-      expect(result.success).toBe(true);
-    });
-
-    it("succeeds when prod + AUTH_OTP_MODE='whatsapp' (default) and AUTH_OTP_DISABLED_ACK absent", () => {
-      const result = envSchema.safeParse({
-        ...validEnv(),
-        NODE_ENV: 'production',
-        // AUTH_OTP_MODE omitted — defaults to 'whatsapp'
-      });
-      expect(result.success).toBe(true);
-    });
-
-    it("does not enforce the guard in non-production environments", () => {
-      const result = envSchema.safeParse({
-        ...validEnv(),
-        NODE_ENV: 'development',
-        AUTH_OTP_MODE: 'disabled',
-        // AUTH_OTP_DISABLED_ACK omitted — defaults to 'no' — allowed in dev
-      });
-      expect(result.success).toBe(true);
     });
   });
 });

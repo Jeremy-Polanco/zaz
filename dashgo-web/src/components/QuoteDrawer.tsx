@@ -157,24 +157,24 @@ export function QuoteDrawer({
           <SavedAddressesList userId={order.customerId} />
         </section>
 
-        <div className="mt-auto flex gap-3">
-          <Button
-            variant="secondary"
-            size="lg"
-            onClick={onClose}
-            disabled={setQuote.isPending}
-            className="flex-1"
-          >
-            Cancelar
-          </Button>
+        <div className="mt-auto flex flex-col gap-3">
           <Button
             variant="accent"
             size="lg"
             onClick={submit}
             disabled={setQuote.isPending}
-            className="flex-1"
+            className="w-full whitespace-nowrap"
           >
             {setQuote.isPending ? 'Enviando…' : 'Enviar cotización →'}
+          </Button>
+          <Button
+            variant="secondary"
+            size="lg"
+            onClick={onClose}
+            disabled={setQuote.isPending}
+            className="w-full"
+          >
+            Cancelar
           </Button>
         </div>
       </aside>

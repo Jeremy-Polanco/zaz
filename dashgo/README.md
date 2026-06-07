@@ -4,6 +4,8 @@ App mobile de DashGo. Expo 55 · React Native · NativeWind · TanStack Query.
 
 > Setup del stack completo (docker, seed, envs): ver [../README.md](../README.md).
 
+> **Pagos — estado de lanzamiento (iteración 1):** DashGo lanza aceptando **solo efectivo contra entrega**. Los pagos con tarjeta (Stripe) están **completamente implementados y probados en el código**, pero **a la espera de la aprobación de la cuenta de producción de Stripe** — se habilitan en cuanto se apruebe la cuenta en vivo. No se elimina nada; es una decisión de tiempos de lanzamiento que depende de una aprobación externa (Stripe).
+
 ## Stack
 
 - **Expo 55** + **Expo Router** (file-based, typed routes)
@@ -11,7 +13,7 @@ App mobile de DashGo. Expo 55 · React Native · NativeWind · TanStack Query.
 - **NativeWind 4** + **Tailwind v3** (Tailwind v4 aún no soportado estable en NativeWind)
 - **TanStack Query** + `@react-native-async-storage/async-storage` para persist
 - **react-hook-form** + **Zod**
-- **Stripe React Native** (setup inicial)
+- **Stripe React Native** (setup inicial; gated hasta aprobación de prod de Stripe — efectivo al lanzamiento)
 - **Inter Tight** single-font system (ver [Design](#design-system))
 
 ## Rutas (Expo Router)
@@ -124,4 +126,4 @@ npx expo start --clear
 - **OTP input sin mono font:** el OTP de 6 dígitos en login usa `font-sans` con `tracking-[8px]`. Si querés columnas perfectas, agregá `style={{ fontVariant: ['tabular-nums'] }}`.
 - **Referral code display:** mismo caso que OTP — Inter Tight no es monospaced, se compensa con tracking generoso.
 - **New Architecture:** habilitada por default en SDK 53+. Algunas libs viejas pueden romper — chequear docs antes de sumar deps.
-- **Stripe key:** se lee de `app.json → extra.stripePublishableKey`. No commitear la live key.
+- **Stripe key:** se lee de `app.json → extra.stripePublishableKey`. No commitear la live key. _(Pagos con tarjeta gated hasta la aprobación de prod de Stripe; al lanzamiento se acepta solo efectivo. La integración queda en el código y se habilita al aprobarse la cuenta en vivo.)_

@@ -5,12 +5,14 @@ import { useForm, Controller } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import {
+  loginSchema,
   sendOtpSchema,
   verifyOtpSchema,
+  type LoginInput,
   type SendOtpInput,
   type VerifyOtpInput,
 } from '../../lib/schemas'
-import { useSendOtp, useVerifyOtp } from '../../lib/queries'
+import { useLogin, useSendOtp, useVerifyOtp } from '../../lib/queries'
 import type { UserRole } from '../../lib/types'
 import { Button, Eyebrow, FieldLabel, FieldError, DashGoMark, BoltIcon } from '../../components/ui'
 import {
@@ -47,6 +49,26 @@ function isFirstLoginError(err: unknown): boolean {
   const msg = (err as Error & { response?: { data?: { message?: string } } })
     ?.response?.data?.message
   return typeof msg === 'string' && msg.toLowerCase().includes('primer ingreso')
+}
+
+/**
+ * Phone-only login is the DEFAULT. The OTP two-step flow is dormant and only
+ * renders when an operator re-enables it via EXPO_PUBLIC_AUTH_OTP_MODE=
+ * whatsapp|sandbox. Read at render time so tests can flip it via process.env.
+ */
+export function isOtpEnabled(): boolean {
+  const mode = process.env.EXPO_PUBLIC_AUTH_OTP_MODE
+  return mode === 'whatsapp' || mode === 'sandbox'
+}
+
+function routeByRole(role: UserRole) {
+  if (role === 'super_admin_delivery') {
+    router.replace('/(super)')
+  } else if (role === 'promoter') {
+    router.replace('/(promoter)')
+  } else {
+    router.replace('/(tabs)')
+  }
 }
 
 /**
@@ -162,6 +184,7 @@ export default function LoginScreen() {
   const [step, setStep] = useState<'phone' | 'code'>('phone')
   const [phone, setPhone] = useState('')
   const [expiresAt, setExpiresAt] = useState<string | null>(null)
+  const otpEnabled = isOtpEnabled()
 
   return (
     <SafeAreaView className="flex-1 bg-paper">
@@ -239,7 +262,12 @@ export default function LoginScreen() {
 
         {/* Form */}
         <View className="flex-1 bg-paper-deep px-6 pb-8 pt-10">
-          {step === 'phone' ? (
+          {!otpEnabled ? (
+            <PhoneOnlyStep
+              referralCode={referralCode}
+              onVerified={routeByRole}
+            />
+          ) : step === 'phone' ? (
             <PhoneStep
               onSent={(p, exp) => {
                 setPhone(p)
@@ -254,15 +282,7 @@ export default function LoginScreen() {
               referralCode={referralCode}
               onBack={() => setStep('phone')}
               onResent={(exp) => setExpiresAt(exp)}
-              onVerified={(role: UserRole) => {
-                if (role === 'super_admin_delivery') {
-                  router.replace('/(super)')
-                } else if (role === 'promoter') {
-                  router.replace('/(promoter)')
-                } else {
-                  router.replace('/(tabs)')
-                }
-              }}
+              onVerified={routeByRole}
             />
           )}
         </View>
@@ -441,6 +461,145 @@ function WhatsAppFailureBlock({
         </Pressable>
       </View>
     </View>
+  )
+}
+
+/**
+ * PhoneOnlyStep — the default, canonical login (no OTP).
+ *
+ * The user enters their phone and submits. Existing users are logged in
+ * immediately; brand-new users get a name field revealed on the spot
+ * ("primer ingreso") and resubmit with it. Mirrors the web flow.
+ */
+export function PhoneOnlyStep({
+  referralCode,
+  onVerified,
+}: {
+  referralCode: string | undefined
+  onVerified: (role: UserRole) => void
+}) {
+  const login = useLogin()
+  const [needsName, setNeedsName] = useState(false)
+  const {
+    control,
+    handleSubmit,
+    setError,
+    setFocus,
+    formState: { errors },
+  } = useForm<LoginInput>({
+    resolver: zodResolver(loginSchema),
+    defaultValues: { phone: '', fullName: undefined, referralCode },
+  })
+
+  const onSubmit = handleSubmit(async (values) => {
+    const trimmedName = values.fullName?.trim()
+    if (needsName && !trimmedName) {
+      setError('fullName', {
+        type: 'required',
+        message: 'Poné tu nombre para crear tu cuenta',
+      })
+      setFocus('fullName')
+      return
+    }
+    try {
+      const res = await login.mutateAsync({
+        phone: values.phone,
+        fullName: trimmedName ? trimmedName : undefined,
+        referralCode: referralCode ?? undefined,
+      })
+      onVerified(res.user.role)
+    } catch (err) {
+      // First-ever login for this phone: reveal the name field and let the
+      // user resubmit. Other errors surface via the inline banner below.
+      if (isFirstLoginError(err) && !needsName) {
+        setNeedsName(true)
+        setTimeout(() => setFocus('fullName'), 0)
+      }
+    }
+  })
+
+  return (
+    <>
+      <Eyebrow className="mb-6">Ingresar</Eyebrow>
+
+      {referralCode ? (
+        <View className="mb-6 flex-row items-center gap-2 self-start bg-brand-light px-2.5 py-1.5">
+          <BoltIcon size={11} color="#1A1530" />
+          <Text className="font-sans-medium text-[11px] uppercase tracking-label text-brand">
+            Registrándote con:{' '}
+            <Text className="text-brand">{referralCode}</Text>
+          </Text>
+        </View>
+      ) : null}
+
+      <View className="mb-8">
+        <FieldLabel>Teléfono</FieldLabel>
+        <Controller
+          control={control}
+          name="phone"
+          render={({ field: { onChange, value } }) => (
+            <TextInput
+              testID="login-phone-input"
+              className="h-11 border-b border-ink/25 pb-1 font-sans text-[18px] text-ink"
+              autoCapitalize="none"
+              keyboardType="phone-pad"
+              autoComplete="tel"
+              textContentType="telephoneNumber"
+              placeholder="+18091234567"
+              placeholderTextColor="#6B6488"
+              value={value}
+              onChangeText={onChange}
+            />
+          )}
+        />
+        <FieldError message={errors.phone?.message} />
+      </View>
+
+      {needsName && (
+        <View className="mb-8">
+          <Text className="mb-3 border-l-2 border-accent pl-3 font-sans text-[13px] text-ink">
+            Primer ingreso detectado — dinos cómo te llamas para crear tu
+            cuenta.
+          </Text>
+          <FieldLabel>Tu nombre</FieldLabel>
+          <Controller
+            control={control}
+            name="fullName"
+            render={({ field: { onChange, onBlur, value, ref } }) => (
+              <TextInput
+                testID="login-name-input"
+                ref={ref}
+                className="h-11 border-b border-ink/25 pb-1 font-sans text-[16px] text-ink"
+                autoComplete="name"
+                textContentType="name"
+                placeholder="Juan Pérez"
+                placeholderTextColor="#6B6488"
+                value={value ?? ''}
+                onChangeText={onChange}
+                onBlur={onBlur}
+              />
+            )}
+          />
+          <FieldError message={errors.fullName?.message} />
+        </View>
+      )}
+
+      {login.isError && !isFirstLoginError(login.error) && (
+        <Text className="mb-4 font-sans text-[11px] uppercase tracking-label text-bad">
+          {serverMessage(login.error, 'No pudimos iniciar sesión')}
+        </Text>
+      )}
+
+      <Button
+        testID="login-submit-btn"
+        variant="accent"
+        size="lg"
+        loading={login.isPending}
+        onPress={onSubmit}
+      >
+        Entrar →
+      </Button>
+    </>
   )
 }
 
