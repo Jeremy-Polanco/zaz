@@ -145,7 +145,7 @@ services:
 databases:
   - name: dashgo-db
     engine: PG
-    version: "16"
+    version: "17"
     production: false
     size: db-s-dev-database
     # Dev tier auto-generates db_name and db_user. DO exposes them via the

@@ -251,6 +251,30 @@ describe('envSchema', () => {
     });
   });
 
+  describe('STRIPE keys optional (cash-only / payments-disabled launch)', () => {
+    it('succeeds when STRIPE_SECRET_KEY + STRIPE_WEBHOOK_SECRET are absent (payments disabled)', () => {
+      const env = validEnv() as Record<string, unknown>;
+      delete env['STRIPE_SECRET_KEY'];
+      delete env['STRIPE_WEBHOOK_SECRET'];
+      const result = envSchema.safeParse(env);
+      expect(result.success).toBe(true);
+    });
+
+    it("still rejects STRIPE_SECRET_KEY set to '' (empty is a misconfig, not a disable)", () => {
+      const result = envSchema.safeParse({ ...validEnv(), STRIPE_SECRET_KEY: '' });
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        const paths = result.error.issues.map((i) => i.path[0]);
+        expect(paths).toContain('STRIPE_SECRET_KEY');
+      }
+    });
+
+    it('succeeds when STRIPE_SECRET_KEY is set non-empty (guard validates live/test prefix separately at boot)', () => {
+      const result = envSchema.safeParse({ ...validEnv(), STRIPE_SECRET_KEY: 'sk_live_xxx' });
+      expect(result.success).toBe(true);
+    });
+  });
+
   describe('cross-field conditionals', () => {
     it("fails when DB_SSL='ca' and DB_SSL_CA is absent, with issue path ['DB_SSL_CA']", () => {
       const env = { ...validEnv(), DB_SSL: 'ca' };
@@ -738,13 +762,14 @@ describe('envSchema', () => {
   });
 
   describe('required fields', () => {
+    // STRIPE_SECRET_KEY / STRIPE_WEBHOOK_SECRET are intentionally NOT here:
+    // they're optional now (cash-only / payments-disabled launch). Their
+    // optional behavior is covered in the "STRIPE keys optional" block above.
     const requiredKeys = [
       'DB_USER',
       'DB_PASSWORD',
       'DB_NAME',
       'JWT_SECRET',
-      'STRIPE_SECRET_KEY',
-      'STRIPE_WEBHOOK_SECRET',
       'TWILIO_ACCOUNT_SID',
       'TWILIO_API_KEY_SID',
       'TWILIO_API_KEY_SECRET',

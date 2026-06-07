@@ -28,14 +28,21 @@ export const envSchema = z
     JWT_REFRESH_TTL: z.string().default('7d'),
 
     // Stripe
-    // FIX CRITICAL-G2 — both keys must be non-empty when set. An empty
+    // FIX CRITICAL-G2 — both keys must be non-empty WHEN SET. An empty
     // string used to slip through (`z.string()` accepts ''), and the
     // runtime guard treated empty as "payments intentionally disabled".
-    // That meant `STRIPE_SECRET_KEY=""` punched a hole through every
-    // production Stripe guard. Require at least one character; the runtime
-    // guard separately rejects empty in production with a clear message.
-    STRIPE_SECRET_KEY: z.string().min(1),
-    STRIPE_WEBHOOK_SECRET: z.string().min(1),
+    // `.min(1)` rejects `STRIPE_SECRET_KEY=""` outright (a misconfig).
+    //
+    // `.optional()` enables the cash-only / payments-disabled launch path:
+    // when STRIPE_SECRET_KEY is UNSET (undefined), stripe-runtime-guard.ts
+    // returns early and each Stripe service (Payments/Subscription/Rentals)
+    // warns + skips init. Without `.optional()` the schema forced the key
+    // present in production, making the very disabled-mode the guard +
+    // services were built for UNREACHABLE — a launch-blocking conflict for a
+    // cash-only soft-launch. The guard still enforces sk_live_/rk_live_ when
+    // a key IS set, so the production security check stays intact.
+    STRIPE_SECRET_KEY: z.string().min(1).optional(),
+    STRIPE_WEBHOOK_SECRET: z.string().min(1).optional(),
     // Optional by design: SubscriptionService bootstraps the row from this env
     // var on startup IFF the `subscription_plan` table is empty. Operators can
     // instead seed `subscription_plan` directly and leave this unset. If both
