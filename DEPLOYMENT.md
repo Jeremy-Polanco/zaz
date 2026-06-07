@@ -12,6 +12,39 @@ This guide assumes:
 
 ---
 
+## 0. Live deployment — current state (READ THIS FIRST)
+
+DashGo is **already deployed and live** (closed beta, cash-only). This section is the source of truth for what's actually running; the numbered steps below are the general guide.
+
+| Layer | URL | Platform |
+|---|---|---|
+| Web | **https://www.dashgo.dev** (apex `dashgo.dev` 307-redirects → `www`) | Vercel |
+| API | **https://api.dashgo.dev** | DigitalOcean App Platform |
+| DB | managed Postgres **17** (`dashgo-db`, dev tier) | DigitalOcean |
+
+- **DO app:** `dashgo` (region `nyc`), service `zaz-dashgo-api`, instance `apps-s-1vcpu-0.5gb` (512 MB / 1 container, ~$5/mo). Default ingress `https://dashgo-z4tg6.ondigitalocean.app`. Source build from `Jeremy-Polanco/zaz`, `deploy_on_push` on `main`.
+- **Payments:** cash-only. `STRIPE_SECRET_KEY` is **unset** → the runtime guard disables Stripe cleanly. When the Stripe live account is approved, set `sk_live_*` + `STRIPE_WEBHOOK_SECRET` + `STRIPE_SUBSCRIPTION_PRICE_ID`.
+- **Auth:** `AUTH_OTP_MODE=disabled` → phone-only login (no OTP sent).
+- **CORS:** `CORS_ORIGIN="https://dashgo.dev,https://www.dashgo.dev"` (must include `www` — the apex redirects there). `PUBLIC_WEB_URL=https://www.dashgo.dev`.
+
+### ⚠️ Hard-won gotchas — do NOT repeat these
+
+1. **`doctl` cannot create a GitHub-sourced app.** It 400s with `GitHub user not authenticated`, no matter how perfectly you link GitHub. Create the app **once via the DO dashboard** (Create App → paste the App Spec), then manage it with `doctl`.
+2. **`doctl apps update --spec <file>` REPLACES the ENTIRE spec.** Anything not in the file is wiped — it silently removed env vars *and* the custom domain during this deploy. **Always** `doctl apps spec get <app-id> > live.yaml` → edit *that* file → re-apply. Never hand-author the spec from scratch.
+3. **The DO dashboard "Bulk Editor" for env vars also replaces the whole set** — it wiped 16 `doctl`-set vars. Use the single **"Add Variable"** button, or set env exclusively via `doctl`.
+4. **A `sk_test_*` Stripe key FAILS boot in production** (`stripe-runtime-guard.ts` rejects it). Cash-only launch = `STRIPE_SECRET_KEY` **unset**, NOT a test key. `env.schema.ts` makes the Stripe vars `.optional()` precisely so the unset/disabled path is reachable. (See §9.)
+5. **DB bindings use the database NAME:** `${dashgo-db.HOSTNAME / PORT / USERNAME / PASSWORD / DATABASE}`. After a dashboard rename, the auto-injected `DATABASE_URL` keeps the *old* name — the app doesn't use `DATABASE_URL`, so drop it.
+
+### Custom domain — `api.dashgo.dev` (DNS at Porkbun)
+
+1. Porkbun DNS → add `CNAME  api → dashgo-z4tg6.ondigitalocean.app` (TTL 600).
+2. DO → app → **Settings → Domains → Add Domain** → `api.dashgo.dev` (PRIMARY), "You manage your domain".
+3. SSL auto-issues (Let's Encrypt / Google Trust) a few minutes after DNS resolves. An `ERR_SSL_VERSION_OR_CIPHER_MISMATCH` just means DNS works but the cert isn't ready yet — wait.
+4. The domain lives in the App Spec as a top-level `domains:` block — keep it there so a `--spec` apply doesn't wipe it (see gotcha #2).
+5. Point the web at it: Vercel `VITE_API_URL=https://api.dashgo.dev/api` → redeploy (Vite bakes env at build time).
+
+---
+
 ## 1. Pre-flight: install dependencies
 
 The API gained `@sentry/node` as a new dependency. Install once locally so the lockfile is up to date, then commit:
@@ -69,8 +102,8 @@ After the app is created, go to **Settings → Components → api → Environmen
 | Variable | How to get it |
 |---|---|
 | `JWT_SECRET` | `openssl rand -base64 48` (must be ≥32 chars) |
-| `STRIPE_SECRET_KEY` | Stripe dashboard → Developers → API keys → "Secret key" (TEST mode) |
-| `STRIPE_WEBHOOK_SECRET` | Set after step 3.4 below |
+| `STRIPE_SECRET_KEY` | **Cash-only launch: LEAVE UNSET** → Stripe is disabled and the app boots fine. A `sk_test_*` key here **fails boot in production** (runtime guard). Only set a real `sk_live_*` key once the Stripe live account is approved. |
+| `STRIPE_WEBHOOK_SECRET` | Cash-only launch: leave unset. Set the `whsec_*` after step 3.4 when you go Stripe-live. |
 | `STRIPE_SUBSCRIPTION_PRICE_ID` | Stripe → Products → create a recurring price → copy `price_...` (optional — only used to bootstrap `subscription_plan` when the table is empty; leave unset if you seed the plan directly in the DB) |
 | `TWILIO_ACCOUNT_SID` | Twilio console (Production credentials) |
 | `TWILIO_API_KEY_SID` | Twilio → Account → API Keys → create a Standard key |

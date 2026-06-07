@@ -4,6 +4,8 @@ Backend de DashGo. NestJS 11 · TypeORM · Postgres · JWT · Twilio OTP · Stri
 
 > Setup del stack completo (docker, seed, envs): ver [../README.md](../README.md).
 
+> **🌐 En vivo:** API desplegada en **https://api.dashgo.dev** (DigitalOcean App Platform · Postgres 17 gestionado). En prod: Stripe **sin configurar** (efectivo) y `AUTH_OTP_MODE=disabled` (login solo por teléfono). Deploy paso a paso + gotchas: [../DEPLOYMENT.md](../DEPLOYMENT.md) (§0).
+
 > **Pagos — estado de lanzamiento (iteración 1):** DashGo lanza aceptando **solo efectivo contra entrega**. Los pagos con tarjeta (Stripe) están **completamente implementados y probados en el código**, pero **a la espera de la aprobación de la cuenta de producción de Stripe** — se habilitan en cuanto se apruebe la cuenta en vivo. No se elimina nada; es una decisión de tiempos de lanzamiento que depende de una aprobación externa (Stripe).
 
 ## Stack

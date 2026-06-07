@@ -10,6 +10,22 @@ SaaS para pedidos de agua a domicilio en New York. Tres roles:
 
 > ⚠️ **READ FIRST** — sección [Pending User Actions](#-pending-user-actions-before-deploy) abajo. Hay 5 cosas que vos tenés que hacer antes de poder deployar prod o correr tests de integración.
 
+## 🌐 En producción (en vivo)
+
+DashGo está **desplegado y en vivo** (closed beta, solo efectivo):
+
+| Capa | URL | Hosting |
+|---|---|---|
+| Web | **https://www.dashgo.dev** | Vercel (el apex `dashgo.dev` redirige 307 → `www`) |
+| API | **https://api.dashgo.dev** | DigitalOcean App Platform |
+| DB | — | Postgres 17 gestionado (DO, tier dev) |
+
+- **Pagos:** solo efectivo — Stripe queda **sin configurar** (deshabilitado) hasta que se apruebe la cuenta de producción. `STRIPE_SECRET_KEY` va **vacío** en prod, no una test key (una `sk_test_*` rompe el boot por el runtime guard).
+- **Login:** solo teléfono (`AUTH_OTP_MODE=disabled`, sin OTP).
+- **CORS:** `https://dashgo.dev,https://www.dashgo.dev` (incluí `www` porque el apex redirige ahí).
+
+Guía completa de deploy + gotchas (doctl/GitHub, `--spec` wipe, dominio custom): **[DEPLOYMENT.md](./DEPLOYMENT.md)** — empezá por la **§0 (estado en vivo)**.
+
 ## Stack
 
 | Paquete | Tech | Tests |
@@ -291,7 +307,7 @@ Cron `0 3 * * *` — cada día a las 03:00 UTC, cobra `lateFeeCents` a cada alqu
 
 ## Testing
 
-524 tests across 3 projects (246 backend unit / 115 web / 163 mobile). Money paths cubiertos.
+Backend **621 unit** (+ integration + E2E) · Web **195** · Mobile (jest-expo). Money paths cubiertos. (Backend/web counts verificados en el último deploy; el gate de CI los corre bloqueantes.)
 
 ### Backend (Jest + Postgres en Docker + Stripe mocked)
 
@@ -346,7 +362,7 @@ Cubre: cart, category-selection, token-storage (con mock SecureStore), schemas (
 
 `.github/workflows/test.yml` corre 3 jobs en paralelo (api/web/mobile) en cada PR + push a main.
 
-Inicialmente con `continue-on-error: true` para no bloquear merges hasta que el equipo esté listo. Para activar enforcement, sacá esa flag de los pasos de `Run tests` / `Run integration tests` / `Run E2E tests`.
+**Gate activo:** el **build + unit tests** de api y web son **bloqueantes** (sin `continue-on-error`) — un PR a `main` no mergea si fallan. Integration/E2E/mobile siguen informativos (`continue-on-error: true`) hasta estabilizarse en CI. Protegé `main` en GitHub (Settings → Branches) requiriendo los checks **Backend (dashgo-api)** y **Web (dashgo-web)**, así el `deploy_on_push` de DO/Vercel solo recibe código verde.
 
 Coverage artifacts se suben en cada job (retention 7 días).
 

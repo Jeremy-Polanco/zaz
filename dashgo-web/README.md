@@ -4,6 +4,8 @@ Frontend web de DashGo. Vite 8 · React 19 · TanStack · Tailwind v4.
 
 > Setup del stack completo (docker, seed, envs): ver [../README.md](../README.md).
 
+> **🌐 En vivo:** Web desplegada en **https://www.dashgo.dev** (Vercel; el apex `dashgo.dev` redirige a `www`). `VITE_API_URL=https://api.dashgo.dev/api` (se hornea en build — un cambio requiere redeploy). Deploy: [../DEPLOYMENT.md](../DEPLOYMENT.md) (§0).
+
 > **Pagos — estado de lanzamiento (iteración 1):** DashGo lanza aceptando **solo efectivo contra entrega**. Los pagos con tarjeta (Stripe) están **completamente implementados y probados en el código**, pero **a la espera de la aprobación de la cuenta de producción de Stripe** — se habilitan en cuanto se apruebe la cuenta en vivo. No se elimina nada; es una decisión de tiempos de lanzamiento que depende de una aprobación externa (Stripe). El flujo de `checkout.tsx` refleja efectivo en el lanzamiento; el camino de tarjeta queda gated hasta la aprobación de prod de Stripe.
 
 ## Stack
