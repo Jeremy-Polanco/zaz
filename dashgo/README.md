@@ -4,6 +4,8 @@ App mobile de DashGo. Expo 55 · React Native · NativeWind · TanStack Query.
 
 > Setup del stack completo (docker, seed, envs): ver [../README.md](../README.md).
 
+> **🌐 En vivo:** la app consume el API de producción en **https://api.dashgo.dev/api** (`EXPO_PUBLIC_API_URL`, seteado como EAS secret). Distribución vía **EAS Build & Submit** — ver [../DEPLOYMENT.md](../DEPLOYMENT.md) §4.5. En prod: efectivo (Stripe gateado), login solo por teléfono.
+
 > **Pagos — estado de lanzamiento (iteración 1):** DashGo lanza aceptando **solo efectivo contra entrega**. Los pagos con tarjeta (Stripe) están **completamente implementados y probados en el código**, pero **a la espera de la aprobación de la cuenta de producción de Stripe** — se habilitan en cuanto se apruebe la cuenta en vivo. No se elimina nada; es una decisión de tiempos de lanzamiento que depende de una aprobación externa (Stripe).
 
 ## Stack
