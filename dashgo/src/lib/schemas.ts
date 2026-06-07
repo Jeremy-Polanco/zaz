@@ -36,7 +36,8 @@ export const checkoutSchema = z.object({
 
 export const phoneSchema = z
   .string()
-  .regex(/^\+\d{8,15}$/, 'Formato E.164 (ej: +18091234567)')
+  // US/NANP-only: the UI feeds exactly 10 national digits and prepends +1.
+  .regex(/^\+1\d{10}$/, 'Son 10 dígitos')
 export const sendOtpSchema = z.object({ phone: phoneSchema })
 
 // Phone-only login is the default — no code is collected. A name is requested

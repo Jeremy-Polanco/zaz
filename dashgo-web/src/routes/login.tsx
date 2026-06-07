@@ -1,12 +1,6 @@
 import { useEffect, useState } from 'react'
 import { createFileRoute, Link, useSearch } from '@tanstack/react-router'
-import {
-  Controller,
-  useForm,
-  type Control,
-  type FieldValues,
-  type Path,
-} from 'react-hook-form'
+import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import {
   loginSchema,
@@ -17,7 +11,7 @@ import {
   type VerifyOtpInput,
 } from '../lib/schemas'
 import { useLogin, useSendOtp, useVerifyOtp } from '../lib/auth'
-import { Button, FieldError, Input, Label } from '../components/ui'
+import { Button, FieldError, Input, Label, PhoneField } from '../components/ui'
 
 export const Route = createFileRoute('/login')({
   validateSearch: (search: Record<string, unknown>) => ({
@@ -60,56 +54,6 @@ export function destForRole(role: string, next?: string): string {
 const OTP_ENABLED =
   import.meta.env.VITE_AUTH_OTP_MODE === 'whatsapp' ||
   import.meta.env.VITE_AUTH_OTP_MODE === 'sandbox'
-
-// Phone input with a fixed "+" affordance. The user types digits only — any
-// "+", spaces or dashes are stripped on the fly — and we store the E.164
-// "+<digits>" value the schema expects. One less thing for people to get wrong.
-function PhoneField<T extends FieldValues>({
-  control,
-  name,
-  error,
-}: {
-  control: Control<T>
-  name: Path<T>
-  error?: string
-}) {
-  return (
-    <div>
-      <Label htmlFor="phone">Teléfono</Label>
-      <Controller
-        control={control}
-        name={name}
-        render={({ field }) => (
-          <div className="flex items-center border-b border-ink/30 px-1 transition-colors focus-within:border-ink">
-            <span
-              aria-hidden
-              className="select-none text-lg font-medium text-ink-muted"
-            >
-              +
-            </span>
-            <input
-              id="phone"
-              type="tel"
-              inputMode="numeric"
-              autoComplete="tel"
-              placeholder="1 809 123 4567"
-              className="h-11 w-full bg-transparent pl-0.5 text-lg font-medium text-ink placeholder:text-ink-muted/60 focus:outline-none"
-              value={String(field.value ?? '').replace(/^\+/, '')}
-              onChange={(e) => {
-                const digits = e.target.value.replace(/\D/g, '')
-                field.onChange(digits ? `+${digits}` : '')
-              }}
-              onBlur={field.onBlur}
-              name={field.name}
-              ref={field.ref}
-            />
-          </div>
-        )}
-      />
-      <FieldError message={error} />
-    </div>
-  )
-}
 
 function LoginPoster({ tagline }: { tagline: string }) {
   return (

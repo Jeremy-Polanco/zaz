@@ -108,7 +108,7 @@ describe('phoneSchema', () => {
     const result = phoneSchema.safeParse('18091234567')
     expect(result.success).toBe(false)
     if (!result.success) {
-      expect(result.error.issues[0].message).toBe('Formato E.164 (ej: +18091234567)')
+      expect(result.error.issues[0].message).toBe('Son 10 dígitos')
     }
   })
 

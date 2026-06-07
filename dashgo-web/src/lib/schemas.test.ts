@@ -78,7 +78,7 @@ describe('phoneSchema', () => {
     const result = phoneSchema.safeParse('18091234567')
     expect(result.success).toBe(false)
     if (!result.success) {
-      expect(result.error.issues[0].message).toMatch(/E\.164/)
+      expect(result.error.issues[0].message).toMatch(/10 dígitos/)
     }
   })
 

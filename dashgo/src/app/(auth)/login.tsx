@@ -14,7 +14,7 @@ import {
 } from '../../lib/schemas'
 import { useLogin, useSendOtp, useVerifyOtp } from '../../lib/queries'
 import type { UserRole } from '../../lib/types'
-import { Button, Eyebrow, FieldLabel, FieldError, DashGoMark, BoltIcon } from '../../components/ui'
+import { Button, Eyebrow, FieldLabel, FieldError, PhoneField, DashGoMark, BoltIcon } from '../../components/ui'
 import {
   extractWhatsAppErrorCode,
   SUPPORT_PHONE,
@@ -533,26 +533,12 @@ export function PhoneOnlyStep({
       ) : null}
 
       <View className="mb-8">
-        <FieldLabel>Teléfono</FieldLabel>
-        <Controller
+        <PhoneField
           control={control}
           name="phone"
-          render={({ field: { onChange, value } }) => (
-            <TextInput
-              testID="login-phone-input"
-              className="h-11 border-b border-ink/25 pb-1 font-sans text-[18px] text-ink"
-              autoCapitalize="none"
-              keyboardType="phone-pad"
-              autoComplete="tel"
-              textContentType="telephoneNumber"
-              placeholder="+18091234567"
-              placeholderTextColor="#6B6488"
-              value={value}
-              onChangeText={onChange}
-            />
-          )}
+          error={errors.phone?.message}
+          testID="login-phone-input"
         />
-        <FieldError message={errors.phone?.message} />
       </View>
 
       {needsName && (
@@ -660,26 +646,12 @@ function PhoneStep({
       <Eyebrow className="mb-6">Ingresar</Eyebrow>
 
       <View className="mb-8">
-        <FieldLabel>Teléfono</FieldLabel>
-        <Controller
+        <PhoneField
           control={control}
           name="phone"
-          render={({ field: { onChange, value } }) => (
-            <TextInput
-              testID="login-phone-input"
-              className="h-11 border-b border-ink/25 pb-1 font-sans text-[18px] text-ink"
-              autoCapitalize="none"
-              keyboardType="phone-pad"
-              autoComplete="tel"
-              textContentType="telephoneNumber"
-              placeholder="+18091234567"
-              placeholderTextColor="#6B6488"
-              value={value}
-              onChangeText={onChange}
-            />
-          )}
+          error={errors.phone?.message}
+          testID="login-phone-input"
         />
-        <FieldError message={errors.phone?.message} />
       </View>
 
       {showWhatsAppFailure ? (

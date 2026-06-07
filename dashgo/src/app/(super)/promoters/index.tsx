@@ -28,6 +28,7 @@ import {
   Hairline,
   KpiCard,
   Metric,
+  PhoneField,
   SectionHead,
 } from '../../../components/ui'
 
@@ -65,23 +66,11 @@ function InviteForm({ onDone }: { onDone: () => void }) {
         Nuevo promotor
       </Text>
 
-      <FieldLabel>Teléfono (E.164)</FieldLabel>
-      <Controller
+      <PhoneField
         control={control}
         name="phone"
-        render={({ field: { onChange, value } }) => (
-          <TextInput
-            className="h-11 border-b border-ink/25 pb-1 font-sans text-[16px] text-ink"
-            placeholder="+18091234567"
-            placeholderTextColor="#6B6488"
-            keyboardType="phone-pad"
-            autoCapitalize="none"
-            value={value}
-            onChangeText={onChange}
-          />
-        )}
+        error={errors.phone?.message}
       />
-      <FieldError message={errors.phone?.message} />
 
       <View className="mt-5">
         <FieldLabel>Nombre completo</FieldLabel>

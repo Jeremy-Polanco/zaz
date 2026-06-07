@@ -75,6 +75,7 @@ jest.mock('expo-symbols', () => ({
 jest.mock('../../components/ui', () => {
   const RN = require('react-native')
   const ReactInternal = require('react')
+  const RHF = require('react-hook-form')
   return {
     Button: ({
       children,
@@ -104,6 +105,34 @@ jest.mock('../../components/ui', () => {
       ReactInternal.createElement(RN.Text, null, children),
     FieldError: ({ message }: { message?: string }) =>
       message ? ReactInternal.createElement(RN.Text, null, message) : null,
+    // Mirrors the real PhoneField: hides "+1", takes 10 national digits, stores
+    // E.164. Uses the real Controller so the form wiring is exercised.
+    PhoneField: ({ control, name, testID, error }: any) =>
+      ReactInternal.createElement(ReactInternal.Fragment, null, [
+        ReactInternal.createElement(
+          RHF.Controller,
+          {
+            key: 'ctrl',
+            control,
+            name,
+            render: ({ field: { onChange, value } }: any) =>
+              ReactInternal.createElement(RN.TextInput, {
+                testID,
+                value: String(value ?? '').replace(/^\+1/, ''),
+                onChangeText: (text: string) => {
+                  let digits = text.replace(/\D/g, '')
+                  if (digits.length === 11 && digits.startsWith('1'))
+                    digits = digits.slice(1)
+                  digits = digits.slice(0, 10)
+                  onChange(digits ? `+1${digits}` : '')
+                },
+              }),
+          },
+        ),
+        error
+          ? ReactInternal.createElement(RN.Text, { key: 'err' }, error)
+          : null,
+      ]),
     DashGoMark: () => null,
     BoltIcon: () => null,
   }

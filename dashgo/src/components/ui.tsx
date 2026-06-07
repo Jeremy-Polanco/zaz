@@ -1,6 +1,7 @@
-import { View, Text, Pressable, ActivityIndicator, type PressableProps, type ViewProps, type TextProps } from 'react-native'
+import { View, Text, TextInput, Pressable, ActivityIndicator, type PressableProps, type ViewProps, type TextProps } from 'react-native'
 import { SymbolView } from 'expo-symbols'
 import type { ReactNode } from 'react'
+import { Controller, type Control, type FieldValues, type Path } from 'react-hook-form'
 import type { OrderStatus } from '../lib/types'
 import { statusLabel } from '../lib/format'
 
@@ -136,6 +137,60 @@ export function FieldError({ message }: { message?: string }) {
     <Text className="mt-1.5 font-sans text-[11px] uppercase tracking-label text-bad">
       {message}
     </Text>
+  )
+}
+
+// Phone input for a US/NANP-only product. The "+1" country code is NEVER shown
+// and NEVER typed — the user just enters the 10 national digits. Any "+", leading
+// country code, spaces or dashes are stripped on the fly, and we store the E.164
+// "+1<digits>" value the schema/Twilio expect. Shared by the login and
+// promoter-invite forms so the behaviour never drifts apart.
+export function PhoneField<T extends FieldValues>({
+  control,
+  name,
+  error,
+  label = 'Teléfono',
+  testID,
+}: {
+  control: Control<T>
+  name: Path<T>
+  error?: string
+  label?: ReactNode
+  testID?: string
+}) {
+  return (
+    <>
+      <FieldLabel>{label}</FieldLabel>
+      <Controller
+        control={control}
+        name={name}
+        render={({ field: { onChange, onBlur, value, ref } }) => (
+          <TextInput
+            testID={testID}
+            ref={ref}
+            className="h-11 border-b border-ink/25 pb-1 font-sans text-[18px] text-ink"
+            autoCapitalize="none"
+            keyboardType="phone-pad"
+            autoComplete="tel"
+            textContentType="telephoneNumber"
+            placeholder="809 123 4567"
+            placeholderTextColor="#6B6488"
+            value={String(value ?? '').replace(/^\+1/, '')}
+            onChangeText={(text) => {
+              let digits = text.replace(/\D/g, '')
+              // Drop a leading "1" the user may have typed/pasted (NANP national
+              // numbers are 10 digits and never start with 1).
+              if (digits.length === 11 && digits.startsWith('1'))
+                digits = digits.slice(1)
+              digits = digits.slice(0, 10)
+              onChange(digits ? `+1${digits}` : '')
+            }}
+            onBlur={onBlur}
+          />
+        )}
+      />
+      <FieldError message={error} />
+    </>
   )
 }
 

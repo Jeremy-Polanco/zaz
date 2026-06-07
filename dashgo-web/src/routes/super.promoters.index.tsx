@@ -6,6 +6,7 @@ import {
   FieldError,
   Input,
   Label,
+  PhoneField,
   SectionHeading,
 } from '../components/ui'
 import { useInvitePromoter, usePromoters } from '../lib/queries'
@@ -63,17 +64,11 @@ function InviteForm({ onDone }: { onDone: () => void }) {
         onSubmit={onSubmit}
         className="grid grid-cols-1 gap-5 md:grid-cols-2"
       >
-        <div>
-          <Label htmlFor="phone">Teléfono (E.164)</Label>
-          <Input
-            id="phone"
-            type="tel"
-            inputMode="tel"
-            placeholder="+18091234567"
-            {...form.register('phone')}
-          />
-          <FieldError message={form.formState.errors.phone?.message} />
-        </div>
+        <PhoneField
+          control={form.control}
+          name="phone"
+          error={form.formState.errors.phone?.message}
+        />
         <div>
           <Label htmlFor="fullName">Nombre completo</Label>
           <Input

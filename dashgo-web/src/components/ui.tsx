@@ -5,6 +5,12 @@ import type {
   SelectHTMLAttributes,
   TextareaHTMLAttributes,
 } from 'react'
+import {
+  Controller,
+  type Control,
+  type FieldValues,
+  type Path,
+} from 'react-hook-form'
 import { cn } from '../lib/utils'
 
 export function Button({
@@ -119,6 +125,57 @@ export function FieldError({ message }: { message?: string }) {
       <span className="mr-1">—</span>
       {message}
     </p>
+  )
+}
+
+// Phone input for a US/NANP-only product. The "+1" country code is NEVER shown
+// and NEVER typed — the user just enters the 10 national digits. Any "+", leading
+// country code, spaces or dashes are stripped on the fly, and we store the E.164
+// "+1<digits>" value the schema/Twilio expect. Shared by the login and
+// promoter-invite forms so the behaviour never drifts apart.
+export function PhoneField<T extends FieldValues>({
+  control,
+  name,
+  error,
+  label = 'Teléfono',
+}: {
+  control: Control<T>
+  name: Path<T>
+  error?: string
+  label?: ReactNode
+}) {
+  return (
+    <div>
+      <Label htmlFor="phone">{label}</Label>
+      <Controller
+        control={control}
+        name={name}
+        render={({ field }) => (
+          <input
+            id="phone"
+            type="tel"
+            inputMode="numeric"
+            autoComplete="tel"
+            placeholder="809 123 4567"
+            className="h-11 w-full rounded-xs border-0 border-b border-ink/30 bg-transparent px-1 text-base font-medium text-ink placeholder:text-ink-muted/60 focus:border-ink focus:outline-none transition-colors"
+            value={String(field.value ?? '').replace(/^\+1/, '')}
+            onChange={(e) => {
+              let digits = e.target.value.replace(/\D/g, '')
+              // Drop a leading "1" the user may have typed/pasted (NANP national
+              // numbers are 10 digits and never start with 1).
+              if (digits.length === 11 && digits.startsWith('1'))
+                digits = digits.slice(1)
+              digits = digits.slice(0, 10)
+              field.onChange(digits ? `+1${digits}` : '')
+            }}
+            onBlur={field.onBlur}
+            name={field.name}
+            ref={field.ref}
+          />
+        )}
+      />
+      <FieldError message={error} />
+    </div>
   )
 }
 
