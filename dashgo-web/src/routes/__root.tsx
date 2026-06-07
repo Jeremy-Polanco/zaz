@@ -7,7 +7,8 @@ import {
 } from '@tanstack/react-router'
 import { TanStackRouterDevtools } from '@tanstack/react-router-devtools'
 import { ReactQueryDevtools } from '@tanstack/react-query-devtools'
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useCurrentUser, useLogout } from '../lib/auth'
 import { useUpdateMe } from '../lib/queries'
 import { requestBrowserLocation, reverseGeocode } from '../lib/geo'
@@ -63,83 +64,249 @@ function RootNotFoundComponent() {
 const navLinkClass =
   'text-[0.7rem] font-medium uppercase tracking-[0.18em] text-ink-muted transition-colors hover:text-ink [&.active]:text-ink [&.active]:underline [&.active]:underline-offset-8 [&.active]:decoration-accent [&.active]:decoration-2'
 
-function RoleNav({ role }: { role: string }) {
+// Bigger tap targets for the mobile sheet — full-width rows, no tiny uppercase.
+const mobileLinkClass =
+  'block rounded-xs px-3 py-3 text-base font-medium text-ink-muted transition-colors hover:bg-ink/5 hover:text-ink [&.active]:bg-ink/5 [&.active]:text-ink'
+
+// Role → nav links, rendered as literal <Link>s so TanStack Router keeps its
+// type-safe `to`/`search`. Shared by the desktop nav and the mobile sheet; the
+// caller decides the layout (className) and whether a tap should close a menu.
+function RoleNavLinks({
+  role,
+  linkClass,
+  onNavigate,
+}: {
+  role: string
+  linkClass: string
+  onNavigate?: () => void
+}) {
   if (role === 'super_admin_delivery') {
     return (
-      <nav className="hidden items-center gap-6 md:flex">
-        <Link to="/super/orders" className={navLinkClass}>
+      <>
+        <Link to="/super/orders" className={linkClass} onClick={onNavigate}>
           Ruta
         </Link>
-        <Link to="/super/products" className={navLinkClass}>
+        <Link to="/super/products" className={linkClass} onClick={onNavigate}>
           Productos
         </Link>
-        <Link to="/super/categories" className={navLinkClass}>
+        <Link to="/super/categories" className={linkClass} onClick={onNavigate}>
           Categorías
         </Link>
-        <Link to="/super/promoters" className={navLinkClass}>
+        <Link to="/super/promoters" className={linkClass} onClick={onNavigate}>
           Promotores
         </Link>
         <Link
           to="/super/credit"
           search={{ status: undefined, search: undefined, page: 1, pageSize: 50 }}
-          className={navLinkClass}
+          className={linkClass}
+          onClick={onNavigate}
         >
           Crédito
         </Link>
-        <Link to="/super/subscription" className={navLinkClass}>
+        <Link to="/super/subscription" className={linkClass} onClick={onNavigate}>
           Suscripción
         </Link>
-        <Link to="/super/rentals" className={navLinkClass}>
+        <Link to="/super/rentals" className={linkClass} onClick={onNavigate}>
           Alquileres
         </Link>
-        <Link to="/cuenta" className={navLinkClass}>
+        <Link to="/cuenta" className={linkClass} onClick={onNavigate}>
           Mi cuenta
         </Link>
-      </nav>
+      </>
     )
   }
   if (role === 'promoter') {
     return (
-      <nav className="hidden items-center gap-6 md:flex">
-        <Link to="/promoter" className={navLinkClass}>
+      <>
+        <Link to="/promoter" className={linkClass} onClick={onNavigate}>
           Mi panel
         </Link>
-        <Link to="/catalog" className={navLinkClass}>
+        <Link to="/catalog" className={linkClass} onClick={onNavigate}>
           Catálogo
         </Link>
-        <Link to="/orders" className={navLinkClass}>
+        <Link to="/orders" className={linkClass} onClick={onNavigate}>
           Mis pedidos
         </Link>
-        <Link to="/points" className={navLinkClass}>
+        <Link to="/points" className={linkClass} onClick={onNavigate}>
           Mis puntos
         </Link>
-        <Link to="/cuenta" className={navLinkClass}>
+        <Link to="/cuenta" className={linkClass} onClick={onNavigate}>
           Mi cuenta
         </Link>
-      </nav>
+      </>
     )
   }
   return (
-    <nav className="hidden items-center gap-6 md:flex">
-      <Link to="/catalog" className={navLinkClass}>
+    <>
+      <Link to="/catalog" className={linkClass} onClick={onNavigate}>
         Catálogo
       </Link>
-      <Link to="/orders" className={navLinkClass}>
+      <Link to="/orders" className={linkClass} onClick={onNavigate}>
         Mis pedidos
       </Link>
-      <Link to="/points" className={navLinkClass}>
+      <Link to="/points" className={linkClass} onClick={onNavigate}>
         Mis puntos
       </Link>
-      <Link to="/credit" className={navLinkClass}>
+      <Link to="/credit" className={linkClass} onClick={onNavigate}>
         Crédito
       </Link>
-      <Link to="/subscription" className={navLinkClass}>
+      <Link to="/subscription" className={linkClass} onClick={onNavigate}>
         Suscripción
       </Link>
-      <Link to="/cuenta" className={navLinkClass}>
+      <Link to="/cuenta" className={linkClass} onClick={onNavigate}>
         Mi cuenta
       </Link>
+    </>
+  )
+}
+
+function RoleNav({ role }: { role: string }) {
+  return (
+    <nav className="hidden items-center gap-6 md:flex">
+      <RoleNavLinks role={role} linkClass={navLinkClass} />
     </nav>
+  )
+}
+
+function MenuIcon() {
+  return (
+    <svg
+      width="22"
+      height="22"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      aria-hidden="true"
+    >
+      <line x1="3" y1="6" x2="21" y2="6" />
+      <line x1="3" y1="12" x2="21" y2="12" />
+      <line x1="3" y1="18" x2="21" y2="18" />
+    </svg>
+  )
+}
+
+function CloseIcon() {
+  return (
+    <svg
+      width="22"
+      height="22"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      aria-hidden="true"
+    >
+      <line x1="6" y1="6" x2="18" y2="18" />
+      <line x1="18" y1="6" x2="6" y2="18" />
+    </svg>
+  )
+}
+
+// Mobile-only nav. The header is `backdrop-blur-md`, and a backdrop-filter makes
+// the element a containing block for `position: fixed` descendants — so a fixed
+// overlay rendered *inside* the header would be trapped in the bar. We portal the
+// overlay to <body> so it covers the real viewport. Only rendered for signed-in
+// users; signed-out folks keep the visible Entrar / Crear cuenta CTAs.
+function MobileNav({
+  role,
+  fullName,
+  onLogout,
+}: {
+  role: string
+  fullName: string
+  onLogout: () => void
+}) {
+  const [open, setOpen] = useState(false)
+  const pathname = useRouterState({ select: (s) => s.location.pathname })
+  const close = () => setOpen(false)
+
+  // Close on navigation — including programmatic redirects (lockout gate, back
+  // button) that never touch a link's onClick. Resetting during render is the
+  // React-recommended pattern over a setState-in-effect.
+  const [menuPath, setMenuPath] = useState(pathname)
+  if (pathname !== menuPath) {
+    setMenuPath(pathname)
+    setOpen(false)
+  }
+
+  // Lock body scroll while the sheet is open.
+  useEffect(() => {
+    if (!open || typeof document === 'undefined') return
+    const prev = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => {
+      document.body.style.overflow = prev
+    }
+  }, [open])
+
+  return (
+    <div className="md:hidden">
+      <button
+        type="button"
+        aria-label="Abrir menú"
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+        className="inline-flex h-10 w-10 items-center justify-center rounded-xs border border-ink/15 text-ink transition-colors hover:bg-ink/5"
+      >
+        <MenuIcon />
+      </button>
+
+      {open &&
+        typeof document !== 'undefined' &&
+        createPortal(
+          <div className="fixed inset-0 z-50 md:hidden">
+            <button
+              type="button"
+              aria-label="Cerrar menú"
+              onClick={close}
+              className="absolute inset-0 bg-ink/40 backdrop-blur-sm"
+            />
+            <div className="absolute inset-x-0 top-0 max-h-[85vh] overflow-y-auto border-b border-ink/10 bg-paper shadow-paper">
+              <div className="mx-auto max-w-7xl px-6 py-4">
+                <div className="flex items-center justify-between gap-4">
+                  <div className="flex flex-col">
+                    <span className="text-sm font-medium leading-tight text-ink">
+                      {fullName}
+                    </span>
+                    <span className="eyebrow !text-[0.6rem]">
+                      {ROLE_LABEL(role)}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    aria-label="Cerrar menú"
+                    onClick={close}
+                    className="inline-flex h-10 w-10 items-center justify-center rounded-xs border border-ink/15 text-ink transition-colors hover:bg-ink/5"
+                  >
+                    <CloseIcon />
+                  </button>
+                </div>
+                <nav className="mt-4 flex flex-col gap-1 border-t border-ink/10 pt-4">
+                  <RoleNavLinks
+                    role={role}
+                    linkClass={mobileLinkClass}
+                    onNavigate={close}
+                  />
+                </nav>
+                <button
+                  type="button"
+                  onClick={() => {
+                    close()
+                    onLogout()
+                  }}
+                  className="mt-4 w-full rounded-xs border border-ink/15 px-3 py-3 text-left text-base font-medium text-ink transition-colors hover:bg-ink/5"
+                >
+                  Salir
+                </button>
+              </div>
+            </div>
+          </div>,
+          document.body,
+        )}
+    </div>
   )
 }
 
@@ -175,7 +342,7 @@ function NavUser() {
   }
 
   return (
-    <div className="flex items-center gap-6">
+    <div className="flex items-center gap-4 md:gap-6">
       <RoleNav role={user.role} />
       <div className="hidden h-8 w-px bg-ink/15 md:block" />
       <div className="hidden flex-col text-right sm:flex">
@@ -184,9 +351,19 @@ function NavUser() {
         </span>
         <span className="eyebrow !text-[0.6rem]">{ROLE_LABEL(user.role)}</span>
       </div>
-      <Button size="sm" variant="ghost" onClick={handleLogout}>
+      <Button
+        size="sm"
+        variant="ghost"
+        onClick={handleLogout}
+        className="hidden md:inline-flex"
+      >
         Salir
       </Button>
+      <MobileNav
+        role={user.role}
+        fullName={user.fullName}
+        onLogout={handleLogout}
+      />
     </div>
   )
 }
