@@ -236,13 +236,10 @@ function OrderDetailPage() {
         </div>
       )}
 
-      {(order.status === 'pending_validation' ||
-        order.status === 'confirmed_by_colmado' ||
+      {(order.status === 'confirmed_by_colmado' ||
         order.status === 'in_delivery_route') && (
         <div className="mb-8 border-l-4 border-ink bg-paper-deep/40 p-5">
           <p className="display text-xl font-semibold">
-            {order.status === 'pending_validation' &&
-              'Pedido confirmado — el colmado lo está preparando.'}
             {order.status === 'confirmed_by_colmado' &&
               'Listo para salir a entregar.'}
             {order.status === 'in_delivery_route' && 'En camino a tu puerta.'}

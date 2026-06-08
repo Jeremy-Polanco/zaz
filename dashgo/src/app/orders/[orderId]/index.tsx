@@ -276,13 +276,10 @@ export default function OrderDetailScreen() {
               </View>
             )}
 
-          {(order.status === 'pending_validation' ||
-            order.status === 'confirmed_by_colmado' ||
+          {(order.status === 'confirmed_by_colmado' ||
             order.status === 'in_delivery_route') && (
             <View className="mb-6 border-l-4 border-ink bg-paper-deep/40 p-4">
               <Text className="font-sans-semibold text-[16px] text-ink">
-                {order.status === 'pending_validation' &&
-                  'Pedido confirmado — el colmado lo prepara.'}
                 {order.status === 'confirmed_by_colmado' &&
                   'Listo para salir a entregar.'}
                 {order.status === 'in_delivery_route' && 'En camino a tu puerta.'}
