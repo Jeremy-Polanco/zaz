@@ -40,8 +40,6 @@ function CatalogPage() {
 
   const q = query.trim().toLowerCase()
   const firstName = user?.fullName?.split(' ')[0] ?? ''
-  const neighborhood =
-    user?.addressDefault?.text?.split('·').pop()?.trim() ?? 'New Jersey'
 
   const filtered = (products ?? []).filter((p) => {
     if (cat && p.category?.slug !== cat) return false
@@ -143,8 +141,7 @@ function CatalogPage() {
       {/* Greeting / contextual strip */}
       <div className="mb-5 mt-4 flex items-end justify-between">
         <div>
-          <span className="eyebrow">{neighborhood}</span>
-          <p className="display mt-0.5 text-base font-semibold leading-tight text-ink">
+          <p className="display text-base font-semibold leading-tight text-ink">
             {q
               ? `${filtered.length} resultado${filtered.length === 1 ? '' : 's'} para "${query}"`
               : firstName
@@ -275,12 +272,12 @@ function ProductCard({
 
   return (
     <li className="group relative flex flex-col overflow-hidden border border-ink/15 bg-paper transition-colors hover:border-ink/30">
-      <div className="relative aspect-square w-full">
+      <div className="relative aspect-square w-full bg-white">
         {imgSrc ? (
           <img
             src={imgSrc}
             alt={product.name}
-            className="h-full w-full object-cover"
+            className="h-full w-full object-contain p-3"
           />
         ) : (
           <div className="placeholder-img h-full w-full">{placeholder}</div>
