@@ -4,6 +4,7 @@ import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { checkoutSchema, type CheckoutInput } from '../lib/schemas'
 import {
+  useConfirmNonStripeOrder,
   useCreateOrder,
   useMyCredit,
   useMySubscription,
@@ -33,6 +34,7 @@ function CheckoutPage() {
   const { data: products } = useProducts()
   const { data: balance } = usePointsBalance()
   const createOrder = useCreateOrder()
+  const confirmOrder = useConfirmNonStripeOrder()
 
   const cartItems = Object.entries(cart).map(([productId, quantity]) => ({
     productId,
@@ -134,6 +136,17 @@ function CheckoutPage() {
 
   const onSubmit = form.handleSubmit(async (values) => {
     const created = await createOrder.mutateAsync({ ...values, usePoints, useCredit })
+    // One-click: a cash order that's auto-quoted (skip-cotización, e.g. water)
+    // already shows its final total here — confirm it right away so the customer
+    // doesn't need a second "Confirmar" tap on the order screen. Normal orders
+    // (admin-quoted later) and digital orders (need payment) keep their step.
+    if (created.status === 'quoted' && created.paymentMethod === 'cash') {
+      try {
+        await confirmOrder.mutateAsync(created.id)
+      } catch {
+        // Non-blocking — the order screen still offers a manual confirm.
+      }
+    }
     clearCart()
     router.navigate({ to: '/orders/$orderId', params: { orderId: created.id } })
   })
@@ -228,9 +241,9 @@ function CheckoutPage() {
               type="submit"
               size="lg"
               variant="accent"
-              disabled={createOrder.isPending}
+              disabled={createOrder.isPending || confirmOrder.isPending}
             >
-              {createOrder.isPending
+              {createOrder.isPending || confirmOrder.isPending
                 ? 'Enviando…'
                 : `Confirmar pedido · ${allSkipQuote ? formatCents(skipQuoteTotalCents) : formatMoney(previewTotal)} →`}
             </Button>

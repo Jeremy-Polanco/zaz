@@ -4,6 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context'
 import { router } from 'expo-router'
 import { useCart, cart } from '../lib/cart'
 import {
+  useConfirmNonStripeOrder,
   useCreateOrder,
   useCurrentUser,
   useMyCredit,
@@ -25,6 +26,7 @@ export default function CheckoutScreen() {
   const { data: creditData } = useMyCredit()
   const { data: subscription } = useMySubscription()
   const createOrder = useCreateOrder()
+  const confirmOrder = useConfirmNonStripeOrder()
 
   const isActiveSubscriber =
     subscription?.status === 'active' || subscription?.status === 'past_due'
@@ -130,6 +132,18 @@ export default function CheckoutScreen() {
         usePoints,
         useCredit,
       })
+
+      // One-click: a cash order that's auto-quoted (skip-cotización, e.g. water)
+      // already shows its final total — confirm it right away so there's no
+      // second "Confirmar" tap on the order screen. Normal/digital orders keep
+      // their step (admin quote / payment).
+      if (created.status === 'quoted' && created.paymentMethod === 'cash') {
+        try {
+          await confirmOrder.mutateAsync(created.id)
+        } catch {
+          // Non-blocking — the order screen still offers a manual confirm.
+        }
+      }
 
       cart.clear()
       router.replace({
@@ -547,7 +561,7 @@ export default function CheckoutScreen() {
           <Button
             variant="accent"
             size="lg"
-            loading={createOrder.isPending}
+            loading={createOrder.isPending || confirmOrder.isPending}
             disabled={hasMixedCart}
             onPress={onSubmit}
           >

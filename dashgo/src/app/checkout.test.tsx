@@ -15,6 +15,7 @@ import { renderWithProviders } from '../test/test-utils'
 
 jest.mock('../lib/queries', () => ({
   useCreateOrder: jest.fn(),
+  useConfirmNonStripeOrder: jest.fn(),
   useCurrentUser: jest.fn(),
   useMyCredit: jest.fn(),
   useMySubscription: jest.fn(),
@@ -63,6 +64,7 @@ jest.mock('../lib/cart', () => ({
 
 import {
   useCreateOrder,
+  useConfirmNonStripeOrder,
   useCurrentUser,
   useMyCredit,
   useMySubscription,
@@ -75,6 +77,8 @@ import CheckoutScreen from './checkout'
 // ── typed mock helpers ────────────────────────────────────────────────────────
 
 const mockUseCreateOrder = useCreateOrder as jest.MockedFunction<typeof useCreateOrder>
+const mockUseConfirmNonStripeOrder =
+  useConfirmNonStripeOrder as jest.MockedFunction<typeof useConfirmNonStripeOrder>
 const mockUseCurrentUser = useCurrentUser as jest.MockedFunction<typeof useCurrentUser>
 const mockUseMyCredit = useMyCredit as jest.MockedFunction<typeof useMyCredit>
 const mockUseMySubscription = useMySubscription as jest.MockedFunction<typeof useMySubscription>
@@ -149,6 +153,11 @@ function setupCheckoutMocks(
     mutateAsync: mockCreateOrderMutateAsync,
     isPending: false,
   } as unknown as ReturnType<typeof useCreateOrder>)
+
+  mockUseConfirmNonStripeOrder.mockReturnValue({
+    mutateAsync: jest.fn().mockResolvedValue({}),
+    isPending: false,
+  } as unknown as ReturnType<typeof useConfirmNonStripeOrder>)
 
   mockUseCurrentUser.mockReturnValue({
     data: { id: 'user-1', role: 'client', addressDefault: null },
