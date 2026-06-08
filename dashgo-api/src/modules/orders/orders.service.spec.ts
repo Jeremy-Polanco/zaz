@@ -57,6 +57,7 @@ function fakeProduct(overrides: Partial<Product> = {}): Product {
     name: 'Test Product',
     isAvailable: true,
     stock: 10,
+    requiresQuote: true,         // default — orders need a manual cotización
     priceToPublic: '5.00',       // getEffectivePrice reads this; 5.00 → 500 cents
     priceCents: 500,             // legacy field used in tests that cast to unknown
     salePrice: null,
@@ -1328,6 +1329,127 @@ describe('OrdersService', () => {
 
       // TX reached
       expect(dataSource.transaction).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Skip cotización — auto-quote at creation (requiresQuote = false)
+  //
+  // A product with requiresQuote=false (e.g. water) skips the manual quote
+  // step. An order whose items are ALL skip-eligible is auto-quoted at
+  // creation: shipping = $0, tax computed now, status = QUOTED, quotedAt set.
+  // If ANY item requires a quote, the whole order stays PENDING_QUOTE.
+  // ─────────────────────────────────────────────────────────────────────────
+
+  describe('create — skip cotización (auto-quote)', () => {
+    const skipProduct = fakeProduct({ id: 'prod-water', requiresQuote: false });
+    const quoteProduct = fakeProduct({
+      id: 'prod-dispenser',
+      requiresQuote: true,
+    });
+
+    const dtoFor = (items: { productId: string; quantity: number }[]) =>
+      ({
+        items,
+        deliveryAddress: { text: '123 Test', lat: 18.4861, lng: -69.9312 },
+        paymentMethod: PaymentMethod.CASH,
+        usePoints: false,
+        useCredit: false,
+      }) as import('./dto/create-order.dto').CreateOrderDto;
+
+    /** Runs create() and returns the order object passed to orderRepo.create(). */
+    async function captureCreatedOrder(
+      products: Product[],
+      items: { productId: string; quantity: number }[],
+    ): Promise<Partial<Order>> {
+      productsRepo.find.mockResolvedValue(products);
+      let captured: Partial<Order> = {};
+
+      (dataSource.transaction as jest.Mock).mockImplementation(
+        async (cb: (mgr: EntityManager) => Promise<unknown>) => {
+          const orderRepo = makeRepoMock<Order>();
+          const itemRepo = makeRepoMock<OrderItem>();
+          orderRepo.create.mockImplementation((d) => {
+            captured = d as Partial<Order>;
+            return { ...d, id: 'order-1' } as Order;
+          });
+          orderRepo.save.mockResolvedValue(fakeOrder());
+          orderRepo.update.mockResolvedValue({ affected: 1 } as never);
+          itemRepo.save.mockResolvedValue({} as never);
+          itemRepo.create.mockImplementation((d) => d as OrderItem);
+
+          const mgr = {
+            getRepository: (entity: unknown) => {
+              if (entity === Order) return orderRepo;
+              if (entity === OrderItem) return itemRepo;
+              return makeRepoMock();
+            },
+          };
+          return cb(mgr as unknown as EntityManager);
+        },
+      );
+
+      ordersRepo.findOne.mockResolvedValue(
+        fakeOrder({ customer: fakeUser() as never, items: [] }),
+      );
+
+      await service.create(fakeUser(UserRole.CLIENT), dtoFor(items));
+      return captured;
+    }
+
+    it('all-skip cart → order created in QUOTED with shipping $0 and tax computed', async () => {
+      const created = await captureCreatedOrder(
+        [skipProduct],
+        [{ productId: 'prod-water', quantity: 1 }],
+      );
+
+      expect(created.status).toBe(OrderStatus.QUOTED);
+      expect(created.shipping).toBe('0.00');
+      expect(created.subtotal).toBe('5.00');
+      // tax = round(500 * 0.08887) = 44 cents
+      expect(created.tax).toBe('0.44');
+      expect(created.totalAmount).toBe('5.44');
+      expect(created.quotedAt).toBeInstanceOf(Date);
+    });
+
+    it('all-skip cart with quantity → tax computed on the full subtotal', async () => {
+      const created = await captureCreatedOrder(
+        [skipProduct],
+        [{ productId: 'prod-water', quantity: 3 }],
+      );
+
+      // 3 × 5.00 = 15.00 → tax = round(1500 * 0.08887) = 133 cents
+      expect(created.status).toBe(OrderStatus.QUOTED);
+      expect(created.subtotal).toBe('15.00');
+      expect(created.tax).toBe('1.33');
+      expect(created.totalAmount).toBe('16.33');
+    });
+
+    it('mixed cart (any requires_quote item) stays PENDING_QUOTE with tax 0', async () => {
+      const created = await captureCreatedOrder(
+        [skipProduct, quoteProduct],
+        [
+          { productId: 'prod-water', quantity: 1 },
+          { productId: 'prod-dispenser', quantity: 1 },
+        ],
+      );
+
+      expect(created.status).toBe(OrderStatus.PENDING_QUOTE);
+      expect(created.shipping).toBe('0.00');
+      expect(created.tax).toBe('0.00');
+      expect(created.totalAmount).toBe('10.00');
+      expect(created.quotedAt).toBeNull();
+    });
+
+    it('regression: all-requires_quote cart stays PENDING_QUOTE (existing behavior)', async () => {
+      const created = await captureCreatedOrder(
+        [quoteProduct],
+        [{ productId: 'prod-dispenser', quantity: 1 }],
+      );
+
+      expect(created.status).toBe(OrderStatus.PENDING_QUOTE);
+      expect(created.tax).toBe('0.00');
+      expect(created.quotedAt).toBeNull();
     });
   });
 

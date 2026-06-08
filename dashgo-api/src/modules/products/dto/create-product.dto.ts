@@ -1,4 +1,5 @@
 import {
+  IsBoolean,
   IsDateString,
   IsEnum,
   IsInt,
@@ -45,6 +46,12 @@ export class CreateProductDto {
   @IsOptional()
   @IsUUID()
   categoryId?: string | null;
+
+  // When false, this product skips the manual cotización flow (water-style
+  // direct ordering). Defaults to true server-side for backward compatibility.
+  @IsOptional()
+  @IsBoolean()
+  requiresQuote?: boolean;
 
   @IsOptional()
   @IsString()

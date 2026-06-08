@@ -47,6 +47,7 @@ type FormState = {
   tracksStock: boolean
   isAvailable: boolean
   categoryId: string | null
+  requiresQuote: boolean
   promoterCommissionText: string
   pointsText: string
   offerLabel: string
@@ -74,6 +75,7 @@ const emptyForm: FormState = {
   tracksStock: true,
   isAvailable: true,
   categoryId: null,
+  requiresQuote: true,
   promoterCommissionText: '0',
   pointsText: '1',
   offerLabel: '',
@@ -125,6 +127,7 @@ function ProductForm({
       tracksStock: editingTracksStock,
       isAvailable: editing.isAvailable,
       categoryId: editing.categoryId ?? null,
+      requiresQuote: editing.requiresQuote ?? true,
       promoterCommissionText: editing.promoterCommissionPct ?? '0',
       pointsText: editing.pointsPct ?? '1',
       offerLabel: editing.offerLabel ?? '',
@@ -200,6 +203,7 @@ function ProductForm({
       priceToPublic: price,
       stock,
       categoryId: state.categoryId,
+      requiresQuote: state.requiresQuote,
       promoterCommissionPct: commission,
       pointsPct: points,
       offerLabel: state.offerOpen ? state.offerLabel.trim() || null : null,
@@ -747,6 +751,17 @@ function ProductForm({
               }
               on={state.isAvailable}
               onChange={(v) => setState((s) => ({ ...s, isAvailable: v }))}
+            />
+
+            <ToggleRow
+              label="Requiere cotización"
+              sub={
+                state.requiresQuote
+                  ? 'El pedido pasa por cotización de envío antes de pagar.'
+                  : 'El cliente pide y paga directo, sin cotización (ej: agua). Envío $0.'
+              }
+              on={state.requiresQuote}
+              onChange={(v) => setState((s) => ({ ...s, requiresQuote: v }))}
             />
 
             <Hairline />

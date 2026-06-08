@@ -206,6 +206,7 @@ export type CreateProductInput = {
   promoterCommissionPct?: number
   pointsPct?: number
   categoryId?: string | null
+  requiresQuote?: boolean
   offerLabel?: string | null
   offerDiscountPct?: number | null
   offerStartsAt?: string | null

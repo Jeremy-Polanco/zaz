@@ -49,6 +49,20 @@ jobs:
         run: npm run build
       - name: Unit tests (blocking)
         run: npm test
+      # ── BLOCKING gate — a broken migration must never reach `main`, because
+      #   the runtime DataSource has migrationsRun:true and applies migrations
+      #   on boot during the DO deploy. A migration that fails here = failed
+      #   boot in prod = downtime. Apply every migration against a clean DB so
+      #   bad SQL is caught at PR time, before it can deploy. ───────────────
+      - name: Migrations apply on a clean DB (blocking)
+        env:
+          DB_HOST: localhost
+          DB_PORT: 5433
+          DB_NAME: dashgo_test
+          DB_USER: dashgo_test
+          DB_PASSWORD: dashgo_test
+          DB_SSL: 'false'
+        run: npm run migration:run
       # ── Informational — runs for visibility, won't block the merge ──
       - name: Integration tests (informational)
         env:
