@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { View, Text, Pressable, ScrollView, Alert } from 'react-native'
+import { View, Text, Pressable, ScrollView } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { router } from 'expo-router'
 import { useCart, cart } from '../lib/cart'
@@ -153,24 +153,8 @@ export default function CheckoutScreen() {
       return
     }
 
-    const paymentLabel = paymentMethod === 'digital' ? 'pago digital' : 'efectivo'
-
-    Alert.alert(
-      '¿Confirmas el pedido?',
-      `${itemCount} ${itemCount === 1 ? 'producto' : 'productos'} · subtotal ${formatCents(
-        previewTotalCents,
-      )}\nPago: ${paymentLabel}\n\nEl repartidor te cotiza el envío y te avisamos para confirmar el total.`,
-      [
-        { text: 'Cancelar', style: 'cancel' },
-        {
-          text: 'Sí, confirmar',
-          style: 'default',
-          onPress: () => {
-            void executeOrder()
-          },
-        },
-      ],
-    )
+    // No confirmation step — keep checkout one-tap simple.
+    void executeOrder()
   }
 
   // ── Empty cart guard ───────────────────────────────────────────────────────
