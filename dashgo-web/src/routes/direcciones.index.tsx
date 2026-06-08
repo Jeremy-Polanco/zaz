@@ -1,6 +1,6 @@
 import { createFileRoute, Link } from '@tanstack/react-router'
 import { Button, SectionHeading } from '../components/ui'
-import { useMyAddresses } from '../lib/queries'
+import { useMyAddresses, useSetDefaultAddress } from '../lib/queries'
 
 export const Route = createFileRoute('/direcciones/')({
   component: AddressesPage,
@@ -8,6 +8,7 @@ export const Route = createFileRoute('/direcciones/')({
 
 export function AddressesPage() {
   const { data: addresses, isPending } = useMyAddresses()
+  const setDefault = useSetDefaultAddress()
 
   if (isPending) {
     return (
@@ -28,7 +29,7 @@ export function AddressesPage() {
             Mis <span className="italic text-brand">direcciones.</span>
           </>
         }
-        subtitle="Dónde te llevamos los pedidos."
+        subtitle="Elegí la principal de un toque, o agregá una nueva."
         action={
           <Link to="/direcciones/nueva">
             <Button variant="accent">+ Agregar dirección</Button>
@@ -38,14 +39,20 @@ export function AddressesPage() {
 
       {list.length > 0 ? (
         <ul className="flex flex-col gap-3">
-          {list.map((a) => (
-            <li key={a.id}>
-              <Link
-                to="/direcciones/$id"
-                params={{ id: a.id }}
-                className="flex items-center justify-between gap-4 border border-ink/15 bg-paper p-4 transition-colors hover:border-ink/40"
+          {list.map((a) => {
+            const settingThis = setDefault.isPending && setDefault.variables === a.id
+            return (
+              <li
+                key={a.id}
+                className={`flex items-center justify-between gap-4 border bg-paper p-4 transition-colors ${
+                  a.isDefault ? 'border-ink' : 'border-ink/15 hover:border-ink/40'
+                }`}
               >
-                <div className="min-w-0">
+                <Link
+                  to="/direcciones/$id"
+                  params={{ id: a.id }}
+                  className="min-w-0 flex-1 transition-colors hover:text-brand"
+                >
                   <div className="flex items-center gap-2">
                     <span className="font-semibold text-ink">{a.label}</span>
                     {a.isDefault && (
@@ -58,13 +65,29 @@ export function AddressesPage() {
                     {a.line1}
                     {a.line2 ? `, ${a.line2}` : ''}
                   </p>
+                </Link>
+
+                <div className="flex shrink-0 items-center gap-3">
+                  {a.isDefault ? (
+                    <span className="text-[0.62rem] uppercase tracking-[0.14em] text-ink-muted">
+                      ✓ Activa
+                    </span>
+                  ) : (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="secondary"
+                      onClick={() => setDefault.mutate(a.id)}
+                      disabled={setDefault.isPending}
+                      aria-label={`Hacer "${a.label}" principal`}
+                    >
+                      {settingThis ? 'Cambiando…' : 'Hacer principal'}
+                    </Button>
+                  )}
                 </div>
-                <span aria-hidden="true" className="text-ink-muted">
-                  →
-                </span>
-              </Link>
-            </li>
-          ))}
+              </li>
+            )
+          })}
         </ul>
       ) : (
         <div className="py-16 text-center">
@@ -78,6 +101,12 @@ export function AddressesPage() {
             </Button>
           </Link>
         </div>
+      )}
+
+      {setDefault.isError && (
+        <p className="mt-4 border-l-2 border-bad pl-3 text-sm font-medium text-bad">
+          No pudimos cambiar tu dirección principal. Intentá de nuevo.
+        </p>
       )}
     </div>
   )
