@@ -62,15 +62,9 @@ export const savedAddressSchema = z.object({
 })
 export type SavedAddressInput = z.infer<typeof savedAddressSchema>
 
-export const checkoutAddressSchema = z.object({
-  text: z.string().min(5, 'Dirección requerida'),
-  lat: z.number({ message: 'Necesitamos tu ubicación para calcular el envío' }),
-  lng: z.number({ message: 'Necesitamos tu ubicación para calcular el envío' }),
-})
-export type CheckoutAddressInput = z.infer<typeof checkoutAddressSchema>
-
+// The customer no longer provides a delivery address — the colmado captures
+// the location at delivery time. Checkout only carries payment + items + perks.
 export const checkoutSchema = z.object({
-  deliveryAddress: checkoutAddressSchema,
   paymentMethod: z.enum(['cash', 'digital']),
   items: z
     .array(

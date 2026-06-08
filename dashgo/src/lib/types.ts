@@ -124,7 +124,7 @@ export interface Order {
   customerId: string
   customer?: AuthUser
   status: OrderStatus
-  deliveryAddress: GeoAddress
+  deliveryAddress: GeoAddress | null
   subtotal: string
   pointsRedeemed: string
   shipping: string
@@ -198,7 +198,7 @@ export interface InvoiceOrderRef {
   id: string
   status: OrderStatus
   paymentMethod: PaymentMethod
-  deliveryAddress: GeoAddress
+  deliveryAddress: GeoAddress | null
   createdAt: string
 }
 

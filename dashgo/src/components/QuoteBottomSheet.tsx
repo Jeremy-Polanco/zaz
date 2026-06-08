@@ -16,6 +16,7 @@ import { Button, Eyebrow, FieldLabel } from './ui'
 
 function openMaps(order: Order) {
   const addr = order.deliveryAddress
+  if (!addr) return
   const hasCoords =
     typeof addr.lat === 'number' && typeof addr.lng === 'number'
   const url = hasCoords
@@ -26,6 +27,7 @@ function openMaps(order: Order) {
 
 function openWaze(order: Order) {
   const addr = order.deliveryAddress
+  if (!addr) return
   const hasCoords =
     typeof addr.lat === 'number' && typeof addr.lng === 'number'
   const url = hasCoords
@@ -97,7 +99,7 @@ export function QuoteBottomSheet({
           {order.customer?.fullName ?? 'Cliente'}
         </Text>
         <Text className="mt-1 font-sans text-[13px] text-ink-soft">
-          {order.deliveryAddress.text}
+          {order.deliveryAddress?.text ?? 'A coordinar'}
         </Text>
 
         <View className="mt-4 flex-row gap-2">

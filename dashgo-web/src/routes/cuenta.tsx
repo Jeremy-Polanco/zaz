@@ -169,7 +169,6 @@ function AccountPage() {
         <Card className="mb-6">
           <span className="eyebrow">Mis datos</span>
           <nav className="mt-4 flex flex-col divide-y divide-ink/10">
-            <AccountLink to="/direcciones" label="Mis direcciones" />
             <AccountLink to="/alquileres" label="Mis alquileres" />
             <AccountLink to="/points" label="Mis puntos" />
             <AccountLink to="/subscription" label="Suscripción" />

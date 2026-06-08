@@ -135,7 +135,6 @@ describe('verifyOtpSchema', () => {
 
 describe('checkoutSchema', () => {
   const validCheckout = {
-    deliveryAddress: { text: 'Calle 1 #23', lat: 18.5, lng: -69.9 },
     paymentMethod: 'cash' as const,
     items: [{ productId: '550e8400-e29b-41d4-a716-446655440000', quantity: 2 }],
   }
@@ -155,18 +154,6 @@ describe('checkoutSchema', () => {
   it('rejects an invalid paymentMethod', () => {
     const result = checkoutSchema.safeParse({ ...validCheckout, paymentMethod: 'crypto' })
     expect(result.success).toBe(false)
-  })
-
-  it('rejects missing lat/lng in deliveryAddress', () => {
-    const result = checkoutSchema.safeParse({
-      ...validCheckout,
-      deliveryAddress: { text: 'Calle sin ubicación' },
-    })
-    expect(result.success).toBe(false)
-    if (!result.success) {
-      const msgs = result.error.issues.map((i) => i.message)
-      expect(msgs.join(' ')).toMatch(/ubicación/)
-    }
   })
 })
 

@@ -61,7 +61,7 @@ function OrdersPage() {
                 <div className="sm:col-span-4">
                   <span className="eyebrow">Entrega</span>
                   <p className="mt-1 text-sm text-ink-soft">
-                    {o.deliveryAddress.text}
+                    {o.deliveryAddress?.text ?? 'A coordinar'}
                   </p>
                 </div>
                 <div className="sm:col-span-2">

@@ -139,6 +139,37 @@ export function useSetOrderQuote() {
   })
 }
 
+/**
+ * Super-admin: PATCH /orders/:id/delivery-address — pin the delivery location
+ * at delivery time. Customers no longer send an address; the colmado sets it.
+ */
+export function useSetOrderDeliveryAddress() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async ({
+      id,
+      text,
+      lat,
+      lng,
+    }: {
+      id: string
+      text: string
+      lat: number
+      lng: number
+    }) => {
+      const { data } = await api.patch<Order>(`/orders/${id}/delivery-address`, {
+        text,
+        lat: roundCoord(lat),
+        lng: roundCoord(lng),
+      })
+      return data
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['orders'] })
+    },
+  })
+}
+
 export function useAuthorizeOrder() {
   const qc = useQueryClient()
   return useMutation({
@@ -897,6 +928,23 @@ export function useSuperUserAddresses(userId: string | undefined) {
       (await api.get<UserAddress[]>(`/admin/users/${userId}/addresses`)).data,
     enabled: !!userId,
     staleTime: 60_000,
+  })
+}
+
+/** Super-admin: POST /admin/users/:userId/addresses — save a location to a customer. */
+export function useCreateAddressForUser(userId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (input: CreateAddressInput) =>
+      (
+        await api.post<UserAddress>(`/admin/users/${userId}/addresses`, {
+          ...input,
+          lat: roundCoord(input.lat),
+          lng: roundCoord(input.lng),
+        })
+      ).data,
+    onSuccess: () =>
+      qc.invalidateQueries({ queryKey: ['admin', 'users', userId, 'addresses'] }),
   })
 }
 

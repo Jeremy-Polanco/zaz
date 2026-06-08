@@ -26,6 +26,7 @@ import {
 } from '../../../components/ui'
 import { SuscriptorBadge } from '../../../components/SuscriptorBadge'
 import { QuoteBottomSheet } from '../../../components/QuoteBottomSheet'
+import { LocationBottomSheet } from '../../../components/LocationBottomSheet'
 
 const LIVE_STATUSES = [
   'pending_quote',
@@ -92,6 +93,7 @@ export default function SuperOrderDetailScreen() {
   const { data: order, isPending, error } = useOrder(orderId)
   const updateStatus = useUpdateOrderStatus()
   const [quoting, setQuoting] = useState(false)
+  const [pinningLocation, setPinningLocation] = useState(false)
 
   if (isPending) {
     return (
@@ -253,9 +255,10 @@ export default function SuperOrderDetailScreen() {
         <View className="mt-5 px-5">
           <Eyebrow className="mb-3">Entrega</Eyebrow>
           <Text className="text-[15px] leading-[22px] text-ink">
-            {order.deliveryAddress.text}
+            {order.deliveryAddress?.text ?? 'A coordinar'}
           </Text>
-          {typeof order.deliveryAddress.lat === 'number' &&
+          {order.deliveryAddress &&
+            typeof order.deliveryAddress.lat === 'number' &&
             typeof order.deliveryAddress.lng === 'number' && (
               <Text
                 className="mt-1 font-sans text-[11px] uppercase tracking-label text-ink-muted"
@@ -265,10 +268,10 @@ export default function SuperOrderDetailScreen() {
                 {order.deliveryAddress.lng.toFixed(5)}
               </Text>
             )}
-          {!isTerminal && (
+          {!isTerminal && order.deliveryAddress && (
             <View className="mt-3 flex-row gap-2">
               <Pressable
-                onPress={() => openMaps(order.deliveryAddress)}
+                onPress={() => openMaps(order.deliveryAddress!)}
                 className="flex-1 items-center justify-center border border-ink/15 py-2.5 active:bg-paper-deep"
               >
                 <Text className="font-sans-medium text-[11px] uppercase tracking-label text-ink">
@@ -276,7 +279,7 @@ export default function SuperOrderDetailScreen() {
                 </Text>
               </Pressable>
               <Pressable
-                onPress={() => openWaze(order.deliveryAddress)}
+                onPress={() => openWaze(order.deliveryAddress!)}
                 className="flex-1 items-center justify-center border border-ink/15 py-2.5 active:bg-paper-deep"
               >
                 <Text className="font-sans-medium text-[11px] uppercase tracking-label text-ink">
@@ -284,6 +287,18 @@ export default function SuperOrderDetailScreen() {
                 </Text>
               </Pressable>
             </View>
+          )}
+          {!isTerminal && (
+            <Pressable
+              onPress={() => setPinningLocation(true)}
+              className="mt-3 items-center justify-center border border-ink/40 py-2.5 active:bg-ink/5"
+            >
+              <Text className="font-sans-medium text-[11px] uppercase tracking-label text-ink">
+                {order.deliveryAddress
+                  ? 'Editar ubicación'
+                  : '📍 Fijar ubicación'}
+              </Text>
+            </Pressable>
           )}
         </View>
 
@@ -492,6 +507,13 @@ export default function SuperOrderDetailScreen() {
         <QuoteBottomSheet
           order={order}
           onClose={() => setQuoting(false)}
+        />
+      )}
+
+      {pinningLocation && (
+        <LocationBottomSheet
+          order={order}
+          onClose={() => setPinningLocation(false)}
         />
       )}
     </SafeAreaView>

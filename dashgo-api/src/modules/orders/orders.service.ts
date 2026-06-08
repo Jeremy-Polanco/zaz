@@ -12,7 +12,7 @@ import { DataSource, FindOptionsWhere, In, Repository } from 'typeorm';
 import { Order, OrderItem, Product } from '../../entities';
 import { OrderStatus, PaymentMethod, UserRole } from '../../entities/enums';
 import { AuthenticatedUser } from '../../common/types/authenticated-user';
-import { CreateOrderDto } from './dto/create-order.dto';
+import { CreateOrderDto, DeliveryAddressDto } from './dto/create-order.dto';
 import { UpdateOrderStatusDto } from './dto/update-order-status.dto';
 import { PaymentsService } from '../payments/payments.service';
 import { PointsService } from '../points/points.service';
@@ -240,7 +240,9 @@ export class OrdersService {
       const order = orderRepo.create({
         customerId: user.id,
         status: skipQuote ? OrderStatus.QUOTED : OrderStatus.PENDING_QUOTE,
-        deliveryAddress: dto.deliveryAddress,
+        // Customers no longer send an address — the super-admin sets it at
+        // delivery time. Persist null when absent.
+        deliveryAddress: dto.deliveryAddress ?? null,
         subtotal: (subtotalCents / 100).toFixed(2),
         pointsRedeemed: (pointsRedeemedCents / 100).toFixed(2),
         shipping: '0.00',
@@ -374,6 +376,32 @@ export class OrdersService {
       wasSubscriberAtQuote: isSub,
     });
 
+    return this.findOne(id, user);
+  }
+
+  /**
+   * Super-admin sets/updates an order's delivery address. Used at delivery
+   * time: the colmado captures the customer's GPS on arrival and pins the
+   * exact destination. Customers never send an address themselves.
+   */
+  async setDeliveryAddress(
+    id: string,
+    address: DeliveryAddressDto,
+    user: AuthenticatedUser,
+  ) {
+    if (user.role !== UserRole.SUPER_ADMIN_DELIVERY) {
+      throw new ForbiddenException(
+        'Solo el super admin puede fijar la dirección de entrega',
+      );
+    }
+    const order = await this.findOne(id, user);
+    await this.orders.update(order.id, {
+      deliveryAddress: {
+        text: address.text,
+        lat: address.lat,
+        lng: address.lng,
+      },
+    });
     return this.findOne(id, user);
   }
 

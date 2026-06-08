@@ -1,21 +1,19 @@
 import { useEffect, useState } from 'react'
-import type { Order } from '../lib/types'
+import type { GeoAddress, Order } from '../lib/types'
 import { useSetOrderQuote } from '../lib/queries'
 import { computeQuotePreviewCents } from '../lib/tax'
 import { formatCents } from '../lib/utils'
 import { Button, FieldError, Input, Label } from './ui'
 import { SavedAddressesList } from './SavedAddressesList'
 
-function mapsDeepLink(order: Order): string {
-  const addr = order.deliveryAddress
+function mapsDeepLink(addr: GeoAddress): string {
   const hasCoords = typeof addr.lat === 'number' && typeof addr.lng === 'number'
   return hasCoords
     ? `https://www.google.com/maps/dir/?api=1&destination=${addr.lat},${addr.lng}`
     : `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(addr.text)}`
 }
 
-function wazeDeepLink(order: Order): string {
-  const addr = order.deliveryAddress
+function wazeDeepLink(addr: GeoAddress): string {
   const hasCoords = typeof addr.lat === 'number' && typeof addr.lng === 'number'
   return hasCoords
     ? `https://waze.com/ul?ll=${addr.lat},${addr.lng}&navigate=yes`
@@ -85,28 +83,30 @@ export function QuoteDrawer({
             {order.customer?.fullName ?? 'Cliente'}
           </h2>
           <p className="mt-2 text-sm text-ink-soft">
-            {order.deliveryAddress.text}
+            {order.deliveryAddress?.text ?? 'Sin ubicación aún'}
           </p>
         </header>
 
-        <div className="mb-6 flex gap-2">
-          <a
-            href={mapsDeepLink(order)}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex items-center border border-ink/20 bg-paper px-3 py-1.5 text-[0.7rem] uppercase tracking-[0.14em] text-ink hover:border-brand hover:text-brand"
-          >
-            Maps ↗
-          </a>
-          <a
-            href={wazeDeepLink(order)}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex items-center border border-ink/20 bg-paper px-3 py-1.5 text-[0.7rem] uppercase tracking-[0.14em] text-ink hover:border-brand hover:text-brand"
-          >
-            Waze ↗
-          </a>
-        </div>
+        {order.deliveryAddress && (
+          <div className="mb-6 flex gap-2">
+            <a
+              href={mapsDeepLink(order.deliveryAddress)}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center border border-ink/20 bg-paper px-3 py-1.5 text-[0.7rem] uppercase tracking-[0.14em] text-ink hover:border-brand hover:text-brand"
+            >
+              Maps ↗
+            </a>
+            <a
+              href={wazeDeepLink(order.deliveryAddress)}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center border border-ink/20 bg-paper px-3 py-1.5 text-[0.7rem] uppercase tracking-[0.14em] text-ink hover:border-brand hover:text-brand"
+            >
+              Waze ↗
+            </a>
+          </div>
+        )}
 
         <div className="mb-6 space-y-1 border-y border-ink/10 py-4 text-sm">
           <div className="flex justify-between">

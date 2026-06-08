@@ -49,6 +49,15 @@ export type UpdateMeInput = {
   addressDefault?: GeoAddress
 }
 
+/**
+ * Round a coordinate to 7 decimal places. The API enforces
+ * `@IsNumber({ maxDecimalPlaces: 7 })` on lat/lng — sending more precision
+ * yields a 400. Mirrors the web app's helper exactly.
+ */
+function roundCoord(n: number) {
+  return Number(n.toFixed(7))
+}
+
 export type ComputeShippingInput = {
   lat: number
   lng: number
@@ -259,6 +268,62 @@ export function useSetOrderQuote() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['orders'] })
+    },
+  })
+}
+
+/**
+ * Super-admin: PATCH /orders/:id/delivery-address — pin the order's delivery
+ * location at delivery time. The customer never enters an address; the colmado
+ * captures it here (GPS/map). Coords are rounded to 7dp (API cap).
+ */
+export function useSetOrderDeliveryAddress() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (input: {
+      id: string
+      text: string
+      lat: number
+      lng: number
+    }) => {
+      const { data } = await api.patch<Order>(
+        `/orders/${input.id}/delivery-address`,
+        {
+          text: input.text,
+          lat: roundCoord(input.lat),
+          lng: roundCoord(input.lng),
+        },
+      )
+      return data
+    },
+    onSuccess: (_d, vars) => {
+      qc.invalidateQueries({ queryKey: ['order', vars.id] })
+      qc.invalidateQueries({ queryKey: ['orders'] })
+    },
+  })
+}
+
+/**
+ * Super-admin: POST /admin/users/:userId/addresses — save an address to a
+ * customer's address book. Used optionally when the colmado pins an order's
+ * location and wants to keep it for next time. Coords rounded to 7dp (API cap).
+ */
+export function useCreateAddressForUser(userId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (body: CreateAddressInput) => {
+      const { data } = await api.post<UserAddress>(
+        `/admin/users/${userId}/addresses`,
+        {
+          ...body,
+          lat: roundCoord(body.lat),
+          lng: roundCoord(body.lng),
+        },
+      )
+      return data
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['users', userId, 'addresses'] })
     },
   })
 }

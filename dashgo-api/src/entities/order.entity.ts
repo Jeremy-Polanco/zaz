@@ -62,8 +62,10 @@ export class Order {
   })
   status!: OrderStatus;
 
-  @Column({ name: 'delivery_address', type: 'jsonb' })
-  deliveryAddress!: GeoAddress;
+  // Nullable: customers order without an address; the super-admin sets it at
+  // delivery time via PATCH /orders/:id/delivery-address.
+  @Column({ name: 'delivery_address', type: 'jsonb', nullable: true })
+  deliveryAddress!: GeoAddress | null;
 
   @Column({
     type: 'numeric',

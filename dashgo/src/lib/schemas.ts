@@ -6,18 +6,6 @@ export const addressSchema = z.object({
   lng: z.number().optional(),
 })
 
-export const checkoutAddressSchema = z.object({
-  text: z.string().min(3, 'Dirección muy corta'),
-  lat: z.number({
-    required_error: 'Necesitamos tu ubicación para calcular el envío',
-    invalid_type_error: 'Necesitamos tu ubicación para calcular el envío',
-  }),
-  lng: z.number({
-    required_error: 'Necesitamos tu ubicación para calcular el envío',
-    invalid_type_error: 'Necesitamos tu ubicación para calcular el envío',
-  }),
-})
-
 export const checkoutSchema = z.object({
   items: z
     .array(
@@ -27,7 +15,6 @@ export const checkoutSchema = z.object({
       }),
     )
     .min(1, 'El carrito está vacío'),
-  deliveryAddress: checkoutAddressSchema,
   paymentMethod: z.enum(['cash', 'digital']),
   stripePaymentIntentId: z.string().optional(),
   usePoints: z.boolean().optional(),

@@ -15,7 +15,6 @@ import { Route as PointsRouteImport } from './routes/points'
 import { Route as OrdersRouteImport } from './routes/orders'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as HomeRouteImport } from './routes/home'
-import { Route as DireccionesRouteImport } from './routes/direcciones'
 import { Route as CuentaRouteImport } from './routes/cuenta'
 import { Route as CreditRouteImport } from './routes/credit'
 import { Route as CheckoutRouteImport } from './routes/checkout'
@@ -24,7 +23,6 @@ import { Route as AlquileresRouteImport } from './routes/alquileres'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as PromoterIndexRouteImport } from './routes/promoter.index'
 import { Route as OrdersIndexRouteImport } from './routes/orders.index'
-import { Route as DireccionesIndexRouteImport } from './routes/direcciones.index'
 import { Route as SuperSubscriptionRouteImport } from './routes/super.subscription'
 import { Route as SuperRentalsRouteImport } from './routes/super.rentals'
 import { Route as SuperPromotersRouteImport } from './routes/super.promoters'
@@ -36,8 +34,6 @@ import { Route as RCodeRouteImport } from './routes/r.$code'
 import { Route as PromoterPayoutsRouteImport } from './routes/promoter.payouts'
 import { Route as PromoterCommissionsRouteImport } from './routes/promoter.commissions'
 import { Route as OrdersOrderIdRouteImport } from './routes/orders.$orderId'
-import { Route as DireccionesNuevaRouteImport } from './routes/direcciones.nueva'
-import { Route as DireccionesIdRouteImport } from './routes/direcciones.$id'
 import { Route as CreditPayRouteImport } from './routes/credit.pay'
 import { Route as SuperPromotersIndexRouteImport } from './routes/super.promoters.index'
 import { Route as SuperPromotersIdRouteImport } from './routes/super.promoters.$id'
@@ -72,11 +68,6 @@ const LoginRoute = LoginRouteImport.update({
 const HomeRoute = HomeRouteImport.update({
   id: '/home',
   path: '/home',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const DireccionesRoute = DireccionesRouteImport.update({
-  id: '/direcciones',
-  path: '/direcciones',
   getParentRoute: () => rootRouteImport,
 } as any)
 const CuentaRoute = CuentaRouteImport.update({
@@ -118,11 +109,6 @@ const OrdersIndexRoute = OrdersIndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => OrdersRoute,
-} as any)
-const DireccionesIndexRoute = DireccionesIndexRouteImport.update({
-  id: '/',
-  path: '/',
-  getParentRoute: () => DireccionesRoute,
 } as any)
 const SuperSubscriptionRoute = SuperSubscriptionRouteImport.update({
   id: '/super/subscription',
@@ -179,16 +165,6 @@ const OrdersOrderIdRoute = OrdersOrderIdRouteImport.update({
   path: '/$orderId',
   getParentRoute: () => OrdersRoute,
 } as any)
-const DireccionesNuevaRoute = DireccionesNuevaRouteImport.update({
-  id: '/nueva',
-  path: '/nueva',
-  getParentRoute: () => DireccionesRoute,
-} as any)
-const DireccionesIdRoute = DireccionesIdRouteImport.update({
-  id: '/$id',
-  path: '/$id',
-  getParentRoute: () => DireccionesRoute,
-} as any)
 const CreditPayRoute = CreditPayRouteImport.update({
   id: '/pay',
   path: '/pay',
@@ -222,7 +198,6 @@ export interface FileRoutesByFullPath {
   '/checkout': typeof CheckoutRoute
   '/credit': typeof CreditRouteWithChildren
   '/cuenta': typeof CuentaRoute
-  '/direcciones': typeof DireccionesRouteWithChildren
   '/home': typeof HomeRoute
   '/login': typeof LoginRoute
   '/orders': typeof OrdersRouteWithChildren
@@ -230,8 +205,6 @@ export interface FileRoutesByFullPath {
   '/privacidad': typeof PrivacidadRoute
   '/subscription': typeof SubscriptionRoute
   '/credit/pay': typeof CreditPayRoute
-  '/direcciones/$id': typeof DireccionesIdRoute
-  '/direcciones/nueva': typeof DireccionesNuevaRoute
   '/orders/$orderId': typeof OrdersOrderIdRouteWithChildren
   '/promoter/commissions': typeof PromoterCommissionsRoute
   '/promoter/payouts': typeof PromoterPayoutsRoute
@@ -243,7 +216,6 @@ export interface FileRoutesByFullPath {
   '/super/promoters': typeof SuperPromotersRouteWithChildren
   '/super/rentals': typeof SuperRentalsRoute
   '/super/subscription': typeof SuperSubscriptionRoute
-  '/direcciones/': typeof DireccionesIndexRoute
   '/orders/': typeof OrdersIndexRoute
   '/promoter/': typeof PromoterIndexRoute
   '/orders/$orderId/invoice': typeof OrdersOrderIdInvoiceRoute
@@ -264,8 +236,6 @@ export interface FileRoutesByTo {
   '/privacidad': typeof PrivacidadRoute
   '/subscription': typeof SubscriptionRoute
   '/credit/pay': typeof CreditPayRoute
-  '/direcciones/$id': typeof DireccionesIdRoute
-  '/direcciones/nueva': typeof DireccionesNuevaRoute
   '/orders/$orderId': typeof OrdersOrderIdRouteWithChildren
   '/promoter/commissions': typeof PromoterCommissionsRoute
   '/promoter/payouts': typeof PromoterPayoutsRoute
@@ -276,7 +246,6 @@ export interface FileRoutesByTo {
   '/super/products': typeof SuperProductsRoute
   '/super/rentals': typeof SuperRentalsRoute
   '/super/subscription': typeof SuperSubscriptionRoute
-  '/direcciones': typeof DireccionesIndexRoute
   '/orders': typeof OrdersIndexRoute
   '/promoter': typeof PromoterIndexRoute
   '/orders/$orderId/invoice': typeof OrdersOrderIdInvoiceRoute
@@ -292,7 +261,6 @@ export interface FileRoutesById {
   '/checkout': typeof CheckoutRoute
   '/credit': typeof CreditRouteWithChildren
   '/cuenta': typeof CuentaRoute
-  '/direcciones': typeof DireccionesRouteWithChildren
   '/home': typeof HomeRoute
   '/login': typeof LoginRoute
   '/orders': typeof OrdersRouteWithChildren
@@ -300,8 +268,6 @@ export interface FileRoutesById {
   '/privacidad': typeof PrivacidadRoute
   '/subscription': typeof SubscriptionRoute
   '/credit/pay': typeof CreditPayRoute
-  '/direcciones/$id': typeof DireccionesIdRoute
-  '/direcciones/nueva': typeof DireccionesNuevaRoute
   '/orders/$orderId': typeof OrdersOrderIdRouteWithChildren
   '/promoter/commissions': typeof PromoterCommissionsRoute
   '/promoter/payouts': typeof PromoterPayoutsRoute
@@ -313,7 +279,6 @@ export interface FileRoutesById {
   '/super/promoters': typeof SuperPromotersRouteWithChildren
   '/super/rentals': typeof SuperRentalsRoute
   '/super/subscription': typeof SuperSubscriptionRoute
-  '/direcciones/': typeof DireccionesIndexRoute
   '/orders/': typeof OrdersIndexRoute
   '/promoter/': typeof PromoterIndexRoute
   '/orders/$orderId/invoice': typeof OrdersOrderIdInvoiceRoute
@@ -330,7 +295,6 @@ export interface FileRouteTypes {
     | '/checkout'
     | '/credit'
     | '/cuenta'
-    | '/direcciones'
     | '/home'
     | '/login'
     | '/orders'
@@ -338,8 +302,6 @@ export interface FileRouteTypes {
     | '/privacidad'
     | '/subscription'
     | '/credit/pay'
-    | '/direcciones/$id'
-    | '/direcciones/nueva'
     | '/orders/$orderId'
     | '/promoter/commissions'
     | '/promoter/payouts'
@@ -351,7 +313,6 @@ export interface FileRouteTypes {
     | '/super/promoters'
     | '/super/rentals'
     | '/super/subscription'
-    | '/direcciones/'
     | '/orders/'
     | '/promoter/'
     | '/orders/$orderId/invoice'
@@ -372,8 +333,6 @@ export interface FileRouteTypes {
     | '/privacidad'
     | '/subscription'
     | '/credit/pay'
-    | '/direcciones/$id'
-    | '/direcciones/nueva'
     | '/orders/$orderId'
     | '/promoter/commissions'
     | '/promoter/payouts'
@@ -384,7 +343,6 @@ export interface FileRouteTypes {
     | '/super/products'
     | '/super/rentals'
     | '/super/subscription'
-    | '/direcciones'
     | '/orders'
     | '/promoter'
     | '/orders/$orderId/invoice'
@@ -399,7 +357,6 @@ export interface FileRouteTypes {
     | '/checkout'
     | '/credit'
     | '/cuenta'
-    | '/direcciones'
     | '/home'
     | '/login'
     | '/orders'
@@ -407,8 +364,6 @@ export interface FileRouteTypes {
     | '/privacidad'
     | '/subscription'
     | '/credit/pay'
-    | '/direcciones/$id'
-    | '/direcciones/nueva'
     | '/orders/$orderId'
     | '/promoter/commissions'
     | '/promoter/payouts'
@@ -420,7 +375,6 @@ export interface FileRouteTypes {
     | '/super/promoters'
     | '/super/rentals'
     | '/super/subscription'
-    | '/direcciones/'
     | '/orders/'
     | '/promoter/'
     | '/orders/$orderId/invoice'
@@ -436,7 +390,6 @@ export interface RootRouteChildren {
   CheckoutRoute: typeof CheckoutRoute
   CreditRoute: typeof CreditRouteWithChildren
   CuentaRoute: typeof CuentaRoute
-  DireccionesRoute: typeof DireccionesRouteWithChildren
   HomeRoute: typeof HomeRoute
   LoginRoute: typeof LoginRoute
   OrdersRoute: typeof OrdersRouteWithChildren
@@ -500,13 +453,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof HomeRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/direcciones': {
-      id: '/direcciones'
-      path: '/direcciones'
-      fullPath: '/direcciones'
-      preLoaderRoute: typeof DireccionesRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/cuenta': {
       id: '/cuenta'
       path: '/cuenta'
@@ -562,13 +508,6 @@ declare module '@tanstack/react-router' {
       fullPath: '/orders/'
       preLoaderRoute: typeof OrdersIndexRouteImport
       parentRoute: typeof OrdersRoute
-    }
-    '/direcciones/': {
-      id: '/direcciones/'
-      path: '/'
-      fullPath: '/direcciones/'
-      preLoaderRoute: typeof DireccionesIndexRouteImport
-      parentRoute: typeof DireccionesRoute
     }
     '/super/subscription': {
       id: '/super/subscription'
@@ -647,20 +586,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof OrdersOrderIdRouteImport
       parentRoute: typeof OrdersRoute
     }
-    '/direcciones/nueva': {
-      id: '/direcciones/nueva'
-      path: '/nueva'
-      fullPath: '/direcciones/nueva'
-      preLoaderRoute: typeof DireccionesNuevaRouteImport
-      parentRoute: typeof DireccionesRoute
-    }
-    '/direcciones/$id': {
-      id: '/direcciones/$id'
-      path: '/$id'
-      fullPath: '/direcciones/$id'
-      preLoaderRoute: typeof DireccionesIdRouteImport
-      parentRoute: typeof DireccionesRoute
-    }
     '/credit/pay': {
       id: '/credit/pay'
       path: '/pay'
@@ -709,22 +634,6 @@ const CreditRouteChildren: CreditRouteChildren = {
 
 const CreditRouteWithChildren =
   CreditRoute._addFileChildren(CreditRouteChildren)
-
-interface DireccionesRouteChildren {
-  DireccionesIdRoute: typeof DireccionesIdRoute
-  DireccionesNuevaRoute: typeof DireccionesNuevaRoute
-  DireccionesIndexRoute: typeof DireccionesIndexRoute
-}
-
-const DireccionesRouteChildren: DireccionesRouteChildren = {
-  DireccionesIdRoute: DireccionesIdRoute,
-  DireccionesNuevaRoute: DireccionesNuevaRoute,
-  DireccionesIndexRoute: DireccionesIndexRoute,
-}
-
-const DireccionesRouteWithChildren = DireccionesRoute._addFileChildren(
-  DireccionesRouteChildren,
-)
 
 interface OrdersOrderIdRouteChildren {
   OrdersOrderIdInvoiceRoute: typeof OrdersOrderIdInvoiceRoute
@@ -784,7 +693,6 @@ const rootRouteChildren: RootRouteChildren = {
   CheckoutRoute: CheckoutRoute,
   CreditRoute: CreditRouteWithChildren,
   CuentaRoute: CuentaRoute,
-  DireccionesRoute: DireccionesRouteWithChildren,
   HomeRoute: HomeRoute,
   LoginRoute: LoginRoute,
   OrdersRoute: OrdersRouteWithChildren,

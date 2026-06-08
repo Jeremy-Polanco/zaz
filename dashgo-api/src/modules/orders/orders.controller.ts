@@ -12,7 +12,7 @@ import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import type { AuthenticatedUser } from '../../common/types/authenticated-user';
 import { OrdersService } from './orders.service';
-import { CreateOrderDto } from './dto/create-order.dto';
+import { CreateOrderDto, DeliveryAddressDto } from './dto/create-order.dto';
 import { UpdateOrderStatusDto } from './dto/update-order-status.dto';
 import { SetQuoteDto } from './dto/set-quote.dto';
 
@@ -58,6 +58,16 @@ export class OrdersController {
     @CurrentUser() user: AuthenticatedUser,
   ) {
     return this.orders.setQuote(id, dto.shippingCents, user);
+  }
+
+  /** Super-admin pins the delivery location at delivery time. */
+  @Patch(':id/delivery-address')
+  setDeliveryAddress(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: DeliveryAddressDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.orders.setDeliveryAddress(id, dto, user);
   }
 
   @Post(':id/authorize')

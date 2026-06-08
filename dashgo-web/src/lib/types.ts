@@ -109,7 +109,8 @@ export interface Order {
   customerId: string
   customer?: AuthUser
   status: OrderStatus
-  deliveryAddress: GeoAddress
+  // null until the colmado pins the location at delivery time.
+  deliveryAddress: GeoAddress | null
   subtotal: string
   pointsRedeemed: string
   shipping: string
@@ -187,7 +188,7 @@ export interface InvoiceCustomer {
 export interface InvoiceOrderRef {
   id: string
   status: OrderStatus
-  deliveryAddress: GeoAddress
+  deliveryAddress: GeoAddress | null
   paymentMethod: PaymentMethod
   createdAt: string
 }

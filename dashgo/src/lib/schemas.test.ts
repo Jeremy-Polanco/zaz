@@ -4,7 +4,6 @@
  */
 import {
   addressSchema,
-  checkoutAddressSchema,
   checkoutSchema,
   phoneSchema,
   sendOtpSchema,
@@ -38,36 +37,9 @@ describe('addressSchema', () => {
   })
 })
 
-describe('checkoutAddressSchema', () => {
-  it('requires lat', () => {
-    const result = checkoutAddressSchema.safeParse({ text: 'Calle 123', lng: -69.9 })
-    expect(result.success).toBe(false)
-    if (!result.success) {
-      expect(result.error.issues[0].message).toBe(
-        'Necesitamos tu ubicación para calcular el envío',
-      )
-    }
-  })
-
-  it('requires lng', () => {
-    const result = checkoutAddressSchema.safeParse({ text: 'Calle 123', lat: 18.5 })
-    expect(result.success).toBe(false)
-  })
-
-  it('accepts a complete address', () => {
-    const result = checkoutAddressSchema.safeParse({
-      text: 'Calle 123',
-      lat: 18.5,
-      lng: -69.9,
-    })
-    expect(result.success).toBe(true)
-  })
-})
-
 describe('checkoutSchema', () => {
   const validCheckout = {
     items: [{ productId: '550e8400-e29b-41d4-a716-446655440000', quantity: 2 }],
-    deliveryAddress: { text: 'Calle 123', lat: 18.5, lng: -69.9 },
     paymentMethod: 'digital' as const,
   }
 

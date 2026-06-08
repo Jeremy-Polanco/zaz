@@ -120,7 +120,7 @@ export default function InvoiceScreen() {
           <View className="flex-1">
             <Eyebrow>Entrega</Eyebrow>
             <Text className="mt-2 text-[14px] text-ink">
-              {invoice.order.deliveryAddress.text}
+              {invoice.order.deliveryAddress?.text ?? 'A coordinar'}
             </Text>
             <Text className="mt-1 font-sans text-[10px] uppercase tracking-label text-ink-muted">
               {invoice.order.paymentMethod === 'cash'

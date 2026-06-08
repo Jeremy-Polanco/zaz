@@ -36,9 +36,13 @@ export class OrderItemInput {
 }
 
 export class CreateOrderDto {
+  // Optional: customers place orders without a delivery address. The
+  // super-admin captures and sets the location at delivery time
+  // (PATCH /orders/:id/delivery-address).
+  @IsOptional()
   @ValidateNested()
   @Type(() => DeliveryAddressDto)
-  deliveryAddress!: DeliveryAddressDto;
+  deliveryAddress?: DeliveryAddressDto;
 
   @IsEnum(PaymentMethod)
   paymentMethod!: PaymentMethod;

@@ -139,12 +139,6 @@ export default function ProfileTab() {
             <View className="mt-6">
               <Eyebrow className="mb-1">Mis datos</Eyebrow>
               <AccountLink
-                label="Mis direcciones"
-                iosIcon="house.fill"
-                androidIcon="home"
-                href="/addresses"
-              />
-              <AccountLink
                 label="Mis alquileres"
                 iosIcon="arrow.clockwise.circle.fill"
                 androidIcon="autorenew"

@@ -19,7 +19,7 @@ function OrderCard({ order }: { order: Order }) {
             Pedido · {formatMoney(order.totalAmount)}
           </Text>
           <Text className="mt-0.5 text-[13px] text-ink-soft">
-            {order.deliveryAddress.text}
+            {order.deliveryAddress?.text ?? 'A coordinar'}
           </Text>
         </View>
         <StatusBadge status={order.status} />

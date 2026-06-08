@@ -3,6 +3,7 @@ import { useMemo, useState } from 'react'
 import { DataTable } from '../components/DataTable'
 import { StatusBadge } from '../components/StatusBadge'
 import { QuoteDrawer } from '../components/QuoteDrawer'
+import { OrderLocationDrawer } from '../components/OrderLocationDrawer'
 import { Button, SectionHeading } from '../components/ui'
 import { useOrders, useUpdateOrderStatus } from '../lib/queries'
 import { formatDate, formatMoney } from '../lib/utils'
@@ -67,6 +68,7 @@ function SuperOrdersPage() {
   const { data: orders, isPending } = useOrders()
   const updateStatus = useUpdateOrderStatus()
   const [quotingOrder, setQuotingOrder] = useState<Order | null>(null)
+  const [locatingOrder, setLocatingOrder] = useState<Order | null>(null)
 
   const activeStatuses: OrderStatus[] = [
     'pending_quote',
@@ -108,10 +110,21 @@ function SuperOrdersPage() {
       },
       {
         header: 'Dirección',
-        accessorFn: (row) => row.deliveryAddress.text,
-        cell: ({ getValue }) => (
-          <span className="text-ink-soft">{getValue<string>()}</span>
-        ),
+        accessorFn: (row) => row.deliveryAddress?.text ?? 'Sin ubicación',
+        cell: ({ getValue, row }) => {
+          const addr = row.original.deliveryAddress
+          return addr ? (
+            <span className="text-ink-soft">{getValue<string>()}</span>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setLocatingOrder(row.original)}
+              className="text-[0.7rem] uppercase tracking-[0.12em] text-brand hover:underline"
+            >
+              📍 Fijar ubicación
+            </button>
+          )
+        },
       },
       {
         header: 'Lista de compra',
@@ -145,6 +158,17 @@ function SuperOrdersPage() {
         id: 'route',
         cell: ({ row }) => {
           const addr = row.original.deliveryAddress
+          if (!addr) {
+            return (
+              <button
+                type="button"
+                onClick={() => setLocatingOrder(row.original)}
+                className="inline-flex items-center border border-brand/40 bg-paper px-2 py-0.5 text-[0.65rem] uppercase tracking-[0.12em] text-brand hover:bg-brand/5"
+              >
+                📍 Fijar
+              </button>
+            )
+          }
           const hasCoords =
             typeof addr.lat === 'number' && typeof addr.lng === 'number'
           const gmaps = hasCoords
@@ -156,7 +180,7 @@ function SuperOrdersPage() {
           const linkCls =
             'inline-flex items-center border border-ink/20 bg-paper px-2 py-0.5 text-[0.65rem] uppercase tracking-[0.12em] text-ink hover:border-brand hover:text-brand'
           return (
-            <div className="flex gap-1.5">
+            <div className="flex items-center gap-1.5">
               <a
                 href={gmaps}
                 target="_blank"
@@ -175,6 +199,14 @@ function SuperOrdersPage() {
               >
                 Waze ↗
               </a>
+              <button
+                type="button"
+                onClick={() => setLocatingOrder(row.original)}
+                className="text-[0.65rem] uppercase tracking-[0.12em] text-ink-muted hover:text-brand"
+                aria-label="Editar ubicación"
+              >
+                Editar
+              </button>
             </div>
           )
         },
@@ -313,6 +345,13 @@ function SuperOrdersPage() {
         <QuoteDrawer
           order={quotingOrder}
           onClose={() => setQuotingOrder(null)}
+        />
+      )}
+
+      {locatingOrder && (
+        <OrderLocationDrawer
+          order={locatingOrder}
+          onClose={() => setLocatingOrder(null)}
         />
       )}
     </>

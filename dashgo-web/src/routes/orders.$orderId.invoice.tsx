@@ -88,7 +88,7 @@ function InvoicePage() {
           <div>
             <span className="eyebrow">Entrega</span>
             <p className="mt-2 text-sm text-ink">
-              {invoice.order.deliveryAddress.text}
+              {invoice.order.deliveryAddress?.text ?? 'A coordinar'}
             </p>
             <p className="mt-1 text-[0.65rem] uppercase tracking-[0.14em] text-ink-muted">
               {invoice.order.paymentMethod === 'cash' ? 'Pago en efectivo' : 'Pago digital'}

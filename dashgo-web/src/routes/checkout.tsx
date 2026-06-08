@@ -4,24 +4,19 @@ import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { checkoutSchema, type CheckoutInput } from '../lib/schemas'
 import {
-  useCreateAddress,
   useCreateOrder,
-  useMyAddresses,
   useMyCredit,
   useMySubscription,
   usePointsBalance,
   useProducts,
 } from '../lib/queries'
-import type { UserAddress } from '../lib/types'
 import { CheckoutCreditStep } from '../components/CheckoutCreditStep'
 import { useCurrentUser } from '../lib/auth'
 import { useCart, clearCart } from '../lib/cart'
-import { Button, FieldError, Input, Label, Select } from '../components/ui'
-import { MapPicker } from '../components/MapPicker'
+import { Button, Label, Select } from '../components/ui'
 import { formatCents, formatMoney } from '../lib/utils'
 import { computeQuotePreviewCents } from '../lib/tax'
 import { TOKEN_KEY } from '../lib/api'
-import { requestBrowserLocation, reverseGeocode } from '../lib/geo'
 
 
 export const Route = createFileRoute('/checkout')({
@@ -37,9 +32,7 @@ function CheckoutPage() {
   const { items: cart, totalItems } = useCart()
   const { data: products } = useProducts()
   const { data: balance } = usePointsBalance()
-  const { data: addresses } = useMyAddresses()
   const createOrder = useCreateOrder()
-  const createAddress = useCreateAddress()
 
   const cartItems = Object.entries(cart).map(([productId, quantity]) => ({
     productId,
@@ -52,63 +45,19 @@ function CheckoutPage() {
   const { data: subscription } = useMySubscription()
   const isActiveSubscriber =
     subscription?.status === 'active' || subscription?.status === 'past_due'
-  const [locating, setLocating] = useState(false)
-  const [locateError, setLocateError] = useState<string | null>(null)
 
-  // ── Saved-address picker state ───────────────────────────────────────────
-  const [selectedAddressId, setSelectedAddressId] = useState<string | null>(null)
-  const [adHocMode, setAdHocMode] = useState(false)
-  const [smartDefaultRan, setSmartDefaultRan] = useState(false)
-
-  // ── Save-this-address (ad-hoc) state ─────────────────────────────────────
-  const [saveAddress, setSaveAddress] = useState(false)
-  const [saveAddressLabel, setSaveAddressLabel] = useState('')
-  const [saveError, setSaveError] = useState<string | null>(null)
-
+  // The customer no longer provides a delivery address — the colmado captures
+  // and pins the location at delivery time. Checkout is just: cart, payment,
+  // perks, confirm.
   const form = useForm<CheckoutInput>({
     resolver: zodResolver(checkoutSchema),
     defaultValues: {
       items: cartItems,
       paymentMethod: 'cash',
-      deliveryAddress: {
-        text: '',
-        lat: undefined as number | undefined,
-        lng: undefined as number | undefined,
-      },
       usePoints: false,
       useCredit: false,
     },
   })
-
-  // Apply a saved address to the form's deliveryAddress field. line1 becomes the
-  // submitted text; the saved coords drive shipping + the submit guard.
-  const applySavedAddress = (addr: UserAddress) => {
-    setSelectedAddressId(addr.id)
-    setAdHocMode(false)
-    setSaveError(null)
-    form.setValue(
-      'deliveryAddress',
-      { text: addr.line1, lat: addr.lat, lng: addr.lng },
-      { shouldValidate: true },
-    )
-  }
-
-  // ── Smart default ──────────────────────────────────────────────────────────
-  // Runs once when the address book arrives. Pre-selects the default address
-  // (no GPS prompt on web — that's reserved for the explicit "use my location"
-  // button in ad-hoc mode). With no saved addresses, drops straight to ad-hoc.
-  useEffect(() => {
-    if (smartDefaultRan) return
-    if (addresses === undefined) return // still loading
-    setSmartDefaultRan(true)
-    if (addresses.length === 0) {
-      setAdHocMode(true)
-      return
-    }
-    const fallback = addresses.find((a) => a.isDefault) ?? addresses[0]
-    if (fallback) applySavedAddress(fallback)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [addresses, smartDefaultRan])
 
   useEffect(() => {
     form.setValue('items', cartItems)
@@ -122,10 +71,6 @@ function CheckoutPage() {
   useEffect(() => {
     form.setValue('useCredit', useCredit)
   }, [useCredit, form])
-
-  const address = form.watch('deliveryAddress')
-  const hasCoords =
-    typeof address?.lat === 'number' && typeof address?.lng === 'number'
 
   const subtotalCents = cartItems.reduce((sum, it) => {
     const p = products?.find((x) => x.id === it.productId)
@@ -150,16 +95,15 @@ function CheckoutPage() {
     ? Math.min(creditAvailable, subtotalCents)
     : 0
 
-  // Shipping + tax are now quoted by the super admin AFTER the order is placed.
-  // The subtotal (minus points) is what we show as the initial total; the real
-  // total is displayed on the order detail screen once it lands in "quoted".
+  // Shipping + tax are quoted by the super admin AFTER the order is placed.
+  // The subtotal (minus points/credit) is the initial total; the real total
+  // shows on the order detail screen once it lands in "quoted".
   const previewTotalCents = Math.max(0, subtotalCents - pointsAppliedCents - creditAppliedCents)
   const previewTotal = previewTotalCents / 100
 
   // Skip-cotización: when EVERY cart item has requiresQuote=false (e.g. water),
   // the order is auto-quoted at creation — shipping $0, tax computed now. Show
-  // the real numbers instead of the "a cotizar" placeholders. Tax base mirrors
-  // the backend (subtotal − points, shipping 0); credit reduces what you pay.
+  // the real numbers instead of the "a cotizar" placeholders.
   const allSkipQuote =
     cartItems.length > 0 &&
     cartItems.every(
@@ -173,50 +117,6 @@ function CheckoutPage() {
       }).taxCents
     : 0
   const skipQuoteTotalCents = previewTotalCents + skipQuoteTaxCents
-
-  const enterAdHoc = () => {
-    setAdHocMode(true)
-    setSaveError(null)
-    form.setValue('deliveryAddress.text', '')
-    form.setValue('deliveryAddress.lat', undefined as unknown as number)
-    form.setValue('deliveryAddress.lng', undefined as unknown as number)
-  }
-
-  const backToSaved = () => {
-    const addr =
-      addresses?.find((a) => a.id === selectedAddressId) ??
-      addresses?.find((a) => a.isDefault) ??
-      addresses?.[0]
-    if (addr) applySavedAddress(addr)
-    else setAdHocMode(false)
-  }
-
-  const handleUseMyLocation = async () => {
-    setLocateError(null)
-    setLocating(true)
-    try {
-      const coords = await requestBrowserLocation()
-      let text = `${coords.lat.toFixed(5)}, ${coords.lng.toFixed(5)}`
-      try {
-        const rev = await reverseGeocode(coords.lat, coords.lng)
-        text = rev.text
-      } catch {
-        // keep coordinate fallback
-      }
-      form.setValue('deliveryAddress', {
-        text,
-        lat: coords.lat,
-        lng: coords.lng,
-      }, { shouldValidate: true })
-    } catch (e) {
-      setLocateError(
-        (e as GeolocationPositionError)?.message ??
-          'No pudimos obtener tu ubicación',
-      )
-    } finally {
-      setLocating(false)
-    }
-  }
 
   if (totalItems === 0) {
     return (
@@ -233,35 +133,10 @@ function CheckoutPage() {
   }
 
   const onSubmit = form.handleSubmit(async (values) => {
-    // Guard: saving an ad-hoc address requires a label.
-    if (adHocMode && saveAddress && !saveAddressLabel.trim()) {
-      setSaveError('Ponle un nombre a esta dirección para guardarla')
-      return
-    }
-    setSaveError(null)
-
     const created = await createOrder.mutateAsync({ ...values, usePoints, useCredit })
-
-    // After the order succeeds, optionally persist the ad-hoc address to the
-    // user's address book. Non-blocking: the order is already placed.
-    if (adHocMode && saveAddress && saveAddressLabel.trim()) {
-      try {
-        await createAddress.mutateAsync({
-          label: saveAddressLabel.trim(),
-          line1: values.deliveryAddress.text,
-          lat: values.deliveryAddress.lat,
-          lng: values.deliveryAddress.lng,
-        })
-      } catch {
-        // non-blocking — the order completed regardless
-      }
-    }
-
     clearCart()
     router.navigate({ to: '/orders/$orderId', params: { orderId: created.id } })
   })
-
-  const savedAddresses = addresses ?? []
 
   return (
     <div className="page-rise mx-auto max-w-6xl px-6 py-12">
@@ -280,197 +155,7 @@ function CheckoutPage() {
             <section>
               <div className="mb-4 flex items-center gap-3">
                 <span className="text-[0.7rem] uppercase tracking-[0.2em] text-ink-muted">
-                  01 · Entrega
-                </span>
-                <span className="h-px flex-1 bg-ink/15" />
-              </div>
-
-              {/* Saved-address picker */}
-              {!adHocMode && savedAddresses.length > 0 && (
-                <fieldset className="flex flex-col gap-2">
-                  <legend className="sr-only">Elegí una dirección guardada</legend>
-                  {savedAddresses.map((addr) => {
-                    const selected = selectedAddressId === addr.id
-                    return (
-                      <label
-                        key={addr.id}
-                        className={`flex cursor-pointer items-start gap-3 border px-4 py-3 transition-colors ${
-                          selected
-                            ? 'border-ink bg-ink text-paper'
-                            : 'border-ink/20 bg-paper text-ink hover:border-ink/40'
-                        }`}
-                      >
-                        <input
-                          type="radio"
-                          name="savedAddress"
-                          className="sr-only"
-                          checked={selected}
-                          onChange={() => applySavedAddress(addr)}
-                        />
-                        <span className="min-w-0 flex-1">
-                          <span className="flex items-center gap-2">
-                            <span className="text-base font-medium">
-                              {addr.label}
-                            </span>
-                            {addr.isDefault && (
-                              <span
-                                className={`text-[0.6rem] uppercase tracking-[0.14em] ${
-                                  selected ? 'text-paper/70' : 'text-brand'
-                                }`}
-                              >
-                                Principal
-                              </span>
-                            )}
-                          </span>
-                          <span
-                            className={`mt-0.5 block truncate text-sm ${
-                              selected ? 'text-paper/70' : 'text-ink-muted'
-                            }`}
-                          >
-                            {addr.line1}
-                            {addr.line2 ? `, ${addr.line2}` : ''}
-                          </span>
-                        </span>
-                        <span
-                          className={`mt-1 h-4 w-4 shrink-0 rounded-full border-2 ${
-                            selected ? 'border-paper bg-paper' : 'border-ink/30'
-                          }`}
-                        />
-                      </label>
-                    )
-                  })}
-                  <div className="mt-2">
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="secondary"
-                      onClick={enterAdHoc}
-                    >
-                      Usar una dirección diferente →
-                    </Button>
-                  </div>
-                </fieldset>
-              )}
-
-              {/* Ad-hoc address form */}
-              {adHocMode && (
-                <div>
-                  {savedAddresses.length > 0 && (
-                    <div className="mb-4">
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="secondary"
-                        onClick={backToSaved}
-                      >
-                        ← Volver a mis direcciones
-                      </Button>
-                    </div>
-                  )}
-                  <Label htmlFor="addressText">Dirección de entrega</Label>
-                  <Input
-                    id="addressText"
-                    placeholder="Ej. 1234 Broadway, Washington Heights"
-                    {...form.register('deliveryAddress.text')}
-                  />
-                  <FieldError
-                    message={form.formState.errors.deliveryAddress?.text?.message}
-                  />
-
-                  <div className="mt-3 flex flex-wrap items-center gap-3">
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="secondary"
-                      onClick={handleUseMyLocation}
-                      disabled={locating}
-                    >
-                      {locating ? 'Ubicando…' : '📍 Usar mi ubicación'}
-                    </Button>
-                    {hasCoords ? (
-                      <span className="nums text-[0.65rem] uppercase tracking-[0.14em] text-ink-muted">
-                        {address!.lat!.toFixed(5)}, {address!.lng!.toFixed(5)}
-                      </span>
-                    ) : (
-                      <span className="text-[0.65rem] uppercase tracking-[0.14em] text-bad">
-                        Necesitamos tu ubicación para calcular el envío
-                      </span>
-                    )}
-                  </div>
-                  {locateError && (
-                    <p className="mt-2 border-l-2 border-bad pl-3 text-sm text-bad">
-                      {locateError}
-                    </p>
-                  )}
-                  <FieldError
-                    message={
-                      form.formState.errors.deliveryAddress?.lat?.message ??
-                      form.formState.errors.deliveryAddress?.lng?.message
-                    }
-                  />
-
-                  {/* Save-this-address affordance. The map lives ONLY here — it
-                      appears when the user opts to save this as a named address,
-                      where pinpointing the exact spot actually matters. A plain
-                      order just needs coords from "use my location". */}
-                  <div className="mt-5 border-t border-ink/10 pt-4">
-                    <label className="flex cursor-pointer items-center gap-3">
-                      <input
-                        type="checkbox"
-                        checked={saveAddress}
-                        onChange={(e) => {
-                          setSaveAddress(e.target.checked)
-                          setSaveError(null)
-                        }}
-                        className="h-4 w-4 accent-accent"
-                      />
-                      <span className="text-sm font-medium text-ink">
-                        Guardar esta dirección
-                      </span>
-                    </label>
-                    {saveAddress && (
-                      <div className="mt-4 flex flex-col gap-4">
-                        <div>
-                          <Label htmlFor="saveAddressLabel">
-                            Nombre de la dirección
-                          </Label>
-                          <Input
-                            id="saveAddressLabel"
-                            placeholder="Ej. Casa, Trabajo, Gym"
-                            value={saveAddressLabel}
-                            onChange={(e) => {
-                              setSaveAddressLabel(e.target.value)
-                              if (e.target.value.trim()) setSaveError(null)
-                            }}
-                          />
-                          {saveError && <FieldError message={saveError} />}
-                        </div>
-                        <div>
-                          <p className="mb-2 text-[0.7rem] uppercase tracking-[0.18em] text-ink-muted">
-                            Ajustá el pin en el mapa para guiar al repartidor
-                          </p>
-                          <MapPicker
-                            value={{
-                              lat: form.watch('deliveryAddress.lat'),
-                              lng: form.watch('deliveryAddress.lng'),
-                            }}
-                            onChange={({ lat, lng }) => {
-                              form.setValue('deliveryAddress.lat', lat, { shouldValidate: true })
-                              form.setValue('deliveryAddress.lng', lng, { shouldValidate: true })
-                            }}
-                          />
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
-            </section>
-
-            <section>
-              <div className="mb-4 flex items-center gap-3">
-                <span className="text-[0.7rem] uppercase tracking-[0.2em] text-ink-muted">
-                  02 · Pago
+                  01 · Pago
                 </span>
                 <span className="h-px flex-1 bg-ink/15" />
               </div>
@@ -491,7 +176,7 @@ function CheckoutPage() {
             <section>
               <div className="mb-4 flex items-center gap-3">
                 <span className="text-[0.7rem] uppercase tracking-[0.2em] text-ink-muted">
-                  04 · Puntos
+                  02 · Puntos
                 </span>
                 <span className="h-px flex-1 bg-ink/15" />
               </div>
@@ -527,6 +212,10 @@ function CheckoutPage() {
               </div>
             </section>
 
+            <p className="border-l-2 border-ink/15 pl-3 text-[0.7rem] uppercase tracking-[0.14em] text-ink-muted">
+              Coordinamos la entrega con vos — no hace falta cargar dirección.
+            </p>
+
             {createOrder.isError && (
               <p className="border-l-2 border-bad pl-3 text-sm font-medium text-bad">
                 {(createOrder.error as Error & {
@@ -539,11 +228,11 @@ function CheckoutPage() {
               type="submit"
               size="lg"
               variant="accent"
-              disabled={createOrder.isPending || !hasCoords}
+              disabled={createOrder.isPending}
             >
               {createOrder.isPending
                 ? 'Enviando…'
-                : `Confirmar pedido · ${formatMoney(previewTotal)} →`}
+                : `Confirmar pedido · ${allSkipQuote ? formatCents(skipQuoteTotalCents) : formatMoney(previewTotal)} →`}
             </Button>
           </form>
         </div>

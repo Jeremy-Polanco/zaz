@@ -86,7 +86,7 @@ function OrderCard({
               {order.customer?.fullName ?? 'Cliente'}
             </Text>
             <Text className="mt-0.5 text-[13px] text-ink-soft">
-              {order.deliveryAddress.text}
+              {order.deliveryAddress?.text ?? 'A coordinar'}
             </Text>
           </View>
           <View className="items-end gap-2">
@@ -153,10 +153,10 @@ function OrderCard({
         </View>
       </View>
 
-      {!isTerminal && (
+      {!isTerminal && order.deliveryAddress && (
         <View className="mb-3 flex-row gap-2">
           <Pressable
-            onPress={() => openMaps(order.deliveryAddress)}
+            onPress={() => openMaps(order.deliveryAddress!)}
             className="flex-1 flex-row items-center justify-center border border-ink/20 bg-paper py-2 active:bg-paper-deep"
           >
             <Text className="font-sans text-[11px] uppercase tracking-label text-ink">
@@ -164,7 +164,7 @@ function OrderCard({
             </Text>
           </Pressable>
           <Pressable
-            onPress={() => openWaze(order.deliveryAddress)}
+            onPress={() => openWaze(order.deliveryAddress!)}
             className="flex-1 flex-row items-center justify-center border border-ink/20 bg-paper py-2 active:bg-paper-deep"
           >
             <Text className="font-sans text-[11px] uppercase tracking-label text-ink">
