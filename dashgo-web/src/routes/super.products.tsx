@@ -108,6 +108,14 @@ function fromDateInput(value: string): string | null {
   return d.toISOString()
 }
 
+// Stock counts as "defined" for save validation ONLY when the operator is
+// actually tracking it. With tracking off, the product is always orderable
+// (we save the UNTRACKED_STOCK sentinel), so an empty stock field must NOT
+// block saving. Pure + exported for testability (strict-tdd preference).
+export function isStockValid(tracksStock: boolean, stockText: string): boolean {
+  return !tracksStock || stockText.trim() !== ''
+}
+
 function ProductForm({
   editing,
   onDone,
@@ -301,7 +309,7 @@ function ProductForm({
     name: state.name.trim().length >= 2,
     category: state.categoryId !== '',
     price: priceN > 0,
-    stock: state.stockText.trim() !== '',
+    stock: isStockValid(state.tracksStock, state.stockText),
     offer: !showOffer || (discountN > 0 && discountN <= 100),
   }
   const allValid = Object.values(v).every(Boolean)

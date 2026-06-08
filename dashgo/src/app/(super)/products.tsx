@@ -258,7 +258,8 @@ function ProductForm({
     name: state.name.trim().length >= 2,
     category: state.categoryId !== null,
     price: priceN > 0,
-    stock: stockN >= 0 && state.stockText.trim() !== '',
+    // Stock only required when tracking is on — "no handle inventory" must save.
+    stock: !state.tracksStock || (stockN >= 0 && state.stockText.trim() !== ''),
     offer:
       !state.offerOpen ||
       (discountN > 0 && discountN <= 100),

@@ -30,6 +30,7 @@ import {
   useUpdateInventory,
   useUploadProductImage,
 } from '../lib/queries'
+import { isStockValid } from './super.products'
 
 const mockUseUpdateProduct = vi.mocked(useUpdateProduct)
 const mockUseCreateProduct = vi.mocked(useCreateProduct)
@@ -483,6 +484,31 @@ describe('super.products — pricing mode radio group', () => {
     const callArg = mutateAsyncMock.mock.calls[0][0]
     expect(callArg).not.toHaveProperty('stripeProductId')
     expect(callArg).not.toHaveProperty('stripePriceId')
+  })
+})
+
+// ── isStockValid — save must not be blocked when stock tracking is OFF ───────────
+
+describe('super.products — isStockValid (pure function)', () => {
+  // The bug: with "Manejar stock" OFF and an empty stock field, save was
+  // blocked — the operator had to type a number then toggle back. Stock should
+  // only be required when tracking is ON.
+  it('tracking OFF + empty stock → valid (the bug: was false, blocked save)', () => {
+    expect(isStockValid(false, '')).toBe(true)
+  })
+
+  it('tracking OFF + any stock text → valid', () => {
+    expect(isStockValid(false, '10')).toBe(true)
+  })
+
+  it('tracking ON + empty stock → invalid (must enter a number)', () => {
+    expect(isStockValid(true, '')).toBe(false)
+    expect(isStockValid(true, '   ')).toBe(false)
+  })
+
+  it('tracking ON + a stock number → valid', () => {
+    expect(isStockValid(true, '0')).toBe(true)
+    expect(isStockValid(true, '25')).toBe(true)
   })
 })
 
