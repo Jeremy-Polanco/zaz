@@ -1,9 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { screen } from '@testing-library/react'
+import { screen, fireEvent } from '@testing-library/react'
 import { renderWithProviders } from '../test/test-utils'
 import type { UserAddress } from '../lib/types'
 
-vi.mock('../lib/queries', () => ({ useMyAddresses: vi.fn() }))
+vi.mock('../lib/queries', () => ({
+  useMyAddresses: vi.fn(),
+  useSetDefaultAddress: vi.fn(),
+}))
 vi.mock('../lib/api', () => ({ api: { get: vi.fn() }, TOKEN_KEY: 'dashgo.token' }))
 vi.mock('@tanstack/react-router', async (importOriginal) => {
   const original =
@@ -23,16 +26,31 @@ vi.mock('@tanstack/react-router', async (importOriginal) => {
   }
 })
 
-import { useMyAddresses } from '../lib/queries'
+import { useMyAddresses, useSetDefaultAddress } from '../lib/queries'
 import { AddressesPage } from './direcciones.index'
 
 const mockUseMyAddresses = vi.mocked(useMyAddresses)
+const mockUseSetDefaultAddress = vi.mocked(useSetDefaultAddress)
 
 function setAddresses(addresses: UserAddress[] | undefined, isPending = false) {
   mockUseMyAddresses.mockReturnValue({
     data: addresses,
     isPending,
   } as unknown as ReturnType<typeof useMyAddresses>)
+}
+
+function setSetDefault(
+  overrides: Partial<{ isPending: boolean; variables: unknown; isError: boolean }> = {},
+) {
+  const mutate = vi.fn()
+  mockUseSetDefaultAddress.mockReturnValue({
+    mutate,
+    isPending: false,
+    variables: undefined,
+    isError: false,
+    ...overrides,
+  } as unknown as ReturnType<typeof useSetDefaultAddress>)
+  return mutate
 }
 
 const sample: UserAddress[] = [
@@ -65,7 +83,10 @@ const sample: UserAddress[] = [
 ]
 
 describe('direcciones (address book list)', () => {
-  beforeEach(() => vi.clearAllMocks())
+  beforeEach(() => {
+    vi.clearAllMocks()
+    setSetDefault()
+  })
 
   it('lists each saved address and marks the default one', () => {
     setAddresses(sample)
@@ -73,6 +94,23 @@ describe('direcciones (address book list)', () => {
     expect(screen.getByText('Casa')).toBeInTheDocument()
     expect(screen.getByText('Oficina')).toBeInTheDocument()
     expect(screen.getByText('Por defecto')).toBeInTheDocument()
+  })
+
+  it('offers a one-tap toggle on non-default addresses and sets the default on click', () => {
+    setAddresses(sample)
+    const mutate = setSetDefault()
+    renderWithProviders(<AddressesPage />)
+
+    // The default ('Casa', a-1) shows no toggle; only 'Oficina' (a-2) does.
+    expect(
+      screen.queryByRole('button', { name: /Hacer "Casa" principal/i }),
+    ).not.toBeInTheDocument()
+
+    const toggle = screen.getByRole('button', {
+      name: /Hacer "Oficina" principal/i,
+    })
+    fireEvent.click(toggle)
+    expect(mutate).toHaveBeenCalledWith('a-2')
   })
 
   it('shows the empty state with a create CTA when there are none', () => {

@@ -14,6 +14,7 @@ import { useUpdateMe } from '../lib/queries'
 import { requestBrowserLocation, reverseGeocode } from '../lib/geo'
 import { Button, UdashMark } from '../components/ui'
 import { NetworkBanner } from '../components/NetworkBanner'
+import { AddressSwitcher } from '../components/AddressSwitcher'
 
 const LOCKOUT_ALLOWLIST = new Set<string>(['/credit/pay', '/login'])
 
@@ -343,6 +344,7 @@ function NavUser() {
 
   return (
     <div className="flex items-center gap-4 md:gap-6">
+      {user.role === 'client' && <AddressSwitcher />}
       <RoleNav role={user.role} />
       <div className="hidden h-8 w-px bg-ink/15 md:block" />
       <div className="hidden flex-col text-right sm:flex">
