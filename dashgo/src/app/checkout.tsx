@@ -9,6 +9,7 @@ import {
   useCurrentUser,
   useMyCredit,
   useMySubscription,
+  useOrders,
   usePointsBalance,
   useProducts,
 } from '../lib/queries'
@@ -27,6 +28,13 @@ export default function CheckoutScreen() {
   const { data: subscription } = useMySubscription()
   const createOrder = useCreateOrder()
   const confirmOrder = useConfirmNonStripeOrder()
+  const { data: orders } = useOrders()
+
+  // One order at a time: block while a previous order is still in progress
+  // (anything not delivered/cancelled). Mirrors the server guard.
+  const activeOrder = orders?.find(
+    (o) => o.status !== 'delivered' && o.status !== 'cancelled',
+  )
 
   const isActiveSubscriber =
     subscription?.status === 'active' || subscription?.status === 'past_due'
@@ -185,6 +193,36 @@ export default function CheckoutScreen() {
           <View className="mt-8 w-full max-w-[240px]">
             <Button variant="ink" size="lg" onPress={() => router.back()}>
               Volver →
+            </Button>
+          </View>
+        </View>
+      </SafeAreaView>
+    )
+  }
+
+  if (activeOrder) {
+    return (
+      <SafeAreaView className="flex-1 bg-paper">
+        <View className="flex-1 items-center justify-center px-6">
+          <Eyebrow>Pedido en curso</Eyebrow>
+          <Text className="mt-4 font-sans-semibold text-3xl text-ink">
+            Ya tenés uno en camino.
+          </Text>
+          <Text className="mt-2 text-center text-[14px] text-ink-soft">
+            Esperá a que se complete para hacer otro. Te avisamos cuando llegue.
+          </Text>
+          <View className="mt-8 w-full max-w-[240px]">
+            <Button
+              variant="ink"
+              size="lg"
+              onPress={() =>
+                router.replace({
+                  pathname: '/orders/[orderId]',
+                  params: { orderId: activeOrder.id },
+                })
+              }
+            >
+              Ver mi pedido →
             </Button>
           </View>
         </View>

@@ -8,6 +8,7 @@ import {
   useCreateOrder,
   useMyCredit,
   useMySubscription,
+  useOrders,
   usePointsBalance,
   useProducts,
 } from '../lib/queries'
@@ -35,6 +36,13 @@ function CheckoutPage() {
   const { data: balance } = usePointsBalance()
   const createOrder = useCreateOrder()
   const confirmOrder = useConfirmNonStripeOrder()
+  const { data: orders } = useOrders()
+
+  // One order at a time: block checkout while a previous order is still in
+  // progress (anything not delivered/cancelled). Mirrors the server guard.
+  const activeOrder = orders?.find(
+    (o) => o.status !== 'delivered' && o.status !== 'cancelled',
+  )
 
   const cartItems = Object.entries(cart).map(([productId, quantity]) => ({
     productId,
@@ -129,6 +137,23 @@ function CheckoutPage() {
         </p>
         <Link to="/catalog">
           <Button variant="accent">Ver catálogo →</Button>
+        </Link>
+      </div>
+    )
+  }
+
+  if (activeOrder) {
+    return (
+      <div className="mx-auto flex max-w-md flex-col items-center gap-5 px-6 py-20 text-center">
+        <span className="eyebrow">Pedido en curso</span>
+        <p className="display text-4xl leading-tight">
+          Ya tenés un pedido en camino.
+        </p>
+        <p className="text-ink-muted">
+          Esperá a que se complete para hacer otro. Te avisamos cuando llegue.
+        </p>
+        <Link to="/orders/$orderId" params={{ orderId: activeOrder.id }}>
+          <Button variant="accent">Ver mi pedido →</Button>
         </Link>
       </div>
     )

@@ -8,7 +8,7 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import * as Sentry from '@sentry/node';
-import { DataSource, FindOptionsWhere, In, Repository } from 'typeorm';
+import { DataSource, FindOptionsWhere, In, Not, Repository } from 'typeorm';
 import { Order, OrderItem, Product } from '../../entities';
 import { OrderStatus, PaymentMethod, UserRole } from '../../entities/enums';
 import { AuthenticatedUser } from '../../common/types/authenticated-user';
@@ -93,6 +93,25 @@ export class OrdersService {
   async create(user: AuthenticatedUser, dto: CreateOrderDto) {
     if (user.role !== UserRole.CLIENT && user.role !== UserRole.PROMOTER) {
       throw new ForbiddenException('Solo clientes pueden crear pedidos');
+    }
+
+    // One active order at a time (clients only): block a new order while the
+    // customer still has one in progress (anything not delivered/cancelled).
+    // Stops the duplicate/repeated orders the colmado was seeing.
+    if (user.role === UserRole.CLIENT) {
+      const activeCount = await this.orders.count({
+        where: {
+          customerId: user.id,
+          status: Not(In([OrderStatus.DELIVERED, OrderStatus.CANCELLED])),
+        },
+      });
+      if (activeCount > 0) {
+        throw new ConflictException({
+          code: 'ACTIVE_ORDER_EXISTS',
+          message:
+            'Ya tenés un pedido en curso. Esperá a que se complete antes de hacer otro.',
+        });
+      }
     }
 
     // T4.2: Global overdue gate — runs BEFORE any products fetch or TX

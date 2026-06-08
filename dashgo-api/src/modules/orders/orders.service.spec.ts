@@ -256,6 +256,51 @@ describe('OrdersService', () => {
       expect(productsRepo.find).not.toHaveBeenCalled();
     });
 
+    it('throws 409 ACTIVE_ORDER_EXISTS when the client already has an order in progress', async () => {
+      ordersRepo.count.mockResolvedValueOnce(1);
+
+      await expect(
+        service.create(fakeUser(UserRole.CLIENT), dto),
+      ).rejects.toMatchObject({ response: { code: 'ACTIVE_ORDER_EXISTS' } });
+
+      // Blocks BEFORE the overdue gate and any product fetch / TX.
+      expect(creditService.assertNotOverdue).not.toHaveBeenCalled();
+      expect(productsRepo.find).not.toHaveBeenCalled();
+    });
+
+    it('allows a CLIENT order when no active order exists (count = 0)', async () => {
+      ordersRepo.count.mockResolvedValueOnce(0);
+      productsRepo.find.mockResolvedValue([fakeProduct()]);
+
+      const savedOrder = fakeOrder({});
+      const orderWithItems = fakeOrder({ customer: fakeUser() as never, items: [] });
+      (dataSource.transaction as jest.Mock).mockImplementation(
+        async (cb: (mgr: EntityManager) => Promise<unknown>) => {
+          const orderRepo = makeRepoMock<Order>();
+          const itemRepo = makeRepoMock<OrderItem>();
+          orderRepo.create.mockImplementation((d) => ({ ...d, id: 'order-1' }) as Order);
+          orderRepo.save.mockResolvedValue(savedOrder);
+          orderRepo.update.mockResolvedValue({ affected: 1 } as never);
+          itemRepo.save.mockResolvedValue({} as never);
+          itemRepo.create.mockImplementation((d) => d as OrderItem);
+          const mgr = {
+            getRepository: (entity: unknown) => {
+              if (entity === Order) return orderRepo;
+              if (entity === OrderItem) return itemRepo;
+              return makeRepoMock();
+            },
+          };
+          return cb(mgr as unknown as EntityManager);
+        },
+      );
+      ordersRepo.findOne.mockResolvedValue(orderWithItems);
+
+      await expect(
+        service.create(fakeUser(UserRole.CLIENT), dto),
+      ).resolves.toBeDefined();
+      expect(productsRepo.find).toHaveBeenCalled();
+    });
+
     it('applies credit for CLIENT with useCredit=true', async () => {
       productsRepo.find.mockResolvedValue([fakeProduct()]);
 
