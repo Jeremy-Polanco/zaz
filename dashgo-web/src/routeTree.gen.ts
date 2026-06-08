@@ -36,6 +36,7 @@ import { Route as PromoterCommissionsRouteImport } from './routes/promoter.commi
 import { Route as OrdersOrderIdRouteImport } from './routes/orders.$orderId'
 import { Route as CreditPayRouteImport } from './routes/credit.pay'
 import { Route as SuperPromotersIndexRouteImport } from './routes/super.promoters.index'
+import { Route as SuperCreditIndexRouteImport } from './routes/super.credit.index'
 import { Route as SuperPromotersIdRouteImport } from './routes/super.promoters.$id'
 import { Route as SuperCreditUserIdRouteImport } from './routes/super.credit.$userId'
 import { Route as OrdersOrderIdInvoiceRouteImport } from './routes/orders.$orderId.invoice'
@@ -175,6 +176,11 @@ const SuperPromotersIndexRoute = SuperPromotersIndexRouteImport.update({
   path: '/',
   getParentRoute: () => SuperPromotersRoute,
 } as any)
+const SuperCreditIndexRoute = SuperCreditIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => SuperCreditRoute,
+} as any)
 const SuperPromotersIdRoute = SuperPromotersIdRouteImport.update({
   id: '/$id',
   path: '/$id',
@@ -221,6 +227,7 @@ export interface FileRoutesByFullPath {
   '/orders/$orderId/invoice': typeof OrdersOrderIdInvoiceRoute
   '/super/credit/$userId': typeof SuperCreditUserIdRoute
   '/super/promoters/$id': typeof SuperPromotersIdRoute
+  '/super/credit/': typeof SuperCreditIndexRoute
   '/super/promoters/': typeof SuperPromotersIndexRoute
 }
 export interface FileRoutesByTo {
@@ -241,7 +248,6 @@ export interface FileRoutesByTo {
   '/promoter/payouts': typeof PromoterPayoutsRoute
   '/r/$code': typeof RCodeRoute
   '/super/categories': typeof SuperCategoriesRoute
-  '/super/credit': typeof SuperCreditRouteWithChildren
   '/super/orders': typeof SuperOrdersRoute
   '/super/products': typeof SuperProductsRoute
   '/super/rentals': typeof SuperRentalsRoute
@@ -251,6 +257,7 @@ export interface FileRoutesByTo {
   '/orders/$orderId/invoice': typeof OrdersOrderIdInvoiceRoute
   '/super/credit/$userId': typeof SuperCreditUserIdRoute
   '/super/promoters/$id': typeof SuperPromotersIdRoute
+  '/super/credit': typeof SuperCreditIndexRoute
   '/super/promoters': typeof SuperPromotersIndexRoute
 }
 export interface FileRoutesById {
@@ -284,6 +291,7 @@ export interface FileRoutesById {
   '/orders/$orderId/invoice': typeof OrdersOrderIdInvoiceRoute
   '/super/credit/$userId': typeof SuperCreditUserIdRoute
   '/super/promoters/$id': typeof SuperPromotersIdRoute
+  '/super/credit/': typeof SuperCreditIndexRoute
   '/super/promoters/': typeof SuperPromotersIndexRoute
 }
 export interface FileRouteTypes {
@@ -318,6 +326,7 @@ export interface FileRouteTypes {
     | '/orders/$orderId/invoice'
     | '/super/credit/$userId'
     | '/super/promoters/$id'
+    | '/super/credit/'
     | '/super/promoters/'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -338,7 +347,6 @@ export interface FileRouteTypes {
     | '/promoter/payouts'
     | '/r/$code'
     | '/super/categories'
-    | '/super/credit'
     | '/super/orders'
     | '/super/products'
     | '/super/rentals'
@@ -348,6 +356,7 @@ export interface FileRouteTypes {
     | '/orders/$orderId/invoice'
     | '/super/credit/$userId'
     | '/super/promoters/$id'
+    | '/super/credit'
     | '/super/promoters'
   id:
     | '__root__'
@@ -380,6 +389,7 @@ export interface FileRouteTypes {
     | '/orders/$orderId/invoice'
     | '/super/credit/$userId'
     | '/super/promoters/$id'
+    | '/super/credit/'
     | '/super/promoters/'
   fileRoutesById: FileRoutesById
 }
@@ -600,6 +610,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SuperPromotersIndexRouteImport
       parentRoute: typeof SuperPromotersRoute
     }
+    '/super/credit/': {
+      id: '/super/credit/'
+      path: '/'
+      fullPath: '/super/credit/'
+      preLoaderRoute: typeof SuperCreditIndexRouteImport
+      parentRoute: typeof SuperCreditRoute
+    }
     '/super/promoters/$id': {
       id: '/super/promoters/$id'
       path: '/$id'
@@ -662,10 +679,12 @@ const OrdersRouteWithChildren =
 
 interface SuperCreditRouteChildren {
   SuperCreditUserIdRoute: typeof SuperCreditUserIdRoute
+  SuperCreditIndexRoute: typeof SuperCreditIndexRoute
 }
 
 const SuperCreditRouteChildren: SuperCreditRouteChildren = {
   SuperCreditUserIdRoute: SuperCreditUserIdRoute,
+  SuperCreditIndexRoute: SuperCreditIndexRoute,
 }
 
 const SuperCreditRouteWithChildren = SuperCreditRoute._addFileChildren(
