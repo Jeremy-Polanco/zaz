@@ -153,6 +153,16 @@ export class OrdersService {
       }
     }
 
+    // Skip-cotización: an order whose items are ALL flagged requiresQuote=false
+    // (e.g. water — standardized bulk delivery) is auto-quoted at creation (see
+    // the TX below). If ANY item requires a quote, the order goes through the
+    // normal manual cotización flow (PENDING_QUOTE → setQuote → QUOTED).
+    const skipQuote =
+      dto.items.length > 0 &&
+      dto.items.every(
+        (input) => byId.get(input.productId)?.requiresQuote === false,
+      );
+
     const now = new Date();
     let subtotalCents = 0;
     const builtItems = dto.items.map((input) => {
@@ -214,22 +224,30 @@ export class OrdersService {
       }
       // Silently skip useCredit for PROMOTER / SUPER_ADMIN_DELIVERY (no error)
 
-      // Shipping is quoted manually by the super admin AFTER the order is
-      // placed. We start with shipping=0 / tax=0 / total=(subtotal - points).
-      // The admin will transition PENDING_QUOTE → QUOTED via setQuote().
+      // Cotización. By default, shipping is quoted manually by the super admin
+      // AFTER the order is placed: we start with shipping=0 / tax=0 /
+      // total=(subtotal - points) and the admin transitions PENDING_QUOTE →
+      // QUOTED via setQuote().
+      //
+      // When `skipQuote` is true (every item has requiresQuote=false), the
+      // order skips that step entirely: shipping stays $0 (included), we compute
+      // tax now — exactly as setQuote would — and land the order directly in
+      // QUOTED so the customer can pay immediately.
       const taxableCents = Math.max(0, subtotalCents - pointsRedeemedCents);
-      const totalCents = taxableCents; // tax = 0 until quoted
+      const taxCents = skipQuote ? Math.round(taxableCents * TAX_RATE) : 0;
+      const totalCents = taxableCents + taxCents;
 
       const order = orderRepo.create({
         customerId: user.id,
-        status: OrderStatus.PENDING_QUOTE,
+        status: skipQuote ? OrderStatus.QUOTED : OrderStatus.PENDING_QUOTE,
         deliveryAddress: dto.deliveryAddress,
         subtotal: (subtotalCents / 100).toFixed(2),
         pointsRedeemed: (pointsRedeemedCents / 100).toFixed(2),
         shipping: '0.00',
-        tax: '0.00',
+        tax: (taxCents / 100).toFixed(2),
         taxRate: TAX_RATE.toFixed(5),
         totalAmount: (totalCents / 100).toFixed(2),
+        quotedAt: skipQuote ? now : null,
         paymentMethod: dto.paymentMethod,
         stripePaymentIntentId: null,
         paidAt: null,

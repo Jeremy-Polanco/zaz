@@ -47,6 +47,7 @@ type FormState = {
   promoterCommissionText: string
   pointsText: string
   categoryId: string
+  requiresQuote: boolean
   offerLabel: string
   offerDiscountText: string
   offerStartsAt: string
@@ -80,6 +81,7 @@ const emptyForm: FormState = {
   promoterCommissionText: '0.00',
   pointsText: '1.00',
   categoryId: '',
+  requiresQuote: true,
   offerLabel: '',
   offerDiscountText: '',
   offerStartsAt: '',
@@ -149,6 +151,7 @@ function ProductForm({
       promoterCommissionText: editing.promoterCommissionPct,
       pointsText: editing.pointsPct,
       categoryId: editing.categoryId ?? '',
+      requiresQuote: editing.requiresQuote ?? true,
       offerLabel: editing.offerLabel ?? '',
       offerDiscountText: editing.offerDiscountPct ?? '',
       offerStartsAt: toDateInput(editing.offerStartsAt),
@@ -235,6 +238,7 @@ function ProductForm({
       promoterCommissionPct: commission,
       pointsPct: points,
       categoryId: state.categoryId ? state.categoryId : null,
+      requiresQuote: state.requiresQuote,
       offerLabel: showOffer && state.offerLabel.trim() ? state.offerLabel.trim() : null,
       offerDiscountPct: showOffer && offerDiscount != null ? offerDiscount : null,
       offerStartsAt: showOffer ? fromDateInput(state.offerStartsAt) : null,
@@ -919,6 +923,17 @@ function ProductForm({
                     }
                     on={state.isAvailable}
                     onChange={(v) => setState((s) => ({ ...s, isAvailable: v }))}
+                  />
+
+                  <ToggleRow
+                    label="Requiere cotización"
+                    sub={
+                      state.requiresQuote
+                        ? 'El pedido pasa por cotización de envío antes de pagar.'
+                        : 'El cliente pide y paga directo, sin cotización (ej: agua). Envío $0.'
+                    }
+                    on={state.requiresQuote}
+                    onChange={(v) => setState((s) => ({ ...s, requiresQuote: v }))}
                   />
 
                   <hr className="border-ink/10" />

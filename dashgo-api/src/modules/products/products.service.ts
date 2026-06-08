@@ -96,6 +96,7 @@ export class ProductsService implements OnModuleInit {
           : '0',
       pointsPct: dto.pointsPct !== undefined ? String(dto.pointsPct) : '1.00',
       categoryId: dto.categoryId ?? null,
+      requiresQuote: dto.requiresQuote ?? true,
       offerLabel: dto.offerLabel ?? null,
       offerDiscountPct:
         dto.offerDiscountPct != null ? String(dto.offerDiscountPct) : null,
@@ -152,6 +153,7 @@ export class ProductsService implements OnModuleInit {
       patch.promoterCommissionPct = String(dto.promoterCommissionPct);
     if (dto.pointsPct !== undefined) patch.pointsPct = String(dto.pointsPct);
     if (dto.categoryId !== undefined) patch.categoryId = dto.categoryId;
+    if (dto.requiresQuote !== undefined) patch.requiresQuote = dto.requiresQuote;
     if (dto.offerLabel !== undefined) patch.offerLabel = dto.offerLabel;
     if (dto.offerDiscountPct !== undefined) {
       patch.offerDiscountPct =

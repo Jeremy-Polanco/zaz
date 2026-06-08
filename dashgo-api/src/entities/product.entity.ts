@@ -33,6 +33,17 @@ export class Product {
   @Column({ type: 'int', default: 0 })
   stock!: number;
 
+  /**
+   * When TRUE (default), orders containing this product require a manual
+   * cotización: they start in PENDING_QUOTE and the super admin sets shipping.
+   *
+   * When FALSE (e.g. water — standardized bulk delivery), the product skips
+   * cotización. An order whose items are ALL `requiresQuote = false` is
+   * auto-quoted at creation (shipping = $0) and lands directly in QUOTED.
+   */
+  @Column({ name: 'requires_quote', type: 'boolean', default: true })
+  requiresQuote!: boolean;
+
   @Column({ name: 'image_bytes', type: 'bytea', nullable: true, select: false })
   imageBytes!: Buffer | null;
 

@@ -77,6 +77,8 @@ export interface Product {
   pointsPct: string
   categoryId: string | null
   category?: Category | null
+  /** When false, the product skips the manual cotización flow (direct order). Defaults true. */
+  requiresQuote?: boolean
   offerLabel: string | null
   offerDiscountPct: string | null
   offerStartsAt: string | null
