@@ -815,12 +815,26 @@ export function useMyAddresses() {
   })
 }
 
+// Address coordinates are capped at 7 decimal places by the API
+// (CreateAddressDto: @IsNumber({ maxDecimalPlaces: 7 })). Browser geolocation
+// and Leaflet emit full-precision floats, so round before persisting — otherwise
+// the API rejects with "lat must be a number…". 7 decimals ≈ 1 cm, plenty precise.
+function roundCoord(n: number): number {
+  return Number(n.toFixed(7))
+}
+
 /** POST /me/addresses — create a saved address (first one auto-defaults). */
 export function useCreateAddress() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: async (input: CreateAddressInput) =>
-      (await api.post<UserAddress>('/me/addresses', input)).data,
+      (
+        await api.post<UserAddress>('/me/addresses', {
+          ...input,
+          lat: roundCoord(input.lat),
+          lng: roundCoord(input.lng),
+        })
+      ).data,
     onSuccess: () => qc.invalidateQueries({ queryKey: MY_ADDRESSES_KEY }),
   })
 }
@@ -830,7 +844,13 @@ export function useUpdateAddress() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: async ({ id, ...patch }: UpdateAddressInput & { id: string }) =>
-      (await api.patch<UserAddress>(`/me/addresses/${id}`, patch)).data,
+      (
+        await api.patch<UserAddress>(`/me/addresses/${id}`, {
+          ...patch,
+          ...(patch.lat !== undefined ? { lat: roundCoord(patch.lat) } : {}),
+          ...(patch.lng !== undefined ? { lng: roundCoord(patch.lng) } : {}),
+        })
+      ).data,
     onSuccess: () => qc.invalidateQueries({ queryKey: MY_ADDRESSES_KEY }),
   })
 }
