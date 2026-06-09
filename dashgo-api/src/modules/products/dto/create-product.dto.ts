@@ -97,4 +97,13 @@ export class CreateProductDto {
   @IsOptional()
   @IsString()
   stripePriceId?: string | null;
+
+  // Bebedero maintenance flags
+  @IsOptional()
+  @IsBoolean()
+  requiresMaintenance?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  isMaintenanceService?: boolean;
 }

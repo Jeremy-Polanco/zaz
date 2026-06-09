@@ -6,6 +6,7 @@ import { useCategories, useCurrentUser, useOrders, useProducts } from '../../lib
 import { categorySelection } from '../../lib/category-selection'
 import { CategoryCard } from '../../components/CategoryCard'
 import { BoltIcon, Eyebrow, Hairline, PlaceholderImage, SpeedBanner } from '../../components/ui'
+import { MaintenanceBanner } from '../../components/MaintenanceBanner'
 import { formatMoney } from '../../lib/format'
 
 export default function HomeTab() {
@@ -69,6 +70,9 @@ export default function HomeTab() {
         <View className="mt-6">
           <SpeedBanner estimate="30–45 min" zone={neighborhood} />
         </View>
+
+        {/* Bebedero maintenance countdown / alert */}
+        <MaintenanceBanner />
 
         {/* Categories */}
         <View className="mt-7 flex-col gap-3">

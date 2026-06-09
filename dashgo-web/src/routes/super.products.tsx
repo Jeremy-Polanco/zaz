@@ -48,6 +48,8 @@ type FormState = {
   pointsText: string
   categoryId: string
   requiresQuote: boolean
+  requiresMaintenance: boolean
+  isMaintenanceService: boolean
   offerLabel: string
   offerDiscountText: string
   offerStartsAt: string
@@ -82,6 +84,8 @@ const emptyForm: FormState = {
   pointsText: '1.00',
   categoryId: '',
   requiresQuote: true,
+  requiresMaintenance: false,
+  isMaintenanceService: false,
   offerLabel: '',
   offerDiscountText: '',
   offerStartsAt: '',
@@ -160,6 +164,8 @@ function ProductForm({
       pointsText: editing.pointsPct,
       categoryId: editing.categoryId ?? '',
       requiresQuote: editing.requiresQuote ?? true,
+      requiresMaintenance: editing.requiresMaintenance ?? false,
+      isMaintenanceService: editing.isMaintenanceService ?? false,
       offerLabel: editing.offerLabel ?? '',
       offerDiscountText: editing.offerDiscountPct ?? '',
       offerStartsAt: toDateInput(editing.offerStartsAt),
@@ -247,6 +253,8 @@ function ProductForm({
       pointsPct: points,
       categoryId: state.categoryId ? state.categoryId : null,
       requiresQuote: state.requiresQuote,
+      requiresMaintenance: state.requiresMaintenance,
+      isMaintenanceService: state.isMaintenanceService,
       offerLabel: showOffer && state.offerLabel.trim() ? state.offerLabel.trim() : null,
       offerDiscountPct: showOffer && offerDiscount != null ? offerDiscount : null,
       offerStartsAt: showOffer ? fromDateInput(state.offerStartsAt) : null,
@@ -942,6 +950,32 @@ function ProductForm({
                     }
                     on={state.requiresQuote}
                     onChange={(v) => setState((s) => ({ ...s, requiresQuote: v }))}
+                  />
+
+                  <ToggleRow
+                    label="Bebedero (requiere mantenimiento)"
+                    sub={
+                      state.requiresMaintenance
+                        ? 'Al activarse el alquiler arranca el contador de mantenimiento de 30 días.'
+                        : 'Este producto no lleva contador de mantenimiento.'
+                    }
+                    on={state.requiresMaintenance}
+                    onChange={(v) =>
+                      setState((s) => ({ ...s, requiresMaintenance: v }))
+                    }
+                  />
+
+                  <ToggleRow
+                    label="Servicio de mantenimiento"
+                    sub={
+                      state.isMaintenanceService
+                        ? 'Entregar una orden con este producto resetea el contador del cliente.'
+                        : 'Marcá esto solo en el producto «Mantenimiento Bebedero».'
+                    }
+                    on={state.isMaintenanceService}
+                    onChange={(v) =>
+                      setState((s) => ({ ...s, isMaintenanceService: v }))
+                    }
                   />
 
                   <hr className="border-ink/10" />

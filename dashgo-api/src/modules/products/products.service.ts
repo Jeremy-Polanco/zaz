@@ -107,6 +107,8 @@ export class ProductsService implements OnModuleInit {
       lateFeeCents: dto.lateFeeCents ?? 0,
       stripeProductId: dto.stripeProductId ?? null,
       stripePriceId: dto.stripePriceId ?? null,
+      requiresMaintenance: dto.requiresMaintenance ?? false,
+      isMaintenanceService: dto.isMaintenanceService ?? false,
     });
     const saved = await this.products.save(product);
     const full = await this.findOne(saved.id);
@@ -179,6 +181,10 @@ export class ProductsService implements OnModuleInit {
     // validation is meaningless if these get overwritten by auto-create.
     if (dto.stripeProductId !== undefined) patch.stripeProductId = dto.stripeProductId;
     if (dto.stripePriceId !== undefined) patch.stripePriceId = dto.stripePriceId;
+    if (dto.requiresMaintenance !== undefined)
+      patch.requiresMaintenance = dto.requiresMaintenance;
+    if (dto.isMaintenanceService !== undefined)
+      patch.isMaintenanceService = dto.isMaintenanceService;
     const adminProvidedStripeIds =
       typeof dto.stripeProductId === 'string' &&
       dto.stripeProductId.length > 0 &&

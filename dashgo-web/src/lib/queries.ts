@@ -79,6 +79,27 @@ export function useCreateOrder() {
   })
 }
 
+/**
+ * Client: create a bebedero maintenance order — a single maintenance-service
+ * item, paid in cash. Delivering this order resets the maintenance countdown.
+ */
+export function useRequestMaintenance() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (productId: string) => {
+      const { data } = await api.post<Order>('/orders', {
+        items: [{ productId, quantity: 1 }],
+        paymentMethod: 'cash',
+      })
+      return data
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['orders'] })
+      qc.invalidateQueries({ queryKey: ['me', 'rentals'] })
+    },
+  })
+}
+
 export function usePointsBalance() {
   return useQuery<PointsBalance>({
     queryKey: ['points', 'balance'],
@@ -151,16 +172,19 @@ export function useSetOrderDeliveryAddress() {
       text,
       lat,
       lng,
+      building,
     }: {
       id: string
       text: string
       lat: number
       lng: number
+      building?: string
     }) => {
       const { data } = await api.patch<Order>(`/orders/${id}/delivery-address`, {
         text,
         lat: roundCoord(lat),
         lng: roundCoord(lng),
+        building,
       })
       return data
     },
@@ -247,6 +271,8 @@ export type CreateProductInput = {
   lateFeeCents?: number
   stripeProductId?: string | null
   stripePriceId?: string | null
+  requiresMaintenance?: boolean
+  isMaintenanceService?: boolean
 }
 
 export function useCreateProduct() {

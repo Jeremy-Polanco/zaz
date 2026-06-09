@@ -33,6 +33,10 @@ const BLOCKING_STATUSES = [
 /** Default page size for listAdmin. */
 const DEFAULT_PAGE_SIZE = 25;
 
+/** Bebedero maintenance interval — maintenance is due every 30 days. */
+const MAINTENANCE_INTERVAL_DAYS = 30;
+const MAINTENANCE_INTERVAL_MS = MAINTENANCE_INTERVAL_DAYS * 24 * 60 * 60 * 1000;
+
 export interface CreateForOrderParams {
   userId: string;
   productId: string;
@@ -301,7 +305,45 @@ export class RentalsService implements OnModuleInit {
       : null;
     rental.currentPeriodEnd = periodEnd ? new Date(periodEnd * 1000) : null;
 
+    // Start the bebedero maintenance countdown for products that require it.
+    // Day 0 = activation; the next maintenance is due 30 days out.
+    const product = await this.products.findOne({
+      where: { id: rental.productId },
+    });
+    if (product?.requiresMaintenance) {
+      rental.nextMaintenanceAt = new Date(Date.now() + MAINTENANCE_INTERVAL_MS);
+    }
+
     return this.rentals.save(rental);
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // resetMaintenanceForUser
+  //
+  // Called by OrdersService.markDelivered when a delivered order contained a
+  // maintenance-service product. Resets the 30-day maintenance countdown on
+  // every ACTIVE rental of this user that tracks maintenance (next_maintenance_at
+  // is non-null). Returns the number of rentals reset.
+  // ─────────────────────────────────────────────────────────────────────────
+
+  async resetMaintenanceForUser(userId: string): Promise<number> {
+    const active = await this.rentals.find({
+      where: { userId, status: RentalStatus.ACTIVE },
+    });
+    const toReset = active.filter((r) => r.nextMaintenanceAt !== null);
+    if (toReset.length === 0) return 0;
+
+    const now = new Date();
+    const next = new Date(now.getTime() + MAINTENANCE_INTERVAL_MS);
+    for (const r of toReset) {
+      r.lastMaintenanceAt = now;
+      r.nextMaintenanceAt = next;
+      await this.rentals.save(r);
+    }
+    this.logger.log(
+      `resetMaintenanceForUser: reset maintenance on ${toReset.length} rental(s) for user ${userId}`,
+    );
+    return toReset.length;
   }
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -848,6 +890,8 @@ export class RentalsService implements OnModuleInit {
     dto.status = r.status;
     dto.nextChargeAt = r.currentPeriodEnd;
     dto.activatedAt = r.activatedAt;
+    dto.nextMaintenanceAt = r.nextMaintenanceAt;
+    dto.lastMaintenanceAt = r.lastMaintenanceAt;
     return dto;
   }
 

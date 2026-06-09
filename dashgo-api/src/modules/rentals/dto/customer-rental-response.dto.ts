@@ -12,4 +12,8 @@ export class CustomerRentalResponseDto {
   /** Next billing date — equal to currentPeriodEnd from the Stripe Subscription. */
   nextChargeAt!: Date | null;
   activatedAt!: Date | null;
+  /** When the next bebedero maintenance is due. NULL if this rental doesn't track maintenance. */
+  nextMaintenanceAt!: Date | null;
+  /** When the last maintenance was completed. NULL until the first one. */
+  lastMaintenanceAt!: Date | null;
 }

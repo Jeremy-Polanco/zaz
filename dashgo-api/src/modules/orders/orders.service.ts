@@ -419,6 +419,7 @@ export class OrdersService {
         text: address.text,
         lat: address.lat,
         lng: address.lng,
+        building: address.building ?? null,
       },
     });
     return this.findOne(id, user);
@@ -624,6 +625,7 @@ export class OrdersService {
   }
 
   private async markDelivered(orderId: string) {
+    let customerId: string | null = null;
     await this.dataSource.transaction(async (tx) => {
       const orderRepo = tx.getRepository(Order);
 
@@ -634,6 +636,7 @@ export class OrdersService {
         lock: { mode: 'pessimistic_write' },
       });
       if (!order) throw new NotFoundException('Pedido no encontrado');
+      customerId = order.customerId;
 
       // Capture the Stripe authorization for digital orders that haven't been
       // paid yet. If capture fails the transaction aborts — order stays in
@@ -671,6 +674,30 @@ export class OrdersService {
       );
       Sentry.captureException(err, {
         tags: { module: 'orders', phase: 'rental-activation' },
+        extra: { orderId },
+      });
+    }
+
+    // Reset the bebedero maintenance countdown when this delivery fulfilled a
+    // maintenance-service order. Best-effort: must NOT fail the delivery.
+    try {
+      const orderItems =
+        (await this.items.find({
+          where: { orderId },
+          relations: ['product'],
+        })) ?? [];
+      const isMaintenanceOrder = orderItems.some(
+        (item) => (item.product as Product | undefined)?.isMaintenanceService,
+      );
+      if (customerId && isMaintenanceOrder) {
+        await this.rentalsService.resetMaintenanceForUser(customerId);
+      }
+    } catch (err) {
+      this.logger.error(
+        `markDelivered: maintenance reset failed for order ${orderId}: ${(err as Error).message}`,
+      );
+      Sentry.captureException(err, {
+        tags: { module: 'orders', phase: 'maintenance-reset' },
         extra: { orderId },
       });
     }

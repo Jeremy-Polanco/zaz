@@ -15,6 +15,8 @@ export interface GeoAddress {
   text: string
   lat?: number
   lng?: number
+  /** Building / house / unit number to pinpoint the exact drop-off. */
+  building?: string | null
 }
 
 export interface AuthUser {
@@ -92,6 +94,10 @@ export interface Product {
   lateFeeCents?: number
   stripeProductId?: string | null
   stripePriceId?: string | null
+  /** Marks a rentable dispenser that needs periodic (30-day) maintenance. */
+  requiresMaintenance?: boolean
+  /** Marks the dedicated "Mantenimiento Bebedero" service product. */
+  isMaintenanceService?: boolean
 }
 
 export interface OrderItem {
@@ -433,6 +439,7 @@ export type UserAddress = {
   label: string
   line1: string
   line2: string | null
+  building: string | null
   lat: number
   lng: number
   instructions: string | null
@@ -445,6 +452,7 @@ export type CreateAddressInput = {
   label: string
   line1: string
   line2?: string
+  building?: string
   lat: number
   lng: number
   instructions?: string
@@ -463,4 +471,8 @@ export interface Rental {
   status: RentalStatus
   nextChargeAt: string | null
   activatedAt: string | null
+  /** When the next bebedero maintenance is due. NULL if this rental doesn't track maintenance. */
+  nextMaintenanceAt: string | null
+  /** When the last maintenance was completed. NULL until the first one. */
+  lastMaintenanceAt: string | null
 }

@@ -14,6 +14,7 @@ import { useUpdateMe } from '../lib/queries'
 import { requestBrowserLocation, reverseGeocode } from '../lib/geo'
 import { Button, UdashMark } from '../components/ui'
 import { NetworkBanner } from '../components/NetworkBanner'
+import { MaintenanceBanner } from '../components/MaintenanceBanner'
 
 const LOCKOUT_ALLOWLIST = new Set<string>(['/credit/pay', '/login'])
 
@@ -413,6 +414,7 @@ export const Route = createRootRoute({
 function RootLayout() {
   useBootstrapLocation()
   useCreditLockoutGate()
+  const { data: user } = useCurrentUser()
   return (
     <div className="flex min-h-full flex-col">
       <NetworkBanner />
@@ -430,6 +432,7 @@ function RootLayout() {
           <NavUser />
         </div>
       </header>
+      {user?.role === 'client' && <MaintenanceBanner />}
       <main className="flex-1">
         <Outlet />
       </main>

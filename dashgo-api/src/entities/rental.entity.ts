@@ -118,6 +118,20 @@ export class Rental {
   @Column({ name: 'last_late_fee_at', type: 'timestamptz', nullable: true })
   lastLateFeeAt!: Date | null;
 
+  /**
+   * When the next bebedero maintenance is due (countdown anchor).
+   * The 30-day clock = next_maintenance_at − now. NULL means this rental does
+   * not track maintenance (its product has requires_maintenance = false).
+   * Set at activation (activated_at + 30d) and reset to now + 30d each time a
+   * maintenance-service order is delivered for this user.
+   */
+  @Column({ name: 'next_maintenance_at', type: 'timestamptz', nullable: true })
+  nextMaintenanceAt!: Date | null;
+
+  /** Timestamp of the most recent completed maintenance (NULL until the first one). */
+  @Column({ name: 'last_maintenance_at', type: 'timestamptz', nullable: true })
+  lastMaintenanceAt!: Date | null;
+
   @CreateDateColumn({ name: 'created_at' })
   createdAt!: Date;
 

@@ -135,6 +135,26 @@ export class Product {
   @Column({ name: 'stripe_price_id', type: 'varchar', length: 64, nullable: true })
   stripePriceId!: string | null;
 
+  /**
+   * Bebedero maintenance flags.
+   *
+   * `requiresMaintenance = true` marks a rentable dispenser (bebedero) that
+   * needs periodic (30-day) maintenance. When such a rental is activated, the
+   * rental's next_maintenance_at countdown is started.
+   *
+   * `isMaintenanceService = true` marks THE dedicated "Mantenimiento Bebedero"
+   * service product. When an order containing this product is delivered, the
+   * customer's active rentals get their maintenance countdown reset.
+   *
+   * The two flags are independent: a bebedero is `requiresMaintenance`; the
+   * service that fulfills it is `isMaintenanceService`.
+   */
+  @Column({ name: 'requires_maintenance', type: 'boolean', default: false })
+  requiresMaintenance!: boolean;
+
+  @Column({ name: 'is_maintenance_service', type: 'boolean', default: false })
+  isMaintenanceService!: boolean;
+
   @CreateDateColumn({ name: 'created_at' })
   createdAt!: Date;
 }
