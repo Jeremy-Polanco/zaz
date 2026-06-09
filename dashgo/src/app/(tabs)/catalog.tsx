@@ -140,13 +140,13 @@ function ProductCard({ product, qty }: { product: Product; qty: number }) {
     <View
       className={`flex-1 border border-ink/15 bg-paper ${unavailable ? 'opacity-60' : ''}`}
     >
-      {/* Full-bleed image */}
-      <View className="relative aspect-square w-full">
+      {/* Contained image on a uniform white canvas */}
+      <View className="relative aspect-square w-full bg-white">
         {hasImage ? (
           <Image
             source={{ uri: productImageUrl(product.id, product.imageUpdatedAt) }}
-            style={{ width: '100%', height: '100%' }}
-            contentFit="cover"
+            style={{ width: '100%', height: '100%', padding: 12 }}
+            contentFit="contain"
           />
         ) : (
           <View
@@ -242,12 +242,12 @@ function ProductRow({ product, qty }: { product: Product; qty: number }) {
     <View
       className={`flex-row items-start gap-4 py-5 ${unavailable ? 'opacity-60' : ''}`}
     >
-      <View className="relative h-20 w-20 border border-ink/15 bg-paper-deep">
+      <View className="relative h-20 w-20 border border-ink/15 bg-white">
         {hasImage ? (
           <Image
             source={{ uri: productImageUrl(product.id, product.imageUpdatedAt) }}
-            style={{ width: '100%', height: '100%' }}
-            contentFit="cover"
+            style={{ width: '100%', height: '100%', padding: 6 }}
+            contentFit="contain"
           />
         ) : (
           <View className="flex-1 items-center justify-center">
