@@ -8,8 +8,9 @@ import { MigrationInterface, QueryRunner } from 'typeorm';
  *    the admin can set a price later. Skip-quote + untracked stock so the
  *    one-tap order never blocks. Idempotent: only inserts when no
  *    maintenance-service product exists yet.
- * 2. Flags every rental-mode product as requiring maintenance — in this
- *    catalog, rentals ARE bebederos. New activations start the 30-day timer.
+ * 2. Flags bebedero rental products (matched by name) as requiring
+ *    maintenance. Other rentals (e.g. bombas de agua) do NOT carry this
+ *    business rule. New activations start the 30-day timer.
  * 3. Backfills the timer for already-active rentals: next maintenance is due
  *    30 days after activation. Rentals activated more than 30 days ago become
  *    overdue immediately (the alert + button show right away).
@@ -37,7 +38,10 @@ export class SeedBebederoMaintenance1785000000000 implements MigrationInterface 
       UPDATE "products"
          SET "requires_maintenance" = true
        WHERE "pricing_mode" = 'rental'
-         AND "requires_maintenance" = false;
+         AND "requires_maintenance" = false
+         AND ("name" ILIKE '%bebedero%'
+           OR "name" ILIKE '%dispensador%'
+           OR "name" ILIKE '%dispenser%');
     `);
 
     await queryRunner.query(`
