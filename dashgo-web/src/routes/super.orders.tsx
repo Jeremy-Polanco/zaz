@@ -1,7 +1,6 @@
 import { createFileRoute, isRedirect, Link, redirect } from '@tanstack/react-router'
 import { useMemo, useState } from 'react'
 import { DataTable } from '../components/DataTable'
-import { StatusBadge } from '../components/StatusBadge'
 import { QuoteDrawer } from '../components/QuoteDrawer'
 import { OrderLocationDrawer } from '../components/OrderLocationDrawer'
 import { Button, SectionHeading } from '../components/ui'
@@ -229,11 +228,6 @@ function SuperOrdersPage() {
             <SuscriptorBadge wasSubscriber={row.original.wasSubscriberAtQuote ?? false} />
           </div>
         ),
-      },
-      {
-        header: 'Estado',
-        accessorKey: 'status',
-        cell: ({ getValue }) => <StatusBadge status={getValue<OrderStatus>()} />,
       },
       {
         header: 'Acciones',

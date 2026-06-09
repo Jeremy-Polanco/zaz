@@ -15,7 +15,7 @@ import { SymbolView } from 'expo-symbols'
 import { useOrders, useUpdateOrderStatus } from '../../lib/queries'
 import { formatDate, formatMoney } from '../../lib/format'
 import type { GeoAddress, Order, OrderStatus } from '../../lib/types'
-import { Button, Eyebrow, Hairline, KpiCard, StatusBadge } from '../../components/ui'
+import { Button, Eyebrow, Hairline, KpiCard } from '../../components/ui'
 import { SuscriptorBadge } from '../../components/SuscriptorBadge'
 import { QuoteBottomSheet } from '../../components/QuoteBottomSheet'
 
@@ -90,7 +90,6 @@ function OrderCard({
             </Text>
           </View>
           <View className="items-end gap-2">
-            <StatusBadge status={order.status} />
             <View className="flex-row items-center gap-1 opacity-70">
               <Text className="font-sans-medium text-[10px] uppercase tracking-label text-ink-muted">
                 Detalle
