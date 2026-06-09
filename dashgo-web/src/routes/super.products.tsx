@@ -347,7 +347,7 @@ function ProductForm({
         style={{ boxShadow: '-12px 0 40px rgba(26, 21, 48, 0.18)' }}
       >
         {/* Header */}
-        <div className="flex items-start justify-between gap-4 border-b border-ink/10 px-8 py-5">
+        <div className="flex items-start justify-between gap-4 border-b border-ink/10 px-5 py-5 sm:px-8">
           <div className="flex min-w-0 flex-col gap-2">
             <div className="flex items-center gap-2">
               <span className="eyebrow text-brand">
@@ -404,11 +404,11 @@ function ProductForm({
         </div>
 
         {/* Body: form left + preview right */}
-        <div className="grid min-h-0 flex-1 grid-cols-[1fr_320px] overflow-hidden">
+        <div className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden lg:grid-cols-[1fr_320px]">
           {/* Left: form */}
-          <div className="overflow-auto border-r border-ink/10">
+          <div className="overflow-auto border-ink/10 lg:border-r">
             {/* Tabs */}
-            <div className="sticky top-0 z-10 flex gap-6 border-b border-ink/10 bg-paper px-8">
+            <div className="sticky top-0 z-10 flex gap-6 overflow-x-auto border-b border-ink/10 bg-paper px-5 sm:px-8">
               {tabs.map((t) => {
                 const sel = tab === t.id
                 return (
@@ -416,7 +416,7 @@ function ProductForm({
                     key={t.id}
                     type="button"
                     onClick={() => setTab(t.id)}
-                    className={`flex items-baseline gap-2 py-3.5 ${
+                    className={`flex shrink-0 items-baseline gap-2 whitespace-nowrap py-3.5 ${
                       sel
                         ? 'border-b-2 border-accent'
                         : 'border-b-2 border-transparent'
@@ -441,7 +441,7 @@ function ProductForm({
               })}
             </div>
 
-            <div className="px-8 py-7">
+            <div className="px-5 py-7 sm:px-8">
               {tab === 'identidad' && (
                 <div className="flex flex-col gap-5">
                   <SectionHeader
@@ -1029,8 +1029,8 @@ function ProductForm({
             </div>
           </div>
 
-          {/* Right: live preview + summary + checklist */}
-          <div className="flex flex-col gap-4 overflow-auto bg-paper-deep p-6">
+          {/* Right: live preview + summary + checklist (desktop only) */}
+          <div className="hidden flex-col gap-4 overflow-auto bg-paper-deep p-6 lg:flex">
             <span className="eyebrow">Vista previa</span>
 
             {/* Mobile catalog row preview */}
@@ -1134,7 +1134,7 @@ function ProductForm({
         </div>
 
         {/* Sticky footer */}
-        <div className="flex items-center justify-between gap-4 border-t border-ink/10 bg-paper px-8 py-4">
+        <div className="flex items-center justify-between gap-4 border-t border-ink/10 bg-paper px-5 py-4 sm:px-8">
           <span className="text-[0.7rem] text-ink-muted">
             {allValid ? (
               <>
