@@ -72,6 +72,7 @@ export class AddressesService {
     if (dto.label !== undefined) addr.label = dto.label;
     if (dto.line1 !== undefined) addr.line1 = dto.line1;
     if (dto.line2 !== undefined) addr.line2 = dto.line2 ?? null;
+    if (dto.building !== undefined) addr.building = dto.building ?? null;
     if (dto.lat !== undefined) addr.lat = dto.lat;
     if (dto.lng !== undefined) addr.lng = dto.lng;
     if (dto.instructions !== undefined) addr.instructions = dto.instructions ?? null;

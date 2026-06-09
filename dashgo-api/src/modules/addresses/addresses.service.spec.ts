@@ -51,6 +51,7 @@ function fakeAddress(overrides: Partial<UserAddress> = {}): UserAddress {
     label: 'Casa',
     line1: 'Calle 1',
     line2: null,
+    building: null,
     lat: 18.47,
     lng: -69.9,
     instructions: null,

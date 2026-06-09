@@ -92,6 +92,7 @@ const testAddress: UserAddress = {
   label: 'Casa',
   line1: 'Av. 27 de Febrero 123',
   line2: null,
+  building: null,
   lat: 18.47,
   lng: -69.9,
   instructions: 'Timbre 3',

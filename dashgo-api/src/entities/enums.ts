@@ -27,4 +27,6 @@ export interface GeoAddress {
   text: string;
   lat?: number | null;
   lng?: number | null;
+  /** Building / house / unit number to pinpoint the exact drop-off. */
+  building?: string | null;
 }

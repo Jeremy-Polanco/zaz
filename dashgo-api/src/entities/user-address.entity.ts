@@ -39,6 +39,10 @@ export class UserAddress {
   @Column({ type: 'varchar', length: 255, nullable: true })
   line2!: string | null;
 
+  /** Building / house / unit number — pinpoints the exact drop-off for future trips. */
+  @Column({ type: 'varchar', length: 120, nullable: true })
+  building!: string | null;
+
   @Column({ type: 'numeric', precision: 10, scale: 7, transformer: numericTransformer })
   lat!: number;
 

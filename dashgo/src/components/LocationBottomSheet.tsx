@@ -34,6 +34,9 @@ export function LocationBottomSheet({
   const createForUser = useCreateAddressForUser(order.customerId)
 
   const [text, setText] = useState(order.deliveryAddress?.text ?? '')
+  const [building, setBuilding] = useState(
+    order.deliveryAddress?.building ?? '',
+  )
   const [pin, setPin] = useState<{ lat?: number; lng?: number }>({
     lat: order.deliveryAddress?.lat ?? undefined,
     lng: order.deliveryAddress?.lng ?? undefined,
@@ -85,6 +88,7 @@ export function LocationBottomSheet({
         text: text.trim(),
         lat: pin.lat,
         lng: pin.lng,
+        building: building.trim() || undefined,
       })
       if (saveToUser && saveLabel.trim() && order.customerId) {
         try {
@@ -93,6 +97,7 @@ export function LocationBottomSheet({
             line1: text.trim() || saveLabel.trim(),
             lat: pin.lat,
             lng: pin.lng,
+            building: building.trim() || undefined,
           })
         } catch {
           // Non-blocking: the order location was set regardless.
@@ -145,6 +150,17 @@ export function LocationBottomSheet({
               placeholderTextColor="#6B6488"
               value={text}
               onChangeText={setText}
+            />
+          </View>
+
+          <View className="mt-4">
+            <FieldLabel>Edificio / N° de casa</FieldLabel>
+            <TextInput
+              className="h-11 border-b border-ink/25 pb-1 font-sans text-[16px] text-ink"
+              placeholder="Ej. Edif. 4, Casa 12, Apto 3B"
+              placeholderTextColor="#6B6488"
+              value={building}
+              onChangeText={setBuilding}
             />
           </View>
 

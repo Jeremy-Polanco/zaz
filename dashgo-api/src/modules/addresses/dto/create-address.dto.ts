@@ -22,6 +22,11 @@ export class CreateAddressDto {
   @MaxLength(255)
   line2?: string;
 
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  building?: string;
+
   @IsNumber({ maxDecimalPlaces: 7 })
   @Min(-90)
   @Max(90)

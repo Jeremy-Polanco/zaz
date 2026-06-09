@@ -11,6 +11,7 @@ import {
   IsPositive,
   IsString,
   IsUUID,
+  MaxLength,
   ValidateNested,
 } from 'class-validator';
 import { PaymentMethod } from '../../../entities/enums';
@@ -24,6 +25,11 @@ export class DeliveryAddressDto {
 
   @IsLongitude()
   lng!: number;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  building?: string;
 }
 
 export class OrderItemInput {

@@ -25,6 +25,9 @@ export function OrderLocationDrawer({
   const createForUser = useCreateAddressForUser(order.customerId)
 
   const [text, setText] = useState(order.deliveryAddress?.text ?? '')
+  const [building, setBuilding] = useState(
+    order.deliveryAddress?.building ?? '',
+  )
   const [pin, setPin] = useState<{ lat?: number; lng?: number }>({
     lat: order.deliveryAddress?.lat ?? undefined,
     lng: order.deliveryAddress?.lng ?? undefined,
@@ -68,6 +71,7 @@ export function OrderLocationDrawer({
 
   const pickSaved = (a: UserAddress) => {
     setText(a.line1)
+    setBuilding(a.building ?? '')
     setPin({ lat: a.lat, lng: a.lng })
     setError(null)
   }
@@ -88,6 +92,7 @@ export function OrderLocationDrawer({
         text: text.trim(),
         lat: pin.lat,
         lng: pin.lng,
+        building: building.trim() || undefined,
       })
       if (saveToUser && saveLabel.trim() && order.customerId) {
         try {
@@ -96,6 +101,7 @@ export function OrderLocationDrawer({
             line1: text.trim() || saveLabel.trim(),
             lat: pin.lat,
             lng: pin.lng,
+            building: building.trim() || undefined,
           })
         } catch {
           // Non-blocking: the order location was set regardless.
@@ -126,7 +132,11 @@ export function OrderLocationDrawer({
           </h2>
           <p className="mt-2 text-sm text-ink-soft">
             {order.deliveryAddress?.text
-              ? `Actual: ${order.deliveryAddress.text}`
+              ? `Actual: ${order.deliveryAddress.text}${
+                  order.deliveryAddress.building
+                    ? ` · Edif./casa ${order.deliveryAddress.building}`
+                    : ''
+                }`
               : 'Sin ubicación aún — fijala al llegar.'}
           </p>
         </header>
@@ -146,6 +156,16 @@ export function OrderLocationDrawer({
             value={text}
             onChange={(e) => setText(e.target.value)}
           />
+
+          <div className="mt-3">
+            <Label htmlFor="loc-building">Edificio / N° de casa</Label>
+            <Input
+              id="loc-building"
+              placeholder="Ej. Edif. 4, Casa 12, Apto 3B"
+              value={building}
+              onChange={(e) => setBuilding(e.target.value)}
+            />
+          </div>
 
           <div className="mt-3 flex flex-wrap items-center gap-3">
             <Button
