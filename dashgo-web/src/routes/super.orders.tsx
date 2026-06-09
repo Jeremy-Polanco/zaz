@@ -233,6 +233,14 @@ function SuperOrdersPage() {
         header: 'Acciones',
         id: 'actions',
         cell: ({ row }) => {
+          // Skip-cotización orders (every item requiresQuote=false, e.g. water)
+          // have no shipping to quote — they auto-quote at creation. Hide the
+          // cotización UI for them.
+          const isSkipQuote =
+            (row.original.items?.length ?? 0) > 0 &&
+            row.original.items.every(
+              (it) => it.product?.requiresQuote === false,
+            )
           if (row.original.status === 'delivered') {
             return (
               <Link
@@ -261,13 +269,15 @@ function SuperOrdersPage() {
                 <span className="text-[0.65rem] uppercase tracking-[0.14em] text-ink-muted">
                   Esperando al cliente
                 </span>
-                <button
-                  type="button"
-                  onClick={() => setQuotingOrder(row.original)}
-                  className="text-[0.65rem] uppercase tracking-[0.12em] text-brand hover:underline"
-                >
-                  Ajustar cotización
-                </button>
+                {!isSkipQuote && (
+                  <button
+                    type="button"
+                    onClick={() => setQuotingOrder(row.original)}
+                    className="text-[0.65rem] uppercase tracking-[0.12em] text-brand hover:underline"
+                  >
+                    Ajustar cotización
+                  </button>
+                )}
               </div>
             )
           }

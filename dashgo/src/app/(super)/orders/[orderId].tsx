@@ -130,6 +130,11 @@ export default function SuperOrderDetailScreen() {
     order.status === 'quoted' ||
     order.status === 'pending_validation' ||
     order.status === 'confirmed_by_colmado'
+  // Skip-cotización orders (every item requiresQuote=false, e.g. water) have no
+  // shipping to quote — they auto-quote at creation. Hide the cotización UI.
+  const isSkipQuote =
+    (order.items?.length ?? 0) > 0 &&
+    order.items.every((it) => it.product?.requiresQuote === false)
 
   const handleAdvance = (status: OrderStatus) => {
     updateStatus.mutate(
@@ -257,6 +262,11 @@ export default function SuperOrderDetailScreen() {
           <Text className="text-[15px] leading-[22px] text-ink">
             {order.deliveryAddress?.text ?? 'A coordinar'}
           </Text>
+          {order.deliveryAddress?.building ? (
+            <Text className="mt-1 font-sans-semibold text-[13px] text-ink">
+              Edificio / casa: {order.deliveryAddress.building}
+            </Text>
+          ) : null}
           {order.deliveryAddress &&
             typeof order.deliveryAddress.lat === 'number' &&
             typeof order.deliveryAddress.lng === 'number' && (
@@ -458,11 +468,13 @@ export default function SuperOrderDetailScreen() {
                 Esperando autorización del cliente
               </Text>
               <View className="flex-row gap-2">
-                <View className="flex-1">
-                  <Button variant="outline" onPress={() => setQuoting(true)}>
-                    Ajustar cotización
-                  </Button>
-                </View>
+                {!isSkipQuote && (
+                  <View className="flex-1">
+                    <Button variant="outline" onPress={() => setQuoting(true)}>
+                      Ajustar cotización
+                    </Button>
+                  </View>
+                )}
                 {canCancel && (
                   <Button
                     variant="ghost"
