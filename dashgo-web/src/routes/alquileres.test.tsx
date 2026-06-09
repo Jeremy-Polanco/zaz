@@ -40,6 +40,8 @@ const sample: Rental[] = [
     status: 'active',
     nextChargeAt: '2026-07-01T00:00:00.000Z',
     activatedAt: '2026-06-01T00:00:00.000Z',
+    nextMaintenanceAt: null,
+    lastMaintenanceAt: null,
   },
   {
     id: 'r-2',
@@ -50,6 +52,8 @@ const sample: Rental[] = [
     status: 'pending_setup',
     nextChargeAt: null,
     activatedAt: null,
+    nextMaintenanceAt: null,
+    lastMaintenanceAt: null,
   },
 ]
 
