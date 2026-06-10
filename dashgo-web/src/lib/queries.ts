@@ -273,6 +273,7 @@ export type CreateProductInput = {
   stripePriceId?: string | null
   requiresMaintenance?: boolean
   isMaintenanceService?: boolean
+  displayOrder?: number
 }
 
 export function useCreateProduct() {
@@ -328,6 +329,51 @@ export function useUploadProductImage() {
       return data
     },
     onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['products'] })
+    },
+  })
+}
+
+export type ReorderProductsInput = {
+  items: { id: string; displayOrder: number }[]
+}
+
+export function useReorderProducts() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (input: ReorderProductsInput) => {
+      const { data } = await api.patch<{ updated: number }>(
+        '/products/reorder',
+        input,
+      )
+      return data
+    },
+    // Optimistic: el drag pinta el nuevo orden al instante en TODAS las vistas
+    // de productos (catálogo + admin); si el server falla, se revierte.
+    onMutate: async (input) => {
+      await qc.cancelQueries({ queryKey: ['products'] })
+      const previous = qc.getQueriesData<Product[]>({ queryKey: ['products'] })
+      const orderById = new Map(input.items.map((i) => [i.id, i.displayOrder]))
+      qc.setQueriesData<Product[]>({ queryKey: ['products'] }, (old) =>
+        old
+          ? old
+              .map((p) => ({
+                ...p,
+                displayOrder: orderById.get(p.id) ?? p.displayOrder,
+              }))
+              .sort(
+                (a, b) =>
+                  a.displayOrder - b.displayOrder ||
+                  (b.createdAt ?? '').localeCompare(a.createdAt ?? ''),
+              )
+          : old,
+      )
+      return { previous }
+    },
+    onError: (_err, _input, ctx) => {
+      for (const [key, data] of ctx?.previous ?? []) qc.setQueryData(key, data)
+    },
+    onSettled: () => {
       qc.invalidateQueries({ queryKey: ['products'] })
     },
   })

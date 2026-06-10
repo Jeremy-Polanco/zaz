@@ -98,6 +98,8 @@ export interface Product {
   requiresMaintenance?: boolean
   /** Marks the dedicated "Mantenimiento Bebedero" service product. */
   isMaintenanceService?: boolean
+  /** Catalog position — lower number appears first. */
+  displayOrder: number
 }
 
 export interface OrderItem {

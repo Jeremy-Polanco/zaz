@@ -14,6 +14,7 @@ vi.mock('../lib/queries', () => ({
   useDeleteProduct: vi.fn(),
   useUpdateInventory: vi.fn(),
   useUploadProductImage: vi.fn(),
+  useReorderProducts: vi.fn(),
 }))
 
 vi.mock('../lib/api', () => ({
@@ -30,7 +31,11 @@ import {
   useUpdateInventory,
   useUploadProductImage,
 } from '../lib/queries'
-import { isStockValid } from './super.products'
+import {
+  computeReorderItems,
+  isStockValid,
+  parseDisplayOrder,
+} from './super.products'
 
 const mockUseUpdateProduct = vi.mocked(useUpdateProduct)
 const mockUseCreateProduct = vi.mocked(useCreateProduct)
@@ -96,6 +101,7 @@ function makeSinglePaymentProduct(overrides: Partial<Product> = {}): Product {
     lateFeeCents: 0,
     stripeProductId: null,
     stripePriceId: null,
+    displayOrder: 0,
     ...overrides,
   }
 }
@@ -509,6 +515,67 @@ describe('super.products — isStockValid (pure function)', () => {
   it('tracking ON + a stock number → valid', () => {
     expect(isStockValid(true, '0')).toBe(true)
     expect(isStockValid(true, '25')).toBe(true)
+  })
+})
+
+// ── Catalog ordering — parseDisplayOrder (pure function) ─────────────────────────
+
+describe('super.products — parseDisplayOrder (pure function)', () => {
+  it('empty string counts as 0 (server default)', () => {
+    expect(parseDisplayOrder('')).toBe(0)
+    expect(parseDisplayOrder('   ')).toBe(0)
+  })
+
+  it('parses a valid non-negative integer', () => {
+    expect(parseDisplayOrder('0')).toBe(0)
+    expect(parseDisplayOrder('7')).toBe(7)
+    expect(parseDisplayOrder('42')).toBe(42)
+  })
+
+  it('rejects negatives and non-numeric text with null', () => {
+    expect(parseDisplayOrder('-1')).toBeNull()
+    expect(parseDisplayOrder('abc')).toBeNull()
+  })
+})
+
+// ── Catalog ordering — computeReorderItems (pure function) ───────────────────────
+
+describe('super.products — computeReorderItems (pure function)', () => {
+  const list = [{ id: 'a' }, { id: 'b' }, { id: 'c' }, { id: 'd' }]
+
+  it('moving a card down reindexes the whole list (index = displayOrder)', () => {
+    // a soltada sobre c → b, c, a, d
+    expect(computeReorderItems(list, 'a', 'c')).toEqual([
+      { id: 'b', displayOrder: 0 },
+      { id: 'c', displayOrder: 1 },
+      { id: 'a', displayOrder: 2 },
+      { id: 'd', displayOrder: 3 },
+    ])
+  })
+
+  it('moving a card up reindexes the whole list', () => {
+    // d soltada sobre b → a, d, b, c
+    expect(computeReorderItems(list, 'd', 'b')).toEqual([
+      { id: 'a', displayOrder: 0 },
+      { id: 'd', displayOrder: 1 },
+      { id: 'b', displayOrder: 2 },
+      { id: 'c', displayOrder: 3 },
+    ])
+  })
+
+  it('returns null when dropped on itself (no-op, no mutation fired)', () => {
+    expect(computeReorderItems(list, 'b', 'b')).toBeNull()
+  })
+
+  it('returns null when either id is not in the list', () => {
+    expect(computeReorderItems(list, 'ghost', 'b')).toBeNull()
+    expect(computeReorderItems(list, 'a', 'ghost')).toBeNull()
+  })
+
+  it('does not mutate the input array', () => {
+    const before = list.map((p) => p.id)
+    computeReorderItems(list, 'a', 'd')
+    expect(list.map((p) => p.id)).toEqual(before)
   })
 })
 

@@ -108,4 +108,10 @@ export class UpdateProductDto {
   @IsOptional()
   @IsBoolean()
   isMaintenanceService?: boolean;
+
+  // Posición en el catálogo (menor número aparece primero)
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  displayOrder?: number;
 }

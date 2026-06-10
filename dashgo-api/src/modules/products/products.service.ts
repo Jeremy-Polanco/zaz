@@ -20,6 +20,7 @@ import { AuthenticatedUser } from '../../common/types/authenticated-user';
 import { CreateProductDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
 import { UpdateInventoryDto } from './dto/update-inventory.dto';
+import { ReorderProductsDto } from './dto/reorder-products.dto';
 import { decorateProduct, ProductWithPricing } from './pricing';
 
 type StripeClient = InstanceType<typeof Stripe>;
@@ -42,18 +43,20 @@ export class ProductsService implements OnModuleInit {
   async onModuleInit(): Promise<void> {
     const secret = this.config.get<string>('STRIPE_SECRET_KEY');
     if (!secret) {
-      this.logger.warn('STRIPE_SECRET_KEY missing — Stripe rental sync disabled');
+      this.logger.warn(
+        'STRIPE_SECRET_KEY missing — Stripe rental sync disabled',
+      );
       return;
     }
     this.stripe = new Stripe(secret);
   }
 
-  /** Catálogo público — productos disponibles. */
+  /** Catálogo público — productos disponibles, en el orden definido por el admin. */
   async findAllPublic(): Promise<ProductForClient[]> {
     const rows = await this.products.find({
       where: { isAvailable: true },
       relations: ['category'],
-      order: { createdAt: 'DESC' },
+      order: { displayOrder: 'ASC', createdAt: 'DESC' },
     });
     const now = new Date();
     return rows.map((p) => this.toClient(p, now));
@@ -64,7 +67,7 @@ export class ProductsService implements OnModuleInit {
     this.assertSuperAdmin(user);
     const rows = await this.products.find({
       relations: ['category'],
-      order: { createdAt: 'DESC' },
+      order: { displayOrder: 'ASC', createdAt: 'DESC' },
     });
     const now = new Date();
     return rows.map((p) => this.toClient(p, now));
@@ -109,6 +112,7 @@ export class ProductsService implements OnModuleInit {
       stripePriceId: dto.stripePriceId ?? null,
       requiresMaintenance: dto.requiresMaintenance ?? false,
       isMaintenanceService: dto.isMaintenanceService ?? false,
+      displayOrder: dto.displayOrder ?? 0,
     });
     const saved = await this.products.save(product);
     const full = await this.findOne(saved.id);
@@ -155,7 +159,8 @@ export class ProductsService implements OnModuleInit {
       patch.promoterCommissionPct = String(dto.promoterCommissionPct);
     if (dto.pointsPct !== undefined) patch.pointsPct = String(dto.pointsPct);
     if (dto.categoryId !== undefined) patch.categoryId = dto.categoryId;
-    if (dto.requiresQuote !== undefined) patch.requiresQuote = dto.requiresQuote;
+    if (dto.requiresQuote !== undefined)
+      patch.requiresQuote = dto.requiresQuote;
     if (dto.offerLabel !== undefined) patch.offerLabel = dto.offerLabel;
     if (dto.offerDiscountPct !== undefined) {
       patch.offerDiscountPct =
@@ -172,19 +177,23 @@ export class ProductsService implements OnModuleInit {
 
     // Rental pricing fields
     if (dto.pricingMode !== undefined) patch.pricingMode = dto.pricingMode;
-    if (dto.monthlyRentCents !== undefined) patch.monthlyRentCents = dto.monthlyRentCents;
+    if (dto.monthlyRentCents !== undefined)
+      patch.monthlyRentCents = dto.monthlyRentCents;
     if (dto.lateFeeCents !== undefined) patch.lateFeeCents = dto.lateFeeCents;
     // Admin-provided Stripe IDs override any auto-sync. When both arrive in the
     // same request, persist them as-is and skip the Stripe API call entirely —
     // operators sometimes create Stripe Products/Prices out-of-band (live mode,
     // CI fixtures, manual mirroring) and the form's `prod_*` / `price_*` Zod
     // validation is meaningless if these get overwritten by auto-create.
-    if (dto.stripeProductId !== undefined) patch.stripeProductId = dto.stripeProductId;
-    if (dto.stripePriceId !== undefined) patch.stripePriceId = dto.stripePriceId;
+    if (dto.stripeProductId !== undefined)
+      patch.stripeProductId = dto.stripeProductId;
+    if (dto.stripePriceId !== undefined)
+      patch.stripePriceId = dto.stripePriceId;
     if (dto.requiresMaintenance !== undefined)
       patch.requiresMaintenance = dto.requiresMaintenance;
     if (dto.isMaintenanceService !== undefined)
       patch.isMaintenanceService = dto.isMaintenanceService;
+    if (dto.displayOrder !== undefined) patch.displayOrder = dto.displayOrder;
     const adminProvidedStripeIds =
       typeof dto.stripeProductId === 'string' &&
       dto.stripeProductId.length > 0 &&
@@ -206,7 +215,7 @@ export class ProductsService implements OnModuleInit {
       const workingProduct: Product = {
         ...p,
         ...patch,
-      } as Product;
+      };
       const stripeIds = await this.syncStripeRentalPrice(workingProduct);
       patch.stripeProductId = stripeIds.stripeProductId;
       patch.stripePriceId = stripeIds.stripePriceId;
@@ -217,6 +226,37 @@ export class ProductsService implements OnModuleInit {
     }
     const full = await this.findOne(id);
     return this.toClient(full);
+  }
+
+  /**
+   * Reordena el catálogo completo en una sola transacción (drag & drop del
+   * panel admin). Recibe el orden final de TODOS los productos para que ningún
+   * `display_order` quede inconsistente entre llamadas individuales.
+   */
+  async reorder(
+    user: AuthenticatedUser,
+    dto: ReorderProductsDto,
+  ): Promise<{ updated: number }> {
+    this.assertSuperAdmin(user);
+    const ids = dto.items.map((i) => i.id);
+    if (new Set(ids).size !== ids.length) {
+      throw new BadRequestException('IDs duplicados en el reordenamiento');
+    }
+    const found = await this.products.find({
+      where: { id: In(ids) },
+      select: ['id'],
+    });
+    if (found.length !== ids.length) {
+      throw new NotFoundException('Producto no encontrado');
+    }
+    await this.products.manager.transaction(async (em) => {
+      for (const item of dto.items) {
+        await em.update(Product, item.id, {
+          displayOrder: item.displayOrder,
+        });
+      }
+    });
+    return { updated: dto.items.length };
   }
 
   async remove(
@@ -397,7 +437,9 @@ export class ProductsService implements OnModuleInit {
 
   private assertSuperAdmin(user: AuthenticatedUser) {
     if (user.role !== UserRole.SUPER_ADMIN_DELIVERY) {
-      throw new ForbiddenException('Solo super admin puede gestionar productos');
+      throw new ForbiddenException(
+        'Solo super admin puede gestionar productos',
+      );
     }
   }
 

@@ -52,6 +52,7 @@ type FormState = {
   isMaintenanceService: boolean
   promoterCommissionText: string
   pointsText: string
+  displayOrderText: string
   offerLabel: string
   offerDiscountText: string
   offerStartsAt: string
@@ -63,6 +64,7 @@ type FormState = {
     stockText?: string
     promoterCommissionText?: string
     pointsText?: string
+    displayOrderText?: string
     offerDiscountText?: string
     offerStartsAt?: string
     offerEndsAt?: string
@@ -82,6 +84,7 @@ const emptyForm: FormState = {
   isMaintenanceService: false,
   promoterCommissionText: '0',
   pointsText: '1',
+  displayOrderText: '0',
   offerLabel: '',
   offerDiscountText: '',
   offerStartsAt: '',
@@ -136,6 +139,7 @@ function ProductForm({
       isMaintenanceService: editing.isMaintenanceService ?? false,
       promoterCommissionText: editing.promoterCommissionPct ?? '0',
       pointsText: editing.pointsPct ?? '1',
+      displayOrderText: String(editing.displayOrder ?? 0),
       offerLabel: editing.offerLabel ?? '',
       offerDiscountText: editing.offerDiscountPct ?? '',
       offerStartsAt: editing.offerStartsAt
@@ -181,6 +185,13 @@ function ProductForm({
     if (!Number.isFinite(points) || points < 0 || points > 100)
       errors.pointsText = '0 a 100'
 
+    const displayOrder =
+      state.displayOrderText.trim() === ''
+        ? 0
+        : parseInt(state.displayOrderText, 10)
+    if (!Number.isFinite(displayOrder) || displayOrder < 0)
+      errors.displayOrderText = 'Orden inválido'
+
     let offerDiscount: number | null = null
     if (state.offerOpen && state.offerDiscountText.trim() !== '') {
       const d = parseFloat(state.offerDiscountText)
@@ -214,6 +225,7 @@ function ProductForm({
       isMaintenanceService: state.isMaintenanceService,
       promoterCommissionPct: commission,
       pointsPct: points,
+      displayOrder,
       offerLabel: state.offerOpen ? state.offerLabel.trim() || null : null,
       offerDiscountPct: state.offerOpen ? offerDiscount : null,
       offerStartsAt: state.offerOpen ? (offerStartsIso ?? null) : null,
@@ -800,6 +812,25 @@ function ProductForm({
             />
 
             <Hairline />
+
+            <View>
+              <FieldLabel>Orden en catálogo</FieldLabel>
+              <TextInput
+                className="h-11 border-b border-ink/25 pb-1 font-sans text-[16px] text-ink"
+                placeholder="0"
+                placeholderTextColor="#6B6488"
+                keyboardType="number-pad"
+                value={state.displayOrderText}
+                onChangeText={(t) =>
+                  setState((s) => ({ ...s, displayOrderText: t }))
+                }
+                style={{ fontVariant: ['tabular-nums'] }}
+              />
+              <FieldError message={state.errors.displayOrderText} />
+              <Text className="mt-1 font-sans text-[10px] text-ink-muted">
+                Menor número aparece primero en el catálogo.
+              </Text>
+            </View>
 
             <View>
               <FieldLabel>Comisión promotor (%)</FieldLabel>

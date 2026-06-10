@@ -120,7 +120,12 @@ export class Product {
    * rental mode is first activated with a non-zero `monthlyRentCents`. They are
    * server-managed — client DTOs MUST NOT include them.
    */
-  @Column({ name: 'pricing_mode', type: 'varchar', length: 20, default: 'single_payment' })
+  @Column({
+    name: 'pricing_mode',
+    type: 'varchar',
+    length: 20,
+    default: 'single_payment',
+  })
   pricingMode!: 'single_payment' | 'rental';
 
   @Column({ name: 'monthly_rent_cents', type: 'integer', default: 0 })
@@ -129,10 +134,20 @@ export class Product {
   @Column({ name: 'late_fee_cents', type: 'integer', default: 0 })
   lateFeeCents!: number;
 
-  @Column({ name: 'stripe_product_id', type: 'varchar', length: 64, nullable: true })
+  @Column({
+    name: 'stripe_product_id',
+    type: 'varchar',
+    length: 64,
+    nullable: true,
+  })
   stripeProductId!: string | null;
 
-  @Column({ name: 'stripe_price_id', type: 'varchar', length: 64, nullable: true })
+  @Column({
+    name: 'stripe_price_id',
+    type: 'varchar',
+    length: 64,
+    nullable: true,
+  })
   stripePriceId!: string | null;
 
   /**
@@ -154,6 +169,10 @@ export class Product {
 
   @Column({ name: 'is_maintenance_service', type: 'boolean', default: false })
   isMaintenanceService!: boolean;
+
+  /** Posición en el catálogo — menor número aparece primero. */
+  @Column({ name: 'display_order', type: 'int', default: 0 })
+  displayOrder!: number;
 
   @CreateDateColumn({ name: 'created_at' })
   createdAt!: Date;

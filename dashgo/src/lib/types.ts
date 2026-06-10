@@ -79,6 +79,8 @@ export interface Product {
   pointsPct: string
   categoryId: string | null
   category?: Category | null
+  /** Lower number appears first in the catalog. */
+  displayOrder: number
   /** When false, the product skips the manual cotización flow (direct order). Defaults true. */
   requiresQuote?: boolean
   offerLabel: string | null

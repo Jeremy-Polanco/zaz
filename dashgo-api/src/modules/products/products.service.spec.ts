@@ -6,6 +6,7 @@
  */
 
 import {
+  BadRequestException,
   ConflictException,
   ForbiddenException,
   NotFoundException,
@@ -48,6 +49,7 @@ function makeRepoMock<T>(): jest.Mocked<Repository<T>> {
     count: jest.fn(),
     delete: jest.fn(),
     remove: jest.fn(),
+    manager: { transaction: jest.fn() },
   } as unknown as jest.Mocked<Repository<T>>;
 }
 
@@ -81,6 +83,7 @@ function fakeProduct(overrides: Partial<Product> = {}): Product {
     lateFeeCents: 0,
     stripeProductId: null,
     stripePriceId: null,
+    displayOrder: 0,
     createdAt: new Date(),
     ...overrides,
   } as Product;
@@ -168,12 +171,21 @@ describe('ProductsService', () => {
           monthlyRentCents: 2000,
           stripeProductId: 'prod_NEW',
           stripePriceId: 'price_NEW',
-        } as Product); // reload after update
+        }); // reload after update
 
-      productsRepo.update.mockResolvedValue({ affected: 1, raw: [], generatedMaps: [] });
+      productsRepo.update.mockResolvedValue({
+        affected: 1,
+        raw: [],
+        generatedMaps: [],
+      });
 
-      mockStripeInstance.products.create = jest.fn().mockResolvedValue({ id: 'prod_NEW' });
-      mockStripeInstance.prices.create.mockResolvedValueOnce({ id: 'price_NEW', unit_amount: 2000 });
+      mockStripeInstance.products.create = jest
+        .fn()
+        .mockResolvedValue({ id: 'prod_NEW' });
+      mockStripeInstance.prices.create.mockResolvedValueOnce({
+        id: 'price_NEW',
+        unit_amount: 2000,
+      });
       mockStripeInstance.products.update.mockResolvedValue({});
 
       await service.update('product-1', superAdmin, {
@@ -184,7 +196,9 @@ describe('ProductsService', () => {
       // Assert Stripe Product created with product name
       expect(mockStripeInstance.products.create).toHaveBeenCalledWith(
         expect.objectContaining({ name: 'Water Dispenser' }),
-        expect.objectContaining({ idempotencyKey: expect.stringContaining('product-1') }),
+        expect.objectContaining({
+          idempotencyKey: expect.stringContaining('product-1'),
+        }),
       );
 
       // Assert Stripe Price created with correct params
@@ -195,7 +209,9 @@ describe('ProductsService', () => {
           recurring: { interval: 'month' },
           product: 'prod_NEW',
         }),
-        expect.objectContaining({ idempotencyKey: expect.stringContaining('product-1') }),
+        expect.objectContaining({
+          idempotencyKey: expect.stringContaining('product-1'),
+        }),
       );
 
       // Assert DB updated with stripe IDs
@@ -232,11 +248,18 @@ describe('ProductsService', () => {
           ...product,
           monthlyRentCents: 2500,
           stripePriceId: 'price_NEW_25',
-        } as Product); // reload
+        }); // reload
 
-      productsRepo.update.mockResolvedValue({ affected: 1, raw: [], generatedMaps: [] });
+      productsRepo.update.mockResolvedValue({
+        affected: 1,
+        raw: [],
+        generatedMaps: [],
+      });
 
-      mockStripeInstance.prices.create.mockResolvedValueOnce({ id: 'price_NEW_25', unit_amount: 2500 });
+      mockStripeInstance.prices.create.mockResolvedValueOnce({
+        id: 'price_NEW_25',
+        unit_amount: 2500,
+      });
       mockStripeInstance.products.update.mockResolvedValue({});
       mockStripeInstance.prices.update.mockResolvedValue({});
 
@@ -295,7 +318,9 @@ describe('ProductsService', () => {
       );
 
       await expect(
-        service.update('product-1', superAdmin, { pricingMode: 'single_payment' }),
+        service.update('product-1', superAdmin, {
+          pricingMode: 'single_payment',
+        }),
       ).rejects.toThrow(ConflictException);
 
       // Stripe must NOT be called
@@ -320,11 +345,15 @@ describe('ProductsService', () => {
         .mockResolvedValueOnce({
           ...product,
           pricingMode: 'single_payment',
-        } as Product);
+        });
 
       // No active rentals
       rentalsRepo.findOne.mockResolvedValueOnce(null);
-      productsRepo.update.mockResolvedValue({ affected: 1, raw: [], generatedMaps: [] });
+      productsRepo.update.mockResolvedValue({
+        affected: 1,
+        raw: [],
+        generatedMaps: [],
+      });
 
       const result = await service.update('product-1', superAdmin, {
         pricingMode: 'single_payment',
@@ -345,7 +374,9 @@ describe('ProductsService', () => {
   describe('findOne', () => {
     it('should throw NotFoundException when product not found', async () => {
       productsRepo.findOne.mockResolvedValueOnce(null);
-      await expect(service.findOne('not-found')).rejects.toThrow(NotFoundException);
+      await expect(service.findOne('not-found')).rejects.toThrow(
+        NotFoundException,
+      );
     });
   });
 
@@ -401,7 +432,7 @@ describe('ProductsService', () => {
         name: 'Botellón',
         priceToPublic: 5,
         stock: 20,
-      } as never);
+      });
 
       expect(productsRepo.create).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -433,7 +464,7 @@ describe('ProductsService', () => {
           monthlyRentCents: 1500,
           stripeProductId: 'prod_admin999',
           stripePriceId: 'price_admin999',
-        } as Product);
+        });
 
       await service.update('product-1', superAdmin, {
         pricingMode: 'rental',
@@ -464,6 +495,147 @@ describe('ProductsService', () => {
       await expect(
         service.update('product-1', regularUser, { name: 'Hack' }),
       ).rejects.toThrow(ForbiddenException);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Catalog ordering (display_order)
+  // -------------------------------------------------------------------------
+
+  describe('catalog ordering by displayOrder', () => {
+    it('findAllPublic orders by displayOrder ASC then createdAt DESC', async () => {
+      productsRepo.find.mockResolvedValueOnce([]);
+      await service.findAllPublic();
+      expect(productsRepo.find).toHaveBeenCalledWith(
+        expect.objectContaining({
+          order: { displayOrder: 'ASC', createdAt: 'DESC' },
+        }),
+      );
+    });
+
+    it('findAllForAdmin orders by displayOrder ASC then createdAt DESC', async () => {
+      productsRepo.find.mockResolvedValueOnce([]);
+      await service.findAllForAdmin(superAdmin);
+      expect(productsRepo.find).toHaveBeenCalledWith(
+        expect.objectContaining({
+          order: { displayOrder: 'ASC', createdAt: 'DESC' },
+        }),
+      );
+    });
+
+    it('create persists a provided displayOrder and defaults to 0', async () => {
+      const captured = fakeProduct({ id: 'new-3', displayOrder: 5 });
+      productsRepo.create.mockReturnValueOnce(captured);
+      productsRepo.save.mockResolvedValueOnce(captured);
+      productsRepo.findOne.mockResolvedValueOnce(captured);
+
+      await service.create(superAdmin, {
+        name: 'Botellón',
+        priceToPublic: 5,
+        displayOrder: 5,
+      });
+
+      expect(productsRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({ displayOrder: 5 }),
+      );
+
+      const capturedDefault = fakeProduct({ id: 'new-4' });
+      productsRepo.create.mockReturnValueOnce(capturedDefault);
+      productsRepo.save.mockResolvedValueOnce(capturedDefault);
+      productsRepo.findOne.mockResolvedValueOnce(capturedDefault);
+
+      await service.create(superAdmin, {
+        name: 'Botellón',
+        priceToPublic: 5,
+      });
+
+      expect(productsRepo.create).toHaveBeenLastCalledWith(
+        expect.objectContaining({ displayOrder: 0 }),
+      );
+    });
+
+    it('update persists displayOrder', async () => {
+      const product = fakeProduct();
+      productsRepo.findOne
+        .mockResolvedValueOnce(product)
+        .mockResolvedValueOnce({ ...product, displayOrder: 7 });
+      productsRepo.update.mockResolvedValue({
+        affected: 1,
+        raw: [],
+        generatedMaps: [],
+      });
+
+      await service.update('product-1', superAdmin, { displayOrder: 7 });
+
+      expect(productsRepo.update).toHaveBeenCalledWith(
+        'product-1',
+        expect.objectContaining({ displayOrder: 7 }),
+      );
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Bulk reorder (drag & drop)
+  // -------------------------------------------------------------------------
+
+  describe('reorder', () => {
+    const items = [
+      { id: 'id-a', displayOrder: 0 },
+      { id: 'id-b', displayOrder: 1 },
+    ];
+
+    it('updates every product inside a transaction and returns the count', async () => {
+      productsRepo.find.mockResolvedValueOnce([
+        { id: 'id-a' },
+        { id: 'id-b' },
+      ] as Product[]);
+      const emUpdate = jest.fn();
+      (productsRepo.manager.transaction as jest.Mock).mockImplementation(
+        async (cb: (em: { update: jest.Mock }) => Promise<void>) =>
+          cb({ update: emUpdate }),
+      );
+
+      const result = await service.reorder(superAdmin, { items });
+
+      expect(result).toEqual({ updated: 2 });
+      expect(emUpdate).toHaveBeenCalledWith(Product, 'id-a', {
+        displayOrder: 0,
+      });
+      expect(emUpdate).toHaveBeenCalledWith(Product, 'id-b', {
+        displayOrder: 1,
+      });
+    });
+
+    it('throws NotFoundException when an id does not exist', async () => {
+      productsRepo.find.mockResolvedValueOnce([{ id: 'id-a' }] as Product[]);
+
+      await expect(service.reorder(superAdmin, { items })).rejects.toThrow(
+        NotFoundException,
+      );
+      expect(productsRepo.manager.transaction).not.toHaveBeenCalled();
+    });
+
+    it('throws BadRequestException on duplicate ids', async () => {
+      await expect(
+        service.reorder(superAdmin, {
+          items: [
+            { id: 'id-a', displayOrder: 0 },
+            { id: 'id-a', displayOrder: 1 },
+          ],
+        }),
+      ).rejects.toThrow(BadRequestException);
+      expect(productsRepo.manager.transaction).not.toHaveBeenCalled();
+    });
+
+    it('throws ForbiddenException for non-super-admin', async () => {
+      const regularUser: AuthenticatedUser = {
+        id: 'user-2',
+        role: 'client' as never,
+        email: 'client@test.com',
+      };
+      await expect(service.reorder(regularUser, { items })).rejects.toThrow(
+        ForbiddenException,
+      );
     });
   });
 });

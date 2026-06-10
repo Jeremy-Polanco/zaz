@@ -1,11 +1,29 @@
 import { createFileRoute, isRedirect, redirect } from '@tanstack/react-router'
 import { useEffect, useMemo, useState } from 'react'
+import {
+  DndContext,
+  KeyboardSensor,
+  PointerSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from '@dnd-kit/core'
+import {
+  SortableContext,
+  arrayMove,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
 import { Button, FieldError, Input, Label, SectionHeading, Textarea } from '../components/ui'
 import {
   useAdminProducts,
   useCategories,
   useCreateProduct,
   useDeleteProduct,
+  useReorderProducts,
   useUpdateInventory,
   useUpdateProduct,
   useUploadProductImage,
@@ -60,6 +78,7 @@ type FormState = {
   lateFeeText: string
   stripeProductId: string
   stripePriceId: string
+  displayOrderText: string
   errors: {
     name?: string
     priceText?: string
@@ -70,6 +89,7 @@ type FormState = {
     image?: string
     monthlyRentText?: string
     lateFeeText?: string
+    displayOrderText?: string
   }
 }
 
@@ -95,6 +115,7 @@ const emptyForm: FormState = {
   lateFeeText: '',
   stripeProductId: '',
   stripePriceId: '',
+  displayOrderText: '0',
   errors: {},
 }
 
@@ -118,6 +139,31 @@ function fromDateInput(value: string): string | null {
 // block saving. Pure + exported for testability (strict-tdd preference).
 export function isStockValid(tracksStock: boolean, stockText: string): boolean {
   return !tracksStock || stockText.trim() !== ''
+}
+
+// Orden en catálogo: vacío cuenta como 0 (mismo default que el server);
+// null = inválido. Pure + exported for testability.
+export function parseDisplayOrder(text: string): number | null {
+  const n = text.trim() === '' ? 0 : parseInt(text, 10)
+  return Number.isFinite(n) && n >= 0 ? n : null
+}
+
+// Dado el orden visible y el drag (qué tarjeta cayó sobre cuál), devuelve el
+// payload completo de reorder — índice final = displayOrder — o null si el
+// drop no cambia nada. Pure + exported for testability.
+export function computeReorderItems(
+  sorted: Pick<Product, 'id'>[],
+  activeId: string,
+  overId: string,
+): { id: string; displayOrder: number }[] | null {
+  if (activeId === overId) return null
+  const oldIndex = sorted.findIndex((p) => p.id === activeId)
+  const newIndex = sorted.findIndex((p) => p.id === overId)
+  if (oldIndex < 0 || newIndex < 0) return null
+  return arrayMove(sorted, oldIndex, newIndex).map((p, i) => ({
+    id: p.id,
+    displayOrder: i,
+  }))
 }
 
 function ProductForm({
@@ -175,6 +221,7 @@ function ProductForm({
       lateFeeText: editing.lateFeeCents ? String(editing.lateFeeCents / 100) : '',
       stripeProductId: editing.stripeProductId ?? '',
       stripePriceId: editing.stripePriceId ?? '',
+      displayOrderText: String(editing.displayOrder ?? 0),
       errors: {},
     }
   })
@@ -227,6 +274,9 @@ function ProductForm({
     if (!Number.isFinite(points) || points < 0 || points > 100)
       errors.pointsText = '0 a 100'
 
+    const displayOrder = parseDisplayOrder(state.displayOrderText)
+    if (displayOrder === null) errors.displayOrderText = '0 o más'
+
     let offerDiscount: number | null = null
     if (showOffer && state.offerDiscountText.trim() !== '') {
       offerDiscount = parseFloat(state.offerDiscountText)
@@ -255,6 +305,7 @@ function ProductForm({
       requiresQuote: state.requiresQuote,
       requiresMaintenance: state.requiresMaintenance,
       isMaintenanceService: state.isMaintenanceService,
+      displayOrder: displayOrder ?? 0,
       offerLabel: showOffer && state.offerLabel.trim() ? state.offerLabel.trim() : null,
       offerDiscountPct: showOffer && offerDiscount != null ? offerDiscount : null,
       offerStartsAt: showOffer ? fromDateInput(state.offerStartsAt) : null,
@@ -941,6 +992,30 @@ function ProductForm({
                     onChange={(v) => setState((s) => ({ ...s, isAvailable: v }))}
                   />
 
+                  <div>
+                    <Label htmlFor="displayOrder">Orden en catálogo</Label>
+                    <Input
+                      id="displayOrder"
+                      type="number"
+                      min="0"
+                      step="1"
+                      value={state.displayOrderText}
+                      onChange={(e) =>
+                        setState((s) => ({
+                          ...s,
+                          displayOrderText: e.target.value,
+                        }))
+                      }
+                      className="nums"
+                      data-testid="display-order-input"
+                    />
+                    <FieldError message={state.errors.displayOrderText} />
+                    <p className="mt-1 text-[0.65rem] text-ink-muted">
+                      Menor número aparece primero. También podés arrastrar las
+                      tarjetas en la lista para reordenar.
+                    </p>
+                  </div>
+
                   <ToggleRow
                     label="Requiere cotización"
                     sub={
@@ -1264,11 +1339,146 @@ function ToggleRow({
   )
 }
 
+function SortableProductRow({
+  product: p,
+  cat,
+  onToggleAvailable,
+  onEdit,
+  onDelete,
+}: {
+  product: Product
+  cat: Category | null | undefined
+  onToggleAvailable: () => void
+  onEdit: () => void
+  onDelete: () => void
+}) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: p.id })
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={{ transform: CSS.Transform.toString(transform), transition }}
+      className={`flex flex-col gap-4 border bg-paper p-5 sm:flex-row sm:items-center sm:justify-between ${
+        isDragging
+          ? 'relative z-10 border-accent shadow-lg'
+          : 'border-ink/15'
+      }`}
+      data-testid={`product-row-${p.id}`}
+    >
+      <div className="flex items-center gap-3">
+        <button
+          type="button"
+          {...attributes}
+          {...listeners}
+          // touchAction none: sin esto el navegador móvil "gana" el gesto y
+          // scrollea la página en vez de arrastrar la tarjeta.
+          style={{ touchAction: 'none' }}
+          className="shrink-0 cursor-grab px-1 py-3 text-ink-muted hover:text-ink active:cursor-grabbing"
+          aria-label={`Reordenar ${p.name}`}
+          data-testid="drag-handle"
+        >
+          <GripIcon />
+        </button>
+        <div className="flex aspect-square w-20 shrink-0 items-center justify-center overflow-hidden border border-ink/10 bg-paper-deep/40">
+          {p.imageUpdatedAt ? (
+            <img
+              src={productImageUrl(
+                p.id,
+                String(new Date(p.imageUpdatedAt).getTime()),
+              )}
+              alt={p.name}
+              className="h-full w-full object-cover"
+            />
+          ) : (
+            <span className="text-[0.55rem] uppercase tracking-[0.18em] text-ink-muted">
+              Sin foto
+            </span>
+          )}
+        </div>
+      </div>
+      <div className="flex-1">
+        <div className="flex flex-wrap items-center gap-2">
+          <p className="display text-lg font-semibold text-ink">{p.name}</p>
+          {p.offerActive ? (
+            <span className="bg-accent px-2 py-0.5 text-[0.6rem] uppercase tracking-[0.12em] text-brand-dark">
+              🔥 Oferta
+            </span>
+          ) : null}
+          {cat ? (
+            <span className="text-[0.65rem] uppercase tracking-[0.14em] text-ink-muted">
+              {cat.iconEmoji ?? ''} {cat.name}
+            </span>
+          ) : null}
+        </div>
+        <div className="mt-1 flex flex-wrap gap-4 text-[0.7rem] uppercase tracking-[0.14em] text-ink-muted">
+          <span>
+            Precio:{' '}
+            {p.offerActive ? (
+              <>
+                <span className="line-through">{formatCents(p.basePriceCents)}</span>{' '}
+                <span className="text-brand">{formatCents(p.effectivePriceCents)}</span>
+              </>
+            ) : (
+              formatCents(p.effectivePriceCents)
+            )}
+          </span>
+          <span>Stock: {p.stock}</span>
+          <span>Orden: {p.displayOrder ?? 0}</span>
+          <span>Comisión: {parseFloat(p.promoterCommissionPct).toFixed(2)}%</span>
+          <span>Puntos: {parseFloat(p.pointsPct).toFixed(2)}%</span>
+        </div>
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <Button
+          size="sm"
+          variant={p.isAvailable ? 'secondary' : 'ghost'}
+          onClick={onToggleAvailable}
+        >
+          {p.isAvailable ? 'Disponible' : 'Oculto'}
+        </Button>
+        <Button size="sm" variant="primary" onClick={onEdit}>
+          Editar
+        </Button>
+        <Button size="sm" variant="ghost" onClick={onDelete}>
+          Borrar
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+function GripIcon() {
+  return (
+    <svg
+      width="14"
+      height="18"
+      viewBox="0 0 14 18"
+      fill="currentColor"
+      aria-hidden
+    >
+      <circle cx="4" cy="3" r="1.5" />
+      <circle cx="10" cy="3" r="1.5" />
+      <circle cx="4" cy="9" r="1.5" />
+      <circle cx="10" cy="9" r="1.5" />
+      <circle cx="4" cy="15" r="1.5" />
+      <circle cx="10" cy="15" r="1.5" />
+    </svg>
+  )
+}
+
 function SuperProductsPage() {
   const { data: products, isPending } = useAdminProducts()
   const { data: categories } = useCategories()
   const del = useDeleteProduct()
   const updateInventory = useUpdateInventory()
+  const reorder = useReorderProducts()
   const [editing, setEditing] = useState<Product | null>(null)
   const [creating, setCreating] = useState(false)
 
@@ -1277,6 +1487,31 @@ function SuperProductsPage() {
     for (const c of categories ?? []) map.set(c.id, c)
     return map
   }, [categories])
+
+  // Mismo criterio que el server (displayOrder ASC, createdAt DESC) para que
+  // el optimistic update del drag no haga saltar la lista.
+  const sorted = useMemo(() => {
+    return [...(products ?? [])].sort(
+      (a, b) =>
+        (a.displayOrder ?? 0) - (b.displayOrder ?? 0) ||
+        (b.createdAt ?? '').localeCompare(a.createdAt ?? ''),
+    )
+  }, [products])
+
+  // distance: 6 evita que un click en los botones de la tarjeta inicie un drag.
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  )
+
+  const onDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event
+    if (!over) return
+    // Mandamos el orden completo: el índice pasa a ser el displayOrder y de
+    // paso normaliza datos legacy donde todos venían en 0.
+    const items = computeReorderItems(sorted, String(active.id), String(over.id))
+    if (items) reorder.mutate({ items })
+  }
 
   const onDelete = (p: Product) => {
     if (!window.confirm(`¿Borrar "${p.name}"?`)) return
@@ -1303,7 +1538,7 @@ function SuperProductsPage() {
               Catálogo <span className="italic text-brand">global.</span>
             </>
           }
-          subtitle={`${products?.length ?? 0} producto${products?.length === 1 ? '' : 's'}.`}
+          subtitle={`${products?.length ?? 0} producto${products?.length === 1 ? '' : 's'}. Arrastrá las tarjetas para definir el orden del catálogo.`}
           action={
             !editingOrCreating ? (
               <Button variant="accent" onClick={() => setCreating(true)}>
@@ -1314,83 +1549,32 @@ function SuperProductsPage() {
         />
 
         <div className="flex flex-col gap-4">
-        {(products ?? []).map((p) => {
-          const cat = p.categoryId ? categoryById.get(p.categoryId) : null
-          return (
-            <div
-              key={p.id}
-              className="flex flex-col gap-4 border border-ink/15 bg-paper p-5 sm:flex-row sm:items-center sm:justify-between"
+          <DndContext
+            sensors={sensors}
+            collisionDetection={closestCenter}
+            onDragEnd={onDragEnd}
+          >
+            <SortableContext
+              items={sorted.map((p) => p.id)}
+              strategy={verticalListSortingStrategy}
             >
-              <div className="flex aspect-square w-20 shrink-0 items-center justify-center overflow-hidden border border-ink/10 bg-paper-deep/40">
-                {p.imageUpdatedAt ? (
-                  <img
-                    src={productImageUrl(
-                      p.id,
-                      String(new Date(p.imageUpdatedAt).getTime()),
-                    )}
-                    alt={p.name}
-                    className="h-full w-full object-cover"
-                  />
-                ) : (
-                  <span className="text-[0.55rem] uppercase tracking-[0.18em] text-ink-muted">
-                    Sin foto
-                  </span>
-                )}
-              </div>
-              <div className="flex-1">
-                <div className="flex flex-wrap items-center gap-2">
-                  <p className="display text-lg font-semibold text-ink">{p.name}</p>
-                  {p.offerActive ? (
-                    <span className="bg-accent px-2 py-0.5 text-[0.6rem] uppercase tracking-[0.12em] text-brand-dark">
-                      🔥 Oferta
-                    </span>
-                  ) : null}
-                  {cat ? (
-                    <span className="text-[0.65rem] uppercase tracking-[0.14em] text-ink-muted">
-                      {cat.iconEmoji ?? ''} {cat.name}
-                    </span>
-                  ) : null}
-                </div>
-                <div className="mt-1 flex flex-wrap gap-4 text-[0.7rem] uppercase tracking-[0.14em] text-ink-muted">
-                  <span>
-                    Precio:{' '}
-                    {p.offerActive ? (
-                      <>
-                        <span className="line-through">{formatCents(p.basePriceCents)}</span>{' '}
-                        <span className="text-brand">{formatCents(p.effectivePriceCents)}</span>
-                      </>
-                    ) : (
-                      formatCents(p.effectivePriceCents)
-                    )}
-                  </span>
-                  <span>Stock: {p.stock}</span>
-                  <span>Comisión: {parseFloat(p.promoterCommissionPct).toFixed(2)}%</span>
-                  <span>Puntos: {parseFloat(p.pointsPct).toFixed(2)}%</span>
-                </div>
-              </div>
-              <div className="flex flex-wrap items-center gap-2">
-                <Button
-                  size="sm"
-                  variant={p.isAvailable ? 'secondary' : 'ghost'}
-                  onClick={() =>
+              {sorted.map((p) => (
+                <SortableProductRow
+                  key={p.id}
+                  product={p}
+                  cat={p.categoryId ? categoryById.get(p.categoryId) : null}
+                  onToggleAvailable={() =>
                     updateInventory.mutate({
                       id: p.id,
                       isAvailable: !p.isAvailable,
                     })
                   }
-                >
-                  {p.isAvailable ? 'Disponible' : 'Oculto'}
-                </Button>
-                <Button size="sm" variant="primary" onClick={() => setEditing(p)}>
-                  Editar
-                </Button>
-                <Button size="sm" variant="ghost" onClick={() => onDelete(p)}>
-                  Borrar
-                </Button>
-              </div>
-            </div>
-          )
-        })}
+                  onEdit={() => setEditing(p)}
+                  onDelete={() => onDelete(p)}
+                />
+              ))}
+            </SortableContext>
+          </DndContext>
 
           {(products ?? []).length === 0 && !editingOrCreating ? (
             <div className="flex flex-col items-center gap-4 border border-dashed border-ink/20 py-20 text-center">

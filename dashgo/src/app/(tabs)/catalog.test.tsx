@@ -99,6 +99,7 @@ function makeProduct(overrides: Partial<Product> = {}): Product {
     promoterCommissionPct: '0',
     pointsPct: '0',
     categoryId: null,
+    displayOrder: 0,
     offerLabel: null,
     offerDiscountPct: null,
     offerStartsAt: null,

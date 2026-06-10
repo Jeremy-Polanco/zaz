@@ -26,6 +26,7 @@ import { ProductsService } from './products.service';
 import { CreateProductDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
 import { UpdateInventoryDto } from './dto/update-inventory.dto';
+import { ReorderProductsDto } from './dto/reorder-products.dto';
 
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('products')
@@ -66,6 +67,19 @@ export class ProductsController {
     @Body() dto: CreateProductDto,
   ) {
     return this.products.create(user, dto);
+  }
+
+  /**
+   * Reordena el catálogo (drag & drop del panel admin).
+   * Declarado ANTES de `PATCH :id` — si no, ParseUUIDPipe atrapa "reorder".
+   */
+  @Roles(UserRole.SUPER_ADMIN_DELIVERY)
+  @Patch('reorder')
+  reorder(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: ReorderProductsDto,
+  ) {
+    return this.products.reorder(user, dto);
   }
 
   @Roles(UserRole.SUPER_ADMIN_DELIVERY)
