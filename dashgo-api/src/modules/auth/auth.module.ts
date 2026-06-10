@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { JwtModule } from '@nestjs/jwt';
+import type { StringValue } from 'ms';
 import { PassportModule } from '@nestjs/passport';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { OtpCode, User } from '../../entities';
@@ -49,7 +50,8 @@ import { CreditModule } from '../credit/credit.module';
       useFactory: (config: ConfigService) => ({
         secret: config.getOrThrow<string>('JWT_SECRET'),
         signOptions: {
-          expiresIn: config.get<string>('JWT_ACCESS_TTL', '1h'),
+          // StringValue: jwt v11 types expiresIn as ms-style duration ('1h').
+          expiresIn: config.get<StringValue>('JWT_ACCESS_TTL', '1h'),
         },
       }),
     }),

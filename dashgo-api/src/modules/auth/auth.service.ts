@@ -10,6 +10,7 @@ import {
 import { createHash, randomInt } from 'crypto';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
+import type { StringValue } from 'ms';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, IsNull, LessThan, Repository } from 'typeorm';
 import * as bcrypt from 'bcrypt';
@@ -358,11 +359,12 @@ export class AuthService implements OnModuleInit {
 
   private async issueTokens(user: User) {
     const payload = { sub: user.id, phone: user.phone, role: user.role };
+    // StringValue: jwt v11 types expiresIn as ms-style duration ('1h', '7d').
     const accessToken = await this.jwt.signAsync(payload, {
-      expiresIn: this.config.get<string>('JWT_ACCESS_TTL', '1h'),
+      expiresIn: this.config.get<StringValue>('JWT_ACCESS_TTL', '1h'),
     });
     const refreshToken = await this.jwt.signAsync(payload, {
-      expiresIn: this.config.get<string>('JWT_REFRESH_TTL', '7d'),
+      expiresIn: this.config.get<StringValue>('JWT_REFRESH_TTL', '7d'),
     });
 
     return {
