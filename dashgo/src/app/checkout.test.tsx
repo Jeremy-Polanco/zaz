@@ -138,6 +138,23 @@ const SINGLE_PRODUCT = {
   pricingMode: 'single_payment' as const,
 }
 
+// requiresQuote=false → the order is auto-quoted at creation (skip-cotización)
+const WATER_PRODUCT = {
+  id: 'product-water',
+  name: 'Botellón de Agua',
+  effectivePriceCents: 4500,
+  basePriceCents: 4500,
+  offerActive: false,
+  offerLabel: null,
+  stock: 10,
+  categoryId: null,
+  description: null,
+  imageUrl: null,
+  active: true,
+  pricingMode: 'single_payment' as const,
+  requiresQuote: false,
+}
+
 const mockCreateOrderMutateAsync = jest.fn()
 
 function setupCheckoutMocks(
@@ -384,5 +401,82 @@ describe('T87 — Rental: mixed cart shows "(primer mes)" copy under rental item
       expect(queryByText(/primer mes/i)).toBeNull()
       expect(queryByText(/Primer mes alquiler/i)).toBeNull()
     })
+  })
+})
+
+// ── Skip-cotización — checkout shows the real tax + final total (web parity) ──
+
+describe('Skip-cotización — checkout preview shows real tax and final total', () => {
+  it('shows the computed tax amount instead of "Al cotizar" when every item skips the quote', async () => {
+    setupCheckoutMocks([WATER_PRODUCT as unknown as typeof MOCK_PRODUCT], { 'product-water': 1 })
+
+    const { getByText, queryByText } = renderWithProviders(<CheckoutScreen />)
+
+    // tax = round(4500 × 0.08887) = 400 → "$4"
+    await waitFor(() => {
+      expect(getByText('$4')).toBeTruthy()
+    })
+    expect(queryByText('Al cotizar')).toBeNull()
+  })
+
+  it('labels the total band "Total" and shows subtotal + tax', async () => {
+    setupCheckoutMocks([WATER_PRODUCT as unknown as typeof MOCK_PRODUCT], { 'product-water': 1 })
+
+    const { getByText } = renderWithProviders(<CheckoutScreen />)
+
+    // total = 4500 + 400 = 4900 → "$49"
+    await waitFor(() => {
+      expect(getByText('Total')).toBeTruthy()
+      expect(getByText('$49')).toBeTruthy()
+    })
+  })
+
+  it('shows "Gratis" shipping for a skip-quote cart', async () => {
+    setupCheckoutMocks([WATER_PRODUCT as unknown as typeof MOCK_PRODUCT], { 'product-water': 1 })
+
+    const { getByText, queryByText } = renderWithProviders(<CheckoutScreen />)
+
+    await waitFor(() => {
+      expect(getByText('Gratis')).toBeTruthy()
+    })
+    expect(queryByText('A cotizar')).toBeNull()
+  })
+
+  it('swaps the "repartidor cotiza" copy for the final-total copy', async () => {
+    setupCheckoutMocks([WATER_PRODUCT as unknown as typeof MOCK_PRODUCT], { 'product-water': 1 })
+
+    const { getByText, queryByText } = renderWithProviders(<CheckoutScreen />)
+
+    await waitFor(() => {
+      expect(getByText(/Sin cotización — este es el total final/i)).toBeTruthy()
+    })
+    expect(queryByText(/El repartidor cotiza el envío/i)).toBeNull()
+  })
+
+  it('keeps the "a cotizar" placeholders when items require a quote (regression)', async () => {
+    // SINGLE_PRODUCT has no requiresQuote flag → not skip-quote
+    setupCheckoutMocks([SINGLE_PRODUCT as unknown as typeof MOCK_PRODUCT], { 'product-single': 1 })
+
+    const { getByText, queryByText } = renderWithProviders(<CheckoutScreen />)
+
+    await waitFor(() => {
+      expect(getByText('Al cotizar')).toBeTruthy()
+      expect(getByText('A cotizar')).toBeTruthy()
+    })
+    expect(queryByText('Total')).toBeNull()
+  })
+
+  it('keeps placeholders for a mixed cart where only some items skip the quote', async () => {
+    setupCheckoutMocks(
+      [WATER_PRODUCT as unknown as typeof MOCK_PRODUCT, SINGLE_PRODUCT as unknown as typeof MOCK_PRODUCT],
+      { 'product-water': 1, 'product-single': 1 },
+    )
+
+    const { getByText, queryByText } = renderWithProviders(<CheckoutScreen />)
+
+    await waitFor(() => {
+      expect(getByText('Al cotizar')).toBeTruthy()
+    })
+    expect(queryByText('Total')).toBeNull()
   })
 })

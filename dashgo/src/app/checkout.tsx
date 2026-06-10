@@ -14,6 +14,7 @@ import {
   useProducts,
 } from '../lib/queries'
 import { formatCents } from '../lib/format'
+import { computeQuotePreviewCents } from '../lib/tax'
 import type { PaymentMethod } from '../lib/types'
 import { Button, Eyebrow, Hairline } from '../components/ui'
 
@@ -119,6 +120,21 @@ export default function CheckoutScreen() {
     : 0
 
   const previewTotalCents = Math.max(0, subtotalCents - redeemCents - creditAppliedCents)
+
+  // Skip-cotización: when EVERY cart item has requiresQuote=false (e.g. water),
+  // the order is auto-quoted at creation — shipping $0, tax computed now. Show
+  // the real numbers instead of the "a cotizar" placeholders.
+  const allSkipQuote =
+    lineItems.length > 0 &&
+    lineItems.every((li) => li.product?.requiresQuote === false)
+  const skipQuoteTaxCents = allSkipQuote
+    ? computeQuotePreviewCents({
+        subtotalCents,
+        shippingCents: 0,
+        pointsRedeemedCents: redeemCents,
+      }).taxCents
+    : 0
+  const skipQuoteTotalCents = previewTotalCents + skipQuoteTaxCents
 
   const itemCount = useMemo(
     () => lineItems.reduce((sum, li) => sum + li.quantity, 0),
@@ -521,7 +537,9 @@ export default function CheckoutScreen() {
             <Text className="font-sans text-[11px] uppercase tracking-label text-ink-muted">
               Envío
             </Text>
-            {isActiveSubscriber ? (
+            {allSkipQuote ? (
+              <Text className="font-sans text-[14px] text-green-700">Gratis</Text>
+            ) : isActiveSubscriber ? (
               <Text className="font-sans text-[14px] text-green-700">
                 Gratis con tu suscripción
               </Text>
@@ -538,24 +556,35 @@ export default function CheckoutScreen() {
             <Text className="font-sans text-[11px] uppercase tracking-label text-ink-muted">
               Impuestos
             </Text>
-            <Text
-              className="font-sans text-[14px] italic text-ink-muted"
-              style={{ fontVariant: ['tabular-nums'] }}
-            >
-              Al cotizar
-            </Text>
+            {allSkipQuote ? (
+              <Text
+                className="font-sans text-[14px] text-ink"
+                style={{ fontVariant: ['tabular-nums'] }}
+              >
+                {formatCents(skipQuoteTaxCents)}
+              </Text>
+            ) : (
+              <Text
+                className="font-sans text-[14px] italic text-ink-muted"
+                style={{ fontVariant: ['tabular-nums'] }}
+              >
+                Al cotizar
+              </Text>
+            )}
           </View>
           <View className="flex-row items-baseline justify-between border-t border-ink pt-3">
-            <Eyebrow tone="ink">Subtotal</Eyebrow>
+            <Eyebrow tone="ink">{allSkipQuote ? 'Total' : 'Subtotal'}</Eyebrow>
             <Text
               className="font-sans-semibold text-[36px] text-brand"
               style={{ fontVariant: ['tabular-nums'] }}
             >
-              {formatCents(previewTotalCents)}
+              {formatCents(allSkipQuote ? skipQuoteTotalCents : previewTotalCents)}
             </Text>
           </View>
           <Text className="mt-3 font-sans text-[11px] text-ink-muted">
-            El repartidor cotiza el envío y te avisamos para confirmar el total.
+            {allSkipQuote
+              ? 'Sin cotización — este es el total final. Confirmás y pagás.'
+              : 'El repartidor cotiza el envío y te avisamos para confirmar el total.'}
           </Text>
         </View>
 
