@@ -1,10 +1,12 @@
 export function formatMoney(value: string | number): string {
   const n = typeof value === 'string' ? parseFloat(value) : value
+  // Whole dollars stay clean ("$20"); fractional amounts always show both
+  // cent digits — never round money the customer is shown.
   return new Intl.NumberFormat('en-US', {
     style: 'currency',
     currency: 'USD',
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 1,
+    minimumFractionDigits: Number.isInteger(n) ? 0 : 2,
+    maximumFractionDigits: 2,
   }).format(n)
 }
 
