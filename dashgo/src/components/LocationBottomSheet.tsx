@@ -13,6 +13,7 @@ import {
   useSetOrderDeliveryAddress,
 } from '../lib/queries'
 import { requestDeviceLocation, reverseGeocode } from '../lib/geo'
+import { formatAddressShort } from '../lib/address'
 import { MapPicker } from './MapPicker'
 import { Button, Eyebrow, FieldLabel } from './ui'
 
@@ -34,8 +35,15 @@ export function LocationBottomSheet({
   const createForUser = useCreateAddressForUser(order.customerId)
 
   const [text, setText] = useState(order.deliveryAddress?.text ?? '')
+  const [houseNumber, setHouseNumber] = useState(
+    order.deliveryAddress?.houseNumber ?? '',
+  )
   const [building, setBuilding] = useState(
     order.deliveryAddress?.building ?? '',
+  )
+  const [unit, setUnit] = useState(order.deliveryAddress?.unit ?? '')
+  const [reference, setReference] = useState(
+    order.deliveryAddress?.reference ?? '',
   )
   const [pin, setPin] = useState<{ lat?: number; lng?: number }>({
     lat: order.deliveryAddress?.lat ?? undefined,
@@ -89,6 +97,9 @@ export function LocationBottomSheet({
         lat: pin.lat,
         lng: pin.lng,
         building: building.trim() || undefined,
+        houseNumber: houseNumber.trim() || undefined,
+        unit: unit.trim() || undefined,
+        reference: reference.trim() || undefined,
       })
       if (saveToUser && saveLabel.trim() && order.customerId) {
         try {
@@ -137,8 +148,8 @@ export function LocationBottomSheet({
             {order.customer?.fullName ?? 'Cliente'}
           </Text>
           <Text className="mt-1 font-sans text-[13px] text-ink-soft">
-            {order.deliveryAddress?.text
-              ? `Actual: ${order.deliveryAddress.text}`
+            {order.deliveryAddress
+              ? `Actual: ${formatAddressShort(order.deliveryAddress)}`
               : 'Sin ubicación — fijala al llegar.'}
           </Text>
 
@@ -153,14 +164,48 @@ export function LocationBottomSheet({
             />
           </View>
 
+          <View className="mt-4 flex-row gap-3">
+            <View className="flex-1">
+              <FieldLabel>N° de casa</FieldLabel>
+              <TextInput
+                className="h-11 border-b border-ink/25 pb-1 font-sans text-[16px] text-ink"
+                placeholder="Ej. 24"
+                placeholderTextColor="#6B6488"
+                value={houseNumber}
+                onChangeText={setHouseNumber}
+              />
+            </View>
+            <View className="flex-1">
+              <FieldLabel>Apto / Piso</FieldLabel>
+              <TextInput
+                className="h-11 border-b border-ink/25 pb-1 font-sans text-[16px] text-ink"
+                placeholder="Ej. Apto 3B"
+                placeholderTextColor="#6B6488"
+                value={unit}
+                onChangeText={setUnit}
+              />
+            </View>
+          </View>
+
           <View className="mt-4">
-            <FieldLabel>Edificio / N° de casa</FieldLabel>
+            <FieldLabel>Edificio</FieldLabel>
             <TextInput
               className="h-11 border-b border-ink/25 pb-1 font-sans text-[16px] text-ink"
-              placeholder="Ej. Edif. 4, Casa 12, Apto 3B"
+              placeholder="Ej. Edif. 4, Torre B"
               placeholderTextColor="#6B6488"
               value={building}
               onChangeText={setBuilding}
+            />
+          </View>
+
+          <View className="mt-4">
+            <FieldLabel>Referencia / punto</FieldLabel>
+            <TextInput
+              className="h-11 border-b border-ink/25 pb-1 font-sans text-[16px] text-ink"
+              placeholder="Ej. frente al colmado, casa amarilla"
+              placeholderTextColor="#6B6488"
+              value={reference}
+              onChangeText={setReference}
             />
           </View>
 

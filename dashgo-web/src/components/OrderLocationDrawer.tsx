@@ -5,6 +5,7 @@ import {
   useSetOrderDeliveryAddress,
 } from '../lib/queries'
 import { requestBrowserLocation, reverseGeocode } from '../lib/geo'
+import { formatAddressShort } from '../lib/address'
 import { MapPicker } from './MapPicker'
 import { SavedAddressesList } from './SavedAddressesList'
 import { Button, FieldError, Input, Label } from './ui'
@@ -25,8 +26,15 @@ export function OrderLocationDrawer({
   const createForUser = useCreateAddressForUser(order.customerId)
 
   const [text, setText] = useState(order.deliveryAddress?.text ?? '')
+  const [houseNumber, setHouseNumber] = useState(
+    order.deliveryAddress?.houseNumber ?? '',
+  )
   const [building, setBuilding] = useState(
     order.deliveryAddress?.building ?? '',
+  )
+  const [unit, setUnit] = useState(order.deliveryAddress?.unit ?? '')
+  const [reference, setReference] = useState(
+    order.deliveryAddress?.reference ?? '',
   )
   const [pin, setPin] = useState<{ lat?: number; lng?: number }>({
     lat: order.deliveryAddress?.lat ?? undefined,
@@ -93,6 +101,9 @@ export function OrderLocationDrawer({
         lat: pin.lat,
         lng: pin.lng,
         building: building.trim() || undefined,
+        houseNumber: houseNumber.trim() || undefined,
+        unit: unit.trim() || undefined,
+        reference: reference.trim() || undefined,
       })
       if (saveToUser && saveLabel.trim() && order.customerId) {
         try {
@@ -131,12 +142,8 @@ export function OrderLocationDrawer({
             {order.customer?.fullName ?? 'Cliente'}
           </h2>
           <p className="mt-2 text-sm text-ink-soft">
-            {order.deliveryAddress?.text
-              ? `Actual: ${order.deliveryAddress.text}${
-                  order.deliveryAddress.building
-                    ? ` · Edif./casa ${order.deliveryAddress.building}`
-                    : ''
-                }`
+            {order.deliveryAddress
+              ? `Actual: ${formatAddressShort(order.deliveryAddress)}`
               : 'Sin ubicación aún — fijala al llegar.'}
           </p>
         </header>
@@ -157,13 +164,44 @@ export function OrderLocationDrawer({
             onChange={(e) => setText(e.target.value)}
           />
 
+          <div className="mt-3 grid grid-cols-2 gap-3">
+            <div>
+              <Label htmlFor="loc-house">N° de casa</Label>
+              <Input
+                id="loc-house"
+                placeholder="Ej. 24"
+                value={houseNumber}
+                onChange={(e) => setHouseNumber(e.target.value)}
+              />
+            </div>
+            <div>
+              <Label htmlFor="loc-unit">Apto / Piso</Label>
+              <Input
+                id="loc-unit"
+                placeholder="Ej. Apto 3B"
+                value={unit}
+                onChange={(e) => setUnit(e.target.value)}
+              />
+            </div>
+          </div>
+
           <div className="mt-3">
-            <Label htmlFor="loc-building">Edificio / N° de casa</Label>
+            <Label htmlFor="loc-building">Edificio</Label>
             <Input
               id="loc-building"
-              placeholder="Ej. Edif. 4, Casa 12, Apto 3B"
+              placeholder="Ej. Edif. 4, Torre B"
               value={building}
               onChange={(e) => setBuilding(e.target.value)}
+            />
+          </div>
+
+          <div className="mt-3">
+            <Label htmlFor="loc-reference">Referencia / punto</Label>
+            <Input
+              id="loc-reference"
+              placeholder="Ej. frente al colmado, casa amarilla"
+              value={reference}
+              onChange={(e) => setReference(e.target.value)}
             />
           </div>
 

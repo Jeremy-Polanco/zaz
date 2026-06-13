@@ -6,6 +6,7 @@ import { OrderLocationDrawer } from '../components/OrderLocationDrawer'
 import { Button, SectionHeading } from '../components/ui'
 import { useOrders, useUpdateOrderStatus } from '../lib/queries'
 import { formatDate, formatMoney } from '../lib/utils'
+import { formatAddressShort } from '../lib/address'
 import type { Order, OrderStatus } from '../lib/types'
 import type { ColumnDef } from '@tanstack/react-table'
 import { TOKEN_KEY, api } from '../lib/api'
@@ -109,7 +110,10 @@ function SuperOrdersPage() {
       },
       {
         header: 'Dirección',
-        accessorFn: (row) => row.deliveryAddress?.text ?? 'Sin ubicación',
+        accessorFn: (row) =>
+          row.deliveryAddress
+            ? formatAddressShort(row.deliveryAddress)
+            : 'Sin ubicación',
         cell: ({ getValue, row }) => {
           const addr = row.original.deliveryAddress
           return addr ? (

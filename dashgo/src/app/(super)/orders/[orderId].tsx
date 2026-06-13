@@ -16,6 +16,7 @@ import { api } from '../../../lib/api'
 import { useUpdateOrderStatus } from '../../../lib/queries'
 import { formatDate, formatMoney } from '../../../lib/format'
 import type { GeoAddress, Order, OrderStatus } from '../../../lib/types'
+import { formatAddressShort, addressDetailParts } from '../../../lib/address'
 import {
   BreakdownRow,
   Button,
@@ -259,12 +260,23 @@ export default function SuperOrderDetailScreen() {
 
         <View className="mt-5 px-5">
           <Eyebrow className="mb-3">Entrega</Eyebrow>
-          <Text className="text-[15px] leading-[22px] text-ink">
-            {order.deliveryAddress?.text ?? 'A coordinar'}
+          <Text className="font-sans-semibold text-[17px] leading-[22px] text-ink">
+            {order.deliveryAddress
+              ? formatAddressShort(order.deliveryAddress)
+              : 'A coordinar'}
           </Text>
-          {order.deliveryAddress?.building ? (
-            <Text className="mt-1 font-sans-semibold text-[13px] text-ink">
-              Edificio / casa: {order.deliveryAddress.building}
+          {addressDetailParts(order.deliveryAddress).map((part) => (
+            <Text
+              key={part.label}
+              className="mt-1 font-sans text-[13px] text-ink-soft"
+            >
+              <Text className="font-sans-medium text-ink">{part.label}: </Text>
+              {part.value}
+            </Text>
+          ))}
+          {order.deliveryAddress?.text ? (
+            <Text className="mt-1.5 font-sans text-[12px] leading-[17px] text-ink-muted">
+              {order.deliveryAddress.text}
             </Text>
           ) : null}
           {order.deliveryAddress &&

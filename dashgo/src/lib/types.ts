@@ -15,8 +15,14 @@ export interface GeoAddress {
   text: string
   lat?: number
   lng?: number
-  /** Building / house / unit number to pinpoint the exact drop-off. */
+  /** Building name/number (e.g. "Edif. 4", "Torre B"). */
   building?: string | null
+  /** House / door number (e.g. "24"). Shown first in the route summary. */
+  houseNumber?: string | null
+  /** Apartment, floor or unit inside a building (e.g. "Apto 3B", "Piso 2"). */
+  unit?: string | null
+  /** Visible landmark to find the drop-off ("frente al colmado"). */
+  reference?: string | null
 }
 
 export interface AuthUser {

@@ -30,6 +30,21 @@ export class DeliveryAddressDto {
   @IsString()
   @MaxLength(120)
   building?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(40)
+  houseNumber?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(60)
+  unit?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  reference?: string;
 }
 
 export class OrderItemInput {

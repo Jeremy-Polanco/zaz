@@ -420,6 +420,9 @@ export class OrdersService {
         lat: address.lat,
         lng: address.lng,
         building: address.building ?? null,
+        houseNumber: address.houseNumber ?? null,
+        unit: address.unit ?? null,
+        reference: address.reference ?? null,
       },
     });
     return this.findOne(id, user);
