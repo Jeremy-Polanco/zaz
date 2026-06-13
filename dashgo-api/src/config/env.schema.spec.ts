@@ -364,58 +364,79 @@ describe('envSchema', () => {
     });
   });
 
-  describe('production: TWILIO_WHATSAPP_FROM + TWILIO_WHATSAPP_OTP_TEMPLATE_SID must be set together', () => {
-    it('succeeds in production when both WhatsApp vars are absent (OTP fails loudly at send-time instead of blocking boot)', () => {
+  describe('production: Meta WhatsApp Cloud API trio required when AUTH_OTP_MODE=whatsapp', () => {
+    const META_TRIO = {
+      WHATSAPP_PHONE_NUMBER_ID: '123456789012345',
+      WHATSAPP_ACCESS_TOKEN: 'EAAG-token',
+      WHATSAPP_OTP_TEMPLATE_NAME: 'dashgo_otp',
+    };
+
+    it('succeeds in production when OTP is off (phone-only) and Meta vars are absent', () => {
       const result = envSchema.safeParse({
         ...validEnv(),
         NODE_ENV: 'production',
         DB_SYNCHRONIZE: 'false',
+        // AUTH_OTP_MODE unset → defaults to 'disabled' → no Meta config needed.
       });
       expect(result.success).toBe(true);
     });
 
-    it('succeeds in production when both WhatsApp vars are set', () => {
+    it('succeeds in production when AUTH_OTP_MODE=whatsapp and the full Meta trio is set', () => {
       const result = envSchema.safeParse({
         ...validEnv(),
         NODE_ENV: 'production',
         DB_SYNCHRONIZE: 'false',
-        TWILIO_WHATSAPP_FROM: 'whatsapp:+18001234567',
-        TWILIO_WHATSAPP_OTP_TEMPLATE_SID: 'HXabc123',
+        AUTH_OTP_MODE: 'whatsapp',
+        ...META_TRIO,
       });
       expect(result.success).toBe(true);
     });
 
-    it('fails in production when TWILIO_WHATSAPP_FROM is set without TEMPLATE_SID', () => {
+    it('fails in production when AUTH_OTP_MODE=whatsapp but WHATSAPP_ACCESS_TOKEN is missing', () => {
       const result = envSchema.safeParse({
         ...validEnv(),
         NODE_ENV: 'production',
         DB_SYNCHRONIZE: 'false',
-        TWILIO_WHATSAPP_FROM: 'whatsapp:+18001234567',
+        AUTH_OTP_MODE: 'whatsapp',
+        WHATSAPP_PHONE_NUMBER_ID: '123456789012345',
+        WHATSAPP_OTP_TEMPLATE_NAME: 'dashgo_otp',
       });
       expect(result.success).toBe(false);
       if (!result.success) {
         const issue = result.error.issues.find(
           (i) =>
-            Array.isArray(i.path) && i.path[0] === 'TWILIO_WHATSAPP_OTP_TEMPLATE_SID',
+            Array.isArray(i.path) && i.path[0] === 'WHATSAPP_ACCESS_TOKEN',
         );
         expect(issue).toBeDefined();
       }
     });
 
-    it('fails in production when TEMPLATE_SID is set without TWILIO_WHATSAPP_FROM', () => {
+    it('flags every missing Meta var when AUTH_OTP_MODE=whatsapp and none are set', () => {
       const result = envSchema.safeParse({
         ...validEnv(),
         NODE_ENV: 'production',
         DB_SYNCHRONIZE: 'false',
-        TWILIO_WHATSAPP_OTP_TEMPLATE_SID: 'HXabc123',
+        AUTH_OTP_MODE: 'whatsapp',
       });
       expect(result.success).toBe(false);
       if (!result.success) {
-        const issue = result.error.issues.find(
-          (i) => Array.isArray(i.path) && i.path[0] === 'TWILIO_WHATSAPP_FROM',
-        );
-        expect(issue).toBeDefined();
+        const paths = result.error.issues
+          .map((i) => (Array.isArray(i.path) ? i.path[0] : undefined))
+          .filter(Boolean);
+        expect(paths).toContain('WHATSAPP_PHONE_NUMBER_ID');
+        expect(paths).toContain('WHATSAPP_ACCESS_TOKEN');
+        expect(paths).toContain('WHATSAPP_OTP_TEMPLATE_NAME');
       }
+    });
+
+    it('does NOT require Meta vars for the relaxed sandbox mode', () => {
+      const result = envSchema.safeParse({
+        ...validEnv(),
+        NODE_ENV: 'production',
+        DB_SYNCHRONIZE: 'false',
+        AUTH_OTP_MODE: 'sandbox',
+      });
+      expect(result.success).toBe(true);
     });
   });
 
@@ -821,11 +842,15 @@ describe('envSchema', () => {
       expect(result.success).toBe(true);
     });
 
-    it("allows re-enabling OTP in production via AUTH_OTP_MODE='whatsapp'", () => {
+    it("allows re-enabling OTP in production via AUTH_OTP_MODE='whatsapp' when the Meta trio is set", () => {
       const result = envSchema.safeParse({
         ...validEnv(),
         NODE_ENV: 'production',
         AUTH_OTP_MODE: 'whatsapp',
+        // Meta WhatsApp Cloud API credentials are mandatory once OTP is on in prod.
+        WHATSAPP_PHONE_NUMBER_ID: '123456789012345',
+        WHATSAPP_ACCESS_TOKEN: 'EAAG-token',
+        WHATSAPP_OTP_TEMPLATE_NAME: 'dashgo_otp',
       });
       expect(result.success).toBe(true);
     });

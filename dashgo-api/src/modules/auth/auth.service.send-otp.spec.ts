@@ -1,21 +1,23 @@
 /**
- * FIX MOBILE-G1 — auth.service.sendOtp Twilio failure handling.
+ * FIX MOBILE-G1 — auth.service.sendOtp WhatsApp failure handling.
  *
- * The mobile sign-in screen now matches against a stable error code
- * (`WHATSAPP_SEND_FAILED`) wrapped in a 503 ServiceUnavailableException.
- * This spec covers the service-side contract:
+ * The mobile sign-in screen matches against stable error codes
+ * (e.g. `WHATSAPP_SEND_FAILED`) wrapped in a 503 ServiceUnavailableException.
+ * This spec covers the service-side contract against the Meta WhatsApp Cloud
+ * API sender (WhatsAppService.sendOtp):
  *
- *   1. Happy path — twilio.sendWhatsAppOtp resolves, sendOtp returns
+ *   1. Happy path — whatsapp.sendOtp resolves, sendOtp returns
  *      `{ sent: true, expiresAt }` and the OTP row stays.
- *   2. Twilio failure — sendOtp re-throws ServiceUnavailableException with
+ *   2. Send failure — sendOtp re-throws ServiceUnavailableException with
  *      body `{ code: 'WHATSAPP_SEND_FAILED', message: '...' }`.
- *   3. Twilio failure — the just-saved OTP row is deleted so the user does
+ *   3. Send failure — the just-saved OTP row is deleted so the user does
  *      NOT get punished with the 30s resend cooldown for a server outage.
- *   4. AUTH_BYPASS phones still bypass Twilio entirely and never touch the
+ *   4. AUTH_BYPASS phones still bypass the sender entirely and never touch the
  *      failure path.
+ *   5. FIX HIGH-G7 — Meta numeric error codes classify into the four buckets.
  *
- * Repositories, Twilio, Promoters and JWT are mocked. We do NOT exercise
- * the DB — the goal here is the failure-handling contract.
+ * Repositories, WhatsAppService, Promoters and JWT are mocked. We do NOT
+ * exercise the DB — the goal here is the failure-handling contract.
  */
 
 import {
@@ -39,7 +41,7 @@ import { PromoterCommissionEntry } from '../../entities/promoter-commission-entr
 import { Payout } from '../../entities/payout.entity';
 import { PointsLedgerEntry } from '../../entities/points-ledger-entry.entity';
 import { AccountDeletion } from '../../entities/account-deletion.entity';
-import { TwilioService } from '../twilio/twilio.service';
+import { WhatsAppService } from '../whatsapp/whatsapp.service';
 import { PromotersService } from '../promoters/promoters.service';
 
 // Stripe is imported at module load — mock so AuthService can construct
@@ -64,10 +66,10 @@ function makeRepoMock<T>(): jest.Mocked<Repository<T>> {
   } as unknown as jest.Mocked<Repository<T>>;
 }
 
-describe('AuthService.sendOtp — Twilio / WhatsApp failure handling (FIX MOBILE-G1)', () => {
+describe('AuthService.sendOtp — WhatsApp (Meta Cloud API) failure handling (FIX MOBILE-G1)', () => {
   let service: AuthService;
   let otps: jest.Mocked<Repository<OtpCode>>;
-  let twilio: { sendWhatsAppOtp: jest.Mock };
+  let whatsapp: { sendOtp: jest.Mock };
 
   const configValues: Record<string, string | undefined> = {
     JWT_SECRET: 'a'.repeat(32),
@@ -81,14 +83,14 @@ describe('AuthService.sendOtp — Twilio / WhatsApp failure handling (FIX MOBILE
 
   beforeEach(async () => {
     otps = makeRepoMock<OtpCode>();
-    // The service saves an OTP and then issues twilio.sendWhatsAppOtp.
+    // The service saves an OTP and then issues whatsapp.sendOtp.
     // We need save() to return an object with a stable `id` so the rollback
     // delete call can target it.
     otps.save.mockImplementation(async (entity: any) => ({
       id: 'otp-1',
       ...entity,
     }));
-    twilio = { sendWhatsAppOtp: jest.fn() };
+    whatsapp = { sendOtp: jest.fn() };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -144,7 +146,7 @@ describe('AuthService.sendOtp — Twilio / WhatsApp failure handling (FIX MOBILE
             ),
           },
         },
-        { provide: TwilioService, useValue: twilio },
+        { provide: WhatsAppService, useValue: whatsapp },
         {
           provide: PromotersService,
           useValue: { findPromoterByReferralCode: jest.fn() },
@@ -156,21 +158,21 @@ describe('AuthService.sendOtp — Twilio / WhatsApp failure handling (FIX MOBILE
     (service as unknown as { onModuleInit?: () => void }).onModuleInit?.();
   });
 
-  it('returns { sent: true, expiresAt } when twilio resolves', async () => {
-    twilio.sendWhatsAppOtp.mockResolvedValueOnce(undefined);
+  it('returns { sent: true, expiresAt } when whatsapp resolves', async () => {
+    whatsapp.sendOtp.mockResolvedValueOnce(undefined);
 
     const result = await service.sendOtp({ phone: '+18095550001' });
 
     expect(result.sent).toBe(true);
     expect(typeof result.expiresAt).toBe('string');
-    expect(twilio.sendWhatsAppOtp).toHaveBeenCalledTimes(1);
+    expect(whatsapp.sendOtp).toHaveBeenCalledTimes(1);
     // OTP row stays — no rollback delete.
     expect(otps.delete).not.toHaveBeenCalled();
   });
 
-  it('throws ServiceUnavailableException with WHATSAPP_SEND_FAILED code when twilio fails', async () => {
-    twilio.sendWhatsAppOtp.mockRejectedValueOnce(
-      new Error('Twilio 500 Internal Server Error'),
+  it('throws ServiceUnavailableException with WHATSAPP_SEND_FAILED code when whatsapp fails', async () => {
+    whatsapp.sendOtp.mockRejectedValueOnce(
+      new Error('Meta 500 Internal Server Error'),
     );
 
     let captured: unknown = null;
@@ -190,10 +192,8 @@ describe('AuthService.sendOtp — Twilio / WhatsApp failure handling (FIX MOBILE
     expect(body.message?.length).toBeGreaterThan(0);
   });
 
-  it('rolls back the just-saved OTP row when twilio fails so the user is not stuck on cooldown', async () => {
-    twilio.sendWhatsAppOtp.mockRejectedValueOnce(
-      new Error('Twilio rate limited'),
-    );
+  it('rolls back the just-saved OTP row when whatsapp fails so the user is not stuck on cooldown', async () => {
+    whatsapp.sendOtp.mockRejectedValueOnce(new Error('rate limited'));
 
     await expect(service.sendOtp({ phone: '+18095550003' })).rejects.toThrow(
       ServiceUnavailableException,
@@ -204,8 +204,8 @@ describe('AuthService.sendOtp — Twilio / WhatsApp failure handling (FIX MOBILE
   });
 
   it('still throws the ServiceUnavailableException even if the OTP rollback delete itself fails', async () => {
-    twilio.sendWhatsAppOtp.mockRejectedValueOnce(new Error('Twilio 503'));
-    // Cleanup failure must NOT mask the original Twilio failure — the user
+    whatsapp.sendOtp.mockRejectedValueOnce(new Error('Meta 503'));
+    // Cleanup failure must NOT mask the original send failure — the user
     // experience that matters is "WhatsApp didn't work, here's what to do".
     otps.delete.mockRejectedValueOnce(new Error('DB unavailable'));
 
@@ -214,40 +214,40 @@ describe('AuthService.sendOtp — Twilio / WhatsApp failure handling (FIX MOBILE
     );
   });
 
-  it('does NOT call twilio for AUTH_BYPASS phones (bypass path is unchanged)', async () => {
+  it('does NOT call whatsapp for AUTH_BYPASS phones (bypass path is unchanged)', async () => {
     await service.sendOtp({ phone: '+15555550000' });
 
-    expect(twilio.sendWhatsAppOtp).not.toHaveBeenCalled();
+    expect(whatsapp.sendOtp).not.toHaveBeenCalled();
     // No rollback either — bypass never enters the WhatsApp branch.
     expect(otps.delete).not.toHaveBeenCalled();
   });
 
-  // ── FIX HIGH-G7 — Distinct error codes per Twilio failure type ──────────
+  // ── FIX HIGH-G7 — Distinct error codes per WhatsApp failure type ──────────
   //
-  // Each Twilio error shape is rebuilt here as a plain object that mirrors
-  // the Twilio SDK's RestException ({ status, code, message }). We do NOT
-  // import the SDK because the production code only inspects those three
-  // fields via the classifyTwilioError helper.
+  // Each Meta failure is rebuilt here as a plain object that mirrors the
+  // WhatsAppApiError shape ({ status, code, message }). We do NOT import the
+  // service's error class because the production code only inspects those
+  // fields via the classifyWhatsAppError helper.
 
   /**
-   * Build a Twilio-shaped error. Both `status` (HTTP) and `code` (Twilio's
-   * numeric error code) are what classifyTwilioError dispatches on.
+   * Build a Meta-shaped error. Both `status` (HTTP) and `code` (Meta's numeric
+   * error code) are what classifyWhatsAppError dispatches on.
    */
-  function twilioError(opts: {
+  function metaError(opts: {
     status?: number;
     code?: number;
     message?: string;
   }): Error {
-    const err = Object.assign(new Error(opts.message ?? 'twilio rest error'), {
+    const err = Object.assign(new Error(opts.message ?? 'meta graph error'), {
       status: opts.status,
       code: opts.code,
     });
     return err;
   }
 
-  it('throws ServiceUnavailableException with WHATSAPP_RATE_LIMITED for Twilio HTTP 429', async () => {
-    twilio.sendWhatsAppOtp.mockRejectedValueOnce(
-      twilioError({ status: 429, message: 'Too Many Requests' }),
+  it('throws ServiceUnavailableException with WHATSAPP_RATE_LIMITED for HTTP 429', async () => {
+    whatsapp.sendOtp.mockRejectedValueOnce(
+      metaError({ status: 429, message: 'Too Many Requests' }),
     );
 
     let captured: unknown = null;
@@ -266,12 +266,31 @@ describe('AuthService.sendOtp — Twilio / WhatsApp failure handling (FIX MOBILE
     expect(otps.delete).toHaveBeenCalledWith('otp-1');
   });
 
-  it('throws BadRequestException with WHATSAPP_RECIPIENT_INVALID for Twilio code 21211', async () => {
-    twilio.sendWhatsAppOtp.mockRejectedValueOnce(
-      twilioError({
+  it('throws ServiceUnavailableException with WHATSAPP_RATE_LIMITED for Meta code 130429', async () => {
+    whatsapp.sendOtp.mockRejectedValueOnce(
+      metaError({ status: 400, code: 130429, message: 'Rate limit hit' }),
+    );
+
+    let captured: unknown = null;
+    try {
+      await service.sendOtp({ phone: '+18095550015' });
+    } catch (err) {
+      captured = err;
+    }
+
+    expect(captured).toBeInstanceOf(ServiceUnavailableException);
+    const body = (captured as ServiceUnavailableException).getResponse() as {
+      code?: string;
+    };
+    expect(body.code).toBe(WHATSAPP_ERROR_CODES.WHATSAPP_RATE_LIMITED);
+  });
+
+  it('throws BadRequestException with WHATSAPP_RECIPIENT_INVALID for Meta code 131009', async () => {
+    whatsapp.sendOtp.mockRejectedValueOnce(
+      metaError({
         status: 400,
-        code: 21211,
-        message: "Invalid 'To' Phone Number",
+        code: 131009,
+        message: 'Parameter value is not valid',
       }),
     );
 
@@ -289,35 +308,12 @@ describe('AuthService.sendOtp — Twilio / WhatsApp failure handling (FIX MOBILE
     expect(body.code).toBe(WHATSAPP_ERROR_CODES.WHATSAPP_RECIPIENT_INVALID);
   });
 
-  it('throws BadRequestException with WHATSAPP_RECIPIENT_INVALID for Twilio code 21614', async () => {
-    twilio.sendWhatsAppOtp.mockRejectedValueOnce(
-      twilioError({
+  it('throws BadRequestException with WHATSAPP_RECIPIENT_NOT_REACHABLE for Meta code 131026', async () => {
+    whatsapp.sendOtp.mockRejectedValueOnce(
+      metaError({
         status: 400,
-        code: 21614,
-        message: "'To' number is not a valid mobile number",
-      }),
-    );
-
-    let captured: unknown = null;
-    try {
-      await service.sendOtp({ phone: '+18095550011' });
-    } catch (err) {
-      captured = err;
-    }
-
-    expect(captured).toBeInstanceOf(BadRequestException);
-    const body = (captured as BadRequestException).getResponse() as {
-      code?: string;
-    };
-    expect(body.code).toBe(WHATSAPP_ERROR_CODES.WHATSAPP_RECIPIENT_INVALID);
-  });
-
-  it('throws BadRequestException with WHATSAPP_RECIPIENT_NOT_REACHABLE for Twilio code 63003', async () => {
-    twilio.sendWhatsAppOtp.mockRejectedValueOnce(
-      twilioError({
-        status: 400,
-        code: 63003,
-        message: 'Channel could not find To address',
+        code: 131026,
+        message: 'Message undeliverable',
       }),
     );
 
@@ -339,12 +335,12 @@ describe('AuthService.sendOtp — Twilio / WhatsApp failure handling (FIX MOBILE
     expect(body.message).toMatch(/WhatsApp/i);
   });
 
-  it('throws BadRequestException with WHATSAPP_RECIPIENT_NOT_REACHABLE for Twilio code 63016', async () => {
-    twilio.sendWhatsAppOtp.mockRejectedValueOnce(
-      twilioError({
+  it('throws BadRequestException with WHATSAPP_RECIPIENT_NOT_REACHABLE for Meta code 131030 (not in allowed list)', async () => {
+    whatsapp.sendOtp.mockRejectedValueOnce(
+      metaError({
         status: 400,
-        code: 63016,
-        message: 'Failed to send freeform message outside allowed window',
+        code: 131030,
+        message: 'Recipient phone number not in allowed list',
       }),
     );
 
@@ -364,9 +360,32 @@ describe('AuthService.sendOtp — Twilio / WhatsApp failure handling (FIX MOBILE
     );
   });
 
-  it('throws ServiceUnavailableException with WHATSAPP_SEND_FAILED for Twilio generic HTTP 500', async () => {
-    twilio.sendWhatsAppOtp.mockRejectedValueOnce(
-      twilioError({ status: 500, message: 'Internal Server Error' }),
+  it('throws ServiceUnavailableException with WHATSAPP_SEND_FAILED for a template error (132001)', async () => {
+    whatsapp.sendOtp.mockRejectedValueOnce(
+      metaError({
+        status: 400,
+        code: 132001,
+        message: 'Template name does not exist',
+      }),
+    );
+
+    let captured: unknown = null;
+    try {
+      await service.sendOtp({ phone: '+18095550016' });
+    } catch (err) {
+      captured = err;
+    }
+
+    expect(captured).toBeInstanceOf(ServiceUnavailableException);
+    const body = (captured as ServiceUnavailableException).getResponse() as {
+      code?: string;
+    };
+    expect(body.code).toBe(WHATSAPP_ERROR_CODES.WHATSAPP_SEND_FAILED);
+  });
+
+  it('throws ServiceUnavailableException with WHATSAPP_SEND_FAILED for a generic HTTP 500', async () => {
+    whatsapp.sendOtp.mockRejectedValueOnce(
+      metaError({ status: 500, message: 'Internal Server Error' }),
     );
 
     let captured: unknown = null;

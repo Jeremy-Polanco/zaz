@@ -1,52 +1,73 @@
 /**
- * FIX HIGH-G7 — Distinct error codes per Twilio failure type.
+ * FIX HIGH-G7 — Distinct error codes per WhatsApp send failure type.
  *
  * Previously the backend emitted a single `WHATSAPP_SEND_FAILED` for every
- * Twilio failure. That collapsed three very different UX paths into one:
+ * delivery failure. That collapsed three very different UX paths into one:
  *
  *   - User has no WhatsApp on this number  → should call support, not retry
  *   - User typed an invalid phone number    → should fix the input
- *   - Twilio is rate-limited / down         → should retry with backoff
+ *   - Provider is rate-limited / down       → should retry with backoff
  *
  * This module is the SINGLE source of truth for those codes. Both the
  * backend exception body and the mobile pattern-match consume it.
  *
  * KEEP IN SYNC with dashgo/src/lib/whatsapp-error-codes.ts — the mobile app
  * imports the same string literals as a separate copy. If you change a code
- * here, change it there too.
+ * here, change it there too. The string literals are provider-agnostic and
+ * MUST NOT change: the mobile app switches on them regardless of whether the
+ * backend talks to Twilio or Meta.
  *
- * Twilio reference (REST API error codes):
- *   - 21211 → "Invalid 'To' Phone Number"
- *   - 21614 → "'To' number is not a valid mobile number"
- *   - 63003 → "Channel could not find To address" (no WhatsApp on number)
- *   - 63016 → "Failed to send freeform message because you are outside the
- *              allowed window" (treated as not-reachable for OTP UX)
+ * Provider: Meta WhatsApp Cloud API (graph.facebook.com). The numeric codes
+ * below come from Meta's `error.code` field. Reference:
+ *   - 131026 → "Message undeliverable" (recipient cannot receive — typically
+ *              has no WhatsApp account, or the number is not a WhatsApp user)
+ *   - 131030 → "Recipient phone number not in allowed list" (sandbox/unverified
+ *              app can only message numbers added as testers) → not reachable
+ *   - 131009 → "Parameter value is not valid" (the recipient `to` is malformed)
+ *   - 130429 → "Rate limit hit" (throughput cap)
+ *   - 131048 → "Spam rate limit hit"
+ *   - 133016 → "Account temporarily blocked due to rate limiting"
+ *   - 80007 / 4 → application/business request limit reached
  *   - HTTP 429 → rate limit (transient)
+ *   - 132xxx → template errors (missing/disabled/param mismatch) → our config
+ *              problem, generic retry bucket
+ *   - 190 → access token expired/invalid → our config problem, generic bucket
  */
 
 export const WHATSAPP_ERROR_CODES = {
-  /** Catch-all transient failure — generic 5xx, network, unknown. Retry OK. */
+  /** Catch-all transient failure — generic 5xx, network, token/template config, unknown. Retry OK. */
   WHATSAPP_SEND_FAILED: 'WHATSAPP_SEND_FAILED',
-  /** Twilio returned HTTP 429. Retry with longer backoff. */
+  /** Meta rate/throughput limit (HTTP 429 or 130429/131048/133016/80007/4). Retry with longer backoff. */
   WHATSAPP_RATE_LIMITED: 'WHATSAPP_RATE_LIMITED',
-  /** Twilio 21211/21614 — phone number is malformed/not mobile. User must fix. */
+  /** Meta 131009 — recipient number is malformed/not valid. User must fix. */
   WHATSAPP_RECIPIENT_INVALID: 'WHATSAPP_RECIPIENT_INVALID',
-  /** Twilio 63003/63016 — recipient does not have WhatsApp. No retry. */
+  /** Meta 131026/131030 — recipient cannot receive (no WhatsApp / not reachable). No retry. */
   WHATSAPP_RECIPIENT_NOT_REACHABLE: 'WHATSAPP_RECIPIENT_NOT_REACHABLE',
 } as const;
 
 export type WhatsAppErrorCode =
   (typeof WHATSAPP_ERROR_CODES)[keyof typeof WHATSAPP_ERROR_CODES];
 
+// Meta numeric error codes, grouped by the bucket they map to.
+const META_NOT_REACHABLE_CODES = new Set([131026, 131030]);
+const META_RECIPIENT_INVALID_CODES = new Set([131009]);
+const META_RATE_LIMIT_CODES = new Set([130429, 131048, 133016, 80007, 4]);
+
 /**
- * Classify a thrown Twilio error into one of the WhatsAppErrorCode buckets.
+ * Classify a thrown WhatsApp send error into one of the WhatsAppErrorCode
+ * buckets.
  *
- * The Twilio SDK throws `RestException`-shaped objects with `status` (HTTP
- * status) and `code` (Twilio numeric error code) properties. We pattern match
- * on both, falling back to WHATSAPP_SEND_FAILED for anything we don't
+ * WhatsAppService throws {@link WhatsAppApiError}-shaped objects with `status`
+ * (HTTP status) and `code` (Meta numeric error code) properties. We pattern
+ * match on both, falling back to WHATSAPP_SEND_FAILED for anything we don't
  * recognize so the UX always has *some* code to switch on.
+ *
+ * NOTE: SendOtpDto already validates E.164 before we ever call Meta, so a
+ * malformed-recipient error is rare in steady state. Auth-token (190) and
+ * template (132xxx) errors deliberately fall through to WHATSAPP_SEND_FAILED
+ * (generic retry) rather than being mislabeled as "your number is invalid".
  */
-export function classifyTwilioError(err: unknown): WhatsAppErrorCode {
+export function classifyWhatsAppError(err: unknown): WhatsAppErrorCode {
   const e = err as
     | { status?: number; code?: number | string; message?: string }
     | null
@@ -56,8 +77,8 @@ export function classifyTwilioError(err: unknown): WhatsAppErrorCode {
   }
 
   const status = typeof e.status === 'number' ? e.status : undefined;
-  // Twilio SDK historically returns `code` as a number, but some surfaces
-  // (e.g. error.message parsing) hand back strings — normalize to number.
+  // Meta returns `code` as a number, but normalize defensively in case a
+  // surface hands back a numeric string.
   const rawCode = e.code;
   const numericCode =
     typeof rawCode === 'number'
@@ -66,14 +87,19 @@ export function classifyTwilioError(err: unknown): WhatsAppErrorCode {
         ? Number.parseInt(rawCode, 10)
         : undefined;
 
-  // Recipient-not-reachable takes priority over status because Twilio still
-  // returns a 4xx alongside these codes — the *reason* (no WhatsApp) is the
-  // actionable signal for the user, not the HTTP status.
-  if (numericCode === 63003 || numericCode === 63016) {
+  // Recipient-not-reachable takes priority — it's the most actionable signal
+  // for the user (no WhatsApp on this number → call support, don't retry).
+  if (numericCode !== undefined && META_NOT_REACHABLE_CODES.has(numericCode)) {
     return WHATSAPP_ERROR_CODES.WHATSAPP_RECIPIENT_NOT_REACHABLE;
   }
-  if (numericCode === 21211 || numericCode === 21614) {
+  if (
+    numericCode !== undefined &&
+    META_RECIPIENT_INVALID_CODES.has(numericCode)
+  ) {
     return WHATSAPP_ERROR_CODES.WHATSAPP_RECIPIENT_INVALID;
+  }
+  if (numericCode !== undefined && META_RATE_LIMIT_CODES.has(numericCode)) {
+    return WHATSAPP_ERROR_CODES.WHATSAPP_RATE_LIMITED;
   }
   if (status === 429) {
     return WHATSAPP_ERROR_CODES.WHATSAPP_RATE_LIMITED;

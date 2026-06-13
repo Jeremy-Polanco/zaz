@@ -30,7 +30,7 @@ import { PromoterCommissionEntry } from '../../entities/promoter-commission-entr
 import { Payout } from '../../entities/payout.entity';
 import { PointsLedgerEntry } from '../../entities/points-ledger-entry.entity';
 import { AccountDeletion } from '../../entities/account-deletion.entity';
-import { TwilioService } from '../twilio/twilio.service';
+import { WhatsAppService } from '../whatsapp/whatsapp.service';
 import { PromotersService } from '../promoters/promoters.service';
 import { UserRole } from '../../entities/enums';
 
@@ -59,7 +59,7 @@ describe('AuthService login — phone-only default + OTP re-enable guard', () =>
   let service: AuthService;
   let users: jest.Mocked<Repository<User>>;
   let otps: jest.Mocked<Repository<OtpCode>>;
-  let twilio: { sendWhatsAppOtp: jest.Mock };
+  let whatsapp: { sendOtp: jest.Mock };
   let promoters: { findPromoterByReferralCode: jest.Mock };
 
   // Mutable so individual tests can flip OTP back on.
@@ -74,7 +74,7 @@ describe('AuthService login — phone-only default + OTP re-enable guard', () =>
 
     users = makeRepoMock<User>();
     otps = makeRepoMock<OtpCode>();
-    twilio = { sendWhatsAppOtp: jest.fn().mockResolvedValue(undefined) };
+    whatsapp = { sendOtp: jest.fn().mockResolvedValue(undefined) };
     promoters = { findPromoterByReferralCode: jest.fn() };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -127,7 +127,7 @@ describe('AuthService login — phone-only default + OTP re-enable guard', () =>
             ),
           },
         },
-        { provide: TwilioService, useValue: twilio },
+        { provide: WhatsAppService, useValue: whatsapp },
         { provide: PromotersService, useValue: promoters },
       ],
     }).compile();
@@ -255,7 +255,7 @@ describe('AuthService login — phone-only default + OTP re-enable guard', () =>
     expect(result.sent).toBe(true);
     expect((result as { requiresCode?: boolean }).requiresCode).toBe(false);
     expect(typeof result.expiresAt).toBe('string');
-    expect(twilio.sendWhatsAppOtp).not.toHaveBeenCalled();
+    expect(whatsapp.sendOtp).not.toHaveBeenCalled();
     expect(otps.save).not.toHaveBeenCalled();
   });
 

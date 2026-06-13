@@ -28,10 +28,10 @@ import { AccountDeletion } from '../../entities/account-deletion.entity';
 import { UserRole } from '../../entities/enums';
 import { SendOtpDto } from './dto/send-otp.dto';
 import { VerifyOtpDto } from './dto/verify-otp.dto';
-import { TwilioService } from '../twilio/twilio.service';
+import { WhatsAppService } from '../whatsapp/whatsapp.service';
 import { PromotersService } from '../promoters/promoters.service';
 import {
-  classifyTwilioError,
+  classifyWhatsAppError,
   PERMANENT_WHATSAPP_ERROR_CODES,
   WHATSAPP_ERROR_MESSAGES,
 } from './whatsapp-error-codes';
@@ -69,7 +69,7 @@ export class AuthService implements OnModuleInit {
     private readonly dataSource: DataSource,
     private readonly jwt: JwtService,
     private readonly config: ConfigService,
-    private readonly twilio: TwilioService,
+    private readonly whatsapp: WhatsAppService,
     private readonly promoters: PromotersService,
   ) {}
 
@@ -162,15 +162,16 @@ export class AuthService implements OnModuleInit {
         `[AUTH_BYPASS_ACTIVE] OTP send skipped for ${phone}; client should submit AUTH_BYPASS_OTP_CODE`,
       );
     } else {
-      // WhatsApp-only OTP. SMS path is reserved for admin order notifications
-      // because A2P 10DLC SMS registration is heavy compared to the WhatsApp
-      // Business path — see DEPLOYMENT.md §Twilio WhatsApp setup.
+      // WhatsApp-only OTP via Meta's WhatsApp Cloud API (graph.facebook.com).
+      // SMS (Twilio) is reserved for admin order notifications because A2P
+      // 10DLC SMS registration is heavy compared to the WhatsApp Business
+      // path — see DEPLOYMENT.md §WhatsApp Cloud API setup.
       //
-      // FIX HIGH-G7 — Twilio failures are NOT one error class. We classify
-      // each into one of four codes so the mobile UI can show the right UX:
-      //   • WHATSAPP_RATE_LIMITED      (HTTP 429)   → retry with longer backoff
-      //   • WHATSAPP_RECIPIENT_INVALID (21211/21614) → user fixes phone, no retry
-      //   • WHATSAPP_RECIPIENT_NOT_REACHABLE (63003/63016) → no WhatsApp, call us
+      // FIX HIGH-G7 — send failures are NOT one error class. We classify each
+      // Meta failure into one of four codes so the mobile UI shows the right UX:
+      //   • WHATSAPP_RATE_LIMITED      (HTTP 429 / 130429…) → retry with backoff
+      //   • WHATSAPP_RECIPIENT_INVALID (131009)   → user fixes phone, no retry
+      //   • WHATSAPP_RECIPIENT_NOT_REACHABLE (131026/131030) → no WhatsApp, call us
       //   • WHATSAPP_SEND_FAILED       (anything else) → generic retry
       //
       // The HTTP status communicates retry semantics at the protocol level
@@ -180,11 +181,11 @@ export class AuthService implements OnModuleInit {
       // failure branch so the user is not punished with the 30s cooldown for
       // a server-side problem they cannot remediate.
       try {
-        await this.twilio.sendWhatsAppOtp(phone, code);
+        await this.whatsapp.sendOtp(phone, code);
       } catch (err) {
-        const classified = classifyTwilioError(err);
+        const classified = classifyWhatsAppError(err);
         const message =
-          err instanceof Error ? err.message : 'unknown twilio error';
+          err instanceof Error ? err.message : 'unknown whatsapp error';
         this.logger.error(`[${classified}] phone=${phone} cause=${message}`);
         // Best-effort cleanup — if this delete itself fails we still want to
         // surface the original Twilio failure to the client, so we don't

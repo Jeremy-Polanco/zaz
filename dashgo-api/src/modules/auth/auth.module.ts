@@ -17,7 +17,7 @@ import { AccountDeletion } from '../../entities/account-deletion.entity';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { JwtStrategy } from './strategies/jwt.strategy';
-import { TwilioModule } from '../twilio/twilio.module';
+import { WhatsAppModule } from '../whatsapp/whatsapp.module';
 import { PromotersModule } from '../promoters/promoters.module';
 import { CreditModule } from '../credit/credit.module';
 
@@ -41,7 +41,7 @@ import { CreditModule } from '../credit/credit.module';
       AccountDeletion,
     ]),
     PassportModule,
-    TwilioModule,
+    WhatsAppModule,
     PromotersModule,
     CreditModule,
     JwtModule.registerAsync({

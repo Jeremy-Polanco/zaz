@@ -1,9 +1,10 @@
 /**
- * FIX MOBILE-G1 — graceful Twilio/WhatsApp failure UX on the sign-in screen.
+ * FIX MOBILE-G1 — graceful WhatsApp failure UX on the sign-in screen.
  *
  * The backend's POST /auth/otp/send now throws a Nest ServiceUnavailableException
- * with `{ code: 'WHATSAPP_SEND_FAILED' }` whenever Twilio refuses the send
- * (Meta API down, rate-limited, user has no WhatsApp). The mobile client must:
+ * with `{ code: 'WHATSAPP_SEND_FAILED' }` whenever the Meta WhatsApp Cloud API
+ * refuses the send (API down, rate-limited, user has no WhatsApp). The mobile
+ * client must:
  *
  *   1. Detect the typed error code (or 503 as fallback).
  *   2. Render the graceful failure block in Spanish with:
@@ -495,7 +496,7 @@ describe('LoginScreen — escalation copy', () => {
 
 // ── FIX HIGH-G7 — Per-code rendering on the phone step ────────────────────────
 //
-// Each Twilio failure code maps to a distinct UX. These tests guarantee the
+// Each WhatsApp failure code maps to a distinct UX. These tests guarantee the
 // switch in WhatsAppFailureBlock stays honest: copy + CTAs must change per code.
 
 describe('LoginScreen — per-code WhatsApp failure UX (FIX HIGH-G7)', () => {

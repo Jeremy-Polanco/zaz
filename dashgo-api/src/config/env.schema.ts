@@ -49,23 +49,32 @@ export const envSchema = z
     // are absent, subscription routes return 4xx until the table is populated.
     STRIPE_SUBSCRIPTION_PRICE_ID: z.string().optional(),
 
-    // Twilio
+    // Twilio — SMS ONLY (admin order notifications + dormant SMS OTP fallback).
+    // WhatsApp OTP is sent via Meta's WhatsApp Cloud API, see WHATSAPP_* below.
     TWILIO_ACCOUNT_SID: z.string(),
     TWILIO_API_KEY_SID: z.string(),
     TWILIO_API_KEY_SECRET: z.string(),
     TWILIO_FROM_NUMBER: z.string(),
 
-    // WhatsApp Business via Twilio (production OTP path).
-    // TWILIO_WHATSAPP_FROM is the sender, format: `whatsapp:+1<number>`. For
-    //   the Twilio sandbox use `whatsapp:+14155238886`.
-    // TWILIO_WHATSAPP_OTP_TEMPLATE_SID is the Content Template SID (HX…) for
-    //   the approved Spanish authentication template. Required outside the
-    //   sandbox because business-initiated WhatsApp messages MUST use a
-    //   pre-approved template per Meta policy. When missing, TwilioService
-    //   falls back to free-form text — only works on the Twilio sandbox where
-    //   each tester has joined with `join <code>`.
-    TWILIO_WHATSAPP_FROM: z.string().optional(),
-    TWILIO_WHATSAPP_OTP_TEMPLATE_SID: z.string().optional(),
+    // WhatsApp Business — Meta WhatsApp Cloud API (production OTP path).
+    // We call graph.facebook.com directly (no BSP). All optional at the schema
+    // level so non-OTP deploys boot without them; the production guard below
+    // (Rule 4) requires the trio when AUTH_OTP_MODE=whatsapp.
+    //
+    //   WHATSAPP_PHONE_NUMBER_ID — the Cloud API phone number ID (numeric).
+    //   WHATSAPP_ACCESS_TOKEN    — System User long-lived token (Bearer).
+    //   WHATSAPP_OTP_TEMPLATE_NAME — name of the approved authentication template.
+    //   WHATSAPP_OTP_TEMPLATE_LANG — template language code (default 'es').
+    //   WHATSAPP_API_VERSION       — Graph API version (default 'v22.0').
+    //   WHATSAPP_OTP_TEMPLATE_HAS_BUTTON — 'false' for a body-only template;
+    //     default 'true' (auth templates ship a copy-code button that needs the
+    //     OTP echoed in a button component on send).
+    WHATSAPP_PHONE_NUMBER_ID: z.string().optional(),
+    WHATSAPP_ACCESS_TOKEN: z.string().optional(),
+    WHATSAPP_OTP_TEMPLATE_NAME: z.string().optional(),
+    WHATSAPP_OTP_TEMPLATE_LANG: z.string().default('es'),
+    WHATSAPP_API_VERSION: z.string().default('v22.0'),
+    WHATSAPP_OTP_TEMPLATE_HAS_BUTTON: z.enum(['true', 'false']).default('true'),
 
     // Order SMS notifications
     ORDER_SMS_NOTIFY_NUMBERS: z
@@ -94,11 +103,12 @@ export const envSchema = z
     //               authenticates by phone alone. This is the canonical product
     //               behavior. SECURITY: anyone who knows a registered phone can
     //               sign in as that user — there is no second factor.
-    //   whatsapp  — RE-ENABLE OTP via Twilio WhatsApp Business template.
-    //               TWILIO_WHATSAPP_FROM + TEMPLATE_SID must be set.
-    //   sandbox   — RE-ENABLE OTP via Twilio WhatsApp Sandbox (free-form text).
-    //               Each tester opts in by texting `join <code>` once.
-    //               TWILIO_WHATSAPP_FROM=whatsapp:+14155238886.
+    //   whatsapp  — RE-ENABLE OTP via Meta WhatsApp Cloud API template.
+    //               WHATSAPP_PHONE_NUMBER_ID + WHATSAPP_ACCESS_TOKEN +
+    //               WHATSAPP_OTP_TEMPLATE_NAME must be set (enforced in prod).
+    //   sandbox   — RE-ENABLE OTP for testing. Same Meta send path, but the
+    //               production config guard is relaxed (use Meta test numbers /
+    //               an unverified app's allow-listed testers).
     //
     // Default is `disabled` (phone-only). Set AUTH_OTP_MODE=whatsapp|sandbox to
     // turn verified login back on — the OTP code path is dormant, not deleted.
@@ -156,23 +166,25 @@ export const envSchema = z
         message: 'SENTRY_DSN is required in production',
       });
     }
-    // Rule 4 — production WhatsApp OTP requires both the sender and the
-    // approved template SID. Without the template SID, business-initiated
-    // messages are rejected by Meta; without the sender, no message gets
-    // sent at all. We allow them to BOTH be absent (boot keeps working,
-    // OTP fails loudly at send-time) so non-API services don't get blocked
-    // by Twilio outages, but if one is set the other must be too.
-    const hasWaFrom = !!env.TWILIO_WHATSAPP_FROM;
-    const hasWaTemplate = !!env.TWILIO_WHATSAPP_OTP_TEMPLATE_SID;
-    if (env.NODE_ENV === 'production' && hasWaFrom !== hasWaTemplate) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: hasWaFrom
-          ? ['TWILIO_WHATSAPP_OTP_TEMPLATE_SID']
-          : ['TWILIO_WHATSAPP_FROM'],
-        message:
-          'TWILIO_WHATSAPP_FROM and TWILIO_WHATSAPP_OTP_TEMPLATE_SID must be set together in production',
-      });
+    // Rule 4 — production WhatsApp OTP (Meta Cloud API) requires the full trio:
+    // phone number id, access token, and the approved template name. Without
+    // any one of them no business-initiated message can be sent. We only
+    // enforce this when OTP is actually turned on in production
+    // (AUTH_OTP_MODE=whatsapp) so phone-only deploys and the relaxed 'sandbox'
+    // testing mode boot without the Meta credentials.
+    if (env.NODE_ENV === 'production' && env.AUTH_OTP_MODE === 'whatsapp') {
+      const missing = [
+        !env.WHATSAPP_PHONE_NUMBER_ID && 'WHATSAPP_PHONE_NUMBER_ID',
+        !env.WHATSAPP_ACCESS_TOKEN && 'WHATSAPP_ACCESS_TOKEN',
+        !env.WHATSAPP_OTP_TEMPLATE_NAME && 'WHATSAPP_OTP_TEMPLATE_NAME',
+      ].filter((v): v is string => Boolean(v));
+      for (const key of missing) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: [key],
+          message: `${key} is required in production when AUTH_OTP_MODE=whatsapp`,
+        });
+      }
     }
     // Rule 5 — AUTH_BYPASS production guard (FIX C1).
     // Auth bypass exists for dev/test/E2E so engineers and CI can log in

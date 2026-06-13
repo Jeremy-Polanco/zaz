@@ -143,7 +143,7 @@ export function FieldError({ message }: { message?: string }) {
 // Phone input for a US/NANP-only product. The "+1" country code is NEVER shown
 // and NEVER typed — the user just enters the 10 national digits. Any "+", leading
 // country code, spaces or dashes are stripped on the fly, and we store the E.164
-// "+1<digits>" value the schema/Twilio expect. Shared by the login and
+// "+1<digits>" value the schema/WhatsApp API expect. Shared by the login and
 // promoter-invite forms so the behaviour never drifts apart.
 export function PhoneField<T extends FieldValues>({
   control,

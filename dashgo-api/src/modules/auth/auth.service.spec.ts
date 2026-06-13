@@ -38,7 +38,7 @@ import { Payout } from '../../entities/payout.entity';
 import { PointsLedgerEntry } from '../../entities/points-ledger-entry.entity';
 import { AccountDeletion } from '../../entities/account-deletion.entity';
 import { createHash } from 'crypto';
-import { TwilioService } from '../twilio/twilio.service';
+import { WhatsAppService } from '../whatsapp/whatsapp.service';
 import { PromotersService } from '../promoters/promoters.service';
 import { UserRole } from '../../entities/enums';
 
@@ -223,7 +223,7 @@ describe('AuthService.deleteAccount (FIX C2)', () => {
             }),
           },
         },
-        { provide: TwilioService, useValue: { sendWhatsAppOtp: jest.fn() } },
+        { provide: WhatsAppService, useValue: { sendOtp: jest.fn() } },
         {
           provide: PromotersService,
           useValue: { findPromoterByReferralCode: jest.fn() },

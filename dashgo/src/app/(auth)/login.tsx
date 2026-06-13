@@ -22,13 +22,13 @@ import {
   type WhatsAppErrorCode,
 } from '../../lib/whatsapp-error-codes'
 
-// FIX MOBILE-G1 — graceful Twilio / WhatsApp failure UX.
+// FIX MOBILE-G1 — graceful WhatsApp failure UX.
 //
 // When the backend's POST /auth/otp/send raises ServiceUnavailableException
 // with { code: 'WHATSAPP_SEND_FAILED' } (Meta down, rate-limited, user has
 // no WhatsApp), we must NOT leave the user with a generic toast. Instead:
 //   1. Show a Spanish guidance message + retry button + support links.
-//   2. Enforce a 5s client-side cooldown on retry so taps don't hammer Twilio.
+//   2. Enforce a 5s client-side cooldown on retry so taps don't hammer Meta.
 //   3. Escalate the copy after 3 consecutive failures so the user knows the
 //      outage is real and is steered toward support instead of retrying.
 //
@@ -72,16 +72,16 @@ function routeByRole(role: UserRole) {
 }
 
 /**
- * Pattern-match a Twilio / WhatsApp delivery failure on the client side.
+ * Pattern-match a WhatsApp delivery failure on the client side.
  *
  * FIX HIGH-G7 — the backend now emits FOUR distinct codes (rate-limited,
  * invalid recipient, not-reachable, generic). For the failure-block visibility
  * decision we treat all four as "this is a WhatsApp failure"; the inner UI
  * then switches on the specific code to pick copy + CTAs.
  *
- * Falls back to "any 503 from /auth/otp/send" because Twilio is the only
- * outbound dependency of that endpoint — a bare 503 with no body is almost
- * certainly Twilio.
+ * Falls back to "any 503 from /auth/otp/send" because the Meta WhatsApp Cloud
+ * API is the only outbound dependency of that endpoint — a bare 503 with no
+ * body is almost certainly a WhatsApp send failure.
  */
 export function isWhatsAppSendFailure(err: unknown): boolean {
   return extractWhatsAppErrorCode(err) !== null
@@ -99,7 +99,7 @@ export function isWhatsAppSendFailure(err: unknown): boolean {
  *     the user explicitly cannot receive WhatsApp.
  *   • retryCooldownSeconds — only meaningful when allowRetry is true. The
  *     rate-limited code uses a longer cooldown so we don't immediately
- *     bounce off Twilio's 429.
+ *     bounce off Meta's rate limit.
  */
 type WhatsAppFailureCopy = {
   eyebrow: string
@@ -138,7 +138,7 @@ const WHATSAPP_FAILURE_COPY: Record<WhatsAppErrorCode, WhatsAppFailureCopy> = {
     message: 'El número no parece válido. Revisalo y probá de nuevo.',
     bullets: [],
     // No retry button — the user must edit the phone field and submit again.
-    // Re-pinging Twilio with the same bad number will just fail identically.
+    // Re-pinging Meta with the same bad number will just fail identically.
     allowRetry: false,
     showCallSupport: false,
     retryCooldownSeconds: 0,

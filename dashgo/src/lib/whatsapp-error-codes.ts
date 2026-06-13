@@ -1,9 +1,11 @@
 /**
- * FIX HIGH-G7 — Distinct error codes per Twilio failure type.
+ * FIX HIGH-G7 — Distinct error codes per WhatsApp failure type.
  *
  * Mirror of dashgo-api/src/modules/auth/whatsapp-error-codes.ts. Do NOT
  * diverge — both files must agree on the exact string literals, otherwise
- * the mobile UI will silently fall through to the generic catch-all.
+ * the mobile UI will silently fall through to the generic catch-all. The
+ * literals are provider-agnostic: the backend now sends WhatsApp OTP via
+ * Meta's WhatsApp Cloud API (was Twilio), but these codes did not change.
  *
  * Why a copy instead of a shared package: the repo isn't a yarn-workspace
  * monorepo, so we have no published shared module. Three string literals
@@ -12,13 +14,13 @@
  */
 
 export const WHATSAPP_ERROR_CODES = {
-  /** Catch-all transient failure — generic 5xx, network, unknown. Retry OK. */
+  /** Catch-all transient failure — generic 5xx, network, token/template config, unknown. Retry OK. */
   WHATSAPP_SEND_FAILED: 'WHATSAPP_SEND_FAILED',
-  /** Twilio returned HTTP 429. Retry with longer backoff. */
+  /** Meta rate/throughput limit (HTTP 429 or 130429/131048/133016…). Retry with longer backoff. */
   WHATSAPP_RATE_LIMITED: 'WHATSAPP_RATE_LIMITED',
-  /** Twilio 21211/21614 — phone number is malformed/not mobile. User must fix. */
+  /** Meta 131009 — recipient number is malformed/not valid. User must fix. */
   WHATSAPP_RECIPIENT_INVALID: 'WHATSAPP_RECIPIENT_INVALID',
-  /** Twilio 63003/63016 — recipient does not have WhatsApp. No retry. */
+  /** Meta 131026/131030 — recipient cannot receive (no WhatsApp / not reachable). No retry. */
   WHATSAPP_RECIPIENT_NOT_REACHABLE: 'WHATSAPP_RECIPIENT_NOT_REACHABLE',
 } as const
 
@@ -47,8 +49,9 @@ export function extractWhatsAppErrorCode(err: unknown): WhatsAppErrorCode | null
     if (code === WHATSAPP_ERROR_CODES.WHATSAPP_RECIPIENT_NOT_REACHABLE) return code
   }
   // Fallback: a 503 from /auth/otp/send is almost always WhatsApp-related
-  // because the only outbound dependency of that endpoint is Twilio. Map
-  // it to the catch-all so the user still sees the graceful failure UX.
+  // because the only outbound dependency of that endpoint is the Meta
+  // WhatsApp Cloud API. Map it to the catch-all so the user still sees the
+  // graceful failure UX.
   if (e.response?.status === 503) {
     return WHATSAPP_ERROR_CODES.WHATSAPP_SEND_FAILED
   }

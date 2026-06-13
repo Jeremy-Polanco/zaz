@@ -121,9 +121,23 @@ function PrivacyPolicy() {
             .
           </li>
           <li>
-            <strong>Twilio</strong> (mensajería) — entrega los códigos de
-            verificación por WhatsApp y las notificaciones de pedido. Recibe tu
-            número de teléfono. Política:{' '}
+            <strong>Meta (WhatsApp)</strong> (mensajería) — entrega los códigos
+            de verificación por WhatsApp a través de la WhatsApp Cloud API.
+            Recibe tu número de teléfono. Política:{' '}
+            <a
+              href="https://www.whatsapp.com/legal/business-policy/"
+              className="text-brand underline"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              whatsapp.com/legal/business-policy
+            </a>
+            .
+          </li>
+          <li>
+            <strong>Twilio</strong> (mensajería SMS) — entrega las
+            notificaciones de pedido por SMS. Recibe tu número de teléfono.
+            Política:{' '}
             <a
               href="https://www.twilio.com/legal/privacy"
               className="text-brand underline"
