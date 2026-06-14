@@ -3,7 +3,7 @@ import {
   isRedirect,
   redirect,
 } from '@tanstack/react-router'
-import { useForm } from 'react-hook-form'
+import { useForm, useWatch } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { TOKEN_KEY, api } from '../lib/api'
@@ -14,6 +14,9 @@ import {
 } from '../lib/queries'
 import { Button, FieldError, Input, Label, SectionHeading } from '../components/ui'
 import type { AdminPlanResponse } from '../lib/types'
+import { TAX_RATE, computeGrossCents } from '../lib/tax'
+
+const TAX_PERCENT_LABEL = `${(TAX_RATE * 100).toFixed(3).replace(/\.?0+$/, '')}%`
 
 // ── Route definition ───────────────────────────────────────────────────────────
 
@@ -52,12 +55,19 @@ function SuperSubscriptionPage() {
   const { data: plan, isPending } = useAdminSubscriptionPlan()
   const mutation = useUpdateSubscriptionPlan()
 
-  const { register, handleSubmit, formState, reset } = useForm<FormValues>({
+  const { register, handleSubmit, formState, reset, control } = useForm<FormValues>({
     resolver: zodResolver(priceSchema),
     defaultValues: {
       priceDollars: plan ? plan.unitAmountCents / 100 : 10,
     },
   })
+
+  // Live preview of the tax-inclusive price as the admin types the net amount.
+  const watchedDollars = useWatch({ control, name: 'priceDollars' })
+  const previewGrossDollars =
+    typeof watchedDollars === 'number' && Number.isFinite(watchedDollars)
+      ? (computeGrossCents(Math.round(watchedDollars * 100)) / 100).toFixed(2)
+      : null
 
   if (isPending) {
     return (
@@ -71,6 +81,9 @@ function SuperSubscriptionPage() {
 
   const currentDollars = plan
     ? (plan.unitAmountCents / 100).toFixed(2)
+    : '—'
+  const currentGrossDollars = plan
+    ? (plan.grossAmountCents / 100).toFixed(2)
     : '—'
 
   const onSubmit = (values: FormValues) => {
@@ -103,16 +116,18 @@ function SuperSubscriptionPage() {
       {/* Current value display */}
       <div className="mb-8 border border-ink/15 bg-paper px-6 py-5">
         <p className="text-[10px] uppercase tracking-wide text-ink-muted mb-1">
-          Precio mensual actual
+          Precio mensual actual (sin impuestos)
         </p>
         <p className="text-3xl font-semibold tabular-nums text-ink" data-testid="current-price">
           ${currentDollars}
         </p>
+        <p className="mt-2 text-sm text-ink" data-testid="current-gross-price">
+          Se cobra <span className="font-semibold tabular-nums">${currentGrossDollars}</span>
+          <span className="text-ink-muted"> (incluye {TAX_PERCENT_LABEL} de impuestos)</span>
+        </p>
         {plan && (
           <p className="mt-1 text-sm text-ink-muted">
             {plan.currency.toUpperCase()} / {plan.interval === 'month' ? 'mes' : plan.interval}
-            {' · '}
-            <span className="font-mono text-xs">{plan.activeStripePriceId}</span>
           </p>
         )}
       </div>
@@ -157,6 +172,15 @@ function SuperSubscriptionPage() {
               <FieldError
                 message={formState.errors.priceDollars.message}
               />
+            )}
+            {previewGrossDollars && !formState.errors.priceDollars && (
+              <p className="mt-2 text-sm text-ink-muted" data-testid="gross-preview">
+                Se cobrará{' '}
+                <span className="font-semibold text-ink tabular-nums">
+                  ${previewGrossDollars}
+                </span>{' '}
+                / mes (incluye {TAX_PERCENT_LABEL} de impuestos)
+              </p>
             )}
           </div>
 
