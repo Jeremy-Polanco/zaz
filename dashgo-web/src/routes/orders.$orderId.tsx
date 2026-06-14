@@ -1,12 +1,19 @@
 import { createFileRoute, redirect, Link } from '@tanstack/react-router'
-import { useQuery } from '@tanstack/react-query'
-import { useState } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useState, type FormEvent } from 'react'
+import {
+  Elements,
+  PaymentElement,
+  useElements,
+  useStripe,
+} from '@stripe/react-stripe-js'
 import { api, TOKEN_KEY } from '../lib/api'
 import {
   useAuthorizeOrder,
   useConfirmCashOrder,
   useConfirmNonStripeOrder,
 } from '../lib/queries'
+import { getStripe } from '../lib/stripe'
 import { Button, SectionHeading } from '../components/ui'
 import { StatusBadge } from '../components/StatusBadge'
 import { formatCents, formatMoney } from '../lib/utils'
@@ -216,22 +223,18 @@ function OrderDetailPage() {
                 : `Autorizar pago · ${formatCents(stripeAmountCents)} →`}
             </Button>
           ) : (
-            <div className="mt-4 border border-ink/20 bg-paper p-4">
-              <p className="text-sm font-medium text-ink">
-                Autorización preparada.
-              </p>
-              <p className="mt-2 break-all font-mono text-xs text-ink-muted">
-                client_secret: {authIntent.clientSecret.slice(0, 32)}…
-              </p>
-              <p className="mt-3 text-xs text-ink-soft">
-                Para completar la autorización, instalá{' '}
-                <code>@stripe/stripe-js</code> y{' '}
-                <code>@stripe/react-stripe-js</code> y montá{' '}
-                <code>&lt;PaymentElement /&gt;</code> con este client_secret,
-                después llamá <code>stripe.confirmPayment</code>. Ver plan en{' '}
-                <code>~/.claude/plans/jazzy-petting-reef.md</code>.
-              </p>
-            </div>
+            <Elements
+              stripe={getStripe()}
+              options={{
+                clientSecret: authIntent.clientSecret,
+                appearance: { theme: 'flat' },
+              }}
+            >
+              <OrderAuthForm
+                orderId={order.id}
+                amountCents={stripeAmountCents}
+              />
+            </Elements>
           )}
         </div>
       )}
@@ -342,5 +345,99 @@ function OrderDetailPage() {
         </div>
       </section>
     </div>
+  )
+}
+
+/**
+ * Card-authorization form for a quoted digital order. The PaymentIntent is
+ * created with capture_method='manual', so a successful confirmation leaves it
+ * in `requires_capture` (funds held), NOT `succeeded` — the colmado captures
+ * later at delivery. The webhook (payment_intent.amount_capturable_updated)
+ * moves the order QUOTED → PENDING_VALIDATION; here we just invalidate so the
+ * page refetches and reflects the new status.
+ */
+function OrderAuthForm({
+  orderId,
+  amountCents,
+}: {
+  orderId: string
+  amountCents: number
+}) {
+  const stripe = useStripe()
+  const elements = useElements()
+  const qc = useQueryClient()
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [authorized, setAuthorized] = useState(false)
+
+  const onSubmit = async (e: FormEvent) => {
+    e.preventDefault()
+    if (!stripe || !elements) return
+    setSubmitting(true)
+    setError(null)
+
+    const { error: confirmError, paymentIntent } = await stripe.confirmPayment({
+      elements,
+      redirect: 'if_required',
+    })
+
+    if (confirmError) {
+      setError(confirmError.message ?? 'No pudimos autorizar la tarjeta.')
+      setSubmitting(false)
+      return
+    }
+
+    // Manual capture: `requires_capture` is the success state (funds held).
+    // Accept `succeeded` defensively in case capture mode ever changes.
+    if (
+      paymentIntent?.status === 'requires_capture' ||
+      paymentIntent?.status === 'succeeded'
+    ) {
+      setAuthorized(true)
+      setTimeout(() => {
+        qc.invalidateQueries({ queryKey: ['order', orderId] })
+        qc.invalidateQueries({ queryKey: ['orders'] })
+      }, 1200)
+      return
+    }
+
+    setError(
+      `Estado de pago inesperado: ${paymentIntent?.status ?? 'desconocido'}.`,
+    )
+    setSubmitting(false)
+  }
+
+  if (authorized) {
+    return (
+      <div className="mt-4 border border-ok/30 bg-ok/5 p-4 text-center">
+        <span className="eyebrow text-ok">Pago autorizado</span>
+        <p className="mt-2 text-sm text-ink">
+          Retuvimos {formatCents(amountCents)} en tu tarjeta. Lo cobramos solo
+          cuando te entreguemos el pedido.
+        </p>
+      </div>
+    )
+  }
+
+  return (
+    <form onSubmit={onSubmit} className="mt-4 space-y-5">
+      <div className="border border-ink/15 bg-paper p-5">
+        <PaymentElement />
+      </div>
+      {error && <p className="text-sm font-medium text-bad">{error}</p>}
+      <Button
+        type="submit"
+        variant="accent"
+        size="lg"
+        disabled={!stripe || !elements || submitting}
+        className="w-full"
+      >
+        {submitting ? 'Procesando…' : `Autorizar ${formatCents(amountCents)} →`}
+      </Button>
+      <p className="text-center text-[11px] text-ink-muted">
+        Pago seguro vía Stripe. El monto queda retenido — no se cobra hasta la
+        entrega.
+      </p>
+    </form>
   )
 }
