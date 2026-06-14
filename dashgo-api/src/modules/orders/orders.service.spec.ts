@@ -1625,6 +1625,47 @@ describe('OrdersService', () => {
       expect(created.tax).toBe('0.00');
       expect(created.quotedAt).toBeNull();
     });
+
+    // Subscriber benefit: bebedero maintenance is free. The maintenance-service
+    // line is zeroed at creation for active subscribers, regardless of the
+    // product's list price — mirrors the free-shipping benefit in setQuote().
+    const maintenanceProduct = fakeProduct({
+      id: 'prod-maint',
+      name: 'Mantenimiento de Bebedero',
+      requiresQuote: false,
+      isMaintenanceService: true,
+      priceToPublic: '10.00',
+    });
+
+    it('active subscriber → maintenance line is free (total $0, wasSubscriberAtQuote=true)', async () => {
+      subscriptionService.isActiveSubscriber.mockResolvedValue(true);
+
+      const created = await captureCreatedOrder(
+        [maintenanceProduct],
+        [{ productId: 'prod-maint', quantity: 1 }],
+      );
+
+      expect(created.status).toBe(OrderStatus.QUOTED);
+      expect(created.subtotal).toBe('0.00');
+      expect(created.tax).toBe('0.00');
+      expect(created.totalAmount).toBe('0.00');
+      expect(created.wasSubscriberAtQuote).toBe(true);
+    });
+
+    it('non-subscriber → maintenance billed at the product list price', async () => {
+      subscriptionService.isActiveSubscriber.mockResolvedValue(false);
+
+      const created = await captureCreatedOrder(
+        [maintenanceProduct],
+        [{ productId: 'prod-maint', quantity: 1 }],
+      );
+
+      // 10.00 → tax = round(1000 * 0.08887) = 89 cents
+      expect(created.subtotal).toBe('10.00');
+      expect(created.tax).toBe('0.89');
+      expect(created.totalAmount).toBe('10.89');
+      expect(created.wasSubscriberAtQuote).toBe(false);
+    });
   });
 
   // ─────────────────────────────────────────────────────────────────────────

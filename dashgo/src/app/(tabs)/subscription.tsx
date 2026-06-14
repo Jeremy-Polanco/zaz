@@ -93,13 +93,14 @@ export default function SubscriptionTab() {
           </Text>
         </View>
         <Text className="mt-2 text-[13px] text-ink-soft">
-          Envío gratis en todos tus pedidos.
+          Envío gratis y mantenimiento del bebedero sin costo.
         </Text>
 
         {toastVisible && (
           <View className="mt-4 border border-green-200 bg-green-50 px-4 py-3">
             <Text className="font-sans text-[12px] text-green-800">
-              ¡Suscripción activada! Ya puedes disfrutar del envío gratis.
+              ¡Suscripción activada! Ya puedes disfrutar de envío gratis y
+              mantenimiento del bebedero sin costo.
             </Text>
           </View>
         )}
@@ -113,7 +114,8 @@ export default function SubscriptionTab() {
               {plan ? formatCents(plan.priceCents) : '$10.00'} / mes
             </Text>
             <Text className="mt-2 text-[14px] text-ink-soft">
-              Envío gratis en todos tus pedidos. Cancela cuando quieras.
+              Impuestos incluidos · Envío gratis y mantenimiento del bebedero
+              sin costo. Cancela cuando quieras.
             </Text>
             <View className="mt-5">
               <Button
@@ -157,7 +159,8 @@ export default function SubscriptionTab() {
               Activo hasta {formatDate(sub.currentPeriodEnd)}, no se renovará.
             </Text>
             <Text className="mt-1 text-[13px] text-yellow-700">
-              Aún tienes envío gratis hasta esa fecha.
+              Aún tienes envío gratis y mantenimiento del bebedero sin costo
+              hasta esa fecha.
             </Text>
             <View className="mt-5 gap-3">
               <Button
@@ -178,7 +181,8 @@ export default function SubscriptionTab() {
               Tu pago está pendiente.
             </Text>
             <Text className="mt-1 text-[13px] text-red-700">
-              Actualizá tu medio de pago para seguir con el envío gratis.
+              Actualizá tu medio de pago para seguir con el envío gratis y el
+              mantenimiento del bebedero sin costo.
             </Text>
             <View className="mt-5">
               <Button onPress={openPortal} disabled={portal.isPending}>

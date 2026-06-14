@@ -58,13 +58,14 @@ function SubscriptionPage() {
             Mi <span className="italic text-brand">suscripción.</span>
           </>
         }
-        subtitle="Envío gratis en todos tus pedidos."
+        subtitle="Envío gratis y mantenimiento del bebedero sin costo."
       />
 
       {session === 'success' && (
         <div className="mb-6 border border-green-200 bg-green-50 px-5 py-4">
           <p className="text-sm font-medium text-green-800">
-            ¡Suscripción activada! Ya puedes disfrutar del envío gratis.
+            ¡Suscripción activada! Ya puedes disfrutar de envío gratis y
+            mantenimiento del bebedero sin costo.
           </p>
         </div>
       )}
@@ -76,7 +77,8 @@ function SubscriptionPage() {
             ${plan ? (plan.priceCents / 100).toFixed(2) : '10.00'} / mes
           </p>
           <p className="mb-6 text-base text-ink-muted">
-            Envío gratis en todos tus pedidos. Cancela cuando quieras.
+            Impuestos incluidos · Envío gratis y mantenimiento del bebedero sin
+            costo. Cancela cuando quieras.
           </p>
           <Button
             variant="accent"
@@ -121,7 +123,8 @@ function SubscriptionPage() {
             Activo hasta {formatDate(sub.currentPeriodEnd)}, no se renovará.
           </p>
           <p className="mb-6 text-sm text-yellow-700">
-            Aún tienes envío gratis hasta esa fecha.
+            Aún tienes envío gratis y mantenimiento del bebedero sin costo hasta
+            esa fecha.
           </p>
           <div className="flex flex-wrap gap-3">
             <Button
@@ -144,7 +147,8 @@ function SubscriptionPage() {
         /* Past due */
         <div className="border border-red-200 bg-red-50 p-8">
           <p className="mb-2 text-base font-medium text-red-800">
-            Tu pago está pendiente. Actualizá tu medio de pago para seguir con el envío gratis.
+            Tu pago está pendiente. Actualizá tu medio de pago para seguir con
+            el envío gratis y el mantenimiento del bebedero sin costo.
           </p>
           <Button
             variant="accent"

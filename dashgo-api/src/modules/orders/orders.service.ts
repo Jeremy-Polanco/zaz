@@ -12,6 +12,7 @@ import { DataSource, FindOptionsWhere, In, Not, Repository } from 'typeorm';
 import { Order, OrderItem, Product } from '../../entities';
 import { OrderStatus, PaymentMethod, UserRole } from '../../entities/enums';
 import { AuthenticatedUser } from '../../common/types/authenticated-user';
+import { TAX_RATE } from '../../common/tax';
 import { CreateOrderDto, DeliveryAddressDto } from './dto/create-order.dto';
 import { UpdateOrderStatusDto } from './dto/update-order-status.dto';
 import { PaymentsService } from '../payments/payments.service';
@@ -41,7 +42,8 @@ const ALLOWED_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
   [OrderStatus.CANCELLED]: [],
 };
 
-export const TAX_RATE = 0.08887;
+// Re-exported for backward compatibility; canonical definition lives in common/tax.ts
+export { TAX_RATE };
 
 @Injectable()
 export class OrdersService {
@@ -182,6 +184,18 @@ export class OrdersService {
         (input) => byId.get(input.productId)?.requiresQuote === false,
       );
 
+    // Subscriber benefit: active subscribers get bebedero maintenance for free.
+    // When the cart contains the maintenance-service product, the maintenance
+    // line is zeroed below regardless of its list price — the same benefit shape
+    // as free shipping (applied in setQuote()). Only resolve subscription status
+    // when there's actually a maintenance item, to avoid an extra query.
+    const hasMaintenanceItem = dto.items.some(
+      (input) => byId.get(input.productId)?.isMaintenanceService === true,
+    );
+    const isSubscriber = hasMaintenanceItem
+      ? await this.subscriptionService.isActiveSubscriber(user.id)
+      : false;
+
     const now = new Date();
     let subtotalCents = 0;
     const builtItems = dto.items.map((input) => {
@@ -193,6 +207,10 @@ export class OrdersService {
         // T58: For rental items, use monthlyRentCents (first month's payment)
         lineCents = product.monthlyRentCents * input.quantity;
         priceAtOrder = (product.monthlyRentCents / 100).toFixed(2);
+      } else if (product.isMaintenanceService && isSubscriber) {
+        // Free bebedero maintenance for active subscribers.
+        lineCents = 0;
+        priceAtOrder = '0.00';
       } else {
         const effective = getEffectivePrice(product, now);
         lineCents = effective.priceCents * input.quantity;
@@ -270,6 +288,7 @@ export class OrdersService {
         totalAmount: (totalCents / 100).toFixed(2),
         quotedAt: skipQuote ? now : null,
         skipQuote,
+        wasSubscriberAtQuote: isSubscriber,
         paymentMethod: dto.paymentMethod,
         stripePaymentIntentId: null,
         paidAt: null,
