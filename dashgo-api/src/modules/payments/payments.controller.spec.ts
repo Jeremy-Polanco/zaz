@@ -15,6 +15,7 @@ import { PaymentsService } from './payments.service';
 import { SubscriptionService } from '../subscription/subscription.service';
 import { CreditService } from '../credit/credit.service';
 import { RentalsService } from '../rentals/rentals.service';
+import { OrdersService } from '../orders/orders.service';
 import { StripeWebhookIdempotencyService } from './stripe-webhook-idempotency.service';
 import type { RawBodyRequest } from '@nestjs/common';
 import type { Request } from 'express';
@@ -124,6 +125,10 @@ describe('PaymentsController — webhook rental dispatch (T49/T50)', () => {
         { provide: SubscriptionService, useValue: mockSubscriptionService },
         { provide: CreditService, useValue: mockCreditService },
         { provide: RentalsService, useValue: mockRentalsService },
+        {
+          provide: OrdersService,
+          useValue: { autoConfirmSkipQuoteByIntentId: jest.fn() },
+        },
         {
           provide: StripeWebhookIdempotencyService,
           useValue: mockIdempotencyService,

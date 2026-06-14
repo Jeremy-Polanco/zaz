@@ -1,9 +1,11 @@
 import {
   Body,
   Controller,
+  forwardRef,
   Headers,
   HttpCode,
   HttpStatus,
+  Inject,
   InternalServerErrorException,
   Logger,
   Post,
@@ -20,6 +22,7 @@ import { CreatePaymentIntentDto } from './dto/create-payment-intent.dto';
 import { SubscriptionService } from '../subscription/subscription.service';
 import { CreditService } from '../credit/credit.service';
 import { RentalsService } from '../rentals/rentals.service';
+import { OrdersService } from '../orders/orders.service';
 import { StripeWebhookIdempotencyService } from './stripe-webhook-idempotency.service';
 
 interface StripePaymentIntentLike {
@@ -48,6 +51,10 @@ export class PaymentsController {
     private readonly credit: CreditService,
     private readonly rentalsService: RentalsService,
     private readonly idempotency: StripeWebhookIdempotencyService,
+    // forwardRef: OrdersModule imports PaymentsModule (OrdersService → PaymentsService),
+    // and we need OrdersService here for skip-quote auto-confirm.
+    @Inject(forwardRef(() => OrdersService))
+    private readonly ordersService: OrdersService,
   ) {}
 
   @UseGuards(JwtAuthGuard)
@@ -145,6 +152,18 @@ export class PaymentsController {
       case 'payment_intent.amount_capturable_updated':
         // Client successfully authorized the hold on their card under manual capture.
         await this.payments.markAuthorizedByIntentId(intent.id);
+        // Skip-cotización orders auto-confirm once the hold is authorized —
+        // nothing for the colmado to quote. Non-blocking: a failure here must
+        // not 500 the webhook (it would retry forever); the order simply stays
+        // PENDING_VALIDATION for manual confirm.
+        try {
+          await this.ordersService.autoConfirmSkipQuoteByIntentId(intent.id);
+        } catch (err) {
+          this.logger.error(
+            'auto-confirm skip-quote webhook handler failed',
+            err as Error,
+          );
+        }
         break;
       case 'payment_intent.succeeded':
         if (kind === 'credit_payment') {

@@ -116,6 +116,7 @@ function fakeOrder(overrides: Partial<Order> = {}): Order {
     authorizedAt: null,
     capturedAt: null,
     wasSubscriberAtQuote: false,
+    skipQuote: false,
     createdAt: new Date(),
     items: [],
     customer: {} as never,
@@ -224,6 +225,134 @@ describe('OrdersService', () => {
     }).compile();
 
     service = module.get<OrdersService>(OrdersService);
+  });
+
+  // -------------------------------------------------------------------------
+  // skip-cotización auto-confirm (PENDING_VALIDATION → CONFIRMED_BY_COLMADO)
+  // -------------------------------------------------------------------------
+
+  type ConfirmStockSpyTarget = {
+    confirmAndDecrementStock(orderId: string): Promise<void>;
+  };
+  const spyConfirmStock = () =>
+    jest
+      .spyOn(
+        service as unknown as ConfirmStockSpyTarget,
+        'confirmAndDecrementStock',
+      )
+      .mockResolvedValue(undefined);
+
+  describe('confirmNonStripeOrder — skip-quote auto-confirm', () => {
+    const user = fakeUser(UserRole.CLIENT);
+
+    const quotedCashOrder = (overrides: Partial<Order> = {}) =>
+      fakeOrder({
+        status: OrderStatus.QUOTED,
+        paymentMethod: PaymentMethod.CASH,
+        stripePaymentIntentId: null,
+        ...overrides,
+      });
+
+    it('auto-confirms a skip-quote order after cash confirm (decrements stock)', async () => {
+      ordersRepo.findOne.mockResolvedValue(quotedCashOrder({ skipQuote: true }));
+      ordersRepo.update.mockResolvedValue({} as never);
+      const confirmSpy = spyConfirmStock();
+
+      await service.confirmNonStripeOrder('order-1', user);
+
+      expect(ordersRepo.update).toHaveBeenCalledWith('order-1', {
+        status: OrderStatus.PENDING_VALIDATION,
+      });
+      expect(confirmSpy).toHaveBeenCalledWith('order-1');
+    });
+
+    it('does NOT auto-confirm a normal (non-skip-quote) order', async () => {
+      ordersRepo.findOne.mockResolvedValue(
+        quotedCashOrder({ skipQuote: false }),
+      );
+      ordersRepo.update.mockResolvedValue({} as never);
+      const confirmSpy = spyConfirmStock();
+
+      await service.confirmNonStripeOrder('order-1', user);
+
+      expect(ordersRepo.update).toHaveBeenCalledWith('order-1', {
+        status: OrderStatus.PENDING_VALIDATION,
+      });
+      expect(confirmSpy).not.toHaveBeenCalled();
+    });
+
+    it('is non-blocking: insufficient stock leaves the order in PENDING_VALIDATION', async () => {
+      ordersRepo.findOne.mockResolvedValue(quotedCashOrder({ skipQuote: true }));
+      ordersRepo.update.mockResolvedValue({} as never);
+      jest
+        .spyOn(
+          service as unknown as ConfirmStockSpyTarget,
+          'confirmAndDecrementStock',
+        )
+        .mockRejectedValue(new Error('Stock insuficiente'));
+
+      await expect(
+        service.confirmNonStripeOrder('order-1', user),
+      ).resolves.toBeDefined();
+    });
+  });
+
+  describe('autoConfirmSkipQuoteByIntentId (digital webhook)', () => {
+    it('auto-confirms a skip-quote digital order once the hold is authorized', async () => {
+      ordersRepo.findOne.mockResolvedValue(
+        fakeOrder({
+          id: 'order-9',
+          skipQuote: true,
+          status: OrderStatus.PENDING_VALIDATION,
+          paymentMethod: PaymentMethod.DIGITAL,
+          stripePaymentIntentId: 'pi_123',
+        }),
+      );
+      const confirmSpy = spyConfirmStock();
+
+      await service.autoConfirmSkipQuoteByIntentId('pi_123');
+
+      expect(confirmSpy).toHaveBeenCalledWith('order-9');
+    });
+
+    it('no-op for a normal (non-skip-quote) order', async () => {
+      ordersRepo.findOne.mockResolvedValue(
+        fakeOrder({
+          skipQuote: false,
+          status: OrderStatus.PENDING_VALIDATION,
+          stripePaymentIntentId: 'pi_123',
+        }),
+      );
+      const confirmSpy = spyConfirmStock();
+
+      await service.autoConfirmSkipQuoteByIntentId('pi_123');
+
+      expect(confirmSpy).not.toHaveBeenCalled();
+    });
+
+    it('no-op when the order is not in PENDING_VALIDATION', async () => {
+      ordersRepo.findOne.mockResolvedValue(
+        fakeOrder({
+          skipQuote: true,
+          status: OrderStatus.QUOTED,
+          stripePaymentIntentId: 'pi_123',
+        }),
+      );
+      const confirmSpy = spyConfirmStock();
+
+      await service.autoConfirmSkipQuoteByIntentId('pi_123');
+
+      expect(confirmSpy).not.toHaveBeenCalled();
+    });
+
+    it('no-op when no order matches the intent', async () => {
+      ordersRepo.findOne.mockResolvedValue(null);
+      const confirmSpy = spyConfirmStock();
+
+      await service.autoConfirmSkipQuoteByIntentId('pi_unknown');
+
+      expect(confirmSpy).not.toHaveBeenCalled();
+    });
   });
 
   // -------------------------------------------------------------------------

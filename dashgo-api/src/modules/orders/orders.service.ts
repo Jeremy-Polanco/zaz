@@ -269,6 +269,7 @@ export class OrdersService {
         taxRate: TAX_RATE.toFixed(5),
         totalAmount: (totalCents / 100).toFixed(2),
         quotedAt: skipQuote ? now : null,
+        skipQuote,
         paymentMethod: dto.paymentMethod,
         stripePaymentIntentId: null,
         paidAt: null,
@@ -544,6 +545,14 @@ export class OrdersService {
     }
 
     await this.orders.update(id, { status: OrderStatus.PENDING_VALIDATION });
+
+    // Skip-cotización orders have nothing for the colmado to quote/review, so
+    // once confirmed they advance straight to CONFIRMED_BY_COLMADO (stock
+    // decremented). Non-blocking — see tryAutoConfirmSkipQuote.
+    if (order.skipQuote) {
+      await this.tryAutoConfirmSkipQuote(id);
+    }
+
     return this.findOne(id, user);
   }
 
@@ -553,6 +562,46 @@ export class OrdersService {
    */
   async confirmCashOrder(id: string, user: AuthenticatedUser) {
     return this.confirmNonStripeOrder(id, user);
+  }
+
+  /**
+   * Webhook entry point: after a digital order's card hold is authorized
+   * (PaymentsService.markAuthorizedByIntentId moved it QUOTED →
+   * PENDING_VALIDATION), auto-confirm it if it's a skip-cotización order.
+   * Called from PaymentsController.dispatch on
+   * `payment_intent.amount_capturable_updated`. No-op for normal orders.
+   */
+  async autoConfirmSkipQuoteByIntentId(intentId: string): Promise<void> {
+    const order = await this.orders.findOne({
+      where: { stripePaymentIntentId: intentId },
+    });
+    if (!order) return;
+    if (!order.skipQuote) return;
+    if (order.status !== OrderStatus.PENDING_VALIDATION) return;
+    await this.tryAutoConfirmSkipQuote(order.id);
+  }
+
+  /**
+   * Auto-advance a skip-cotización order PENDING_VALIDATION →
+   * CONFIRMED_BY_COLMADO once payment has settled (cash confirm or card
+   * authorization). Skip-quote orders need no admin review (no shipping to
+   * quote), so we confirm + decrement stock automatically.
+   *
+   * NON-BLOCKING: confirmAndDecrementStock throws on insufficient stock (or any
+   * error). We swallow it and leave the order in PENDING_VALIDATION so the admin
+   * can resolve it manually — this must never break the cash-confirm response
+   * or the Stripe webhook.
+   */
+  private async tryAutoConfirmSkipQuote(orderId: string): Promise<void> {
+    try {
+      await this.confirmAndDecrementStock(orderId);
+    } catch (err) {
+      this.logger.warn(
+        `auto-confirm skip-quote order ${orderId} failed — left in PENDING_VALIDATION for manual review: ${
+          (err as Error).message
+        }`,
+      );
+    }
   }
 
 

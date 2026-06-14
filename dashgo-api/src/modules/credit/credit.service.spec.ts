@@ -82,6 +82,7 @@ function fakeOrder(
     authorizedAt: null,
     capturedAt: null,
     wasSubscriberAtQuote: false,
+    skipQuote: false,
     createdAt: new Date(),
     items: [],
     customer: {} as never,

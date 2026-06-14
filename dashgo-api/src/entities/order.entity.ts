@@ -158,6 +158,14 @@ export class Order {
   @Column({ name: 'was_subscriber_at_quote', type: 'boolean', default: false })
   wasSubscriberAtQuote!: boolean;
 
+  // True when the order was created as skip-cotización (every item
+  // requiresQuote=false → auto-quoted, $0 shipping). Drives auto-confirm:
+  // such orders advance PENDING_VALIDATION → CONFIRMED_BY_COLMADO without an
+  // admin review step once paid/confirmed. NOT inferred from shipping=0
+  // (subscribers also get $0 shipping on normal orders).
+  @Column({ name: 'skip_quote', type: 'boolean', default: false })
+  skipQuote!: boolean;
+
   @CreateDateColumn({ name: 'created_at' })
   createdAt!: Date;
 
