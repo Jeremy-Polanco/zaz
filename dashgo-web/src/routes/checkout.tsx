@@ -4,6 +4,7 @@ import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { checkoutSchema, type CheckoutInput } from '../lib/schemas'
 import {
+  useAuthorizeOrder,
   useConfirmNonStripeOrder,
   useCreateOrder,
   useMyCredit,
@@ -13,9 +14,10 @@ import {
   useProducts,
 } from '../lib/queries'
 import { CheckoutCreditStep } from '../components/CheckoutCreditStep'
+import { CardAuthForm } from '../components/CardAuthForm'
 import { useCurrentUser } from '../lib/auth'
 import { useCart, clearCart } from '../lib/cart'
-import { Button, Label, Select } from '../components/ui'
+import { Button, Label, Select, SectionHeading } from '../components/ui'
 import { formatCents, formatMoney } from '../lib/utils'
 import { computeQuotePreviewCents } from '../lib/tax'
 import { TOKEN_KEY } from '../lib/api'
@@ -36,7 +38,17 @@ function CheckoutPage() {
   const { data: balance } = usePointsBalance()
   const createOrder = useCreateOrder()
   const confirmOrder = useConfirmNonStripeOrder()
+  const authorize = useAuthorizeOrder()
   const { data: orders } = useOrders()
+
+  // When a skip-cotización digital order needs card payment, we collect it
+  // inline here (no bounce to the order page's "Autorizar" step) — the customer
+  // pays and the order is placed in one flow.
+  const [inlinePay, setInlinePay] = useState<{
+    orderId: string
+    clientSecret: string
+    amount: number
+  } | null>(null)
 
   // One order at a time: block checkout while a previous order is still in
   // progress (anything not delivered/cancelled). Mirrors the server guard.
@@ -159,22 +171,74 @@ function CheckoutPage() {
     )
   }
 
+  const goToOrder = (orderId: string) => {
+    clearCart()
+    router.navigate({ to: '/orders/$orderId', params: { orderId } })
+  }
+
   const onSubmit = form.handleSubmit(async (values) => {
     const created = await createOrder.mutateAsync({ ...values, usePoints, useCredit })
-    // One-click: a cash order that's auto-quoted (skip-cotización, e.g. water)
-    // already shows its final total here — confirm it right away so the customer
-    // doesn't need a second "Confirmar" tap on the order screen. Normal orders
-    // (admin-quoted later) and digital orders (need payment) keep their step.
-    if (created.status === 'quoted' && created.paymentMethod === 'cash') {
+
+    // Skip-cotización orders are auto-quoted at creation (status 'quoted'):
+    // nothing for the admin to quote, so we finish payment right here instead
+    // of bouncing the customer to the order page. Normal orders (status
+    // 'pending_quote') still go to the order page to await the admin's quote.
+    const isSkipQuote = created.status === 'quoted'
+    const totalCents = Math.round(parseFloat(created.totalAmount) * 100)
+    const creditCents = Math.round(parseFloat(created.creditApplied ?? '0') * 100)
+    const fullCredit = creditCents > 0 && creditCents >= totalCents
+
+    if (isSkipQuote && created.paymentMethod === 'digital' && !fullCredit) {
+      // Authorize the card hold and collect payment inline.
+      try {
+        const intent = await authorize.mutateAsync(created.id)
+        setInlinePay({
+          orderId: created.id,
+          clientSecret: intent.clientSecret,
+          amount: intent.amount,
+        })
+      } catch {
+        // Authorization couldn't be prepared — fall back to the order page,
+        // where the customer can retry the "Autorizar pago" step.
+        goToOrder(created.id)
+      }
+      return
+    }
+
+    if (isSkipQuote && (created.paymentMethod === 'cash' || fullCredit)) {
+      // One-click: no card needed (cash, or fully covered by credit). Confirm
+      // now so the customer doesn't need a second tap. Non-blocking.
       try {
         await confirmOrder.mutateAsync(created.id)
       } catch {
-        // Non-blocking — the order screen still offers a manual confirm.
+        // The order screen still offers a manual confirm.
       }
     }
-    clearCart()
-    router.navigate({ to: '/orders/$orderId', params: { orderId: created.id } })
+
+    goToOrder(created.id)
   })
+
+  // Skip-cotización digital order awaiting inline card payment.
+  if (inlinePay) {
+    return (
+      <div className="page-rise mx-auto max-w-xl px-6 py-12">
+        <SectionHeading
+          eyebrow="Pago"
+          title={
+            <>
+              Autorizá <span className="italic text-brand">tu tarjeta.</span>
+            </>
+          }
+          subtitle="El monto queda retenido y lo cobramos solo cuando te entreguemos el pedido."
+        />
+        <CardAuthForm
+          clientSecret={inlinePay.clientSecret}
+          amountCents={inlinePay.amount}
+          onAuthorized={() => goToOrder(inlinePay.orderId)}
+        />
+      </div>
+    )
+  }
 
   return (
     <div className="page-rise mx-auto max-w-6xl px-6 py-12">

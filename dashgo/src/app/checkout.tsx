@@ -3,7 +3,9 @@ import { View, Text, Pressable, ScrollView } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { router } from 'expo-router'
 import { useCart, cart } from '../lib/cart'
+import { useStripe } from '@stripe/stripe-react-native'
 import {
+  useAuthorizeOrder,
   useConfirmNonStripeOrder,
   useCreateOrder,
   useCurrentUser,
@@ -29,6 +31,8 @@ export default function CheckoutScreen() {
   const { data: subscription } = useMySubscription()
   const createOrder = useCreateOrder()
   const confirmOrder = useConfirmNonStripeOrder()
+  const authorize = useAuthorizeOrder()
+  const { initPaymentSheet, presentPaymentSheet } = useStripe()
   const { data: orders } = useOrders()
 
   // One order at a time: block while a previous order is still in progress
@@ -143,6 +147,31 @@ export default function CheckoutScreen() {
 
   // ── Order submission ───────────────────────────────────────────────────────
 
+  // Authorizes a skip-cotización digital order via the native PaymentSheet,
+  // inline at checkout (no bounce to the order screen's "Autorizar" step).
+  // Returns true once the hold is authorized; false on cancel/error.
+  const payWithSheet = async (orderId: string): Promise<boolean> => {
+    const intent = await authorize.mutateAsync(orderId)
+    const initResult = await initPaymentSheet({
+      merchantDisplayName: 'DashGo',
+      paymentIntentClientSecret: intent.clientSecret,
+      allowsDelayedPaymentMethods: false,
+      returnURL: 'dashgo://stripe-redirect',
+    })
+    if (initResult.error) {
+      setError(initResult.error.message)
+      return false
+    }
+    const sheetResult = await presentPaymentSheet()
+    if (sheetResult.error) {
+      if (sheetResult.error.code !== 'Canceled') {
+        setError(sheetResult.error.message)
+      }
+      return false
+    }
+    return true
+  }
+
   const executeOrder = async () => {
     const items = lineItems.map(({ productId, quantity }) => ({
       productId,
@@ -157,15 +186,30 @@ export default function CheckoutScreen() {
         useCredit,
       })
 
-      // One-click: a cash order that's auto-quoted (skip-cotización, e.g. water)
-      // already shows its final total — confirm it right away so there's no
-      // second "Confirmar" tap on the order screen. Normal/digital orders keep
-      // their step (admin quote / payment).
-      if (created.status === 'quoted' && created.paymentMethod === 'cash') {
+      // Skip-cotización orders are auto-quoted at creation (status 'quoted'):
+      // nothing for the admin to quote, so we finish payment right here. Normal
+      // orders (status 'pending_quote') go to the order screen to await a quote.
+      const isSkipQuote = created.status === 'quoted'
+      const totalCents = Math.round(parseFloat(created.totalAmount) * 100)
+      const creditCents = Math.round(
+        parseFloat(created.creditApplied ?? '0') * 100,
+      )
+      const fullCredit = creditCents > 0 && creditCents >= totalCents
+
+      if (isSkipQuote && created.paymentMethod === 'digital' && !fullCredit) {
+        // Pay with the card sheet inline. On cancel/failure, fall through to the
+        // order screen where the customer can retry the "Autorizar" step.
+        await payWithSheet(created.id)
+      } else if (
+        isSkipQuote &&
+        (created.paymentMethod === 'cash' || fullCredit)
+      ) {
+        // One-click: no card needed (cash, or fully covered by credit). The
+        // server auto-confirms skip-quote orders from here. Non-blocking.
         try {
           await confirmOrder.mutateAsync(created.id)
         } catch {
-          // Non-blocking — the order screen still offers a manual confirm.
+          // The order screen still offers a manual confirm.
         }
       }
 

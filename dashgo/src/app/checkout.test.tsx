@@ -16,12 +16,20 @@ import { renderWithProviders } from '../test/test-utils'
 jest.mock('../lib/queries', () => ({
   useCreateOrder: jest.fn(),
   useConfirmNonStripeOrder: jest.fn(),
+  useAuthorizeOrder: jest.fn(),
   useOrders: jest.fn(),
   useCurrentUser: jest.fn(),
   useMyCredit: jest.fn(),
   useMySubscription: jest.fn(),
   usePointsBalance: jest.fn(),
   useProducts: jest.fn(),
+}))
+
+jest.mock('@stripe/stripe-react-native', () => ({
+  useStripe: () => ({
+    initPaymentSheet: jest.fn(),
+    presentPaymentSheet: jest.fn(),
+  }),
 }))
 
 jest.mock('expo-router', () => {
