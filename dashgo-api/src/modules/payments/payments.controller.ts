@@ -1,11 +1,9 @@
 import {
   Body,
   Controller,
-  forwardRef,
   Headers,
   HttpCode,
   HttpStatus,
-  Inject,
   InternalServerErrorException,
   Logger,
   Post,
@@ -13,6 +11,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import type { RawBodyRequest } from '@nestjs/common';
+import { ModuleRef } from '@nestjs/core';
 import type { Request } from 'express';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
@@ -51,10 +50,11 @@ export class PaymentsController {
     private readonly credit: CreditService,
     private readonly rentalsService: RentalsService,
     private readonly idempotency: StripeWebhookIdempotencyService,
-    // forwardRef: OrdersModule imports PaymentsModule (OrdersService → PaymentsService),
-    // and we need OrdersService here for skip-quote auto-confirm.
-    @Inject(forwardRef(() => OrdersService))
-    private readonly ordersService: OrdersService,
+    // OrdersService is resolved lazily via ModuleRef (see dispatch). A static
+    // module import here would create an OrdersModule ↔ PaymentsModule cycle
+    // (OrdersService already depends on PaymentsService), which breaks app
+    // bootstrap even with forwardRef because the cycle runs through CreditModule.
+    private readonly moduleRef: ModuleRef,
   ) {}
 
   @UseGuards(JwtAuthGuard)
@@ -157,7 +157,10 @@ export class PaymentsController {
         // not 500 the webhook (it would retry forever); the order simply stays
         // PENDING_VALIDATION for manual confirm.
         try {
-          await this.ordersService.autoConfirmSkipQuoteByIntentId(intent.id);
+          const ordersService = this.moduleRef.get(OrdersService, {
+            strict: false,
+          });
+          await ordersService.autoConfirmSkipQuoteByIntentId(intent.id);
         } catch (err) {
           this.logger.error(
             'auto-confirm skip-quote webhook handler failed',

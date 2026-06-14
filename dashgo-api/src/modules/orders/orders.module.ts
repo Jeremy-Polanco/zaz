@@ -16,9 +16,7 @@ import { RentalsModule } from '../rentals/rentals.module';
 @Module({
   imports: [
     TypeOrmModule.forFeature([Order, OrderItem, Product]),
-    // forwardRef: PaymentsModule's controller injects OrdersService (skip-quote
-    // auto-confirm), while OrdersService injects PaymentsService — mutual ref.
-    forwardRef(() => PaymentsModule),
+    PaymentsModule,
     PointsModule,
     InvoicesModule,
     PromotersModule,

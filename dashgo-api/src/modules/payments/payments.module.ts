@@ -11,7 +11,6 @@ import { ShippingModule } from '../shipping/shipping.module';
 import { CreditModule } from '../credit/credit.module';
 import { SubscriptionModule } from '../subscription/subscription.module';
 import { RentalsModule } from '../rentals/rentals.module';
-import { OrdersModule } from '../orders/orders.module';
 
 @Module({
   imports: [
@@ -21,9 +20,6 @@ import { OrdersModule } from '../orders/orders.module';
     forwardRef(() => CreditModule),
     forwardRef(() => SubscriptionModule),
     forwardRef(() => RentalsModule),
-    // forwardRef: the webhook controller injects OrdersService for skip-quote
-    // auto-confirm; OrdersModule already imports PaymentsModule — mutual ref.
-    forwardRef(() => OrdersModule),
   ],
   controllers: [PaymentsController],
   providers: [
