@@ -41,8 +41,9 @@ import { setupTransactionPerTest } from '../../src/test-utils/transaction';
 import { makeCreditAccount, makeUser } from '../../src/test-utils/fixtures';
 import { CreditAccount } from '../../src/entities/credit-account.entity';
 import { CreditMovementType } from '../../src/entities/credit-movement.entity';
+import { Order } from '../../src/entities/order.entity';
 import { User } from '../../src/entities/user.entity';
-import { UserRole } from '../../src/entities/enums';
+import { OrderStatus, PaymentMethod, UserRole } from '../../src/entities/enums';
 import { CreditService } from '../../src/modules/credit/credit.service';
 
 // Load .env.test before app bootstrap
@@ -99,8 +100,6 @@ describe('CreditService (integration)', () => {
       await qr.manager.getRepository(CreditAccount).save(acctData as unknown as CreditAccount);
 
       // We need an order ID for the charge — save a minimal order
-      const { Order } = await import('../../src/entities/order.entity');
-      const { OrderStatus, PaymentMethod } = await import('../../src/entities/enums');
       const orderRepo = qr.manager.getRepository(Order);
       const order = await orderRepo.save({
         customerId: savedUser.id,
@@ -164,10 +163,8 @@ describe('CreditService (integration)', () => {
       // This test does NOT use the per-test transaction rollback because
       // concurrent connections require separate transactions.
       // We use the test DB directly and clean up manually.
-      const { User: UserEntity } = await import('../../src/entities/user.entity');
-      const { CreditAccount: CreditAccountEntity } = await import(
-        '../../src/entities/credit-account.entity'
-      );
+      const UserEntity = User;
+      const CreditAccountEntity = CreditAccount;
 
       const userRepo = dataSource.getRepository(UserEntity);
       const acctRepo = dataSource.getRepository(CreditAccountEntity);
@@ -193,8 +190,9 @@ describe('CreditService (integration)', () => {
         currency: 'usd',
       } as unknown as InstanceType<typeof CreditAccountEntity>);
 
-      const { Order: OrderEntity } = await import('../../src/entities/order.entity');
-      const { OrderStatus: OS, PaymentMethod: PM } = await import('../../src/entities/enums');
+      const OrderEntity = Order;
+      const OS = OrderStatus;
+      const PM = PaymentMethod;
       const orderRepo2 = dataSource.getRepository(OrderEntity);
 
       // Create two orders for the two concurrent charges

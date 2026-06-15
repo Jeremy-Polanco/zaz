@@ -518,12 +518,13 @@ describe('SubscriptionPlan (integration) — T36/T37 updatePlan + auth', () => {
     });
 
     it('(e) subsequent GET /subscription/plan reflects new priceCents from DB (Scenario 15)', async () => {
-      // DB should now have unitAmountCents=2500 from test (d)
+      // DB should now have unitAmountCents=2500 (net) from test (d). The public
+      // plan endpoint returns GROSS: 2500 + round(2500 * 0.08887)=222 = 2722.
       const res = await request(app.getHttpServer())
         .get('/subscription/plan');
 
       expect(res.status).toBe(200);
-      expect(res.body.priceCents).toBe(2500);
+      expect(res.body.priceCents).toBe(2722);
       expect(res.body.currency).toBe('usd');
       expect(res.body.interval).toBe('month');
     });

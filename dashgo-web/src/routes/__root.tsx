@@ -96,6 +96,9 @@ function RoleNavLinks({
         <Link to="/super/promoters" className={linkClass} onClick={onNavigate}>
           Promotores
         </Link>
+        <Link to="/super/users" className={linkClass} onClick={onNavigate}>
+          Usuarios
+        </Link>
         <Link
           to="/super/credit"
           search={{ status: undefined, search: undefined, page: 1, pageSize: 50 }}

@@ -23,6 +23,7 @@ import { Route as AlquileresRouteImport } from './routes/alquileres'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as PromoterIndexRouteImport } from './routes/promoter.index'
 import { Route as OrdersIndexRouteImport } from './routes/orders.index'
+import { Route as SuperUsersRouteImport } from './routes/super.users'
 import { Route as SuperSubscriptionRouteImport } from './routes/super.subscription'
 import { Route as SuperRentalsRouteImport } from './routes/super.rentals'
 import { Route as SuperPromotersRouteImport } from './routes/super.promoters'
@@ -110,6 +111,11 @@ const OrdersIndexRoute = OrdersIndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => OrdersRoute,
+} as any)
+const SuperUsersRoute = SuperUsersRouteImport.update({
+  id: '/super/users',
+  path: '/super/users',
+  getParentRoute: () => rootRouteImport,
 } as any)
 const SuperSubscriptionRoute = SuperSubscriptionRouteImport.update({
   id: '/super/subscription',
@@ -222,6 +228,7 @@ export interface FileRoutesByFullPath {
   '/super/promoters': typeof SuperPromotersRouteWithChildren
   '/super/rentals': typeof SuperRentalsRoute
   '/super/subscription': typeof SuperSubscriptionRoute
+  '/super/users': typeof SuperUsersRoute
   '/orders/': typeof OrdersIndexRoute
   '/promoter/': typeof PromoterIndexRoute
   '/orders/$orderId/invoice': typeof OrdersOrderIdInvoiceRoute
@@ -252,6 +259,7 @@ export interface FileRoutesByTo {
   '/super/products': typeof SuperProductsRoute
   '/super/rentals': typeof SuperRentalsRoute
   '/super/subscription': typeof SuperSubscriptionRoute
+  '/super/users': typeof SuperUsersRoute
   '/orders': typeof OrdersIndexRoute
   '/promoter': typeof PromoterIndexRoute
   '/orders/$orderId/invoice': typeof OrdersOrderIdInvoiceRoute
@@ -286,6 +294,7 @@ export interface FileRoutesById {
   '/super/promoters': typeof SuperPromotersRouteWithChildren
   '/super/rentals': typeof SuperRentalsRoute
   '/super/subscription': typeof SuperSubscriptionRoute
+  '/super/users': typeof SuperUsersRoute
   '/orders/': typeof OrdersIndexRoute
   '/promoter/': typeof PromoterIndexRoute
   '/orders/$orderId/invoice': typeof OrdersOrderIdInvoiceRoute
@@ -321,6 +330,7 @@ export interface FileRouteTypes {
     | '/super/promoters'
     | '/super/rentals'
     | '/super/subscription'
+    | '/super/users'
     | '/orders/'
     | '/promoter/'
     | '/orders/$orderId/invoice'
@@ -351,6 +361,7 @@ export interface FileRouteTypes {
     | '/super/products'
     | '/super/rentals'
     | '/super/subscription'
+    | '/super/users'
     | '/orders'
     | '/promoter'
     | '/orders/$orderId/invoice'
@@ -384,6 +395,7 @@ export interface FileRouteTypes {
     | '/super/promoters'
     | '/super/rentals'
     | '/super/subscription'
+    | '/super/users'
     | '/orders/'
     | '/promoter/'
     | '/orders/$orderId/invoice'
@@ -416,6 +428,7 @@ export interface RootRouteChildren {
   SuperPromotersRoute: typeof SuperPromotersRouteWithChildren
   SuperRentalsRoute: typeof SuperRentalsRoute
   SuperSubscriptionRoute: typeof SuperSubscriptionRoute
+  SuperUsersRoute: typeof SuperUsersRoute
   PromoterIndexRoute: typeof PromoterIndexRoute
 }
 
@@ -518,6 +531,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/orders/'
       preLoaderRoute: typeof OrdersIndexRouteImport
       parentRoute: typeof OrdersRoute
+    }
+    '/super/users': {
+      id: '/super/users'
+      path: '/super/users'
+      fullPath: '/super/users'
+      preLoaderRoute: typeof SuperUsersRouteImport
+      parentRoute: typeof rootRouteImport
     }
     '/super/subscription': {
       id: '/super/subscription'
@@ -728,6 +748,7 @@ const rootRouteChildren: RootRouteChildren = {
   SuperPromotersRoute: SuperPromotersRouteWithChildren,
   SuperRentalsRoute: SuperRentalsRoute,
   SuperSubscriptionRoute: SuperSubscriptionRoute,
+  SuperUsersRoute: SuperUsersRoute,
   PromoterIndexRoute: PromoterIndexRoute,
 }
 export const routeTree = rootRouteImport

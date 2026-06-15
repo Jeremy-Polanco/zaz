@@ -440,6 +440,24 @@ export type ChargeLateFeeResponse = {
   subscriptionCanceled: boolean
 }
 
+// ── Admin users (GET /users) ───────────────────────────────────────────────────
+
+/** Super-admin: a user row enriched with subscription status. */
+export interface AdminUser {
+  id: string
+  email: string | null
+  fullName: string
+  phone: string | null
+  role: UserRole
+  referralCode: string | null
+  createdAt: string
+  hasActiveSubscription: boolean
+  subscriptionStatus: string | null
+}
+
+/** Filter for GET /users?subscription=... — omit for all users. */
+export type AdminUsersSubscriptionFilter = 'active' | 'none'
+
 // ── UserAddress ───────────────────────────────────────────────────────────────
 
 export type UserAddress = {

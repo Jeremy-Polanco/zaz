@@ -765,7 +765,9 @@ describe('SubscriptionService — updatePlan (T11–T22)', () => {
     expect(mockStripeInstance.prices.create).toHaveBeenCalledTimes(1);
     const createCall = mockStripeInstance.prices.create.mock.calls[0];
     expect(createCall[0]).toMatchObject({
-      unit_amount: 1500,
+      // Stripe Price is created with the GROSS amount: net 1500 + 8.887% tax
+      // (round(1500 * 0.08887) = 133) = 1633.
+      unit_amount: 1633,
       currency: 'usd',
       recurring: { interval: 'month' },
       product: 'prod_existing',
@@ -791,9 +793,11 @@ describe('SubscriptionService — updatePlan (T11–T22)', () => {
     expect(saveArg.activeStripePriceId).toBe('price_NEW');
     expect(saveArg.unitAmountCents).toBe(1500);
 
-    // Returns updated plan
+    // Returns updated plan — DB keeps the NET amount as the source of truth,
+    // gross (tax-inclusive) is derived for display.
     expect(result.activeStripePriceId).toBe('price_NEW');
     expect(result.unitAmountCents).toBe(1500);
+    expect(result.grossAmountCents).toBe(1633);
   });
 
   // T13 — No plan row → throws 503
@@ -1192,13 +1196,14 @@ describe('SubscriptionService — getPlan (T9)', () => {
     const result = await service.getPlan();
 
     expect(result).not.toBeNull();
-    expect(result!.priceCents).toBe(1500);
+    // priceCents is GROSS (tax-inclusive): net 1500 + round(1500 * 0.08887)=133 = 1633.
+    expect(result!.priceCents).toBe(1633);
     expect(result!.currency).toBe('usd');
     expect(result!.interval).toBe('month');
   });
 
   // T9f triangulation: different price value from DB
-  it('returns priceCents matching the stored unitAmountCents regardless of value', async () => {
+  it('returns gross priceCents derived from the stored net unitAmountCents', async () => {
     plansRepo.findOne.mockResolvedValue({
       id: 'plan-uuid-2',
       stripeProductId: 'prod_xyz',
@@ -1213,7 +1218,8 @@ describe('SubscriptionService — getPlan (T9)', () => {
     const result = await service.getPlan();
 
     expect(result).not.toBeNull();
-    expect(result!.priceCents).toBe(4999);
+    // Gross: net 4999 + round(4999 * 0.08887)=444 = 5443.
+    expect(result!.priceCents).toBe(5443);
   });
 
   // T9g: no row → returns null (per REQ-4)

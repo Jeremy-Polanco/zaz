@@ -5,6 +5,15 @@
  */
 export const TAX_RATE = 0.08887
 
+/**
+ * Gross (tax-inclusive) cents for a net amount: net + tax. Mirrors
+ * computeGrossCents in dashgo-api/src/common/tax.ts. The subscription price
+ * shown to the customer is gross; the backend already returns it tax-inclusive.
+ */
+export function computeGrossCents(netCents: number): number {
+  return netCents + Math.round(netCents * TAX_RATE)
+}
+
 export function computeQuotePreviewCents(input: {
   subtotalCents: number
   shippingCents: number

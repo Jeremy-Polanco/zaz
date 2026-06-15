@@ -3,6 +3,8 @@ import { api } from './api'
 import type {
   AdminPlanResponse,
   AdminRentalResponse,
+  AdminUser,
+  AdminUsersSubscriptionFilter,
   AuthorizedIntent,
   AuthUser,
   Category,
@@ -252,6 +254,23 @@ export function useUsers() {
   return useQuery<AuthUser[]>({
     queryKey: ['users'],
     queryFn: async () => (await api.get<AuthUser[]>('/users')).data,
+  })
+}
+
+/**
+ * Super-admin: GET /users — all users enriched with subscription status.
+ * Pass `subscription` to server-side filter to only active subs ('active')
+ * or only users without an active sub ('none'); omit for everyone.
+ */
+export function useAdminUsers(subscription?: AdminUsersSubscriptionFilter) {
+  return useQuery<AdminUser[]>({
+    queryKey: ['users', 'admin', subscription ?? 'all'],
+    queryFn: async () =>
+      (
+        await api.get<AdminUser[]>('/users', {
+          params: subscription ? { subscription } : undefined,
+        })
+      ).data,
   })
 }
 

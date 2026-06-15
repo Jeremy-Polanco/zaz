@@ -1,5 +1,5 @@
 import { createFileRoute, isRedirect, redirect } from '@tanstack/react-router'
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { Button, SectionHeading } from '../components/ui'
 import {
   useAdminRentals,
@@ -260,6 +260,24 @@ function SuperRentalsPage() {
   const isMutating =
     chargeMutation.isPending || cancelMutation.isPending || retryMutation.isPending
 
+  // Summary computed from the already-fetched rentals — no extra request.
+  const summary = useMemo(() => {
+    const list = rentals ?? []
+    const alDia = list.filter((r) => r.status === 'active')
+    const debiendo = list.filter(
+      (r) => r.status === 'past_due' || r.status === 'unpaid',
+    )
+    const rentAtRiskCents = debiendo.reduce(
+      (sum, r) => sum + r.monthlyRentCents,
+      0,
+    )
+    return {
+      alDiaCount: alDia.length,
+      debiendoCount: debiendo.length,
+      rentAtRiskCents,
+    }
+  }, [rentals])
+
   const handleStatusChange = (value: string) => {
     setStatusFilter(value)
     setFilters((f) => ({ ...f, status: value ? [value] : undefined, page: 1 }))
@@ -312,6 +330,34 @@ function SuperRentalsPage() {
           }
           subtitle={`${rentals?.length ?? 0} resultado${rentals?.length === 1 ? '' : 's'}.`}
         />
+
+        {/* Summary — derived from the fetched rentals, no extra request */}
+        <div className="mb-6 grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <div className="border border-ink/10 bg-paper p-4">
+            <p className="text-[0.6rem] uppercase tracking-[0.14em] text-ink-muted">
+              Al día
+            </p>
+            <p className="display nums mt-1 text-2xl font-semibold text-ok">
+              {summary.alDiaCount}
+            </p>
+          </div>
+          <div className="border border-ink/10 bg-paper p-4">
+            <p className="text-[0.6rem] uppercase tracking-[0.14em] text-ink-muted">
+              Debiendo
+            </p>
+            <p className="display nums mt-1 text-2xl font-semibold text-bad">
+              {summary.debiendoCount}
+            </p>
+          </div>
+          <div className="border border-ink/10 bg-paper p-4">
+            <p className="text-[0.6rem] uppercase tracking-[0.14em] text-ink-muted">
+              Renta mensual en riesgo
+            </p>
+            <p className="display nums mt-1 text-2xl font-semibold text-ink">
+              {formatCents(summary.rentAtRiskCents)}
+            </p>
+          </div>
+        </div>
 
         {/* Filter bar */}
         <div className="mb-6 flex flex-wrap items-center gap-3">

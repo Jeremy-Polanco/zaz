@@ -16,10 +16,9 @@ import { PointsService } from '../points/points.service';
 import { ShippingService } from '../shipping/shipping.service';
 import { CreditService } from '../credit/credit.service';
 import { assertStripeProductionConfig } from '../../common/stripe/stripe-runtime-guard';
+import { TAX_RATE } from '../../common/tax';
 
 type StripeClient = InstanceType<typeof Stripe>;
-
-const TAX_RATE = 0.08887;
 
 export interface CreateIntentInput {
   userId: string;

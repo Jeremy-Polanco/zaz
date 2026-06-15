@@ -23,6 +23,7 @@ import { PlanDto } from './dto/plan.dto';
 import { AdminPlanResponseDto } from './dto/admin-plan-response.dto';
 import { plainToInstance } from 'class-transformer';
 import { assertStripeProductionConfig } from '../../common/stripe/stripe-runtime-guard';
+import { computeGrossCents } from '../../common/tax';
 
 type StripeClient = InstanceType<typeof Stripe>;
 
@@ -284,7 +285,9 @@ export class SubscriptionService implements OnModuleInit {
     const plan = await this.plans.findOne({ where: {} });
     if (!plan) return null;
     return {
-      priceCents: plan.unitAmountCents,
+      // Gross (tax-inclusive) — what the customer is actually charged. The DB
+      // stores the net amount; tax (8.887%) is applied here at display time.
+      priceCents: computeGrossCents(plan.unitAmountCents),
       currency: plan.currency as 'usd',
       interval: plan.interval as 'month',
     };
@@ -309,7 +312,9 @@ export class SubscriptionService implements OnModuleInit {
     try {
       newPrice = await stripe.prices.create(
         {
-          unit_amount: unitAmountCents,
+          // Charge gross: the admin enters the net price; the customer pays
+          // net + 8.887% tax. The net stays the editable source of truth in DB.
+          unit_amount: computeGrossCents(unitAmountCents),
           currency: plan.currency,
           recurring: { interval: plan.interval as 'month' },
           product: plan.stripeProductId,
@@ -383,19 +388,28 @@ export class SubscriptionService implements OnModuleInit {
       );
     }
 
+    return this.toAdminPlanResponse(plan);
+  }
+
+  async getAdminPlan(): Promise<AdminPlanResponseDto> {
+    return this.toAdminPlanResponse(await this.getActivePlanRow());
+  }
+
+  /**
+   * Maps a plan row to the admin response, deriving the gross (tax-inclusive)
+   * amount so the admin can see what the customer is actually charged.
+   */
+  private toAdminPlanResponse(plan: SubscriptionPlan): AdminPlanResponseDto {
     return {
       id: plan.id,
       stripeProductId: plan.stripeProductId,
       activeStripePriceId: plan.activeStripePriceId,
       unitAmountCents: plan.unitAmountCents,
+      grossAmountCents: computeGrossCents(plan.unitAmountCents),
       currency: plan.currency,
       interval: plan.interval,
       updatedAt: plan.updatedAt,
     };
-  }
-
-  async getAdminPlan(): Promise<AdminPlanResponseDto> {
-    return this.getActivePlanRow();
   }
 
   /**
