@@ -873,8 +873,8 @@ export function useCreateCheckoutSession() {
   return useMutation({
     mutationFn: async (opts?: { successUrl?: string; cancelUrl?: string }) => {
       const { data } = await api.post<{ url: string }>('/subscription/checkout-session', {
-        successUrl: opts?.successUrl ?? 'https://app.dashgo.dev/subscription?session=success',
-        cancelUrl: opts?.cancelUrl ?? 'https://app.dashgo.dev/subscription?session=canceled',
+        successUrl: opts?.successUrl ?? 'https://www.dashgo.dev/subscription?session=success',
+        cancelUrl: opts?.cancelUrl ?? 'https://www.dashgo.dev/subscription?session=canceled',
       })
       return data
     },

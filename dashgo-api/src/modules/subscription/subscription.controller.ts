@@ -66,8 +66,8 @@ export class SubscriptionController {
     @CurrentUser() user: AuthenticatedUser,
     @Body() body: { successUrl: string; cancelUrl: string },
   ) {
-    const successUrl = body.successUrl ?? 'https://app.dashgo.dev/subscription?session=success';
-    const cancelUrl = body.cancelUrl ?? 'https://app.dashgo.dev/subscription?session=canceled';
+    const successUrl = body.successUrl ?? 'https://www.dashgo.dev/subscription?session=success';
+    const cancelUrl = body.cancelUrl ?? 'https://www.dashgo.dev/subscription?session=canceled';
     return this.subscription.createCheckoutSession(user.id, successUrl, cancelUrl);
   }
 

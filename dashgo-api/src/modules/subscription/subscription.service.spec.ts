@@ -1003,8 +1003,8 @@ describe('SubscriptionService — createCheckoutSession plan source (T23)', () =
   it('T23-1: uses activeStripePriceId from DB plan row in checkout line_items', async () => {
     await service.createCheckoutSession(
       'user-1',
-      'https://app.dashgo.dev/subscription?session=success',
-      'https://app.dashgo.dev/subscription?session=canceled',
+      'https://www.dashgo.dev/subscription?session=success',
+      'https://www.dashgo.dev/subscription?session=canceled',
     );
 
     expect(mockStripeInstance.checkout.sessions.create).toHaveBeenCalledTimes(1);
@@ -1022,8 +1022,8 @@ describe('SubscriptionService — createCheckoutSession plan source (T23)', () =
     await expect(
       service.createCheckoutSession(
         'user-1',
-        'https://app.dashgo.dev/subscription?session=success',
-        'https://app.dashgo.dev/subscription?session=canceled',
+        'https://www.dashgo.dev/subscription?session=success',
+        'https://www.dashgo.dev/subscription?session=canceled',
       ),
     ).rejects.toThrow(ServiceUnavailableException);
 
@@ -1249,8 +1249,8 @@ describe('SubscriptionService — coverage completion', () => {
   let usersRepo: jest.Mocked<Repository<User>>;
   let configService: jest.Mocked<ConfigService>;
 
-  const SUCCESS_URL = 'https://app.dashgo.dev/subscription?session=success';
-  const CANCEL_URL = 'https://app.dashgo.dev/subscription?session=canceled';
+  const SUCCESS_URL = 'https://www.dashgo.dev/subscription?session=success';
+  const CANCEL_URL = 'https://www.dashgo.dev/subscription?session=canceled';
 
   function makeRepoMockLocal<T>(): jest.Mocked<Repository<T>> {
     return {
@@ -1473,7 +1473,7 @@ describe('SubscriptionService — coverage completion', () => {
       expect(result).toEqual({ url: 'https://stripe.test/portal-url' });
       expect(mockStripeInstance.billingPortal.sessions.create).toHaveBeenCalledWith({
         customer: 'cus_portal',
-        return_url: 'https://app.dashgo.dev/subscription',
+        return_url: 'https://www.dashgo.dev/subscription',
       });
     });
   });

@@ -67,8 +67,8 @@ interface StripeInvoiceObject {
 }
 
 const SUBSCRIPTION_ALLOWLIST = [
-  'https://app.dashgo.dev/subscription?session=success',
-  'https://app.dashgo.dev/subscription?session=canceled',
+  'https://www.dashgo.dev/subscription?session=success',
+  'https://www.dashgo.dev/subscription?session=canceled',
   'dashgo://subscription?success=1',
   'dashgo://subscription?cancel=1',
 ];
@@ -213,7 +213,7 @@ export class SubscriptionService implements OnModuleInit {
     const customerId = await this.getOrCreateStripeCustomer(userId);
     const session = await stripe.billingPortal.sessions.create({
       customer: customerId,
-      return_url: 'https://app.dashgo.dev/subscription',
+      return_url: 'https://www.dashgo.dev/subscription',
     });
     return { url: session.url };
   }
