@@ -32,7 +32,7 @@ function SubscriptionBadge({ user }: { user: AdminUser }) {
     : 'border-ink/15 bg-ink/5 text-ink-muted'
   return (
     <span
-      className={`inline-flex items-center border px-1.5 py-0.5 text-[0.6rem] font-medium uppercase tracking-[0.10em] ${cls}`}
+      className={`inline-flex items-center whitespace-nowrap border px-1.5 py-0.5 text-[0.6rem] font-medium uppercase tracking-[0.10em] ${cls}`}
     >
       {active ? 'Activa' : 'Sin suscripción'}
     </span>
@@ -115,7 +115,8 @@ function SuperUsersPage() {
         </div>
       ) : (
         <div className="border border-ink/15 bg-paper">
-          <table className="w-full text-sm">
+          <div className="overflow-x-auto">
+          <table className="w-full min-w-88 text-sm">
             <thead>
               <tr className="border-b border-ink/10">
                 <th className="p-4 text-left text-[10px] font-medium uppercase tracking-wide text-ink-muted">
@@ -124,10 +125,10 @@ function SuperUsersPage() {
                 <th className="p-4 text-left text-[10px] font-medium uppercase tracking-wide text-ink-muted">
                   Tel
                 </th>
-                <th className="p-4 text-left text-[10px] font-medium uppercase tracking-wide text-ink-muted">
+                <th className="hidden p-4 text-left text-[10px] font-medium uppercase tracking-wide text-ink-muted md:table-cell">
                   Email
                 </th>
-                <th className="p-4 text-left text-[10px] font-medium uppercase tracking-wide text-ink-muted">
+                <th className="hidden p-4 text-left text-[10px] font-medium uppercase tracking-wide text-ink-muted sm:table-cell">
                   Rol
                 </th>
                 <th className="p-4 text-left text-[10px] font-medium uppercase tracking-wide text-ink-muted">
@@ -150,8 +151,8 @@ function SuperUsersPage() {
                   >
                     <td className="p-4 font-medium text-ink">{u.fullName}</td>
                     <td className="p-4 text-ink-muted">{u.phone ?? '—'}</td>
-                    <td className="p-4 text-ink-muted">{u.email ?? '—'}</td>
-                    <td className="p-4 text-[11px] uppercase tracking-wide text-ink-muted">
+                    <td className="hidden p-4 text-ink-muted md:table-cell">{u.email ?? '—'}</td>
+                    <td className="hidden p-4 text-[11px] uppercase tracking-wide text-ink-muted sm:table-cell">
                       {u.role}
                     </td>
                     <td className="p-4">
@@ -162,6 +163,7 @@ function SuperUsersPage() {
               )}
             </tbody>
           </table>
+          </div>
           <div className="border-t border-ink/10 px-4 py-3 text-right text-[11px] text-ink-muted">
             {filtered.length} usuario{filtered.length !== 1 ? 's' : ''}
           </div>
