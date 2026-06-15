@@ -9,6 +9,15 @@ export const TAX_RATE = 0.08887
  * Compute the quote preview given cent-denominated inputs. Matches the formula
  * in OrdersService.setQuote exactly.
  */
+/**
+ * Gross (tax-inclusive) cents for a net amount: net + tax. Mirrors
+ * computeGrossCents in dashgo-api/src/common/tax.ts. Used to preview the
+ * tax-inclusive subscription price the admin types (the backend stores net).
+ */
+export function computeGrossCents(netCents: number): number {
+  return netCents + Math.round(netCents * TAX_RATE)
+}
+
 export function computeQuotePreviewCents(input: {
   subtotalCents: number
   shippingCents: number

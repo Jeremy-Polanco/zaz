@@ -386,7 +386,8 @@ export interface AdminPlanResponse {
   id: string
   stripeProductId: string
   activeStripePriceId: string
-  unitAmountCents: number
+  unitAmountCents: number // net (pre-tax) price — the editable source of truth
+  grossAmountCents: number // tax-inclusive price actually charged in Stripe
   currency: string
   interval: string
   updatedAt: string // ISO timestamp

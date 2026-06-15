@@ -26,6 +26,7 @@ const defaultPlan: AdminPlanResponse = {
   stripeProductId: 'prod_test001',
   activeStripePriceId: 'price_test001',
   unitAmountCents: 1000,
+  grossAmountCents: 1089,
   currency: 'usd',
   interval: 'month',
   updatedAt: '2026-05-01T00:00:00.000Z',
