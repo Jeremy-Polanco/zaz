@@ -39,12 +39,22 @@ function useOrder(orderId: string | undefined) {
   })
 }
 
-function StatusLabel({ status }: { status: Order['status'] }) {
+function StatusLabel({
+  status,
+  paymentMethod,
+}: {
+  status: Order['status']
+  paymentMethod?: Order['paymentMethod']
+}) {
   const label =
     status === 'pending_quote'
       ? 'Por cotizar'
       : status === 'quoted'
-        ? 'Cotizado'
+        ? // Customer-facing: a quoted order just needs payment/confirmation —
+          // skip the internal "Cotizado" wording.
+          paymentMethod === 'digital'
+          ? 'Por pagar'
+          : 'Por confirmar'
         : status === 'pending_validation'
           ? 'Pendiente'
           : status === 'confirmed_by_colmado'
@@ -182,7 +192,10 @@ export default function OrderDetailScreen() {
         <View className="px-6 pt-6">
           <Eyebrow>Pedido · {order.id.slice(0, 8)}</Eyebrow>
           <View className="mt-3">
-            <StatusLabel status={order.status} />
+            <StatusLabel
+              status={order.status}
+              paymentMethod={order.paymentMethod}
+            />
           </View>
           {order.status !== 'cancelled' && (
             <View className="mb-6 mt-5">
@@ -271,7 +284,7 @@ export default function OrderDetailScreen() {
                   loading={paying || authorize.isPending}
                   className="mt-4"
                 >
-                  Autorizar pago · {formatCents(stripeAmountCents)} →
+                  Pagar · {formatCents(stripeAmountCents)} →
                 </Button>
               </View>
             )}

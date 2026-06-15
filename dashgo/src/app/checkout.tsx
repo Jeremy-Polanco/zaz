@@ -49,6 +49,11 @@ export default function CheckoutScreen() {
   const [usePoints, setUsePoints] = useState(false)
   const [useCredit, setUseCredit] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // True while THIS order is being placed/paid. The just-created (status
+  // 'quoted') order refetches into `orders` mid-flow and would otherwise trip
+  // the activeOrder guard — slamming the "ya tenés uno en camino" screen in
+  // front of the payment sheet. Suppress the blocker until the flow settles.
+  const [placing, setPlacing] = useState(false)
 
   // ── Derived values ─────────────────────────────────────────────────────────
 
@@ -178,6 +183,7 @@ export default function CheckoutScreen() {
       quantity,
     }))
 
+    setPlacing(true)
     try {
       const created = await createOrder.mutateAsync({
         items,
@@ -223,6 +229,8 @@ export default function CheckoutScreen() {
         (e as { response?: { data?: { message?: string } } })?.response?.data
           ?.message ?? 'No se pudo crear el pedido',
       )
+    } finally {
+      setPlacing(false)
     }
   }
 
@@ -260,7 +268,7 @@ export default function CheckoutScreen() {
     )
   }
 
-  if (activeOrder) {
+  if (activeOrder && !placing) {
     return (
       <SafeAreaView className="flex-1 bg-paper">
         <View className="flex-1 items-center justify-center px-6">

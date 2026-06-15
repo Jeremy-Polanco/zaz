@@ -21,7 +21,15 @@ const STYLE: Record<OrderStatus, string> = {
   cancelled: 'border-bad/40 bg-bad/10 text-bad',
 }
 
-export function StatusBadge({ status }: { status: OrderStatus }) {
+export function StatusBadge({
+  status,
+  label,
+}: {
+  status: OrderStatus
+  // Override the default status label (e.g. show "Por pagar" to the customer
+  // instead of the internal "Cotizado"). Styling still follows `status`.
+  label?: string
+}) {
   return (
     <span
       className={cn(
@@ -41,7 +49,7 @@ export function StatusBadge({ status }: { status: OrderStatus }) {
           status === 'cancelled' && 'bg-bad',
         )}
       />
-      {LABEL[status]}
+      {label ?? LABEL[status]}
     </span>
   )
 }

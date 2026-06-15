@@ -56,6 +56,16 @@ function CheckoutPage() {
     (o) => o.status !== 'delivered' && o.status !== 'cancelled',
   )
 
+  // While we're placing/paying THIS order, the orders query refetches and the
+  // just-created (status 'quoted') order would trip the activeOrder guard above
+  // — slamming the "ya tenés un pedido en camino" screen in front of the card
+  // payment we're mid-way through. Suppress the blocker until the flow settles.
+  const placing =
+    createOrder.isPending ||
+    authorize.isPending ||
+    confirmOrder.isPending ||
+    inlinePay !== null
+
   const cartItems = Object.entries(cart).map(([productId, quantity]) => ({
     productId,
     quantity,
@@ -154,7 +164,7 @@ function CheckoutPage() {
     )
   }
 
-  if (activeOrder) {
+  if (activeOrder && !placing) {
     return (
       <div className="mx-auto flex max-w-md flex-col items-center gap-5 px-6 py-20 text-center">
         <span className="eyebrow">Pedido en curso</span>
@@ -226,7 +236,7 @@ function CheckoutPage() {
           eyebrow="Pago"
           title={
             <>
-              Autorizá <span className="italic text-brand">tu tarjeta.</span>
+              Pagá con <span className="italic text-brand">tu tarjeta.</span>
             </>
           }
           subtitle="El monto queda retenido y lo cobramos solo cuando te entreguemos el pedido."

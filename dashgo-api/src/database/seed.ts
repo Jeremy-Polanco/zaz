@@ -215,6 +215,9 @@ async function run() {
       categoryId: agua.id,
       pointsPct: '1.00',
       promoterCommissionPct: '5.00',
+      // Water is a standardized direct order — no cotización, $0 shipping,
+      // pay at checkout and auto-confirm.
+      requiresQuote: false,
     }),
     productRepo.create({
       name: 'Garrafón 2.5gal',
@@ -225,6 +228,7 @@ async function run() {
       categoryId: agua.id,
       pointsPct: '1.00',
       promoterCommissionPct: '5.00',
+      requiresQuote: false,
     }),
     productRepo.create({
       name: 'Botellón 5L',
@@ -239,6 +243,7 @@ async function run() {
       offerDiscountPct: '15.00',
       offerStartsAt: null,
       offerEndsAt: thirtyDaysFromNow,
+      requiresQuote: false,
     }),
     productRepo.create({
       name: 'Pack 6x 500ml',

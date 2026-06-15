@@ -111,7 +111,16 @@ function OrderDetailPage() {
       />
 
       <div className="mb-8 flex items-center gap-3">
-        <StatusBadge status={order.status} />
+        <StatusBadge
+          status={order.status}
+          label={
+            order.status === 'quoted'
+              ? order.paymentMethod === 'digital'
+                ? 'Por pagar'
+                : 'Por confirmar'
+              : undefined
+          }
+        />
         <span className="text-[0.7rem] uppercase tracking-[0.14em] text-ink-muted">
           {order.paymentMethod === 'cash' ? 'Pago en efectivo' : 'Pago digital'}
         </span>
@@ -132,7 +141,7 @@ function OrderDetailPage() {
       {order.status === 'quoted' && order.paymentMethod === 'cash' && (
         <div className="mb-8 border-l-4 border-accent bg-accent/5 p-5">
           <p className="display text-xl font-semibold">
-            Cotización lista — total {formatCents(totalCents)}
+            Total — {formatCents(totalCents)}
           </p>
           <p className="mt-2 text-sm text-ink-soft">
             Confirma tu pedido y el repartidor sale a entregártelo. Pagas en
@@ -162,7 +171,7 @@ function OrderDetailPage() {
         isFullCredit && (
           <div className="mb-8 border-l-4 border-accent bg-accent/5 p-5">
             <p className="display text-xl font-semibold">
-              Cotización lista — total {formatCents(totalCents)}
+              Total — {formatCents(totalCents)}
             </p>
             <p className="mt-2 text-sm text-ink-soft">
               Este pedido se cubre 100% con tu crédito —{' '}
@@ -188,12 +197,89 @@ function OrderDetailPage() {
           </div>
         )}
 
+      {/*
+        Skip-cotización digital orders are paid INLINE at checkout — they must
+        never re-show the "Cotización lista → Autorizar" panel here. Once the
+        card is authorized the order carries a stripePaymentIntentId; the webhook
+        then advances quoted → pending_validation. While that's in flight, just
+        show a processing state (no pay button) so the customer can't re-trigger
+        a charge.
+      */}
       {order.status === 'quoted' &&
         order.paymentMethod === 'digital' &&
-        !isFullCredit && (
+        !isFullCredit &&
+        order.skipQuote &&
+        order.stripePaymentIntentId && (
+          <div className="mb-8 border-l-4 border-accent bg-accent/5 p-5">
+            <p className="display text-xl font-semibold">Procesando tu pago…</p>
+            <p className="mt-2 text-sm text-ink-soft">
+              Ya autorizamos el cobro en tu tarjeta. Estamos confirmando tu
+              pedido — esta página se actualiza sola.
+            </p>
+          </div>
+        )}
+
+      {/*
+        Recovery only: a skip-cotización order with no intent means the customer
+        abandoned the inline payment at checkout. Let them finish it here instead
+        of getting stuck — but this is the exception, not the normal flow.
+      */}
+      {order.status === 'quoted' &&
+        order.paymentMethod === 'digital' &&
+        !isFullCredit &&
+        order.skipQuote &&
+        !order.stripePaymentIntentId && (
+          <div className="mb-8 border-l-4 border-accent bg-accent/5 p-5">
+            <p className="display text-xl font-semibold">
+              Completá tu pago — total {formatCents(totalCents)}
+            </p>
+            {creditAppliedCents > 0 && (
+              <p className="mt-2 text-sm text-brand">
+                Crédito aplicado: −{formatCents(creditAppliedCents)} · Pago con
+                tarjeta: {formatCents(stripeAmountCents)}
+              </p>
+            )}
+            <p className="mt-2 text-sm text-ink-soft">
+              Quedó un paso pendiente. Autorizá el cobro en tu tarjeta — el monto
+              queda retenido y lo cobramos solo cuando te entreguemos el pedido.
+            </p>
+            {!authIntent ? (
+              <Button
+                variant="accent"
+                size="lg"
+                onClick={onAuthorize}
+                disabled={authorize.isPending}
+                className="mt-4"
+              >
+                {authorize.isPending
+                  ? 'Preparando…'
+                  : `Pagar ahora · ${formatCents(stripeAmountCents)} →`}
+              </Button>
+            ) : (
+              <CardAuthForm
+                clientSecret={authIntent.clientSecret}
+                amountCents={stripeAmountCents}
+                onAuthorized={() => {
+                  qc.invalidateQueries({ queryKey: ['order', order.id] })
+                  qc.invalidateQueries({ queryKey: ['orders'] })
+                }}
+              />
+            )}
+          </div>
+        )}
+
+      {/*
+        Normal (quote-required) digital orders: shipping is quoted by the admin
+        AFTER the order is placed, so the customer authorizes payment here once
+        the quote lands. This is the intended flow for these orders.
+      */}
+      {order.status === 'quoted' &&
+        order.paymentMethod === 'digital' &&
+        !isFullCredit &&
+        !order.skipQuote && (
         <div className="mb-8 border-l-4 border-accent bg-accent/5 p-5">
           <p className="display text-xl font-semibold">
-            Cotización lista — total {formatCents(totalCents)}
+            Total a pagar — {formatCents(totalCents)}
           </p>
           {creditAppliedCents > 0 && (
             <p className="mt-2 text-sm text-brand">
@@ -215,7 +301,7 @@ function OrderDetailPage() {
             >
               {authorize.isPending
                 ? 'Preparando…'
-                : `Autorizar pago · ${formatCents(stripeAmountCents)} →`}
+                : `Pagar · ${formatCents(stripeAmountCents)} →`}
             </Button>
           ) : (
             <CardAuthForm
