@@ -64,11 +64,26 @@ function Metric({
   )
 }
 
+// Local-day check: an order "de hoy" is one created today in the viewer's
+// timezone (admin is in New Jersey, same TZ as the delivery ops).
+function isToday(iso: string): boolean {
+  const d = new Date(iso)
+  const now = new Date()
+  return (
+    d.getFullYear() === now.getFullYear() &&
+    d.getMonth() === now.getMonth() &&
+    d.getDate() === now.getDate()
+  )
+}
+
+type ListFilter = 'pending' | 'delivered' | 'all'
+
 function SuperOrdersPage() {
   const { data: orders, isPending } = useOrders()
   const updateStatus = useUpdateOrderStatus()
   const [quotingOrder, setQuotingOrder] = useState<Order | null>(null)
   const [locatingOrder, setLocatingOrder] = useState<Order | null>(null)
+  const [listFilter, setListFilter] = useState<ListFilter>('pending')
 
   const activeStatuses: OrderStatus[] = [
     'pending_quote',
@@ -88,7 +103,19 @@ function SuperOrdersPage() {
   ).length
   const inRoute = (orders ?? []).filter((o) => o.status === 'in_delivery_route').length
   const readyToGo = (orders ?? []).filter((o) => o.status === 'confirmed_by_colmado').length
-  const delivered = (orders ?? []).filter((o) => o.status === 'delivered').length
+
+  // "Hoy" metrics are scoped to orders created today (same-day delivery biz).
+  const todayOrders = (orders ?? []).filter((o) => isToday(o.createdAt))
+  const delivered = todayOrders.filter((o) => o.status === 'delivered').length
+
+  // List defaults to pending/active work (any day); the filter is the escape
+  // hatch to look at today's deliveries or the full history.
+  const visibleOrders = (orders ?? []).filter((o) => {
+    if (listFilter === 'pending') return activeStatuses.includes(o.status)
+    if (listFilter === 'delivered')
+      return o.status === 'delivered' && isToday(o.createdAt)
+    return true
+  })
 
   const columns = useMemo<ColumnDef<Order>[]>(
     () => [
@@ -320,7 +347,7 @@ function SuperOrdersPage() {
               Ruta de <span className="italic text-brand">entrega</span>
             </>
           }
-          subtitle={`${pendingRoute.length} pedido${pendingRoute.length === 1 ? '' : 's'} en ruta · ${orders?.length ?? 0} totales hoy.`}
+          subtitle={`${pendingRoute.length} pedido${pendingRoute.length === 1 ? '' : 's'} en ruta · ${todayOrders.length} totales hoy.`}
         />
 
         <div className="mb-10 grid grid-cols-2 gap-4 sm:grid-cols-5">
@@ -339,11 +366,39 @@ function SuperOrdersPage() {
           <Metric label="Entregados hoy" value={delivered} />
         </div>
 
+        <div className="mb-4 flex flex-wrap gap-2">
+          {(
+            [
+              { value: 'pending', label: 'Pendientes' },
+              { value: 'delivered', label: 'Entregados hoy' },
+              { value: 'all', label: 'Todos' },
+            ] as const
+          ).map((opt) => (
+            <button
+              key={opt.value}
+              onClick={() => setListFilter(opt.value)}
+              className={`rounded-full px-3 py-1 text-[11px] uppercase tracking-wide transition-colors ${
+                listFilter === opt.value
+                  ? 'bg-accent text-brand-dark'
+                  : 'border border-ink/20 text-ink-muted hover:border-accent hover:text-accent'
+              }`}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+
         <DataTable
-          data={orders ?? []}
+          data={visibleOrders}
           columns={columns}
           filterPlaceholder="Buscar por cliente, colmado o dirección…"
-          emptyMessage="No hay pedidos en ruta."
+          emptyMessage={
+            listFilter === 'pending'
+              ? 'No hay pedidos pendientes.'
+              : listFilter === 'delivered'
+                ? 'No se entregó ningún pedido hoy.'
+                : 'No hay pedidos.'
+          }
         />
       </div>
 
