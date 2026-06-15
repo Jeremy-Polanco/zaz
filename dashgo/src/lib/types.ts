@@ -159,6 +159,12 @@ export interface Order {
   creditApplied?: string
   /** True when the order was quoted while the customer had an active subscription. */
   wasSubscriberAtQuote?: boolean
+  /**
+   * True when every item skips the manual cotización flow (requiresQuote=false).
+   * These orders are auto-quoted at creation and paid inline at checkout — the
+   * order screen never re-prompts for authorization.
+   */
+  skipQuote?: boolean
   items: OrderItem[]
   createdAt: string
 }

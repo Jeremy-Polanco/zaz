@@ -17,8 +17,8 @@ import { CheckoutCreditStep } from '../components/CheckoutCreditStep'
 import { CardAuthForm } from '../components/CardAuthForm'
 import { useCurrentUser } from '../lib/auth'
 import { useCart, clearCart } from '../lib/cart'
-import { Button, Label, Select, SectionHeading } from '../components/ui'
-import { formatCents, formatMoney } from '../lib/utils'
+import { Button, SectionHeading } from '../components/ui'
+import { cn, formatCents, formatMoney } from '../lib/utils'
 import { computeQuotePreviewCents } from '../lib/tax'
 import { TOKEN_KEY } from '../lib/api'
 
@@ -90,6 +90,9 @@ function CheckoutPage() {
       useCredit: false,
     },
   })
+
+  // Watched so the payment-method cards re-render on selection.
+  const paymentMethod = form.watch('paymentMethod')
 
   useEffect(() => {
     form.setValue('items', cartItems)
@@ -271,11 +274,71 @@ function CheckoutPage() {
                 </span>
                 <span className="h-px flex-1 bg-ink/15" />
               </div>
-              <Label htmlFor="paymentMethod">Método de pago</Label>
-              <Select id="paymentMethod" {...form.register('paymentMethod')}>
-                <option value="cash">Efectivo al entregar</option>
-                <option value="digital">Pago digital</option>
-              </Select>
+              <span
+                id="paymentMethodLabel"
+                className="mb-3 block text-sm font-medium text-ink"
+              >
+                Método de pago
+              </span>
+              <div
+                role="radiogroup"
+                aria-labelledby="paymentMethodLabel"
+                className="grid grid-cols-1 gap-3 sm:grid-cols-2"
+              >
+                {(
+                  [
+                    {
+                      value: 'cash',
+                      eyebrow: 'Al recibir',
+                      title: 'Efectivo',
+                      sub: 'Pagás en efectivo cuando te entregamos.',
+                    },
+                    {
+                      value: 'digital',
+                      eyebrow: 'Con tarjeta',
+                      title: 'Pago digital',
+                      sub: 'Pagás ahora — retenemos el monto hasta la entrega.',
+                    },
+                  ] as const
+                ).map((opt) => {
+                  const selected = paymentMethod === opt.value
+                  return (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      role="radio"
+                      aria-checked={selected}
+                      onClick={() => form.setValue('paymentMethod', opt.value)}
+                      className={cn(
+                        'flex flex-col items-start rounded-xs border p-4 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
+                        selected
+                          ? 'border-ink bg-ink text-paper'
+                          : 'border-ink/20 bg-paper text-ink hover:border-ink/50',
+                      )}
+                    >
+                      <span
+                        className={cn(
+                          'text-[0.62rem] uppercase tracking-[0.18em]',
+                          selected ? 'text-paper/60' : 'text-ink-muted',
+                        )}
+                      >
+                        {opt.eyebrow}
+                      </span>
+                      <span className="mt-1 text-lg font-semibold">
+                        {opt.title}
+                      </span>
+                      <span
+                        className={cn(
+                          'mt-1 text-[0.78rem] leading-snug',
+                          selected ? 'text-paper/70' : 'text-ink-muted',
+                        )}
+                      >
+                        {opt.sub}
+                      </span>
+                    </button>
+                  )
+                })}
+              </div>
             </section>
 
             <CheckoutCreditStep

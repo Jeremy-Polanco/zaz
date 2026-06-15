@@ -260,9 +260,75 @@ export default function OrderDetailScreen() {
               </View>
             )}
 
+          {/*
+            Skip-cotización digital orders are paid INLINE at checkout — they
+            must never re-show the "Pagar" panel here. Once the card is
+            authorized the order carries a stripePaymentIntentId; the webhook
+            then advances quoted → pending_validation. While that's in flight,
+            show a processing state (no button) so the customer can't re-trigger
+            a charge.
+          */}
           {order.status === 'quoted' &&
             order.paymentMethod === 'digital' &&
-            !isFullCredit && (
+            !isFullCredit &&
+            order.skipQuote &&
+            order.stripePaymentIntentId && (
+              <View className="mb-6 border-l-4 border-accent bg-accent/10 p-4">
+                <Text className="font-sans-semibold text-[18px] text-ink">
+                  Procesando tu pago…
+                </Text>
+                <Text className="mt-2 font-sans text-[13px] text-ink-soft">
+                  Ya autorizamos el cobro en tu tarjeta. Estamos confirmando tu
+                  pedido — esta pantalla se actualiza sola.
+                </Text>
+              </View>
+            )}
+
+          {/*
+            Recovery only: a skip-cotización order with no intent means the
+            customer abandoned the inline payment at checkout. Let them finish
+            it here instead of getting stuck — the exception, not the norm.
+          */}
+          {order.status === 'quoted' &&
+            order.paymentMethod === 'digital' &&
+            !isFullCredit &&
+            order.skipQuote &&
+            !order.stripePaymentIntentId && (
+              <View className="mb-6 border-l-4 border-accent bg-accent/10 p-4">
+                <Text className="font-sans-semibold text-[18px] text-ink">
+                  Completá tu pago — {formatCents(totalCents)}
+                </Text>
+                {creditAppliedCents > 0 && (
+                  <Text className="mt-2 font-sans text-[13px] text-brand">
+                    Crédito aplicado: −{formatCents(creditAppliedCents)} · Pago
+                    con tarjeta: {formatCents(stripeAmountCents)}
+                  </Text>
+                )}
+                <Text className="mt-2 font-sans text-[13px] text-ink-soft">
+                  Quedó un paso pendiente. Autorizá el cobro — retenemos el monto
+                  y lo cobramos solo cuando te entreguemos.
+                </Text>
+                <Button
+                  variant="accent"
+                  size="lg"
+                  onPress={onAuthorize}
+                  loading={paying || authorize.isPending}
+                  className="mt-4"
+                >
+                  Pagar · {formatCents(stripeAmountCents)} →
+                </Button>
+              </View>
+            )}
+
+          {/*
+            Normal (quote-required) digital orders: shipping is quoted by the
+            admin AFTER the order is placed, so the customer authorizes payment
+            here once the quote lands. Intended flow for these orders.
+          */}
+          {order.status === 'quoted' &&
+            order.paymentMethod === 'digital' &&
+            !isFullCredit &&
+            !order.skipQuote && (
               <View className="mb-6 border-l-4 border-accent bg-accent/10 p-4">
                 <Text className="font-sans-semibold text-[18px] text-ink">
                   Total {formatCents(totalCents)}
