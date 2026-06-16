@@ -292,12 +292,19 @@ export class RentalsService implements OnModuleInit {
     const trialEnd = Math.floor(Date.now() / 1000) + 30 * 86400;
     const rentalId = rental.id;
 
+    // A 30-day trial defers the first rent charge to next month (so a subscriber
+    // who just paid is not double-charged). Do NOT also set billing_cycle_anchor:
+    // with a trial + proration_behavior 'none', Stripe rejects an explicit anchor
+    // ("anchored invoice must be prorated"). The trial alone anchors the cycle.
+    //
+    // The idempotency key includes trialEnd so a retry (which computes a fresh
+    // trialEnd) gets a NEW key instead of colliding with the failed first call's
+    // poisoned key ("can only be used with the same parameters").
     const sub = await stripe.subscriptions.create(
       {
         customer: user.stripeCustomerId,
         items: [{ price: rental.stripePriceId }],
         trial_end: trialEnd,
-        billing_cycle_anchor: trialEnd,
         proration_behavior: 'none',
         metadata: {
           rentalId,
@@ -305,7 +312,7 @@ export class RentalsService implements OnModuleInit {
           productId: rental.productId,
         },
       },
-      { idempotencyKey: `rental-setup-${rentalId}` },
+      { idempotencyKey: `rental-setup-${rentalId}-${trialEnd}` },
     );
 
     const subObj = sub as {

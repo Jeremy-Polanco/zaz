@@ -317,12 +317,15 @@ describe('RentalsService', () => {
       expect((stripeCall['metadata'] as Record<string, string>)['productId']).toBe('product-1');
       expect(stripeCall['proration_behavior']).toBe('none');
 
-      // trial_end and billing_cycle_anchor should be ~30 days from now
+      // trial_end is ~30 days out (first charge next month — no double-charge).
       const trialEnd = stripeCall['trial_end'] as number;
-      const anchor = stripeCall['billing_cycle_anchor'] as number;
-      expect(trialEnd).toBe(anchor); // same value
-      const expectedAnchor = Math.floor(Date.now() / 1000) + 30 * 86400;
-      expect(Math.abs(trialEnd - expectedAnchor)).toBeLessThan(5); // within 5 seconds
+      const expectedTrialEnd = Math.floor(Date.now() / 1000) + 30 * 86400;
+      expect(Math.abs(trialEnd - expectedTrialEnd)).toBeLessThan(5); // within 5 seconds
+
+      // billing_cycle_anchor must NOT be sent: with a trial + proration_behavior
+      // 'none', Stripe rejects an explicit anchor ("anchored invoice must be
+      // prorated"). The trial alone anchors the first billing cycle.
+      expect(stripeCall['billing_cycle_anchor']).toBeUndefined();
 
       // Result rental should be active
       expect(result.status).toBe(RentalStatus.ACTIVE);
@@ -332,7 +335,7 @@ describe('RentalsService', () => {
       expect(result.currentPeriodEnd).toBeInstanceOf(Date);
     });
 
-    it('T21: idempotency key is rental-setup-{rentalId}', async () => {
+    it('T21: idempotency key is rental-setup-{rentalId}-{trialEnd} (retry-safe)', async () => {
       const user = fakeUser({ stripeCustomerId: 'cus_abc' });
       const rental = fakeRental({ id: 'rental-xyz', status: RentalStatus.PENDING_SETUP });
 
@@ -342,8 +345,12 @@ describe('RentalsService', () => {
 
       await service.activateForOrder('rental-xyz');
 
+      // The key includes the trial_end so a later retry (with a fresh trial_end)
+      // gets a NEW key instead of colliding with a poisoned one.
+      const stripeCall = mockStripeInstance.subscriptions.create.mock.calls[0][0] as Record<string, unknown>;
+      const trialEnd = stripeCall['trial_end'] as number;
       const callOptions = mockStripeInstance.subscriptions.create.mock.calls[0][1] as Record<string, unknown>;
-      expect(callOptions?.['idempotencyKey']).toBe('rental-setup-rental-xyz');
+      expect(callOptions?.['idempotencyKey']).toBe(`rental-setup-rental-xyz-${trialEnd}`);
     });
   });
 
@@ -1211,9 +1218,12 @@ describe('RentalsService', () => {
       // subscriptions.create called
       expect(mockStripeInstance.subscriptions.create).toHaveBeenCalledTimes(1);
 
-      // Idempotency key must be rental-setup-{rentalId}
+      // Idempotency key is rental-setup-{rentalId}-{trialEnd} — retry-safe so a
+      // re-attempt with a fresh trial_end never collides with a poisoned key.
+      const stripeCall = mockStripeInstance.subscriptions.create.mock.calls[0][0] as Record<string, unknown>;
+      const trialEnd = stripeCall['trial_end'] as number;
       const callOptions = mockStripeInstance.subscriptions.create.mock.calls[0][1] as Record<string, unknown>;
-      expect(callOptions?.['idempotencyKey']).toBe('rental-setup-rental-7');
+      expect(callOptions?.['idempotencyKey']).toBe(`rental-setup-rental-7-${trialEnd}`);
 
       // Result is active
       expect(result.status).toBe(RentalStatus.ACTIVE);
