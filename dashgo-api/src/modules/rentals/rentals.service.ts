@@ -958,6 +958,36 @@ export class RentalsService implements OnModuleInit {
   }
 
   // ─────────────────────────────────────────────────────────────────────────
+  // resetMaintenance — admin: restart a single rental's maintenance countdown
+  // to MAINTENANCE_INTERVAL_DAYS from now (e.g. after a manual visit, or to
+  // apply a new interval to a rental whose timer was stamped under the old one).
+  // ─────────────────────────────────────────────────────────────────────────
+
+  async resetMaintenance(rentalId: string): Promise<AdminRentalResponseDto> {
+    const rental = await this.rentals.findOne({
+      where: { id: rentalId },
+      relations: ['user', 'product'],
+    });
+    if (!rental) {
+      throw new NotFoundException(`Rental ${rentalId} not found`);
+    }
+    if (!rental.product?.requiresMaintenance) {
+      throw new HttpException(
+        {
+          code: 'RENTAL_NOT_MAINTENANCE',
+          message: 'Este alquiler no lleva contador de mantenimiento.',
+        },
+        HttpStatus.CONFLICT,
+      );
+    }
+    const now = new Date();
+    rental.lastMaintenanceAt = now;
+    rental.nextMaintenanceAt = new Date(now.getTime() + MAINTENANCE_INTERVAL_MS);
+    const saved = await this.rentals.save(rental);
+    return this.toAdminDto(saved);
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
   // T52, T54, T56 — handleWebhook
   //
   // Called by PaymentsController when metadata.rentalId is found on the
@@ -1189,6 +1219,7 @@ export class RentalsService implements OnModuleInit {
     dto.lastLateFeeAt = r.lastLateFeeAt;
     dto.activatedAt = r.activatedAt;
     dto.canceledAt = r.canceledAt;
+    dto.nextMaintenanceAt = r.nextMaintenanceAt ?? null;
     dto.createdAt = r.createdAt;
 
     // daysDelinquent: computed from currentPeriodEnd

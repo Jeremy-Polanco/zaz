@@ -75,6 +75,7 @@ function makeRental(overrides: Partial<AdminRentalResponse> = {}): AdminRentalRe
     currentPeriodEnd: '2026-06-01T00:00:00Z',
     activatedAt: '2026-05-01T00:00:00Z',
     canceledAt: null,
+    nextMaintenanceAt: null,
     daysDelinquent: 0,
     createdAt: '2026-05-01T00:00:00Z',
     ...overrides,

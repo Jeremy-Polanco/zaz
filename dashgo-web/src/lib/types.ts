@@ -435,6 +435,8 @@ export interface AdminRentalResponse {
   currentPeriodEnd: string | null
   activatedAt: string | null
   canceledAt: string | null
+  /** Next bebedero maintenance due date, or null if not a maintenance rental. */
+  nextMaintenanceAt: string | null
   daysDelinquent: number
   createdAt: string
 }

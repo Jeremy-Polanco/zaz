@@ -24,6 +24,8 @@ export class AdminRentalResponseDto {
   lastLateFeeAt!: Date | null;
   activatedAt!: Date | null;
   canceledAt!: Date | null;
+  /** Next bebedero maintenance due date, or null if not a maintenance rental. */
+  nextMaintenanceAt!: Date | null;
   /** Days overdue since currentPeriodEnd. Computed: max(0, days from currentPeriodEnd to NOW). */
   daysDelinquent!: number;
   createdAt!: Date;

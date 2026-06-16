@@ -7,6 +7,7 @@ import {
   useChargeTheftFee,
   useCancelRental,
   useRetryRentalSetup,
+  useResetMaintenance,
 } from '../lib/queries'
 import { TOKEN_KEY, api } from '../lib/api'
 import type { AuthUser } from '../lib/types'
@@ -66,6 +67,7 @@ type ModalAction = {
     | 'charge-theft-cancel'
     | 'cancel'
     | 'retry'
+    | 'reset-maintenance'
   rentalId: string
   label: string
 }
@@ -146,6 +148,8 @@ function RentalRow({
     rental.status,
   )
   const canRetry = rental.status === 'pending_setup'
+  // Only bebederos that have a running maintenance timer can have it reset.
+  const canResetMaintenance = !!rental.nextMaintenanceAt
 
   const periodEndStr = rental.currentPeriodEnd
     ? new Date(rental.currentPeriodEnd).toLocaleDateString('es', {
@@ -251,6 +255,21 @@ function RentalRow({
             Reintentar setup
           </Button>
         ) : null}
+        {canResetMaintenance ? (
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() =>
+              onAction({
+                type: 'reset-maintenance',
+                rentalId: rental.id,
+                label: `Reiniciar el timer de mantenimiento a 90 días para ${rental.userName}`,
+              })
+            }
+          >
+            Reiniciar timer
+          </Button>
+        ) : null}
         {canCancel ? (
           <Button
             size="sm"
@@ -284,12 +303,14 @@ function SuperRentalsPage() {
   const theftMutation = useChargeTheftFee()
   const cancelMutation = useCancelRental()
   const retryMutation = useRetryRentalSetup()
+  const resetMaintenanceMutation = useResetMaintenance()
 
   const isMutating =
     chargeMutation.isPending ||
     theftMutation.isPending ||
     cancelMutation.isPending ||
-    retryMutation.isPending
+    retryMutation.isPending ||
+    resetMaintenanceMutation.isPending
 
   // Summary computed from the already-fetched rentals — no extra request.
   const summary = useMemo(() => {
@@ -334,6 +355,8 @@ function SuperRentalsPage() {
         await cancelMutation.mutateAsync(pendingAction.rentalId)
       } else if (pendingAction.type === 'retry') {
         await retryMutation.mutateAsync(pendingAction.rentalId)
+      } else if (pendingAction.type === 'reset-maintenance') {
+        await resetMaintenanceMutation.mutateAsync(pendingAction.rentalId)
       }
     } catch (e) {
       const msg =

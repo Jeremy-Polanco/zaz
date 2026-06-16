@@ -1252,6 +1252,42 @@ describe('RentalsService', () => {
     });
   });
 
+  describe('resetMaintenance', () => {
+    it('resets nextMaintenanceAt to ~90 days out for a maintenance rental', async () => {
+      const rental = fakeRental({
+        id: 'rental-rm',
+        status: RentalStatus.ACTIVE,
+        product: { requiresMaintenance: true, name: 'Bebedero' } as Product,
+        user: { fullName: 'X', phone: '+1' } as User,
+        nextMaintenanceAt: new Date('2026-01-01T00:00:00Z'),
+      });
+      rentalRepo.findOne.mockResolvedValueOnce(rental);
+      rentalRepo.save.mockImplementation(async (r: Rental) => r);
+
+      const result = await service.resetMaintenance('rental-rm');
+
+      const next = new Date(result.nextMaintenanceAt as Date).getTime();
+      const expected = Date.now() + 90 * 24 * 60 * 60 * 1000;
+      expect(Math.abs(next - expected)).toBeLessThan(5000);
+    });
+
+    it('409 when the rental does not track maintenance', async () => {
+      const rental = fakeRental({
+        id: 'rental-nm',
+        product: { requiresMaintenance: false } as Product,
+      });
+      rentalRepo.findOne.mockResolvedValueOnce(rental);
+
+      await expect(service.resetMaintenance('rental-nm')).rejects.toMatchObject({ status: 409 });
+      expect(rentalRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('404 when the rental is not found', async () => {
+      rentalRepo.findOne.mockResolvedValueOnce(null);
+      await expect(service.resetMaintenance('nope')).rejects.toMatchObject({ status: 404 });
+    });
+  });
+
   // ─────────────────────────────────────────────────────────────────────────
   // Phase 4 (Batch B) — past_due webhook: pastDueSince write-once
   // ─────────────────────────────────────────────────────────────────────────

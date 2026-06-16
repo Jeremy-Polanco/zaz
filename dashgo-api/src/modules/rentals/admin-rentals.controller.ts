@@ -113,6 +113,19 @@ export class AdminRentalsController {
   }
 
   /**
+   * POST /admin/rentals/:id/reset-maintenance
+   * Restarts the rental's maintenance countdown (next_maintenance_at) to the
+   * configured interval (90 days) from now. 409 if the rental isn't a bebedero.
+   */
+  @Post(':id/reset-maintenance')
+  @HttpCode(200)
+  async resetMaintenance(
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<AdminRentalResponseDto> {
+    return this.rentals.resetMaintenance(id);
+  }
+
+  /**
    * POST /admin/rentals/:id/retry-setup
    * Re-attempts Stripe Subscription creation for a pending_setup rental.
    * Returns 409 if rental is not in pending_setup status.

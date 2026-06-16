@@ -1158,6 +1158,20 @@ export function useChargeTheftFee() {
   })
 }
 
+/** Super-admin: POST /admin/rentals/:id/reset-maintenance (restart timer to +90d) */
+export function useResetMaintenance() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (rentalId: string) => {
+      const { data } = await api.post(`/admin/rentals/${rentalId}/reset-maintenance`)
+      return data
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['admin', 'rentals'] })
+    },
+  })
+}
+
 /** Super-admin: POST /admin/rentals/:id/cancel */
 export function useCancelRental() {
   const qc = useQueryClient()
