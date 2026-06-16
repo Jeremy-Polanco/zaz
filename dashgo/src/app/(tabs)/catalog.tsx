@@ -216,6 +216,13 @@ function ProductCard({ product, qty }: { product: Product; qty: number }) {
           </View>
         ) : null}
 
+        {product.pricingMode === 'rental' && (product.theftFeeCents ?? 0) > 0 ? (
+          <Text className="mt-1 font-sans text-[9px] leading-snug text-ink-muted">
+            ⚠️ Equipo en alquiler. Si dejás de pagar y te quedás con él, se cobra
+            una multa por robo de {formatCents(product.theftFeeCents ?? 0)}.
+          </Text>
+        ) : null}
+
         <View className="mt-2.5">
           {unavailable ? (
             <Text className="font-sans text-[10px] uppercase tracking-label text-ink-muted">
@@ -282,6 +289,12 @@ function ProductRow({ product, qty }: { product: Product; qty: number }) {
               </Text>
             </View>
           </View>
+        ) : null}
+        {product.pricingMode === 'rental' && (product.theftFeeCents ?? 0) > 0 ? (
+          <Text className="mt-1 font-sans text-[10px] leading-snug text-ink-muted">
+            ⚠️ Equipo en alquiler. Si dejás de pagar y te quedás con él, se cobra
+            una multa por robo de {formatCents(product.theftFeeCents ?? 0)}.
+          </Text>
         ) : null}
         <View className="mt-2 flex-row items-end justify-between">
           <View className="flex-row items-baseline gap-2">

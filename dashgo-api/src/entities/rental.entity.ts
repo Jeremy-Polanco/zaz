@@ -90,6 +90,20 @@ export class Rental {
   @Column({ name: 'late_fee_cents', type: 'integer' })
   lateFeeCents!: number;
 
+  /**
+   * Snapshot of the one-time theft/replacement fee (cents) at Rental creation.
+   * Charged at most once via chargeTheftFee. 0 disables the charge.
+   */
+  @Column({ name: 'theft_fee_cents', type: 'integer', default: 0 })
+  theftFeeCents!: number;
+
+  /**
+   * Timestamp of the (single) successful theft-fee charge, or null if never
+   * charged. Guards against double-charging — chargeTheftFee rejects once set.
+   */
+  @Column({ name: 'theft_fee_charged_at', type: 'timestamptz', nullable: true })
+  theftFeeChargedAt!: Date | null;
+
   @Column({ name: 'current_period_start', type: 'timestamptz', nullable: true })
   currentPeriodStart!: Date | null;
 

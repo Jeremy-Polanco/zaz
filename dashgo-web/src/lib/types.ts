@@ -100,12 +100,16 @@ export interface Product {
   pricingMode?: 'single_payment' | 'rental'
   monthlyRentCents?: number
   lateFeeCents?: number
+  /** One-time theft/replacement fee charged if a subscriber keeps the unit unpaid. */
+  theftFeeCents?: number
   stripeProductId?: string | null
   stripePriceId?: string | null
   /** Marks a rentable dispenser that needs periodic (30-day) maintenance. */
   requiresMaintenance?: boolean
   /** Marks the dedicated "Mantenimiento Bebedero" service product. */
   isMaintenanceService?: boolean
+  /** Marks THE bebedero handed out free when a user subscribes (at most one). */
+  isDefaultSubscriberBebedero?: boolean
   /** Catalog position — lower number appears first. */
   displayOrder: number
 }
@@ -424,6 +428,9 @@ export interface AdminRentalResponse {
   status: RentalStatus
   monthlyRentCents: number
   lateFeeCents: number
+  theftFeeCents: number
+  /** Timestamp of the one-time theft-fee charge, or null if never charged. */
+  theftFeeChargedAt: string | null
   stripeSubscriptionId: string | null
   currentPeriodEnd: string | null
   activatedAt: string | null

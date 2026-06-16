@@ -24,7 +24,11 @@ import { CreditService } from '../credit/credit.service';
 import { SubscriptionService } from '../subscription/subscription.service';
 import { TwilioService } from '../twilio/twilio.service';
 import { RentalsService } from '../rentals/rentals.service';
-import { getEffectivePrice, resolveBebederoRentCents } from '../products/pricing';
+import {
+  SUBSCRIBER_BEBEDERO_RENT_CENTS,
+  getEffectivePrice,
+  resolveBebederoRentCents,
+} from '../products/pricing';
 
 const ALLOWED_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
   [OrderStatus.PENDING_QUOTE]: [OrderStatus.QUOTED, OrderStatus.CANCELLED],
@@ -216,12 +220,23 @@ export class OrdersService {
       const priorCount = await this.rentalsService.countBebederoRentalsForUser(
         user.id,
       );
-      const ratePrices = await this.rentalsService.ensureBebederoRatePrices();
+      // Additional bebederos rent at the live subscription price (net cents).
+      // Falls back to the frozen rate only if no plan is configured.
+      const subscriberRentCents =
+        (await this.subscriptionService.getPlanNetCents()) ??
+        SUBSCRIBER_BEBEDERO_RENT_CENTS;
+      const ratePrices =
+        await this.rentalsService.ensureBebederoRatePrices(subscriberRentCents);
       let ordinal = priorCount;
       for (const input of dto.items) {
         const product = byId.get(input.productId)!;
         if (!isBebedero(product)) continue;
-        const rent = resolveBebederoRentCents(product, true, ordinal);
+        const rent = resolveBebederoRentCents(
+          product,
+          true,
+          ordinal,
+          subscriberRentCents,
+        );
         if (rent.tier !== 'catalog') {
           bebederoRateByProductId.set(product.id, {
             monthlyRentCents: rent.monthlyRentCents,

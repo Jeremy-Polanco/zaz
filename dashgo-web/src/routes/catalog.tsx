@@ -349,6 +349,13 @@ function ProductCard({
             Sin stock
           </span>
         )}
+
+        {product.pricingMode === 'rental' && (product.theftFeeCents ?? 0) > 0 ? (
+          <p className="mt-1 text-[0.6rem] leading-snug text-ink-muted">
+            ⚠️ Equipo en alquiler. Si dejás de pagar y te quedás con él, se cobra
+            una multa por robo de {formatCents(product.theftFeeCents ?? 0)}.
+          </p>
+        ) : null}
       </div>
     </li>
   )

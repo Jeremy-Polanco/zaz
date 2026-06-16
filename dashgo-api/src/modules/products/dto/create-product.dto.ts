@@ -89,6 +89,14 @@ export class CreateProductDto {
   @Max(1000000)
   lateFeeCents?: number;
 
+  // One-time theft / replacement fee charged off-session if a subscriber keeps
+  // the rented unit without paying. Only meaningful for rental products.
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(10000000)
+  theftFeeCents?: number;
+
   // Stripe IDs — admin may set these manually; server will lazy-create if absent
   @IsOptional()
   @IsString()
@@ -106,6 +114,12 @@ export class CreateProductDto {
   @IsOptional()
   @IsBoolean()
   isMaintenanceService?: boolean;
+
+  // Marks THE bebedero handed out free when a user subscribes. At most one
+  // product carries this flag (enforced by a partial unique index).
+  @IsOptional()
+  @IsBoolean()
+  isDefaultSubscriberBebedero?: boolean;
 
   // Posición en el catálogo (menor número aparece primero)
   @IsOptional()

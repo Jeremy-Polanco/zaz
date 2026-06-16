@@ -18,6 +18,7 @@ import { ListRentalsQueryDto } from './dto/list-rentals-query.dto';
 import { ChargeLateFeeDto } from './dto/charge-late-fee.dto';
 import { AdminRentalResponseDto } from './dto/admin-rental-response.dto';
 import { ChargeLateFeeResponseDto } from './dto/charge-late-fee-response.dto';
+import { ChargeTheftFeeResponseDto } from './dto/charge-theft-fee-response.dto';
 
 /**
  * Admin endpoints for rental management.
@@ -81,6 +82,21 @@ export class AdminRentalsController {
     @Body() dto: ChargeLateFeeDto,
   ): Promise<ChargeLateFeeResponseDto> {
     return this.rentals.chargeLateFee(id, dto.alsoCancel ?? false);
+  }
+
+  /**
+   * POST /admin/rentals/:id/charge-theft-fee
+   * Charges the rental's theftFeeCents off-session (one-time replacement fee).
+   * Optional body { alsoCancel: true } also cancels the Stripe Subscription.
+   * Returns 503 if theftFeeCents = 0, 409 if already charged, 502 if Stripe fails.
+   */
+  @Post(':id/charge-theft-fee')
+  @HttpCode(200)
+  async chargeTheftFee(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: ChargeLateFeeDto,
+  ): Promise<ChargeTheftFeeResponseDto> {
+    return this.rentals.chargeTheftFee(id, dto.alsoCancel ?? false);
   }
 
   /**

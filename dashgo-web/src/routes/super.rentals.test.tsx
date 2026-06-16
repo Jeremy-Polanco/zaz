@@ -69,6 +69,8 @@ function makeRental(overrides: Partial<AdminRentalResponse> = {}): AdminRentalRe
     status: 'active',
     monthlyRentCents: 2000,
     lateFeeCents: 500,
+    theftFeeCents: 0,
+    theftFeeChargedAt: null,
     stripeSubscriptionId: 'sub_stripe_001',
     currentPeriodEnd: '2026-06-01T00:00:00Z',
     activatedAt: '2026-05-01T00:00:00Z',

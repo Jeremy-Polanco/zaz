@@ -108,10 +108,12 @@ export class ProductsService implements OnModuleInit {
       pricingMode: dto.pricingMode ?? 'single_payment',
       monthlyRentCents: dto.monthlyRentCents ?? 0,
       lateFeeCents: dto.lateFeeCents ?? 0,
+      theftFeeCents: dto.theftFeeCents ?? 0,
       stripeProductId: dto.stripeProductId ?? null,
       stripePriceId: dto.stripePriceId ?? null,
       requiresMaintenance: dto.requiresMaintenance ?? false,
       isMaintenanceService: dto.isMaintenanceService ?? false,
+      isDefaultSubscriberBebedero: dto.isDefaultSubscriberBebedero ?? false,
       displayOrder: dto.displayOrder ?? 0,
     });
     const saved = await this.products.save(product);
@@ -180,6 +182,8 @@ export class ProductsService implements OnModuleInit {
     if (dto.monthlyRentCents !== undefined)
       patch.monthlyRentCents = dto.monthlyRentCents;
     if (dto.lateFeeCents !== undefined) patch.lateFeeCents = dto.lateFeeCents;
+    if (dto.theftFeeCents !== undefined)
+      patch.theftFeeCents = dto.theftFeeCents;
     // Admin-provided Stripe IDs override any auto-sync. When both arrive in the
     // same request, persist them as-is and skip the Stripe API call entirely —
     // operators sometimes create Stripe Products/Prices out-of-band (live mode,
@@ -193,6 +197,8 @@ export class ProductsService implements OnModuleInit {
       patch.requiresMaintenance = dto.requiresMaintenance;
     if (dto.isMaintenanceService !== undefined)
       patch.isMaintenanceService = dto.isMaintenanceService;
+    if (dto.isDefaultSubscriberBebedero !== undefined)
+      patch.isDefaultSubscriberBebedero = dto.isDefaultSubscriberBebedero;
     if (dto.displayOrder !== undefined) patch.displayOrder = dto.displayOrder;
     const adminProvidedStripeIds =
       typeof dto.stripeProductId === 'string' &&

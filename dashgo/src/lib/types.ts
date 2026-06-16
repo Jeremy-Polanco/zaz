@@ -101,6 +101,8 @@ export interface Product {
   pricingMode?: 'single_payment' | 'rental'
   monthlyRentCents?: number
   lateFeeCents?: number
+  /** One-time theft/replacement fee charged if a subscriber keeps the unit unpaid. */
+  theftFeeCents?: number
   /** Marks a rentable dispenser that needs periodic (30-day) maintenance. */
   requiresMaintenance?: boolean
   /** Marks the dedicated "Mantenimiento Bebedero" service product. */

@@ -297,6 +297,17 @@ export class SubscriptionService implements OnModuleInit {
   }
 
   /**
+   * Net monthly subscription price in cents (pre-tax), or null when no plan is
+   * configured. This is the price an additional bebedero rents at for an active
+   * subscriber — see resolveBebederoRentCents (products/pricing.ts). Net (not
+   * gross) keeps it consistent with how bebedero rent is taxed at order time.
+   */
+  async getPlanNetCents(): Promise<number | null> {
+    const plan = await this.plans.findOne({ where: {} });
+    return plan ? plan.unitAmountCents : null;
+  }
+
+  /**
    * Admin: update the monthly subscription price.
    *
    * 4-step Stripe Price rotation:

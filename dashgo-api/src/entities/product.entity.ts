@@ -134,6 +134,16 @@ export class Product {
   @Column({ name: 'late_fee_cents', type: 'integer', default: 0 })
   lateFeeCents!: number;
 
+  /**
+   * One-time theft / replacement fee (in cents) charged off-session when a
+   * subscriber stops paying and effectively keeps (steals) the rented unit.
+   * Snapshotted onto the Rental at order time; charged at most once via
+   * RentalsService.chargeTheftFee. Only meaningful for rental products; 0
+   * disables the charge.
+   */
+  @Column({ name: 'theft_fee_cents', type: 'integer', default: 0 })
+  theftFeeCents!: number;
+
   @Column({
     name: 'stripe_product_id',
     type: 'varchar',

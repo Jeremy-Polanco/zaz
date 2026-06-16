@@ -27,13 +27,25 @@ describe('resolveBebederoRentCents', () => {
     expect(r).toEqual({ monthlyRentCents: 0, tier: 'free' });
   });
 
-  it('subscriber pays $6.99 for an ADDITIONAL bebedero', () => {
+  it('subscriber pays the fallback rate for an ADDITIONAL bebedero when no plan amount is given', () => {
     const r = resolveBebederoRentCents(mkProduct(), true, 1);
     expect(r).toEqual({
       monthlyRentCents: SUBSCRIBER_BEBEDERO_RENT_CENTS,
       tier: 'subscriber',
     });
     expect(SUBSCRIBER_BEBEDERO_RENT_CENTS).toBe(699);
+  });
+
+  it('subscriber pays the SUBSCRIPTION plan price for an ADDITIONAL bebedero', () => {
+    // The additional-bebedero rent must track the live subscription price
+    // (net cents from subscription_plan.unitAmountCents), not a frozen constant.
+    const r = resolveBebederoRentCents(mkProduct(), true, 1, 1299);
+    expect(r).toEqual({ monthlyRentCents: 1299, tier: 'subscriber' });
+  });
+
+  it('FIRST bebedero is still free regardless of the plan price', () => {
+    const r = resolveBebederoRentCents(mkProduct(), true, 0, 1299);
+    expect(r).toEqual({ monthlyRentCents: 0, tier: 'free' });
   });
 
   it('subscriber: a rental that is NOT a bebedero (requiresMaintenance=false) uses catalog rent', () => {

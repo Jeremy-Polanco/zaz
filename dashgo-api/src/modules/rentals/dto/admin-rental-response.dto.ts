@@ -15,6 +15,9 @@ export class AdminRentalResponseDto {
   status!: string;
   monthlyRentCents!: number;
   lateFeeCents!: number;
+  theftFeeCents!: number;
+  /** Timestamp of the one-time theft-fee charge, or null if never charged. */
+  theftFeeChargedAt!: Date | null;
   stripeSubscriptionId!: string | null;
   currentPeriodEnd!: Date | null;
   pastDueSince!: Date | null;

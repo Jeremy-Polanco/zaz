@@ -40,10 +40,15 @@ export function getEffectivePrice(
 }
 
 /**
- * Flat monthly rent (in cents) an active subscriber pays for each bebedero
- * BEYOND their first one. The first bebedero is free ($0); every additional
- * bebedero rents at this rate ($6.99/mo + tax). Non-subscribers pay the
- * product's catalog `monthlyRentCents`.
+ * Fallback monthly rent (in net cents) an active subscriber pays for each
+ * bebedero BEYOND their first one, used only when the live subscription plan
+ * price is unavailable. Normally the additional-bebedero rent TRACKS the
+ * subscription's own monthly price (`subscription_plan.unitAmountCents`) so the
+ * two can never drift apart — pass it as `subscriberRentCents`.
+ *
+ * The first bebedero is free ($0); every additional bebedero rents at the
+ * subscription price + tax. Non-subscribers pay the product's catalog
+ * `monthlyRentCents`.
  */
 export const SUBSCRIBER_BEBEDERO_RENT_CENTS = 699;
 
@@ -63,19 +68,23 @@ export interface BebederoRent {
  * rental that is not a dispenser) always uses its catalog `monthlyRentCents`.
  *
  * Benefit (active subscribers only):
- *   - first bebedero ever (priorBebederoCount === 0) → $0/mo  ('free')
- *   - each additional bebedero                       → $6.99/mo ('subscriber')
+ *   - first bebedero ever (priorBebederoCount === 0) → $0/mo          ('free')
+ *   - each additional bebedero                       → subscription price ('subscriber')
  *
  * @param product             the rental product being priced
  * @param isActiveSubscriber  whether the user is an active subscriber right now
  * @param priorBebederoCount  lifetime count of bebedero rentals the user has
  *                            had BEFORE this one (any status). 0 → this is
  *                            their first → free.
+ * @param subscriberRentCents net monthly rent for additional bebederos — the
+ *                            live subscription price. Defaults to the frozen
+ *                            fallback when the plan price is unavailable.
  */
 export function resolveBebederoRentCents(
   product: Product,
   isActiveSubscriber: boolean,
   priorBebederoCount: number,
+  subscriberRentCents: number = SUBSCRIBER_BEBEDERO_RENT_CENTS,
 ): BebederoRent {
   const isBebedero =
     product.pricingMode === 'rental' && product.requiresMaintenance === true;
@@ -89,7 +98,7 @@ export function resolveBebederoRentCents(
   }
 
   return {
-    monthlyRentCents: SUBSCRIBER_BEBEDERO_RENT_CENTS,
+    monthlyRentCents: subscriberRentCents,
     tier: 'subscriber',
   };
 }

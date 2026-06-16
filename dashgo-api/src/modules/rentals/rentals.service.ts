@@ -15,10 +15,10 @@ import Stripe = require('stripe');
 import { Rental, RentalStatus } from '../../entities/rental.entity';
 import { User } from '../../entities/user.entity';
 import { Product } from '../../entities/product.entity';
-import { SUBSCRIBER_BEBEDERO_RENT_CENTS } from '../products/pricing';
 import { CustomerRentalResponseDto } from './dto/customer-rental-response.dto';
 import { AdminRentalResponseDto } from './dto/admin-rental-response.dto';
 import { ChargeLateFeeResponseDto } from './dto/charge-late-fee-response.dto';
+import { ChargeTheftFeeResponseDto } from './dto/charge-theft-fee-response.dto';
 import { assertStripeProductionConfig } from '../../common/stripe/stripe-runtime-guard';
 
 type StripeClient = InstanceType<typeof Stripe>;
@@ -75,10 +75,15 @@ export class RentalsService implements OnModuleInit {
   private readonly logger = new Logger(RentalsService.name);
   private stripe: StripeClient | null = null;
 
-  /** In-memory cache of the resolved subscriber bebedero price IDs. */
+  /**
+   * In-memory cache of the resolved subscriber bebedero price IDs, keyed by the
+   * subscriber net amount they were resolved for. A change in the subscription
+   * price invalidates the cache so the subscriber price is regenerated.
+   */
   private bebederoRatePrices: {
     freePriceId: string;
     subscriberPriceId: string;
+    subscriberAmountCents: number;
   } | null = null;
 
   constructor(
@@ -191,6 +196,7 @@ export class RentalsService implements OnModuleInit {
       monthlyRentCents:
         params.monthlyRentCentsOverride ?? product.monthlyRentCents,
       lateFeeCents: product.lateFeeCents,
+      theftFeeCents: product.theftFeeCents ?? 0,
       status: RentalStatus.PENDING_SETUP,
     };
 
@@ -418,19 +424,31 @@ export class RentalsService implements OnModuleInit {
   //
   // Lazily provisions (and caches) the two flat recurring Stripe Prices used
   // for the subscriber bebedero benefit:
-  //   - $0.00/mo  → the first bebedero (free)        lookup_key bebedero_free_monthly
-  //   - $6.99/mo  → each additional bebedero          lookup_key bebedero_subscriber_monthly
+  //   - $0.00/mo            → the first bebedero (free)   lookup_key bebedero_free_monthly
+  //   - subscription price  → each additional bebedero    lookup_key bebedero_subscriber_monthly
   //
-  // Idempotent: looks the prices up by lookup_key first and only creates the
-  // missing ones (under a shared "Bebedero — Tarifa Suscriptor" Stripe Product).
-  // Stripe is the source of truth — we persist nothing in our own DB.
+  // The subscriber price TRACKS the live subscription price (net cents, passed
+  // by OrdersService from subscription_plan.unitAmountCents) so the additional
+  // bebedero always rents at the same price as the subscription. Stripe prices
+  // are immutable, so when the plan price changes we mint a NEW subscriber price
+  // at the new amount, move the lookup_key onto it, and archive the stale one.
+  //
+  // Idempotent + amount-keyed cache: same amount → cached, no Stripe calls;
+  // changed amount → re-resolve. Stripe is the source of truth — we persist
+  // nothing in our own DB.
   // ─────────────────────────────────────────────────────────────────────────
 
-  async ensureBebederoRatePrices(): Promise<{
+  async ensureBebederoRatePrices(subscriberNetCents: number): Promise<{
     freePriceId: string;
     subscriberPriceId: string;
   }> {
-    if (this.bebederoRatePrices) return this.bebederoRatePrices;
+    const cached = this.bebederoRatePrices;
+    if (cached && cached.subscriberAmountCents === subscriberNetCents) {
+      return {
+        freePriceId: cached.freePriceId,
+        subscriberPriceId: cached.subscriberPriceId,
+      };
+    }
 
     const stripe = this.requireStripe();
 
@@ -439,15 +457,26 @@ export class RentalsService implements OnModuleInit {
       active: true,
     });
 
-    const byKey = new Map<string, string>();
+    const byKey = new Map<string, { id: string; amount: number | null }>();
     for (const p of existing.data ?? []) {
-      if (p.lookup_key) byKey.set(p.lookup_key, p.id);
+      if (p.lookup_key) {
+        byKey.set(p.lookup_key, { id: p.id, amount: p.unit_amount ?? null });
+      }
     }
 
-    let freePriceId = byKey.get(BEBEDERO_FREE_LOOKUP_KEY);
-    let subscriberPriceId = byKey.get(BEBEDERO_SUBSCRIBER_LOOKUP_KEY);
+    let freePriceId = byKey.get(BEBEDERO_FREE_LOOKUP_KEY)?.id;
+    const existingSub = byKey.get(BEBEDERO_SUBSCRIBER_LOOKUP_KEY);
+    // Reuse the subscriber price only when it already bills the live amount.
+    let subscriberPriceId =
+      existingSub && existingSub.amount === subscriberNetCents
+        ? existingSub.id
+        : undefined;
 
-    if (!freePriceId || !subscriberPriceId) {
+    // Create the shared rate product lazily — only when we actually need to
+    // mint a price. Idempotency key keeps it a single shared product.
+    let rateProductId: string | undefined;
+    const ensureRateProduct = async (): Promise<string> => {
+      if (rateProductId) return rateProductId;
       const product = await stripe.products.create(
         {
           name: 'Bebedero — Tarifa Suscriptor',
@@ -455,38 +484,60 @@ export class RentalsService implements OnModuleInit {
         },
         { idempotencyKey: 'bebedero-rate-product' },
       );
+      rateProductId = product.id;
+      return rateProductId;
+    };
 
-      if (!freePriceId) {
-        const price = await stripe.prices.create(
-          {
-            unit_amount: 0,
-            currency: 'usd',
-            recurring: { interval: 'month' },
-            product: product.id,
-            lookup_key: BEBEDERO_FREE_LOOKUP_KEY,
-          },
-          { idempotencyKey: 'bebedero-rate-price-free' },
-        );
-        freePriceId = price.id;
-      }
+    if (!freePriceId) {
+      const price = await stripe.prices.create(
+        {
+          unit_amount: 0,
+          currency: 'usd',
+          recurring: { interval: 'month' },
+          product: await ensureRateProduct(),
+          lookup_key: BEBEDERO_FREE_LOOKUP_KEY,
+        },
+        { idempotencyKey: 'bebedero-rate-price-free' },
+      );
+      freePriceId = price.id;
+    }
 
-      if (!subscriberPriceId) {
-        const price = await stripe.prices.create(
-          {
-            unit_amount: SUBSCRIBER_BEBEDERO_RENT_CENTS,
-            currency: 'usd',
-            recurring: { interval: 'month' },
-            product: product.id,
-            lookup_key: BEBEDERO_SUBSCRIBER_LOOKUP_KEY,
-          },
-          { idempotencyKey: 'bebedero-rate-price-subscriber' },
-        );
-        subscriberPriceId = price.id;
+    if (!subscriberPriceId) {
+      // Missing, or the plan price changed — (re)create at the live amount and
+      // transfer the lookup_key onto the new price.
+      const price = await stripe.prices.create(
+        {
+          unit_amount: subscriberNetCents,
+          currency: 'usd',
+          recurring: { interval: 'month' },
+          product: await ensureRateProduct(),
+          lookup_key: BEBEDERO_SUBSCRIBER_LOOKUP_KEY,
+          transfer_lookup_key: true,
+        },
+        {
+          idempotencyKey: `bebedero-rate-price-subscriber-${subscriberNetCents}`,
+        },
+      );
+      subscriberPriceId = price.id;
+
+      // Archive the stale price (non-blocking) so it stops being billable.
+      if (existingSub && existingSub.id !== subscriberPriceId) {
+        try {
+          await stripe.prices.update(existingSub.id, { active: false });
+        } catch (e) {
+          this.logger.warn(
+            `failed to archive stale bebedero subscriber price ${existingSub.id}: ${(e as Error).message}`,
+          );
+        }
       }
     }
 
-    this.bebederoRatePrices = { freePriceId, subscriberPriceId };
-    return this.bebederoRatePrices;
+    this.bebederoRatePrices = {
+      freePriceId,
+      subscriberPriceId,
+      subscriberAmountCents: subscriberNetCents,
+    };
+    return { freePriceId, subscriberPriceId };
   }
 
   async countBebederoRentalsForUser(
@@ -701,6 +752,85 @@ export class RentalsService implements OnModuleInit {
 
     const response = new ChargeLateFeeResponseDto();
     response.chargedCents = rental.lateFeeCents;
+    response.paymentIntentId = pi.id;
+    response.subscriptionCanceled = alsoCancel;
+    return response;
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // chargeTheftFee
+  //
+  // One-time off-session PaymentIntent for the theft/replacement fee charged
+  // when a subscriber stops paying and keeps (steals) the unit. Unlike the
+  // late fee (recurring, day-keyed), this is charged AT MOST ONCE — guarded by
+  // theftFeeChargedAt and a stable idempotency key (theft-fee-{rentalId}).
+  // alsoCancel=true → cancel the rental after a successful charge.
+  // ─────────────────────────────────────────────────────────────────────────
+
+  async chargeTheftFee(
+    rentalId: string,
+    alsoCancel: boolean,
+  ): Promise<ChargeTheftFeeResponseDto> {
+    const rental = await this.rentals.findOne({ where: { id: rentalId } });
+    if (!rental) {
+      throw new NotFoundException(`Rental ${rentalId} not found`);
+    }
+
+    // Pre-check — theftFeeCents must be configured.
+    if (rental.theftFeeCents === 0) {
+      throw new HttpException(
+        'THEFT_FEE_NOT_CONFIGURED',
+        HttpStatus.SERVICE_UNAVAILABLE,
+      );
+    }
+
+    // Guard — a theft fee is charged at most once.
+    if (rental.theftFeeChargedAt) {
+      throw new ConflictException('THEFT_FEE_ALREADY_CHARGED');
+    }
+
+    const user = await this.users.findOne({ where: { id: rental.userId } });
+    if (!user?.stripeCustomerId) {
+      throw new HttpException('NO_PAYMENT_METHOD', HttpStatus.BAD_REQUEST);
+    }
+
+    const stripe = this.requireStripe();
+
+    let pi: { id: string };
+    try {
+      pi = await stripe.paymentIntents.create(
+        {
+          customer: user.stripeCustomerId,
+          amount: rental.theftFeeCents,
+          currency: 'usd',
+          off_session: true,
+          confirm: true,
+          metadata: {
+            kind: 'rental_theft_fee',
+            rentalId,
+            userId: rental.userId,
+          },
+        },
+        { idempotencyKey: `theft-fee-${rentalId}` },
+      );
+    } catch (err) {
+      this.logger.error(
+        `chargeTheftFee: PaymentIntent failed for rental ${rentalId}: ${(err as Error).message}`,
+      );
+      throw new HttpException('STRIPE_PAYMENT_FAILED', HttpStatus.BAD_GATEWAY);
+    }
+
+    // Stamp the one-time charge AFTER Stripe success so a failed charge can be
+    // retried; a succeeded one can never be charged again.
+    rental.theftFeeChargedAt = new Date();
+    await this.rentals.save(rental);
+
+    if (alsoCancel) {
+      await this.cancelAdmin(rentalId);
+    }
+
+    const response = new ChargeTheftFeeResponseDto();
+    response.chargedCents = rental.theftFeeCents;
     response.paymentIntentId = pi.id;
     response.subscriptionCanceled = alsoCancel;
     return response;
@@ -1044,6 +1174,8 @@ export class RentalsService implements OnModuleInit {
     dto.status = r.status;
     dto.monthlyRentCents = r.monthlyRentCents;
     dto.lateFeeCents = r.lateFeeCents;
+    dto.theftFeeCents = r.theftFeeCents ?? 0;
+    dto.theftFeeChargedAt = r.theftFeeChargedAt ?? null;
     dto.stripeSubscriptionId = r.stripeSubscriptionId;
     dto.currentPeriodEnd = r.currentPeriodEnd;
     dto.pastDueSince = r.pastDueSince;

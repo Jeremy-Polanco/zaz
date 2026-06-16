@@ -297,10 +297,12 @@ export type CreateProductInput = {
   pricingMode?: 'single_payment' | 'rental'
   monthlyRentCents?: number
   lateFeeCents?: number
+  theftFeeCents?: number
   stripeProductId?: string | null
   stripePriceId?: string | null
   requiresMaintenance?: boolean
   isMaintenanceService?: boolean
+  isDefaultSubscriberBebedero?: boolean
   displayOrder?: number
 }
 
@@ -1123,6 +1125,29 @@ export function useChargeLateFee() {
     }) => {
       const { data } = await api.post<ChargeLateFeeResponse>(
         `/admin/rentals/${rentalId}/charge-late-fee`,
+        { alsoCancel },
+      )
+      return data
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['admin', 'rentals'] })
+    },
+  })
+}
+
+/** Super-admin: POST /admin/rentals/:id/charge-theft-fee (one-time replacement fee) */
+export function useChargeTheftFee() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async ({
+      rentalId,
+      alsoCancel,
+    }: {
+      rentalId: string
+      alsoCancel?: boolean
+    }) => {
+      const { data } = await api.post<ChargeLateFeeResponse>(
+        `/admin/rentals/${rentalId}/charge-theft-fee`,
         { alsoCancel },
       )
       return data

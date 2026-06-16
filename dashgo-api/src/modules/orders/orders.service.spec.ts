@@ -186,6 +186,7 @@ describe('OrdersService', () => {
     subscriptionService = {
       isActiveSubscriber: jest.fn().mockResolvedValue(false),
       getOrCreateStripeCustomer: jest.fn().mockResolvedValue('cus_test_default'),
+      getPlanNetCents: jest.fn().mockResolvedValue(699),
     } as unknown as jest.Mocked<SubscriptionService>;
 
     twilioService = {
@@ -1250,6 +1251,33 @@ describe('OrdersService', () => {
           productId: 'prod-bebedero',
           monthlyRentCentsOverride: 699,
           stripePriceIdOverride: 'price_sub_existing',
+        }),
+        expect.anything(),
+      );
+    });
+
+    it('active subscriber, ADDITIONAL bebedero → tracks the live subscription price (not the frozen rate)', async () => {
+      // Plan now charges $12.99/mo — the additional bebedero must rent at $12.99,
+      // and the Stripe rate price is resolved for that same amount.
+      productsRepo.find.mockResolvedValue([bebedero]);
+      subscriptionService.isActiveSubscriber.mockResolvedValue(true);
+      subscriptionService.getPlanNetCents.mockResolvedValue(1299);
+      rentalsService.countBebederoRentalsForUser.mockResolvedValue(1);
+      rentalsService.ensureBebederoRatePrices.mockResolvedValue({
+        freePriceId: 'price_free_existing',
+        subscriberPriceId: 'price_sub_1299',
+      });
+      setupTx();
+
+      await service.create(fakeUser(UserRole.CLIENT), bebederoCart);
+
+      expect(rentalsService.ensureBebederoRatePrices).toHaveBeenCalledWith(1299);
+      expect(savedOrderArg?.subtotal).toBe('12.99');
+      expect(rentalsService.createForOrder).toHaveBeenCalledWith(
+        expect.objectContaining({
+          productId: 'prod-bebedero',
+          monthlyRentCentsOverride: 1299,
+          stripePriceIdOverride: 'price_sub_1299',
         }),
         expect.anything(),
       );

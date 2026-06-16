@@ -68,6 +68,7 @@ type FormState = {
   requiresQuote: boolean
   requiresMaintenance: boolean
   isMaintenanceService: boolean
+  isDefaultSubscriberBebedero: boolean
   offerLabel: string
   offerDiscountText: string
   offerStartsAt: string
@@ -76,6 +77,7 @@ type FormState = {
   pricingMode: 'single_payment' | 'rental'
   monthlyRentText: string
   lateFeeText: string
+  theftFeeText: string
   stripeProductId: string
   stripePriceId: string
   displayOrderText: string
@@ -89,6 +91,7 @@ type FormState = {
     image?: string
     monthlyRentText?: string
     lateFeeText?: string
+    theftFeeText?: string
     displayOrderText?: string
   }
 }
@@ -106,6 +109,7 @@ const emptyForm: FormState = {
   requiresQuote: true,
   requiresMaintenance: false,
   isMaintenanceService: false,
+  isDefaultSubscriberBebedero: false,
   offerLabel: '',
   offerDiscountText: '',
   offerStartsAt: '',
@@ -113,6 +117,7 @@ const emptyForm: FormState = {
   pricingMode: 'single_payment',
   monthlyRentText: '',
   lateFeeText: '',
+  theftFeeText: '',
   stripeProductId: '',
   stripePriceId: '',
   displayOrderText: '0',
@@ -212,6 +217,7 @@ function ProductForm({
       requiresQuote: editing.requiresQuote ?? true,
       requiresMaintenance: editing.requiresMaintenance ?? false,
       isMaintenanceService: editing.isMaintenanceService ?? false,
+      isDefaultSubscriberBebedero: editing.isDefaultSubscriberBebedero ?? false,
       offerLabel: editing.offerLabel ?? '',
       offerDiscountText: editing.offerDiscountPct ?? '',
       offerStartsAt: toDateInput(editing.offerStartsAt),
@@ -219,6 +225,7 @@ function ProductForm({
       pricingMode: editing.pricingMode ?? 'single_payment',
       monthlyRentText: editing.monthlyRentCents ? String(editing.monthlyRentCents / 100) : '',
       lateFeeText: editing.lateFeeCents ? String(editing.lateFeeCents / 100) : '',
+      theftFeeText: editing.theftFeeCents ? String(editing.theftFeeCents / 100) : '',
       stripeProductId: editing.stripeProductId ?? '',
       stripePriceId: editing.stripePriceId ?? '',
       displayOrderText: String(editing.displayOrder ?? 0),
@@ -305,6 +312,7 @@ function ProductForm({
       requiresQuote: state.requiresQuote,
       requiresMaintenance: state.requiresMaintenance,
       isMaintenanceService: state.isMaintenanceService,
+      isDefaultSubscriberBebedero: state.isDefaultSubscriberBebedero,
       displayOrder: displayOrder ?? 0,
       offerLabel: showOffer && state.offerLabel.trim() ? state.offerLabel.trim() : null,
       offerDiscountPct: showOffer && offerDiscount != null ? offerDiscount : null,
@@ -315,6 +323,7 @@ function ProductForm({
         ? {
             monthlyRentCents: Math.round(parseFloat(state.monthlyRentText || '0') * 100),
             lateFeeCents: Math.round(parseFloat(state.lateFeeText || '0') * 100),
+            theftFeeCents: Math.round(parseFloat(state.theftFeeText || '0') * 100),
             stripeProductId: state.stripeProductId.trim() || null,
             stripePriceId: state.stripePriceId.trim() || null,
           }
@@ -724,6 +733,28 @@ function ProductForm({
                         <FieldError message={state.errors.lateFeeText} />
                       </div>
                       <div>
+                        <Label htmlFor="theftFee">Multa por robo / reposición ($)</Label>
+                        <div className="flex items-center border border-ink/15 bg-paper">
+                          <span className="border-r border-ink/15 px-3 py-2.5 text-sm text-ink-muted">$</span>
+                          <input
+                            id="theftFee"
+                            type="number"
+                            step="0.01"
+                            min="0"
+                            value={state.theftFeeText}
+                            onChange={(e) => setState((s) => ({ ...s, theftFeeText: e.target.value }))}
+                            className="nums flex-1 bg-transparent px-3 py-2.5 text-sm text-ink outline-none"
+                            placeholder="0.00"
+                            data-testid="theft-fee-input"
+                          />
+                          <span className="px-3 py-2.5 text-[0.65rem] uppercase tracking-[0.10em] text-ink-muted">USD</span>
+                        </div>
+                        <p className="mt-1 text-[0.65rem] text-ink-muted">
+                          Cobro único si el suscriptor deja de pagar y se queda con el equipo.
+                        </p>
+                        <FieldError message={state.errors.theftFeeText} />
+                      </div>
+                      <div>
                         <Label htmlFor="stripeProductId">Stripe Product ID</Label>
                         <input
                           id="stripeProductId"
@@ -1050,6 +1081,19 @@ function ProductForm({
                     on={state.isMaintenanceService}
                     onChange={(v) =>
                       setState((s) => ({ ...s, isMaintenanceService: v }))
+                    }
+                  />
+
+                  <ToggleRow
+                    label="1 gratis incluido con la suscripción"
+                    sub={
+                      state.isDefaultSubscriberBebedero
+                        ? 'Este es EL bebedero que se entrega gratis al suscribirse. Solo un producto puede tener esta marca.'
+                        : 'Marcá esto en el bebedero que se regala con la suscripción.'
+                    }
+                    on={state.isDefaultSubscriberBebedero}
+                    onChange={(v) =>
+                      setState((s) => ({ ...s, isDefaultSubscriberBebedero: v }))
                     }
                   />
 

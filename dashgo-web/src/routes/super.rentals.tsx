@@ -4,6 +4,7 @@ import { Button, SectionHeading } from '../components/ui'
 import {
   useAdminRentals,
   useChargeLateFee,
+  useChargeTheftFee,
   useCancelRental,
   useRetryRentalSetup,
 } from '../lib/queries'
@@ -58,7 +59,13 @@ function statusBadge(status: RentalStatus): { label: string; cls: string } {
 // ── Confirmation modal ─────────────────────────────────────────────────────────
 
 type ModalAction = {
-  type: 'charge' | 'charge-cancel' | 'cancel' | 'retry'
+  type:
+    | 'charge'
+    | 'charge-cancel'
+    | 'charge-theft'
+    | 'charge-theft-cancel'
+    | 'cancel'
+    | 'retry'
   rentalId: string
   label: string
 }
@@ -130,6 +137,11 @@ function RentalRow({
   const canChargeCancel =
     (['past_due', 'unpaid'] as RentalStatus[]).includes(rental.status) &&
     rental.lateFeeCents > 0
+  // Theft fee: one-time, only while the contract is still open and not yet charged.
+  const canChargeTheft =
+    (['active', 'past_due', 'unpaid'] as RentalStatus[]).includes(rental.status) &&
+    rental.theftFeeCents > 0 &&
+    !rental.theftFeeChargedAt
   const canCancel = (['active', 'past_due', 'unpaid', 'pending_setup'] as RentalStatus[]).includes(
     rental.status,
   )
@@ -209,6 +221,21 @@ function RentalRow({
             Cobrar y cancelar
           </Button>
         ) : null}
+        {canChargeTheft ? (
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() =>
+              onAction({
+                type: 'charge-theft-cancel',
+                rentalId: rental.id,
+                label: `Cobrar multa por robo de ${formatCents(rental.theftFeeCents)} y cancelar alquiler de ${rental.userName}`,
+              })
+            }
+          >
+            Cobrar robo
+          </Button>
+        ) : null}
         {canRetry ? (
           <Button
             size="sm"
@@ -254,11 +281,15 @@ function SuperRentalsPage() {
 
   const { data: rentals, isPending } = useAdminRentals(filters)
   const chargeMutation = useChargeLateFee()
+  const theftMutation = useChargeTheftFee()
   const cancelMutation = useCancelRental()
   const retryMutation = useRetryRentalSetup()
 
   const isMutating =
-    chargeMutation.isPending || cancelMutation.isPending || retryMutation.isPending
+    chargeMutation.isPending ||
+    theftMutation.isPending ||
+    cancelMutation.isPending ||
+    retryMutation.isPending
 
   // Summary computed from the already-fetched rentals — no extra request.
   const summary = useMemo(() => {
@@ -295,6 +326,10 @@ function SuperRentalsPage() {
         await chargeMutation.mutateAsync({ rentalId: pendingAction.rentalId, alsoCancel: false })
       } else if (pendingAction.type === 'charge-cancel') {
         await chargeMutation.mutateAsync({ rentalId: pendingAction.rentalId, alsoCancel: true })
+      } else if (pendingAction.type === 'charge-theft') {
+        await theftMutation.mutateAsync({ rentalId: pendingAction.rentalId, alsoCancel: false })
+      } else if (pendingAction.type === 'charge-theft-cancel') {
+        await theftMutation.mutateAsync({ rentalId: pendingAction.rentalId, alsoCancel: true })
       } else if (pendingAction.type === 'cancel') {
         await cancelMutation.mutateAsync(pendingAction.rentalId)
       } else if (pendingAction.type === 'retry') {

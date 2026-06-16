@@ -124,6 +124,8 @@ function fakeRental(overrides: Partial<Rental> = {}): Rental {
     status: RentalStatus.PENDING_SETUP,
     monthlyRentCents: 2000,
     lateFeeCents: 500,
+    theftFeeCents: 0,
+    theftFeeChargedAt: null,
     currentPeriodStart: null,
     currentPeriodEnd: null,
     activatedAt: null,
@@ -158,6 +160,7 @@ function fakeProduct(overrides: Partial<Product> = {}): Product {
     pricingMode: 'rental' as any,
     monthlyRentCents: 2000,
     lateFeeCents: 500,
+    theftFeeCents: 0,
     stripePriceId: 'price_abc',
     stripeProductId: 'prod_abc',
     priceToPublic: '100.00',
@@ -487,15 +490,19 @@ describe('RentalsService', () => {
   // ─────────────────────────────────────────────────────────────────────────
 
   describe('ensureBebederoRatePrices', () => {
-    it('reuses existing Stripe prices found by lookup_key (no creation)', async () => {
+    it('reuses the existing subscriber price when its amount matches the requested plan price', async () => {
       mockStripeInstance.prices.list.mockResolvedValueOnce({
         data: [
-          { id: 'price_free_existing', lookup_key: 'bebedero_free_monthly' },
-          { id: 'price_sub_existing', lookup_key: 'bebedero_subscriber_monthly' },
+          { id: 'price_free_existing', lookup_key: 'bebedero_free_monthly', unit_amount: 0 },
+          {
+            id: 'price_sub_existing',
+            lookup_key: 'bebedero_subscriber_monthly',
+            unit_amount: 699,
+          },
         ],
       });
 
-      const result = await service.ensureBebederoRatePrices();
+      const result = await service.ensureBebederoRatePrices(699);
 
       expect(result).toEqual({
         freePriceId: 'price_free_existing',
@@ -505,20 +512,57 @@ describe('RentalsService', () => {
       expect(mockStripeInstance.products.create).not.toHaveBeenCalled();
     });
 
-    it('creates the $0 and $6.99 recurring prices (with lookup_keys) when missing', async () => {
+    it('regenerates the subscriber price when the subscription price changed, transferring the lookup_key and archiving the stale price', async () => {
+      // Existing subscriber price is $6.99 but the plan now charges $12.99.
+      mockStripeInstance.prices.list.mockResolvedValueOnce({
+        data: [
+          { id: 'price_free_existing', lookup_key: 'bebedero_free_monthly', unit_amount: 0 },
+          {
+            id: 'price_sub_stale',
+            lookup_key: 'bebedero_subscriber_monthly',
+            unit_amount: 699,
+          },
+        ],
+      });
+      mockStripeInstance.products.create.mockResolvedValueOnce({ id: 'prod_rate' });
+      mockStripeInstance.prices.create.mockResolvedValueOnce({ id: 'price_sub_1299' });
+
+      const result = await service.ensureBebederoRatePrices(1299);
+
+      expect(result).toEqual({
+        freePriceId: 'price_free_existing',
+        subscriberPriceId: 'price_sub_1299',
+      });
+      // New price created at the live plan amount, moving the lookup_key onto it.
+      expect(mockStripeInstance.prices.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          unit_amount: 1299,
+          currency: 'usd',
+          recurring: { interval: 'month' },
+          lookup_key: 'bebedero_subscriber_monthly',
+          transfer_lookup_key: true,
+        }),
+        expect.any(Object),
+      );
+      // Stale price archived (deactivated) so it can no longer be billed.
+      expect(mockStripeInstance.prices.update).toHaveBeenCalledWith('price_sub_stale', {
+        active: false,
+      });
+    });
+
+    it('creates the $0 free price and the subscriber price at the requested amount when both are missing', async () => {
       mockStripeInstance.prices.list.mockResolvedValueOnce({ data: [] });
       mockStripeInstance.products.create.mockResolvedValueOnce({ id: 'prod_rate' });
       mockStripeInstance.prices.create
         .mockResolvedValueOnce({ id: 'price_free_new' })
         .mockResolvedValueOnce({ id: 'price_sub_new' });
 
-      const result = await service.ensureBebederoRatePrices();
+      const result = await service.ensureBebederoRatePrices(1299);
 
       expect(result).toEqual({
         freePriceId: 'price_free_new',
         subscriberPriceId: 'price_sub_new',
       });
-      // $0/mo recurring with the free lookup_key
       expect(mockStripeInstance.prices.create).toHaveBeenCalledWith(
         expect.objectContaining({
           unit_amount: 0,
@@ -528,10 +572,9 @@ describe('RentalsService', () => {
         }),
         expect.any(Object),
       );
-      // $6.99/mo recurring with the subscriber lookup_key
       expect(mockStripeInstance.prices.create).toHaveBeenCalledWith(
         expect.objectContaining({
-          unit_amount: 699,
+          unit_amount: 1299,
           currency: 'usd',
           recurring: { interval: 'month' },
           lookup_key: 'bebedero_subscriber_monthly',
@@ -540,18 +583,27 @@ describe('RentalsService', () => {
       );
     });
 
-    it('caches the resolved prices — a second call does not hit Stripe again', async () => {
-      mockStripeInstance.prices.list.mockResolvedValueOnce({
+    it('caches per amount — a second call at the same amount does not hit Stripe; a different amount re-resolves', async () => {
+      mockStripeInstance.prices.list.mockResolvedValue({
         data: [
-          { id: 'price_free_existing', lookup_key: 'bebedero_free_monthly' },
-          { id: 'price_sub_existing', lookup_key: 'bebedero_subscriber_monthly' },
+          { id: 'price_free_existing', lookup_key: 'bebedero_free_monthly', unit_amount: 0 },
+          {
+            id: 'price_sub_existing',
+            lookup_key: 'bebedero_subscriber_monthly',
+            unit_amount: 699,
+          },
         ],
       });
 
-      await service.ensureBebederoRatePrices();
-      await service.ensureBebederoRatePrices();
-
+      await service.ensureBebederoRatePrices(699);
+      await service.ensureBebederoRatePrices(699);
       expect(mockStripeInstance.prices.list).toHaveBeenCalledTimes(1);
+
+      // A different plan amount must bypass the cache and re-resolve.
+      mockStripeInstance.products.create.mockResolvedValueOnce({ id: 'prod_rate' });
+      mockStripeInstance.prices.create.mockResolvedValueOnce({ id: 'price_sub_999' });
+      await service.ensureBebederoRatePrices(999);
+      expect(mockStripeInstance.prices.list).toHaveBeenCalledTimes(2);
     });
   });
 
@@ -936,6 +988,127 @@ describe('RentalsService', () => {
       mockStripeInstance.paymentIntents.create.mockRejectedValueOnce(new Error('card_declined'));
 
       await expect(service.chargeLateFee('rental-4', false)).rejects.toMatchObject({ status: 502 });
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // chargeTheftFee — one-time replacement/theft penalty (off-session)
+  //
+  // Mirrors chargeLateFee but: charges rental.theftFeeCents, metadata kind
+  // 'rental_theft_fee', and is GUARDED to charge at most once (theftFeeChargedAt).
+  // ─────────────────────────────────────────────────────────────────────────
+
+  describe('chargeTheftFee', () => {
+    it('alsoCancel=false — charges theftFeeCents off-session, stamps theftFeeChargedAt, returns response', async () => {
+      const rental = fakeRental({
+        id: 'rental-t1',
+        userId: 'user-1',
+        theftFeeCents: 8000,
+        theftFeeChargedAt: null,
+        status: RentalStatus.PAST_DUE,
+        stripeSubscriptionId: 'sub_abc',
+      });
+      const user = fakeUser({ id: 'user-1', stripeCustomerId: 'cus_abc' });
+
+      rentalRepo.findOne.mockResolvedValueOnce(rental);
+      userRepo.findOne.mockResolvedValueOnce(user);
+      mockStripeInstance.paymentIntents.create.mockResolvedValueOnce({
+        id: 'pi_theft_123',
+        status: 'succeeded',
+        amount: 8000,
+      });
+
+      const result = await service.chargeTheftFee('rental-t1', false);
+
+      expect(mockStripeInstance.paymentIntents.create).toHaveBeenCalledTimes(1);
+      const piCall = mockStripeInstance.paymentIntents.create.mock.calls[0][0] as Record<string, unknown>;
+      expect(piCall['customer']).toBe('cus_abc');
+      expect(piCall['amount']).toBe(8000);
+      expect(piCall['off_session']).toBe(true);
+      expect(piCall['confirm']).toBe(true);
+      const metadata = piCall['metadata'] as Record<string, string>;
+      expect(metadata['kind']).toBe('rental_theft_fee');
+      expect(metadata['rentalId']).toBe('rental-t1');
+
+      // Idempotency key is stable per rental (one-time charge).
+      const piOpts = mockStripeInstance.paymentIntents.create.mock.calls[0][1] as Record<string, unknown>;
+      expect(piOpts?.['idempotencyKey']).toBe('theft-fee-rental-t1');
+
+      expect(result.chargedCents).toBe(8000);
+      expect(result.paymentIntentId).toBe('pi_theft_123');
+      expect(result.subscriptionCanceled).toBe(false);
+      expect(mockStripeInstance.subscriptions.cancel).not.toHaveBeenCalled();
+
+      // theftFeeChargedAt stamped on success
+      expect(rentalRepo.save).toHaveBeenCalledTimes(1);
+      const savedArg = rentalRepo.save.mock.calls[0][0] as Partial<Rental>;
+      expect(savedArg.theftFeeChargedAt).toBeInstanceOf(Date);
+    });
+
+    it('alsoCancel=true — charges then cancels the rental', async () => {
+      const rental = fakeRental({
+        id: 'rental-t2',
+        userId: 'user-1',
+        theftFeeCents: 8000,
+        status: RentalStatus.UNPAID,
+        stripeSubscriptionId: 'sub_xyz',
+      });
+      const user = fakeUser({ id: 'user-1', stripeCustomerId: 'cus_abc' });
+
+      // chargeTheftFee loads the rental once; cancelAdmin loads it again with relations.
+      rentalRepo.findOne
+        .mockResolvedValueOnce(rental)
+        .mockResolvedValueOnce({
+          ...rental,
+          user: { fullName: 'Test User', phone: '+1' } as User,
+          product: { name: 'Dispenser' } as Product,
+        });
+      userRepo.findOne.mockResolvedValueOnce(user);
+      mockStripeInstance.paymentIntents.create.mockResolvedValueOnce({
+        id: 'pi_theft_456',
+        status: 'succeeded',
+        amount: 8000,
+      });
+      mockStripeInstance.subscriptions.cancel.mockResolvedValueOnce({ id: 'sub_xyz', status: 'canceled' });
+      rentalRepo.save
+        .mockResolvedValueOnce({ ...rental, theftFeeChargedAt: new Date() })
+        .mockResolvedValueOnce({ ...rental, status: RentalStatus.CANCELED, canceledAt: new Date() });
+
+      const result = await service.chargeTheftFee('rental-t2', true);
+
+      expect(result.subscriptionCanceled).toBe(true);
+      expect(mockStripeInstance.subscriptions.cancel).toHaveBeenCalledTimes(1);
+    });
+
+    it('theftFeeCents=0 → 503 THEFT_FEE_NOT_CONFIGURED, no Stripe call', async () => {
+      const rental = fakeRental({ id: 'rental-t3', theftFeeCents: 0 });
+      rentalRepo.findOne.mockResolvedValueOnce(rental);
+
+      await expect(service.chargeTheftFee('rental-t3', false)).rejects.toMatchObject({ status: 503 });
+      expect(mockStripeInstance.paymentIntents.create).not.toHaveBeenCalled();
+    });
+
+    it('already charged (theftFeeChargedAt set) → 409, never double-charges', async () => {
+      const rental = fakeRental({
+        id: 'rental-t4',
+        theftFeeCents: 8000,
+        theftFeeChargedAt: new Date('2026-01-01T00:00:00Z'),
+      });
+      rentalRepo.findOne.mockResolvedValueOnce(rental);
+
+      await expect(service.chargeTheftFee('rental-t4', false)).rejects.toMatchObject({ status: 409 });
+      expect(mockStripeInstance.paymentIntents.create).not.toHaveBeenCalled();
+    });
+
+    it('Stripe failure → 502 STRIPE_PAYMENT_FAILED, theftFeeChargedAt NOT stamped', async () => {
+      const rental = fakeRental({ id: 'rental-t5', userId: 'user-1', theftFeeCents: 8000 });
+      const user = fakeUser({ id: 'user-1', stripeCustomerId: 'cus_abc' });
+      rentalRepo.findOne.mockResolvedValueOnce(rental);
+      userRepo.findOne.mockResolvedValueOnce(user);
+      mockStripeInstance.paymentIntents.create.mockRejectedValueOnce(new Error('card_declined'));
+
+      await expect(service.chargeTheftFee('rental-t5', false)).rejects.toMatchObject({ status: 502 });
+      expect(rentalRepo.save).not.toHaveBeenCalled();
     });
   });
 
