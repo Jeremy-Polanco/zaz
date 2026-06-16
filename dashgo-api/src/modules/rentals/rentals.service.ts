@@ -42,8 +42,8 @@ const BLOCKING_STATUSES = [
 /** Default page size for listAdmin. */
 const DEFAULT_PAGE_SIZE = 25;
 
-/** Bebedero maintenance interval — maintenance is due every 30 days. */
-const MAINTENANCE_INTERVAL_DAYS = 30;
+/** Bebedero maintenance interval — maintenance is due every 90 days. */
+const MAINTENANCE_INTERVAL_DAYS = 90;
 const MAINTENANCE_INTERVAL_MS = MAINTENANCE_INTERVAL_DAYS * 24 * 60 * 60 * 1000;
 
 export interface CreateForOrderParams {
@@ -347,7 +347,7 @@ export class RentalsService implements OnModuleInit {
     // Start the bebedero maintenance countdown for products that require it,
     // unless the admin has disabled this user's maintenance timer (e.g. a
     // subscriber who does not hold a physical bebedero).
-    // Day 0 = activation; the next maintenance is due 30 days out.
+    // Day 0 = activation; the next maintenance is due 90 days out.
     const product = await this.products.findOne({
       where: { id: rental.productId },
     });
@@ -362,7 +362,7 @@ export class RentalsService implements OnModuleInit {
   // resetMaintenanceForUser
   //
   // Called by OrdersService.markDelivered when a delivered order contained a
-  // maintenance-service product. Resets the 30-day maintenance countdown on
+  // maintenance-service product. Resets the 90-day maintenance countdown on
   // every ACTIVE rental of this user that tracks maintenance (next_maintenance_at
   // is non-null). Returns the number of rentals reset.
   // ─────────────────────────────────────────────────────────────────────────

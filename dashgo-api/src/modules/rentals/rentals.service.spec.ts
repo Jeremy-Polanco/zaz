@@ -386,7 +386,7 @@ describe('RentalsService', () => {
       return () => saved;
     }
 
-    it('starts the 30-day timer on a bebedero when the user has NOT disabled it', async () => {
+    it('starts the 90-day timer on a bebedero when the user has NOT disabled it', async () => {
       const getSaved = activationSetup(
         fakeUser({ id: 'u1', stripeCustomerId: 'cus_1', maintenanceTimerDisabled: false }),
         fakeProduct({ id: 'prod-beb', requiresMaintenance: true } as Partial<Product>),
@@ -394,7 +394,11 @@ describe('RentalsService', () => {
 
       await service.activateForOrder('rental-mt');
 
-      expect(getSaved()?.nextMaintenanceAt).toBeInstanceOf(Date);
+      const next = getSaved()?.nextMaintenanceAt;
+      expect(next).toBeInstanceOf(Date);
+      // ~90 days out from activation (maintenance is due quarterly).
+      const expected = Date.now() + 90 * 24 * 60 * 60 * 1000;
+      expect(Math.abs((next as Date).getTime() - expected)).toBeLessThan(5000);
     });
 
     it('does NOT start the timer when the user has it disabled', async () => {

@@ -164,7 +164,7 @@ export class Product {
    * Bebedero maintenance flags.
    *
    * `requiresMaintenance = true` marks a rentable dispenser (bebedero) that
-   * needs periodic (30-day) maintenance. When such a rental is activated, the
+   * needs periodic (90-day) maintenance. When such a rental is activated, the
    * rental's next_maintenance_at countdown is started.
    *
    * `isMaintenanceService = true` marks THE dedicated "Mantenimiento Bebedero"

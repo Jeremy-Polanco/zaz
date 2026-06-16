@@ -61,11 +61,11 @@ export function MaintenanceBanner() {
 
   if (!overdue) {
     return (
-      <View className="mt-6 border-l-4 border-ink bg-paper-deep/40 p-4">
-        <Text className="font-sans-semibold text-[16px] text-ink">
+      <View className="mt-6 border-l-4 border-ink bg-paper-deep/40 p-6">
+        <Text className="font-sans-semibold text-[24px] text-ink">
           Mantenimiento del bebedero
         </Text>
-        <Text className="mt-2 font-sans text-[13px] text-ink-soft">
+        <Text className="mt-2 font-sans text-[17px] text-ink-soft">
           Próximo mantenimiento en {daysLeft} {daysLeft === 1 ? 'día' : 'días'}.
         </Text>
       </View>
@@ -82,11 +82,11 @@ export function MaintenanceBanner() {
     )?.response?.data?.message ?? 'No pudimos crear la orden. Intentá de nuevo.'
 
   return (
-    <View className="mt-6 border-l-4 border-bad bg-bad/10 p-4">
-      <Text className="font-sans-semibold text-[18px] text-ink">
+    <View className="mt-6 border-l-4 border-bad bg-bad/10 p-6">
+      <Text className="font-sans-semibold text-[24px] text-ink">
         Mantenimiento del bebedero vencido
       </Text>
-      <Text className="mt-2 font-sans text-[13px] text-ink-soft">
+      <Text className="mt-2 font-sans text-[17px] text-ink-soft">
         {overdueDays === 0
           ? 'El mantenimiento vence hoy. '
           : `Venció hace ${overdueDays} ${overdueDays === 1 ? 'día' : 'días'}. `}

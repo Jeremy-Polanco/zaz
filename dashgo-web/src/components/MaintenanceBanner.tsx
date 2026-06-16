@@ -64,13 +64,13 @@ export function MaintenanceBanner() {
     )?.response?.data?.message ?? 'No pudimos crear la orden. Intentá de nuevo.'
 
   return (
-    <div className="mx-auto max-w-7xl px-6 pt-6">
+    <div className="w-full px-6 pt-6">
       {overdue ? (
-        <div className="border-l-4 border-bad bg-bad/5 p-5">
-          <p className="display text-xl font-semibold text-ink">
+        <div className="border-l-4 border-bad bg-bad/5 p-8">
+          <p className="display text-3xl font-semibold text-ink">
             Mantenimiento del bebedero vencido
           </p>
-          <p className="mt-2 text-sm text-ink-soft">
+          <p className="mt-2 text-lg text-ink-soft">
             {daysLeft === 0
               ? 'El mantenimiento vence hoy.'
               : `Venció hace ${Math.abs(daysLeft)} ${
@@ -100,11 +100,11 @@ export function MaintenanceBanner() {
           )}
         </div>
       ) : (
-        <div className="border-l-4 border-ink bg-paper-deep/40 p-5">
-          <p className="text-base font-semibold text-ink">
+        <div className="border-l-4 border-ink bg-paper-deep/40 p-8">
+          <p className="display text-3xl font-semibold text-ink">
             Mantenimiento del bebedero
           </p>
-          <p className="mt-1 text-sm text-ink-soft">
+          <p className="mt-2 text-lg text-ink-soft">
             Próximo mantenimiento en {daysLeft} {daysLeft === 1 ? 'día' : 'días'}.
           </p>
         </div>
