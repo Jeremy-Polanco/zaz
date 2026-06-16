@@ -33,6 +33,7 @@ export interface MockStripe {
     retrieve: jest.Mock;
     create: jest.Mock;
     update: jest.Mock;
+    list: jest.Mock;
   };
   products: {
     create: jest.Mock;
@@ -88,6 +89,7 @@ export function createMockStripe(): MockStripe {
         recurring: { interval: 'month' },
       }),
       update: jest.fn().mockResolvedValue({}),
+      list: jest.fn().mockResolvedValue({ data: [] }),
     },
     products: {
       create: jest.fn().mockResolvedValue({ id: 'prod_test_default' }),
@@ -178,6 +180,7 @@ export function resetMockStripe(mock: MockStripe): void {
   mock.prices.retrieve.mockReset().mockImplementation(fresh.prices.retrieve);
   mock.prices.create.mockReset().mockImplementation(fresh.prices.create);
   mock.prices.update.mockReset().mockImplementation(fresh.prices.update);
+  mock.prices.list.mockReset().mockImplementation(fresh.prices.list);
   mock.products.create.mockReset().mockImplementation(fresh.products.create);
   mock.products.update.mockReset().mockImplementation(fresh.products.update);
   mock.subscriptions.create.mockReset().mockImplementation(fresh.subscriptions.create);

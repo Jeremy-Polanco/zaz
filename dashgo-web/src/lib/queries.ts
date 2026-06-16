@@ -1007,6 +1007,24 @@ export function useDeleteAddress() {
   })
 }
 
+/**
+ * PATCH /me/addresses/:id/set-active — set the caller's active operating
+ * location. For a repartidor (SUPER_ADMIN_DELIVERY) with multiple locations,
+ * the active one becomes the shipping origin. Also invalidates the auth/me
+ * query so `activeLocationId` in the current-user cache refreshes.
+ */
+export function useSetActiveLocation() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (id: string) =>
+      (await api.patch<UserAddress>(`/me/addresses/${id}/set-active`)).data,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: MY_ADDRESSES_KEY })
+      qc.invalidateQueries({ queryKey: ['auth', 'me'] })
+    },
+  })
+}
+
 // ── My rentals (customer) ────────────────────────────────────────────────────
 
 /** GET /me/rentals — the caller's own rentals. */

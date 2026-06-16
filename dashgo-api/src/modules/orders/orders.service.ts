@@ -24,7 +24,7 @@ import { CreditService } from '../credit/credit.service';
 import { SubscriptionService } from '../subscription/subscription.service';
 import { TwilioService } from '../twilio/twilio.service';
 import { RentalsService } from '../rentals/rentals.service';
-import { getEffectivePrice } from '../products/pricing';
+import { getEffectivePrice, resolveBebederoRentCents } from '../products/pricing';
 
 const ALLOWED_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
   [OrderStatus.PENDING_QUOTE]: [OrderStatus.QUOTED, OrderStatus.CANCELLED],
@@ -184,17 +184,56 @@ export class OrdersService {
         (input) => byId.get(input.productId)?.requiresQuote === false,
       );
 
-    // Subscriber benefit: active subscribers get bebedero maintenance for free.
-    // When the cart contains the maintenance-service product, the maintenance
-    // line is zeroed below regardless of its list price — the same benefit shape
-    // as free shipping (applied in setQuote()). Only resolve subscription status
-    // when there's actually a maintenance item, to avoid an extra query.
+    // Subscriber benefits depend on subscription status. Two benefits ride on
+    // it: (1) free bebedero maintenance, and (2) subscriber bebedero pricing —
+    // the first bebedero rents free ($0/mo), each additional at $6.99/mo. A
+    // bebedero is a rental product with requiresMaintenance=true. Resolve the
+    // (single) subscription query only when the cart actually contains a
+    // maintenance item OR a bebedero, to avoid an extra query otherwise.
+    const isBebedero = (p: Product | undefined): boolean =>
+      p?.pricingMode === 'rental' && p?.requiresMaintenance === true;
+
     const hasMaintenanceItem = dto.items.some(
       (input) => byId.get(input.productId)?.isMaintenanceService === true,
     );
-    const isSubscriber = hasMaintenanceItem
-      ? await this.subscriptionService.isActiveSubscriber(user.id)
-      : false;
+    const hasBebederoItem = dto.items.some((input) =>
+      isBebedero(byId.get(input.productId)),
+    );
+    const isSubscriber =
+      hasMaintenanceItem || hasBebederoItem
+        ? await this.subscriptionService.isActiveSubscriber(user.id)
+        : false;
+
+    // Resolve the per-bebedero subscriber rate (rent cents + which recurring
+    // Stripe price to snapshot). Keyed by productId. The ordinal across the
+    // user's lifetime decides free vs $6.99: prior count + position in this
+    // cart. Only for active subscribers; non-subscribers pay catalog rent.
+    const bebederoRateByProductId = new Map<
+      string,
+      { monthlyRentCents: number; stripePriceId: string }
+    >();
+    if (isSubscriber && hasBebederoItem) {
+      const priorCount = await this.rentalsService.countBebederoRentalsForUser(
+        user.id,
+      );
+      const ratePrices = await this.rentalsService.ensureBebederoRatePrices();
+      let ordinal = priorCount;
+      for (const input of dto.items) {
+        const product = byId.get(input.productId)!;
+        if (!isBebedero(product)) continue;
+        const rent = resolveBebederoRentCents(product, true, ordinal);
+        if (rent.tier !== 'catalog') {
+          bebederoRateByProductId.set(product.id, {
+            monthlyRentCents: rent.monthlyRentCents,
+            stripePriceId:
+              rent.tier === 'free'
+                ? ratePrices.freePriceId
+                : ratePrices.subscriberPriceId,
+          });
+        }
+        ordinal += 1;
+      }
+    }
 
     const now = new Date();
     let subtotalCents = 0;
@@ -204,9 +243,13 @@ export class OrdersService {
       let priceAtOrder: string;
 
       if (product.pricingMode === 'rental') {
-        // T58: For rental items, use monthlyRentCents (first month's payment)
-        lineCents = product.monthlyRentCents * input.quantity;
-        priceAtOrder = (product.monthlyRentCents / 100).toFixed(2);
+        // T58: For rental items, the first month's rent is charged in the order.
+        // Subscriber bebedero rate overrides catalog rent when it applies.
+        const rentCents =
+          bebederoRateByProductId.get(product.id)?.monthlyRentCents ??
+          product.monthlyRentCents;
+        lineCents = rentCents * input.quantity;
+        priceAtOrder = (rentCents / 100).toFixed(2);
       } else if (product.isMaintenanceService && isSubscriber) {
         // Free bebedero maintenance for active subscribers.
         lineCents = 0;
@@ -314,12 +357,15 @@ export class OrdersService {
       for (const input of dto.items) {
         const product = byId.get(input.productId)!;
         if (product.pricingMode === 'rental') {
+          const rate = bebederoRateByProductId.get(product.id);
           await this.rentalsService.createForOrder(
             {
               userId: user.id,
               productId: product.id,
               orderId: persisted.id,
               product,
+              monthlyRentCentsOverride: rate?.monthlyRentCents,
+              stripePriceIdOverride: rate?.stripePriceId,
             },
             tx,
           );

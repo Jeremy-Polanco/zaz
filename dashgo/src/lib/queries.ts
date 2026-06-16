@@ -1004,6 +1004,26 @@ export function useSetDefaultAddress() {
   })
 }
 
+/**
+ * PATCH /me/addresses/:id/set-active — set the caller's active operating
+ * location. For a repartidor (SUPER_ADMIN_DELIVERY) with multiple locations,
+ * the active one becomes the shipping origin. Also invalidates ['auth','me']
+ * so `activeLocationId` on the current-user cache refreshes.
+ */
+export function useSetActiveLocation() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const { data } = await api.patch<UserAddress>(`/me/addresses/${id}/set-active`)
+      return data
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['me', 'addresses'] })
+      qc.invalidateQueries({ queryKey: ['auth', 'me'] })
+    },
+  })
+}
+
 // ── Rentals ───────────────────────────────────────────────────────────────────
 
 /** Client: GET /me/rentals — list the authenticated user's rentals */

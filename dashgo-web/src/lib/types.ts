@@ -32,6 +32,8 @@ export interface AuthUser {
   phone: string | null
   role: UserRole
   addressDefault: GeoAddress | null
+  /** Active operating location (UserAddress id). Drives the repartidor's shipping origin. */
+  activeLocationId: string | null
   referralCode: string | null
   creditLocked: boolean
 }

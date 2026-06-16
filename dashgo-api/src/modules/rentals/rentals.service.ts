@@ -15,12 +15,21 @@ import Stripe = require('stripe');
 import { Rental, RentalStatus } from '../../entities/rental.entity';
 import { User } from '../../entities/user.entity';
 import { Product } from '../../entities/product.entity';
+import { SUBSCRIBER_BEBEDERO_RENT_CENTS } from '../products/pricing';
 import { CustomerRentalResponseDto } from './dto/customer-rental-response.dto';
 import { AdminRentalResponseDto } from './dto/admin-rental-response.dto';
 import { ChargeLateFeeResponseDto } from './dto/charge-late-fee-response.dto';
 import { assertStripeProductionConfig } from '../../common/stripe/stripe-runtime-guard';
 
 type StripeClient = InstanceType<typeof Stripe>;
+
+/**
+ * Stripe price lookup_keys for the subscriber bebedero rates. These let us
+ * find (and idempotently create) the two flat recurring prices without storing
+ * their IDs in our own DB — Stripe is the source of truth via the lookup_key.
+ */
+const BEBEDERO_FREE_LOOKUP_KEY = 'bebedero_free_monthly';
+const BEBEDERO_SUBSCRIBER_LOOKUP_KEY = 'bebedero_subscriber_monthly';
 
 /** Statuses that indicate an active rental contract (no new duplicate allowed). */
 const BLOCKING_STATUSES = [
@@ -42,6 +51,15 @@ export interface CreateForOrderParams {
   productId: string;
   orderId: string;
   product: Product;
+  /**
+   * Subscriber bebedero benefit overrides. When present, the Rental snapshots
+   * these INSTEAD of the product's catalog values, so both the order's
+   * first-month charge and the recurring Stripe subscription bill the
+   * subscriber rate ($0 for the first bebedero, $6.99 for additional ones).
+   * Resolved by OrdersService at order time. Omit for catalog pricing.
+   */
+  monthlyRentCentsOverride?: number;
+  stripePriceIdOverride?: string;
 }
 
 export interface ListAdminFilters {
@@ -56,6 +74,12 @@ export interface ListAdminFilters {
 export class RentalsService implements OnModuleInit {
   private readonly logger = new Logger(RentalsService.name);
   private stripe: StripeClient | null = null;
+
+  /** In-memory cache of the resolved subscriber bebedero price IDs. */
+  private bebederoRatePrices: {
+    freePriceId: string;
+    subscriberPriceId: string;
+  } | null = null;
 
   constructor(
     @InjectRepository(Rental)
@@ -157,13 +181,15 @@ export class RentalsService implements OnModuleInit {
       });
     }
 
-    // Snapshot pricing from product at time of creation
+    // Snapshot pricing at creation time. Subscriber bebedero overrides win over
+    // catalog values when present (first bebedero free / additional at $6.99).
     const rentalData: Partial<Rental> = {
       userId,
       productId,
       orderId,
-      stripePriceId: product.stripePriceId,
-      monthlyRentCents: product.monthlyRentCents,
+      stripePriceId: params.stripePriceIdOverride ?? product.stripePriceId,
+      monthlyRentCents:
+        params.monthlyRentCentsOverride ?? product.monthlyRentCents,
       lateFeeCents: product.lateFeeCents,
       status: RentalStatus.PENDING_SETUP,
     };
@@ -305,12 +331,14 @@ export class RentalsService implements OnModuleInit {
       : null;
     rental.currentPeriodEnd = periodEnd ? new Date(periodEnd * 1000) : null;
 
-    // Start the bebedero maintenance countdown for products that require it.
+    // Start the bebedero maintenance countdown for products that require it,
+    // unless the admin has disabled this user's maintenance timer (e.g. a
+    // subscriber who does not hold a physical bebedero).
     // Day 0 = activation; the next maintenance is due 30 days out.
     const product = await this.products.findOne({
       where: { id: rental.productId },
     });
-    if (product?.requiresMaintenance) {
+    if (product?.requiresMaintenance && !user.maintenanceTimerDisabled) {
       rental.nextMaintenanceAt = new Date(Date.now() + MAINTENANCE_INTERVAL_MS);
     }
 
@@ -327,6 +355,15 @@ export class RentalsService implements OnModuleInit {
   // ─────────────────────────────────────────────────────────────────────────
 
   async resetMaintenanceForUser(userId: string): Promise<number> {
+    // Respect the per-user disable switch — no maintenance scheduling at all.
+    const user = await this.users.findOne({ where: { id: userId } });
+    if (user?.maintenanceTimerDisabled) {
+      this.logger.log(
+        `resetMaintenanceForUser: user ${userId} has maintenance timer disabled — skipping`,
+      );
+      return 0;
+    }
+
     const active = await this.rentals.find({
       where: { userId, status: RentalStatus.ACTIVE },
     });
@@ -364,6 +401,106 @@ export class RentalsService implements OnModuleInit {
     return this.rentals.findOne({
       where: { userId, productId, status: In(BLOCKING_STATUSES) },
     });
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // countBebederoRentalsForUser
+  //
+  // Lifetime count of bebedero (water dispenser) rentals a user has ever held,
+  // in ANY status (active, canceled, etc.). A bebedero is a rental product with
+  // requiresMaintenance=true. Drives the subscriber pricing tier: a user with
+  // 0 prior bebederos gets their first one free; additional ones rent at the
+  // flat subscriber rate. See resolveBebederoRentCents (products/pricing.ts).
+  // ─────────────────────────────────────────────────────────────────────────
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // ensureBebederoRatePrices
+  //
+  // Lazily provisions (and caches) the two flat recurring Stripe Prices used
+  // for the subscriber bebedero benefit:
+  //   - $0.00/mo  → the first bebedero (free)        lookup_key bebedero_free_monthly
+  //   - $6.99/mo  → each additional bebedero          lookup_key bebedero_subscriber_monthly
+  //
+  // Idempotent: looks the prices up by lookup_key first and only creates the
+  // missing ones (under a shared "Bebedero — Tarifa Suscriptor" Stripe Product).
+  // Stripe is the source of truth — we persist nothing in our own DB.
+  // ─────────────────────────────────────────────────────────────────────────
+
+  async ensureBebederoRatePrices(): Promise<{
+    freePriceId: string;
+    subscriberPriceId: string;
+  }> {
+    if (this.bebederoRatePrices) return this.bebederoRatePrices;
+
+    const stripe = this.requireStripe();
+
+    const existing = await stripe.prices.list({
+      lookup_keys: [BEBEDERO_FREE_LOOKUP_KEY, BEBEDERO_SUBSCRIBER_LOOKUP_KEY],
+      active: true,
+    });
+
+    const byKey = new Map<string, string>();
+    for (const p of existing.data ?? []) {
+      if (p.lookup_key) byKey.set(p.lookup_key, p.id);
+    }
+
+    let freePriceId = byKey.get(BEBEDERO_FREE_LOOKUP_KEY);
+    let subscriberPriceId = byKey.get(BEBEDERO_SUBSCRIBER_LOOKUP_KEY);
+
+    if (!freePriceId || !subscriberPriceId) {
+      const product = await stripe.products.create(
+        {
+          name: 'Bebedero — Tarifa Suscriptor',
+          metadata: { kind: 'bebedero_subscriber_rate' },
+        },
+        { idempotencyKey: 'bebedero-rate-product' },
+      );
+
+      if (!freePriceId) {
+        const price = await stripe.prices.create(
+          {
+            unit_amount: 0,
+            currency: 'usd',
+            recurring: { interval: 'month' },
+            product: product.id,
+            lookup_key: BEBEDERO_FREE_LOOKUP_KEY,
+          },
+          { idempotencyKey: 'bebedero-rate-price-free' },
+        );
+        freePriceId = price.id;
+      }
+
+      if (!subscriberPriceId) {
+        const price = await stripe.prices.create(
+          {
+            unit_amount: SUBSCRIBER_BEBEDERO_RENT_CENTS,
+            currency: 'usd',
+            recurring: { interval: 'month' },
+            product: product.id,
+            lookup_key: BEBEDERO_SUBSCRIBER_LOOKUP_KEY,
+          },
+          { idempotencyKey: 'bebedero-rate-price-subscriber' },
+        );
+        subscriberPriceId = price.id;
+      }
+    }
+
+    this.bebederoRatePrices = { freePriceId, subscriberPriceId };
+    return this.bebederoRatePrices;
+  }
+
+  async countBebederoRentalsForUser(
+    userId: string,
+    tx?: EntityManager,
+  ): Promise<number> {
+    const repo = tx ? tx.getRepository(Rental) : this.rentals;
+    return repo
+      .createQueryBuilder('rental')
+      .innerJoin('rental.product', 'product')
+      .where('rental.userId = :userId', { userId })
+      .andWhere('product.pricingMode = :mode', { mode: 'rental' })
+      .andWhere('product.requiresMaintenance = true')
+      .getCount();
   }
 
   // ─────────────────────────────────────────────────────────────────────────

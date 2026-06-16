@@ -60,7 +60,10 @@ function makeRepoMock<T>() {
     skip: jest.fn().mockReturnThis(),
     getMany: jest.fn().mockResolvedValue([]),
     getManyAndCount: jest.fn().mockResolvedValue([[], 0]),
+    getCount: jest.fn().mockResolvedValue(0),
     leftJoinAndSelect: jest.fn().mockReturnThis(),
+    innerJoin: jest.fn().mockReturnThis(),
+    leftJoin: jest.fn().mockReturnThis(),
     setLock: jest.fn().mockReturnThis(),
     getOne: jest.fn().mockResolvedValue(null),
     select: jest.fn().mockReturnThis(),
@@ -342,6 +345,72 @@ describe('RentalsService', () => {
   });
 
   // ─────────────────────────────────────────────────────────────────────────
+  // maintenance timer disable flag (per-user)
+  // ─────────────────────────────────────────────────────────────────────────
+
+  describe('maintenance timer — per-user disable flag', () => {
+    function activationSetup(user: User, product: Product) {
+      const rental = fakeRental({
+        id: 'rental-mt',
+        userId: user.id,
+        productId: product.id,
+        status: RentalStatus.PENDING_SETUP,
+        nextMaintenanceAt: null,
+      });
+      rentalRepo.findOne.mockResolvedValueOnce(rental);
+      userRepo.findOne.mockResolvedValueOnce(user);
+      productRepo.findOne.mockResolvedValueOnce(product);
+      mockStripeInstance.subscriptions.create.mockResolvedValueOnce({
+        id: 'sub_mt',
+        status: 'trialing',
+        current_period_start: Math.floor(Date.now() / 1000),
+        current_period_end: Math.floor(Date.now() / 1000) + 30 * 86400,
+        items: { data: [] },
+        metadata: {},
+      });
+      let saved: Rental | undefined;
+      (rentalRepo.save as jest.Mock).mockImplementationOnce(async (r: Rental) => {
+        saved = r;
+        return r;
+      });
+      return () => saved;
+    }
+
+    it('starts the 30-day timer on a bebedero when the user has NOT disabled it', async () => {
+      const getSaved = activationSetup(
+        fakeUser({ id: 'u1', stripeCustomerId: 'cus_1', maintenanceTimerDisabled: false }),
+        fakeProduct({ id: 'prod-beb', requiresMaintenance: true } as Partial<Product>),
+      );
+
+      await service.activateForOrder('rental-mt');
+
+      expect(getSaved()?.nextMaintenanceAt).toBeInstanceOf(Date);
+    });
+
+    it('does NOT start the timer when the user has it disabled', async () => {
+      const getSaved = activationSetup(
+        fakeUser({ id: 'u2', stripeCustomerId: 'cus_2', maintenanceTimerDisabled: true }),
+        fakeProduct({ id: 'prod-beb', requiresMaintenance: true } as Partial<Product>),
+      );
+
+      await service.activateForOrder('rental-mt');
+
+      expect(getSaved()?.nextMaintenanceAt ?? null).toBeNull();
+    });
+
+    it('resetMaintenanceForUser is a no-op when the user has the timer disabled', async () => {
+      userRepo.findOne.mockResolvedValueOnce(
+        fakeUser({ id: 'u3', maintenanceTimerDisabled: true }),
+      );
+
+      const reset = await service.resetMaintenanceForUser('u3');
+
+      expect(reset).toBe(0);
+      expect(rentalRepo.find).not.toHaveBeenCalled();
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────
   // Pair 3 (T23) — activateForOrder Stripe failure → keep pending_setup
   // ─────────────────────────────────────────────────────────────────────────
 
@@ -416,6 +485,102 @@ describe('RentalsService', () => {
   // ─────────────────────────────────────────────────────────────────────────
   // Pair 5 (T27) — listMine(userId)
   // ─────────────────────────────────────────────────────────────────────────
+
+  describe('ensureBebederoRatePrices', () => {
+    it('reuses existing Stripe prices found by lookup_key (no creation)', async () => {
+      mockStripeInstance.prices.list.mockResolvedValueOnce({
+        data: [
+          { id: 'price_free_existing', lookup_key: 'bebedero_free_monthly' },
+          { id: 'price_sub_existing', lookup_key: 'bebedero_subscriber_monthly' },
+        ],
+      });
+
+      const result = await service.ensureBebederoRatePrices();
+
+      expect(result).toEqual({
+        freePriceId: 'price_free_existing',
+        subscriberPriceId: 'price_sub_existing',
+      });
+      expect(mockStripeInstance.prices.create).not.toHaveBeenCalled();
+      expect(mockStripeInstance.products.create).not.toHaveBeenCalled();
+    });
+
+    it('creates the $0 and $6.99 recurring prices (with lookup_keys) when missing', async () => {
+      mockStripeInstance.prices.list.mockResolvedValueOnce({ data: [] });
+      mockStripeInstance.products.create.mockResolvedValueOnce({ id: 'prod_rate' });
+      mockStripeInstance.prices.create
+        .mockResolvedValueOnce({ id: 'price_free_new' })
+        .mockResolvedValueOnce({ id: 'price_sub_new' });
+
+      const result = await service.ensureBebederoRatePrices();
+
+      expect(result).toEqual({
+        freePriceId: 'price_free_new',
+        subscriberPriceId: 'price_sub_new',
+      });
+      // $0/mo recurring with the free lookup_key
+      expect(mockStripeInstance.prices.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          unit_amount: 0,
+          currency: 'usd',
+          recurring: { interval: 'month' },
+          lookup_key: 'bebedero_free_monthly',
+        }),
+        expect.any(Object),
+      );
+      // $6.99/mo recurring with the subscriber lookup_key
+      expect(mockStripeInstance.prices.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          unit_amount: 699,
+          currency: 'usd',
+          recurring: { interval: 'month' },
+          lookup_key: 'bebedero_subscriber_monthly',
+        }),
+        expect.any(Object),
+      );
+    });
+
+    it('caches the resolved prices — a second call does not hit Stripe again', async () => {
+      mockStripeInstance.prices.list.mockResolvedValueOnce({
+        data: [
+          { id: 'price_free_existing', lookup_key: 'bebedero_free_monthly' },
+          { id: 'price_sub_existing', lookup_key: 'bebedero_subscriber_monthly' },
+        ],
+      });
+
+      await service.ensureBebederoRatePrices();
+      await service.ensureBebederoRatePrices();
+
+      expect(mockStripeInstance.prices.list).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('countBebederoRentalsForUser', () => {
+    it('counts the user\'s lifetime bebedero rentals via product join (any status)', async () => {
+      (rentalRepo._qb.getCount as jest.Mock).mockResolvedValueOnce(2);
+
+      const count = await service.countBebederoRentalsForUser('user-7');
+
+      expect(count).toBe(2);
+      expect(rentalRepo.createQueryBuilder).toHaveBeenCalledWith('rental');
+      expect(rentalRepo._qb.innerJoin).toHaveBeenCalledWith(
+        'rental.product',
+        'product',
+      );
+      expect(rentalRepo._qb.where).toHaveBeenCalledWith('rental.userId = :userId', {
+        userId: 'user-7',
+      });
+      expect(rentalRepo._qb.andWhere).toHaveBeenCalledWith(
+        'product.requiresMaintenance = true',
+      );
+    });
+
+    it('returns 0 when the user has never rented a bebedero', async () => {
+      (rentalRepo._qb.getCount as jest.Mock).mockResolvedValueOnce(0);
+      const count = await service.countBebederoRentalsForUser('user-new');
+      expect(count).toBe(0);
+    });
+  });
 
   describe('listMine', () => {
     it('T27: returns only user A rentals ordered by activatedAt DESC', async () => {

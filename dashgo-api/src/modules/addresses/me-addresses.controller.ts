@@ -71,6 +71,21 @@ export class MeAddressesController {
   }
 
   /**
+   * PATCH /me/addresses/:id/set-active
+   * Sets this address as the user's active operating location. For a repartidor
+   * with multiple locations, the active one becomes the shipping origin.
+   * Like set-default, MUST be declared BEFORE PATCH ':id'.
+   * Returns 200 with the now-active address.
+   */
+  @Patch(':id/set-active')
+  setActive(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.service.setActiveLocation(user.id, id);
+  }
+
+  /**
    * PATCH /me/addresses/:id
    * Updates whitelisted fields (label, line1, line2, lat, lng, instructions).
    * isDefault cannot be changed via this endpoint.

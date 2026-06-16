@@ -6,6 +6,7 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
 import { UserAddress } from '../../entities/user-address.entity';
+import { User } from '../../entities/user.entity';
 import { CreateAddressDto } from './dto/create-address.dto';
 import { UpdateAddressDto } from './dto/update-address.dto';
 
@@ -14,6 +15,8 @@ export class AddressesService {
   constructor(
     @InjectRepository(UserAddress)
     private readonly addresses: Repository<UserAddress>,
+    @InjectRepository(User)
+    private readonly users: Repository<User>,
     private readonly dataSource: DataSource,
   ) {}
 
@@ -136,6 +139,27 @@ export class AddressesService {
       target.isDefault = true;
       return repo.save(target);
     });
+  }
+
+  /**
+   * Set the user's active operating location (the address they currently
+   * dispatch from). Primary use: a repartidor with multiple locations picks
+   * which one is active — it becomes the shipping origin. Validates ownership
+   * of the address, then points users.active_location_id at it.
+   * Throws 404 if the address doesn't exist or belongs to another user.
+   * Returns the now-active address.
+   */
+  async setActiveLocation(userId: string, id: string): Promise<UserAddress> {
+    const target = await this.addresses.findOne({ where: { id } });
+    if (!target || target.userId !== userId) {
+      throw new NotFoundException({
+        statusCode: 404,
+        code: 'ADDRESS_NOT_FOUND',
+        message: 'Dirección no encontrada',
+      });
+    }
+    await this.users.update(userId, { activeLocationId: id });
+    return target;
   }
 
   /**

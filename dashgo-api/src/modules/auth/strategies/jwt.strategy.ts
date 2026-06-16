@@ -37,6 +37,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       phone: user.phone,
       role: user.role,
       addressDefault: user.addressDefault ?? null,
+      activeLocationId: user.activeLocationId ?? null,
       referralCode: user.referralCode ?? null,
       referredById: user.referredById ?? null,
       stripeCustomerId: user.stripeCustomerId ?? null,

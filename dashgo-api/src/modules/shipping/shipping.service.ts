@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { User } from '../../entities';
+import { UserAddress } from '../../entities/user-address.entity';
 import { UserRole } from '../../entities/enums';
 
 export interface ShippingQuote {
@@ -32,6 +33,8 @@ function haversineMiles(
 export class ShippingService {
   constructor(
     @InjectRepository(User) private readonly users: Repository<User>,
+    @InjectRepository(UserAddress)
+    private readonly addresses: Repository<UserAddress>,
     private readonly config: ConfigService,
   ) {}
 
@@ -46,16 +49,51 @@ export class ShippingService {
     );
   }
 
+  /**
+   * Shipping origin = the primary repartidor's currently-active location.
+   *
+   * Resolution order, most-specific first:
+   *   1) The repartidor's explicitly selected location (`active_location_id`).
+   *   2) Their default saved address (`UserAddress.isDefault`).
+   *   3) Legacy `addressDefault` JSONB (deprecated, pre-multi-location data).
+   *   4) null → caller falls back to the flat base shipping rate.
+   *
+   * "Primary" repartidor = the first SUPER_ADMIN_DELIVERY by createdAt; the
+   * delivery operation has a single dispatch origin at any given time, and the
+   * driver switches it by selecting a different active location.
+   */
   async getOrigin(): Promise<{ lat: number; lng: number } | null> {
     const superAdmin = await this.users.findOne({
       where: { role: UserRole.SUPER_ADMIN_DELIVERY },
       order: { createdAt: 'ASC' },
     });
-    const addr = superAdmin?.addressDefault;
-    if (!addr || typeof addr.lat !== 'number' || typeof addr.lng !== 'number') {
-      return null;
+    if (!superAdmin) return null;
+
+    // 1) Explicitly selected active location.
+    if (superAdmin.activeLocationId) {
+      const active = await this.addresses.findOne({
+        where: { id: superAdmin.activeLocationId, userId: superAdmin.id },
+      });
+      if (active && typeof active.lat === 'number' && typeof active.lng === 'number') {
+        return { lat: active.lat, lng: active.lng };
+      }
     }
-    return { lat: addr.lat, lng: addr.lng };
+
+    // 2) Default saved address.
+    const fallback = await this.addresses.findOne({
+      where: { userId: superAdmin.id, isDefault: true },
+    });
+    if (fallback && typeof fallback.lat === 'number' && typeof fallback.lng === 'number') {
+      return { lat: fallback.lat, lng: fallback.lng };
+    }
+
+    // 3) Legacy single-address JSONB.
+    const addr = superAdmin.addressDefault;
+    if (addr && typeof addr.lat === 'number' && typeof addr.lng === 'number') {
+      return { lat: addr.lat, lng: addr.lng };
+    }
+
+    return null;
   }
 
   async computeQuote(dest: {

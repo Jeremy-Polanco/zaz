@@ -62,6 +62,29 @@ export class User {
   @Column({ name: 'stripe_customer_id', type: 'varchar', length: 64, nullable: true, unique: true })
   stripeCustomerId!: string | null;
 
+  /**
+   * The `UserAddress` this user is currently operating from. Meaningful for
+   * `SUPER_ADMIN_DELIVERY` (repartidor): when a driver works out of multiple
+   * locations they pick the active one, which becomes the shipping origin
+   * (see `ShippingService.getOrigin`). NULL falls back to the default address.
+   * FK is `ON DELETE SET NULL` — deleting the active address clears the pointer.
+   */
+  @Column({ name: 'active_location_id', type: 'uuid', nullable: true })
+  activeLocationId!: string | null;
+
+  @ManyToOne(() => UserAddress, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'active_location_id' })
+  activeLocation!: UserAddress | null;
+
+  /**
+   * Admin switch to suppress this user's bebedero maintenance timer. When true,
+   * rental activation and maintenance resets do NOT set `next_maintenance_at`,
+   * so the user never appears as "maintenance due". Used for subscribers who do
+   * not actually hold a physical bebedero. Default false (timer active).
+   */
+  @Column({ name: 'maintenance_timer_disabled', type: 'boolean', default: false })
+  maintenanceTimerDisabled!: boolean;
+
   @CreateDateColumn({ name: 'created_at' })
   createdAt!: Date;
 

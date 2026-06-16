@@ -18,6 +18,7 @@ import type { GeoAddress, Order, OrderStatus } from '../../lib/types'
 import { Button, Eyebrow, Hairline, KpiCard } from '../../components/ui'
 import { SuscriptorBadge } from '../../components/SuscriptorBadge'
 import { QuoteBottomSheet } from '../../components/QuoteBottomSheet'
+import { LocationSelector } from '../../components/LocationSelector'
 
 function nextStatus(current: OrderStatus): OrderStatus | null {
   if (current === 'pending_validation') return 'confirmed_by_colmado'
@@ -326,6 +327,8 @@ export default function SuperOrdersScreen() {
               {stats.inRoute + stats.readyToGo} en ruta ·{' '}
               {stats.delivered} entregados.
             </Text>
+
+            <LocationSelector />
 
             <View className="mt-6 flex-row gap-2">
               <KpiCard label="Cotizar" value={stats.pendingQuote} tone="warn" />

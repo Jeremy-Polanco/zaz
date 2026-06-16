@@ -12,6 +12,7 @@ import { getRepositoryToken } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
 import { AddressesService } from './addresses.service';
 import { UserAddress } from '../../entities/user-address.entity';
+import { User } from '../../entities/user.entity';
 import { CreateAddressDto } from './dto/create-address.dto';
 import { UpdateAddressDto } from './dto/update-address.dto';
 
@@ -29,6 +30,13 @@ function makeRepoMock(): jest.Mocked<Repository<UserAddress>> {
     delete: jest.fn(),
     createQueryBuilder: jest.fn(),
   } as unknown as jest.Mocked<Repository<UserAddress>>;
+}
+
+function makeUserRepoMock(): jest.Mocked<Repository<User>> {
+  return {
+    update: jest.fn(),
+    findOne: jest.fn(),
+  } as unknown as jest.Mocked<Repository<User>>;
 }
 
 function makeDataSourceMock(
@@ -79,6 +87,7 @@ describe('AddressesService — list', () => {
       providers: [
         AddressesService,
         { provide: getRepositoryToken(UserAddress), useValue: repo },
+        { provide: getRepositoryToken(User), useValue: makeUserRepoMock() },
         { provide: DataSource, useValue: ds },
       ],
     }).compile();
@@ -124,6 +133,7 @@ describe('AddressesService — create', () => {
       providers: [
         AddressesService,
         { provide: getRepositoryToken(UserAddress), useValue: repo },
+        { provide: getRepositoryToken(User), useValue: makeUserRepoMock() },
         { provide: DataSource, useValue: ds },
       ],
     }).compile();
@@ -214,6 +224,7 @@ describe('AddressesService — update', () => {
       providers: [
         AddressesService,
         { provide: getRepositoryToken(UserAddress), useValue: repo },
+        { provide: getRepositoryToken(User), useValue: makeUserRepoMock() },
         { provide: DataSource, useValue: ds },
       ],
     }).compile();
@@ -293,6 +304,7 @@ describe('AddressesService — delete', () => {
       providers: [
         AddressesService,
         { provide: getRepositoryToken(UserAddress), useValue: repo },
+        { provide: getRepositoryToken(User), useValue: makeUserRepoMock() },
         { provide: DataSource, useValue: { transaction: dsTransactionMock } },
       ],
     }).compile();
@@ -382,6 +394,7 @@ describe('AddressesService — setDefault', () => {
       providers: [
         AddressesService,
         { provide: getRepositoryToken(UserAddress), useValue: repo },
+        { provide: getRepositoryToken(User), useValue: makeUserRepoMock() },
         { provide: DataSource, useValue: { transaction: dsTransactionMock } },
       ],
     }).compile();
@@ -464,6 +477,7 @@ describe('AddressesService — listByUserId', () => {
       providers: [
         AddressesService,
         { provide: getRepositoryToken(UserAddress), useValue: repo },
+        { provide: getRepositoryToken(User), useValue: makeUserRepoMock() },
         { provide: DataSource, useValue: ds },
       ],
     }).compile();
@@ -491,5 +505,64 @@ describe('AddressesService — listByUserId', () => {
     repo.find.mockResolvedValue([]);
     const result = await service.listByUserId('user-other');
     expect(result).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// AddressesService — setActiveLocation
+// ---------------------------------------------------------------------------
+
+describe('AddressesService — setActiveLocation', () => {
+  let service: AddressesService;
+  let repo: jest.Mocked<Repository<UserAddress>>;
+  let userRepo: jest.Mocked<Repository<User>>;
+
+  beforeEach(async () => {
+    repo = makeRepoMock();
+    userRepo = makeUserRepoMock();
+    const ds = makeDataSourceMock(repo);
+
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        AddressesService,
+        { provide: getRepositoryToken(UserAddress), useValue: repo },
+        { provide: getRepositoryToken(User), useValue: userRepo },
+        { provide: DataSource, useValue: ds },
+      ],
+    }).compile();
+
+    service = module.get<AddressesService>(AddressesService);
+  });
+
+  it('points users.active_location_id at the address and returns it', async () => {
+    const target = fakeAddress({ id: 'addr-b', userId: 'user-1' });
+    repo.findOne.mockResolvedValue(target);
+
+    const result = await service.setActiveLocation('user-1', 'addr-b');
+
+    expect(repo.findOne).toHaveBeenCalledWith({ where: { id: 'addr-b' } });
+    expect(userRepo.update).toHaveBeenCalledWith('user-1', {
+      activeLocationId: 'addr-b',
+    });
+    expect(result).toBe(target);
+  });
+
+  it('throws NotFoundException when address not found', async () => {
+    repo.findOne.mockResolvedValue(null);
+
+    await expect(
+      service.setActiveLocation('user-1', 'addr-ghost'),
+    ).rejects.toThrow(NotFoundException);
+    expect(userRepo.update).not.toHaveBeenCalled();
+  });
+
+  it('throws NotFoundException when address belongs to another user', async () => {
+    const other = fakeAddress({ id: 'addr-1', userId: 'user-OTHER' });
+    repo.findOne.mockResolvedValue(other);
+
+    await expect(
+      service.setActiveLocation('user-1', 'addr-1'),
+    ).rejects.toThrow(NotFoundException);
+    expect(userRepo.update).not.toHaveBeenCalled();
   });
 });

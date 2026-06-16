@@ -198,6 +198,11 @@ describe('OrdersService', () => {
       activateForOrder: jest.fn().mockResolvedValue({} as never),
       createForOrder: jest.fn().mockResolvedValue({}),
       cancelPendingForOrder: jest.fn().mockResolvedValue(undefined),
+      countBebederoRentalsForUser: jest.fn().mockResolvedValue(0),
+      ensureBebederoRatePrices: jest.fn().mockResolvedValue({
+        freePriceId: 'price_free_existing',
+        subscriberPriceId: 'price_sub_existing',
+      }),
     } as unknown as jest.Mocked<RentalsService>;
 
     dataSource = {
@@ -1155,6 +1160,112 @@ describe('OrdersService', () => {
       } as import('./dto/create-order.dto').CreateOrderDto);
 
       expect(rentalsService.createForOrder).not.toHaveBeenCalled();
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Subscriber bebedero pricing — first free ($0), additional $6.99
+  // ─────────────────────────────────────────────────────────────────────────
+
+  describe('create — subscriber bebedero pricing', () => {
+    const bebedero = fakeRentalProduct({
+      id: 'prod-bebedero',
+      requiresMaintenance: true,
+      monthlyRentCents: 2000, // $20 catalog
+    });
+
+    const bebederoCart = {
+      items: [{ productId: 'prod-bebedero', quantity: 1 }],
+      deliveryAddress: { text: '123 Test', lat: 18.4861, lng: -69.9312 },
+      paymentMethod: PaymentMethod.CASH,
+      usePoints: false,
+      useCredit: false,
+    } as import('./dto/create-order.dto').CreateOrderDto;
+
+    let savedOrderArg: Partial<Order> | undefined;
+
+    function setupTx() {
+      savedOrderArg = undefined;
+      (dataSource.transaction as jest.Mock).mockImplementation(
+        async (cb: (mgr: EntityManager) => Promise<unknown>) => {
+          const orderRepo = makeRepoMock<Order>();
+          const itemRepo = makeRepoMock<OrderItem>();
+          orderRepo.create.mockImplementation((d) => {
+            savedOrderArg = d as Partial<Order>;
+            return { ...d, id: 'order-bebedero-1' } as Order;
+          });
+          orderRepo.save.mockResolvedValue(
+            fakeOrder({ id: 'order-bebedero-1' }),
+          );
+          orderRepo.update.mockResolvedValue({ affected: 1 } as never);
+          itemRepo.save.mockResolvedValue({} as never);
+          itemRepo.create.mockImplementation((d) => d as OrderItem);
+          const mgr = {
+            getRepository: (entity: unknown) => {
+              if (entity === Order) return orderRepo;
+              if (entity === OrderItem) return itemRepo;
+              return makeRepoMock();
+            },
+          } as unknown as EntityManager;
+          return cb(mgr);
+        },
+      );
+      ordersRepo.findOne.mockResolvedValue(
+        fakeOrder({ id: 'order-bebedero-1', customer: fakeUser() as never, items: [] }),
+      );
+    }
+
+    it('active subscriber, FIRST bebedero → $0/mo + free Stripe price snapshot', async () => {
+      productsRepo.find.mockResolvedValue([bebedero]);
+      subscriptionService.isActiveSubscriber.mockResolvedValue(true);
+      rentalsService.countBebederoRentalsForUser.mockResolvedValue(0);
+      setupTx();
+
+      await service.create(fakeUser(UserRole.CLIENT), bebederoCart);
+
+      // Order subtotal (first month charged in the order) is $0
+      expect(savedOrderArg?.subtotal).toBe('0.00');
+      // Rental snapshot uses the free recurring price + $0 rent
+      expect(rentalsService.createForOrder).toHaveBeenCalledWith(
+        expect.objectContaining({
+          productId: 'prod-bebedero',
+          monthlyRentCentsOverride: 0,
+          stripePriceIdOverride: 'price_free_existing',
+        }),
+        expect.anything(),
+      );
+    });
+
+    it('active subscriber, ADDITIONAL bebedero → $6.99/mo + subscriber Stripe price snapshot', async () => {
+      productsRepo.find.mockResolvedValue([bebedero]);
+      subscriptionService.isActiveSubscriber.mockResolvedValue(true);
+      rentalsService.countBebederoRentalsForUser.mockResolvedValue(1);
+      setupTx();
+
+      await service.create(fakeUser(UserRole.CLIENT), bebederoCart);
+
+      expect(savedOrderArg?.subtotal).toBe('6.99');
+      expect(rentalsService.createForOrder).toHaveBeenCalledWith(
+        expect.objectContaining({
+          productId: 'prod-bebedero',
+          monthlyRentCentsOverride: 699,
+          stripePriceIdOverride: 'price_sub_existing',
+        }),
+        expect.anything(),
+      );
+    });
+
+    it('NON-subscriber bebedero → catalog rent, no override', async () => {
+      productsRepo.find.mockResolvedValue([bebedero]);
+      subscriptionService.isActiveSubscriber.mockResolvedValue(false);
+      setupTx();
+
+      await service.create(fakeUser(UserRole.CLIENT), bebederoCart);
+
+      expect(savedOrderArg?.subtotal).toBe('20.00');
+      expect(rentalsService.ensureBebederoRatePrices).not.toHaveBeenCalled();
+      const call = rentalsService.createForOrder.mock.calls[0][0];
+      expect(call.monthlyRentCentsOverride).toBeUndefined();
     });
   });
 

@@ -15,6 +15,8 @@ export interface AuthenticatedUser {
   fullName?: string;
   phone?: string | null;
   addressDefault?: GeoAddress | null;
+  /** Active operating location (UserAddress id) — drives the repartidor's shipping origin. */
+  activeLocationId?: string | null;
   referralCode?: string | null;
   referredById?: string | null;
   stripeCustomerId?: string | null;
