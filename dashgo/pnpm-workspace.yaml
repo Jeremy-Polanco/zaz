@@ -1,0 +1,2 @@
+patchedDependencies:
+  '@stripe/stripe-react-native@0.58.0': patches/@stripe__stripe-react-native@0.58.0.patch
