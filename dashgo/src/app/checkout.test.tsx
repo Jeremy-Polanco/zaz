@@ -23,6 +23,7 @@ jest.mock('../lib/queries', () => ({
   useMySubscription: jest.fn(),
   usePointsBalance: jest.fn(),
   useProducts: jest.fn(),
+  useMyAddresses: jest.fn(),
 }))
 
 jest.mock('@stripe/stripe-react-native', () => ({
@@ -80,6 +81,7 @@ import {
   useMySubscription,
   usePointsBalance,
   useProducts,
+  useMyAddresses,
 } from '../lib/queries'
 import { router } from 'expo-router'
 import CheckoutScreen from './checkout'
@@ -95,6 +97,7 @@ const mockUseMyCredit = useMyCredit as jest.MockedFunction<typeof useMyCredit>
 const mockUseMySubscription = useMySubscription as jest.MockedFunction<typeof useMySubscription>
 const mockUsePointsBalance = usePointsBalance as jest.MockedFunction<typeof usePointsBalance>
 const mockUseProducts = useProducts as jest.MockedFunction<typeof useProducts>
+const mockUseMyAddresses = useMyAddresses as jest.MockedFunction<typeof useMyAddresses>
 
 const mockRouter = router as jest.Mocked<typeof router>
 
@@ -197,6 +200,7 @@ function setupCheckoutMocks(
   mockUseMyCredit.mockReturnValue({ data: null } as unknown as ReturnType<typeof useMyCredit>)
   mockUseMySubscription.mockReturnValue({ data: null } as unknown as ReturnType<typeof useMySubscription>)
   mockUsePointsBalance.mockReturnValue({ data: null } as unknown as ReturnType<typeof usePointsBalance>)
+  mockUseMyAddresses.mockReturnValue({ data: [] } as unknown as ReturnType<typeof useMyAddresses>)
 }
 
 let alertSpy: jest.SpyInstance

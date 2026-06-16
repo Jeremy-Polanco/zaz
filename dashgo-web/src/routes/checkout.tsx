@@ -7,6 +7,7 @@ import {
   useAuthorizeOrder,
   useConfirmNonStripeOrder,
   useCreateOrder,
+  useMyAddresses,
   useMyCredit,
   useMySubscription,
   useOrders,
@@ -18,6 +19,7 @@ import { CardAuthForm } from '../components/CardAuthForm'
 import { useCurrentUser } from '../lib/auth'
 import { useCart, clearCart } from '../lib/cart'
 import { Button, SectionHeading } from '../components/ui'
+import { userAddressToGeoAddress } from '../lib/address'
 import { cn, formatCents, formatMoney } from '../lib/utils'
 import { computeQuotePreviewCents } from '../lib/tax'
 import { TOKEN_KEY } from '../lib/api'
@@ -73,7 +75,22 @@ function CheckoutPage() {
 
   const [usePoints, setUsePoints] = useState(false)
   const [useCredit, setUseCredit] = useState(false)
+  const { data: myAddresses } = useMyAddresses()
   const { data: creditData } = useMyCredit()
+
+  // Customer-picked delivery address. Defaults to the saved default (then the
+  // first) once addresses load; the customer can switch among saved locations.
+  // With no saved addresses this stays empty and the order goes out without an
+  // address — the colmado pins it at delivery time (legacy behavior).
+  const [selectedAddressId, setSelectedAddressId] = useState<string>('')
+  useEffect(() => {
+    if (!myAddresses || myAddresses.length === 0) return
+    setSelectedAddressId((prev) => {
+      if (prev && myAddresses.some((a) => a.id === prev)) return prev
+      return (myAddresses.find((a) => a.isDefault) ?? myAddresses[0]).id
+    })
+  }, [myAddresses])
+  const selectedAddress = myAddresses?.find((a) => a.id === selectedAddressId)
   const { data: subscription } = useMySubscription()
   const isActiveSubscriber =
     subscription?.status === 'active' || subscription?.status === 'past_due'
@@ -190,7 +207,14 @@ function CheckoutPage() {
   }
 
   const onSubmit = form.handleSubmit(async (values) => {
-    const created = await createOrder.mutateAsync({ ...values, usePoints, useCredit })
+    const created = await createOrder.mutateAsync({
+      ...values,
+      usePoints,
+      useCredit,
+      deliveryAddress: selectedAddress
+        ? userAddressToGeoAddress(selectedAddress)
+        : undefined,
+    })
 
     // Skip-cotización orders are auto-quoted at creation (status 'quoted'):
     // nothing for the admin to quote, so we finish payment right here instead
@@ -267,10 +291,72 @@ function CheckoutPage() {
       <div className="grid grid-cols-1 gap-12 lg:grid-cols-12">
         <div className="lg:col-span-7">
           <form onSubmit={onSubmit} className="flex flex-col gap-8">
+            {myAddresses && myAddresses.length > 0 && (
+              <section>
+                <div className="mb-4 flex items-center gap-3">
+                  <span className="text-[0.7rem] uppercase tracking-[0.2em] text-ink-muted">
+                    01 · Entrega
+                  </span>
+                  <span className="h-px flex-1 bg-ink/15" />
+                </div>
+                <span
+                  id="deliveryAddressLabel"
+                  className="mb-3 block text-sm font-medium text-ink"
+                >
+                  ¿A dónde te lo llevamos?
+                </span>
+                <div
+                  role="radiogroup"
+                  aria-labelledby="deliveryAddressLabel"
+                  className="flex flex-col gap-2"
+                >
+                  {myAddresses.map((addr) => {
+                    const selected = addr.id === selectedAddressId
+                    return (
+                      <button
+                        type="button"
+                        key={addr.id}
+                        role="radio"
+                        aria-checked={selected}
+                        onClick={() => setSelectedAddressId(addr.id)}
+                        className={cn(
+                          'flex items-start justify-between gap-3 border px-4 py-3 text-left transition-colors',
+                          selected
+                            ? 'border-ink bg-ink/3'
+                            : 'border-ink/15 hover:border-ink/40',
+                        )}
+                      >
+                        <span className="min-w-0">
+                          <span className="block text-sm font-medium text-ink">
+                            {addr.label}
+                            {addr.isDefault && (
+                              <span className="ml-2 text-[0.65rem] uppercase tracking-[0.15em] text-ink-muted">
+                                Predeterminada
+                              </span>
+                            )}
+                          </span>
+                          <span className="mt-0.5 block truncate text-sm text-ink-muted">
+                            {addr.line1}
+                          </span>
+                        </span>
+                        <span
+                          aria-hidden
+                          className={cn(
+                            'mt-1 h-3.5 w-3.5 shrink-0 rounded-full border-2',
+                            selected ? 'border-ink bg-ink' : 'border-ink/30',
+                          )}
+                        />
+                      </button>
+                    )
+                  })}
+                </div>
+              </section>
+            )}
+
             <section>
               <div className="mb-4 flex items-center gap-3">
                 <span className="text-[0.7rem] uppercase tracking-[0.2em] text-ink-muted">
-                  01 · Pago
+                  {myAddresses && myAddresses.length > 0 ? '02 · Pago' : '01 · Pago'}
                 </span>
                 <span className="h-px flex-1 bg-ink/15" />
               </div>
@@ -351,7 +437,7 @@ function CheckoutPage() {
             <section>
               <div className="mb-4 flex items-center gap-3">
                 <span className="text-[0.7rem] uppercase tracking-[0.2em] text-ink-muted">
-                  02 · Puntos
+                  {myAddresses && myAddresses.length > 0 ? '03 · Puntos' : '02 · Puntos'}
                 </span>
                 <span className="h-px flex-1 bg-ink/15" />
               </div>

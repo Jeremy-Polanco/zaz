@@ -1,4 +1,31 @@
-import type { GeoAddress } from './types'
+import type { GeoAddress, UserAddress } from './types'
+
+/**
+ * Map a saved address (UserAddress) to the delivery-address payload an order
+ * expects (backend DeliveryAddressDto). Used when a customer picks one of their
+ * saved locations at checkout. `text` is the human-readable line1 (+ line2);
+ * the driver-facing note (`instructions`) becomes `reference`. Optional fields
+ * are omitted (undefined) rather than null so they pass the DTO's @IsString.
+ */
+export function userAddressToGeoAddress(addr: UserAddress): {
+  text: string
+  lat: number
+  lng: number
+  building?: string
+  reference?: string
+} {
+  const line2 = (addr.line2 ?? '').trim()
+  const text = line2 ? `${addr.line1}, ${line2}` : addr.line1
+  const building = (addr.building ?? '').trim()
+  const reference = (addr.instructions ?? '').trim()
+  return {
+    text,
+    lat: addr.lat,
+    lng: addr.lng,
+    ...(building ? { building } : {}),
+    ...(reference ? { reference } : {}),
+  }
+}
 
 export interface AddressPart {
   label: string

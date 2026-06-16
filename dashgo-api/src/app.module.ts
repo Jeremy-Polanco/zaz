@@ -7,6 +7,7 @@ import {
 import { APP_GUARD } from '@nestjs/core';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { ScheduleModule } from '@nestjs/schedule';
+import { EventEmitterModule } from '@nestjs/event-emitter';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { DataSource } from 'typeorm';
@@ -36,6 +37,7 @@ import { RequestLoggerMiddleware } from './common/middleware/request-logger.midd
       validate: (config) => envSchema.parse(config),
     }),
     ScheduleModule.forRoot(),
+    EventEmitterModule.forRoot(),
     // Global IP-based throttler: 100 req/60s per IP. Protects against general
     // flooding from a single source. SMS-cost endpoints get an additional
     // per-phone bucket via PhoneThrottlerGuard (see common/guards/) which

@@ -9,8 +9,10 @@ import {
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { SUBSCRIPTION_ACTIVATED } from '../../common/events/subscription.events';
 import Stripe = require('stripe');
 import {
   Subscription,
@@ -86,6 +88,7 @@ export class SubscriptionService implements OnModuleInit {
     @InjectRepository(SubscriptionPlan)
     private readonly plans: Repository<SubscriptionPlan>,
     private readonly config: ConfigService,
+    private readonly events: EventEmitter2,
   ) {}
 
   async onModuleInit(): Promise<void> {
@@ -627,11 +630,13 @@ export class SubscriptionService implements OnModuleInit {
         ? new Date()
         : null;
 
+    const normalizedStatus = this.normalizeStatus(stripeSub.status);
+
     await this.subscriptions.upsert(
       {
         userId,
         stripeSubscriptionId: stripeSub.id,
-        status: this.normalizeStatus(stripeSub.status),
+        status: normalizedStatus,
         currentPeriodStart: start,
         currentPeriodEnd: end,
         cancelAtPeriodEnd: stripeSub.cancel_at_period_end,
@@ -642,6 +647,14 @@ export class SubscriptionService implements OnModuleInit {
     this.logger.log(
       `upserted subscription ${stripeSub.id} for user ${userId} — status: ${stripeSub.status}`,
     );
+
+    // Fire the auto-bebedero side-effect when the subscription is active. The
+    // listener (OrdersModule) is idempotent — replayed "active" webhooks won't
+    // create duplicate bebedero orders. Event-driven to keep the module graph
+    // acyclic (OrdersModule already depends on SubscriptionModule).
+    if (normalizedStatus === SubscriptionStatus.ACTIVE) {
+      this.events.emit(SUBSCRIPTION_ACTIVATED, { userId });
+    }
   }
 
   private normalizeStatus(stripeStatus: string): SubscriptionStatus {

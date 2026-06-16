@@ -170,6 +170,20 @@ export class Product {
   @Column({ name: 'is_maintenance_service', type: 'boolean', default: false })
   isMaintenanceService!: boolean;
 
+  /**
+   * Marks THE bebedero given for free when a user subscribes. Exactly one
+   * product should carry this flag; the subscription-activated listener
+   * auto-creates a free order for it. If none is flagged, no auto-bebedero is
+   * created (logged). Should only be set on a rental dispenser
+   * (pricingMode='rental', requiresMaintenance=true).
+   */
+  @Column({
+    name: 'is_default_subscriber_bebedero',
+    type: 'boolean',
+    default: false,
+  })
+  isDefaultSubscriberBebedero!: boolean;
+
   /** Posición en el catálogo — menor número aparece primero. */
   @Column({ name: 'display_order', type: 'int', default: 0 })
   displayOrder!: number;

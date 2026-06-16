@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { View, Text, Pressable, ScrollView } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { router } from 'expo-router'
@@ -9,12 +9,14 @@ import {
   useConfirmNonStripeOrder,
   useCreateOrder,
   useCurrentUser,
+  useMyAddresses,
   useMyCredit,
   useMySubscription,
   useOrders,
   usePointsBalance,
   useProducts,
 } from '../lib/queries'
+import { userAddressToGeoAddress } from '../lib/address'
 import { formatCents } from '../lib/format'
 import { computeQuotePreviewCents } from '../lib/tax'
 import type { PaymentMethod } from '../lib/types'
@@ -49,6 +51,22 @@ export default function CheckoutScreen() {
   const [usePoints, setUsePoints] = useState(false)
   const [useCredit, setUseCredit] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  // ── Delivery address state ─────────────────────────────────────────────────
+  // Customer-picked delivery address. Defaults to the saved default (then the
+  // first) once addresses load; the customer can switch among saved locations.
+  // No saved addresses → stays empty and the colmado pins it at delivery time.
+  const { data: myAddresses } = useMyAddresses()
+  const [selectedAddressId, setSelectedAddressId] = useState<string>('')
+  useEffect(() => {
+    if (!myAddresses || myAddresses.length === 0) return
+    setSelectedAddressId((prev) => {
+      if (prev && myAddresses.some((a) => a.id === prev)) return prev
+      return (myAddresses.find((a) => a.isDefault) ?? myAddresses[0]).id
+    })
+  }, [myAddresses])
+  const selectedAddress = myAddresses?.find((a) => a.id === selectedAddressId)
+  const hasAddresses = (myAddresses?.length ?? 0) > 0
   // True while THIS order is being placed/paid. The just-created (status
   // 'quoted') order refetches into `orders` mid-flow and would otherwise trip
   // the activeOrder guard — slamming the "ya tenés uno en camino" screen in
@@ -190,6 +208,9 @@ export default function CheckoutScreen() {
         paymentMethod,
         usePoints,
         useCredit,
+        ...(selectedAddress
+          ? { deliveryAddress: userAddressToGeoAddress(selectedAddress) }
+          : {}),
       })
 
       // Skip-cotización orders are auto-quoted at creation (status 'quoted'):
@@ -387,10 +408,57 @@ export default function CheckoutScreen() {
           )}
         </View>
 
-        {/* 02 · Pago */}
+        {/* 02 · Entrega — only when the customer has saved addresses */}
+        {hasAddresses && myAddresses ? (
+          <View className="mb-8">
+            <View className="mb-4 flex-row items-baseline gap-3">
+              <Text className="font-sans-italic text-2xl text-brand">02</Text>
+              <Text className="font-sans text-[11px] uppercase tracking-eyebrow text-ink-muted">
+                Entrega
+              </Text>
+            </View>
+            <View className="gap-2">
+              {myAddresses.map((addr) => {
+                const selected = addr.id === selectedAddressId
+                return (
+                  <Pressable
+                    key={addr.id}
+                    onPress={() => setSelectedAddressId(addr.id)}
+                    className={`flex-row items-center justify-between border px-4 py-3 ${
+                      selected ? 'border-ink bg-ink/5' : 'border-ink/20 bg-paper'
+                    }`}
+                  >
+                    <View className="flex-1 pr-3">
+                      <Text className="font-sans-semibold text-[15px] text-ink" numberOfLines={1}>
+                        {addr.label}
+                        {addr.isDefault ? (
+                          <Text className="font-sans text-[10px] uppercase tracking-label text-ink-muted">
+                            {'  '}Predeterminada
+                          </Text>
+                        ) : null}
+                      </Text>
+                      <Text className="mt-0.5 font-sans text-[13px] text-ink-muted" numberOfLines={1}>
+                        {addr.line1}
+                      </Text>
+                    </View>
+                    <View
+                      className={`h-4 w-4 rounded-full border-2 ${
+                        selected ? 'border-ink bg-ink' : 'border-ink/30'
+                      }`}
+                    />
+                  </Pressable>
+                )
+              })}
+            </View>
+          </View>
+        ) : null}
+
+        {/* Pago */}
         <View className="mb-8">
           <View className="mb-4 flex-row items-baseline gap-3">
-            <Text className="font-sans-italic text-2xl text-brand">02</Text>
+            <Text className="font-sans-italic text-2xl text-brand">
+              {hasAddresses ? '03' : '02'}
+            </Text>
             <Text className="font-sans text-[11px] uppercase tracking-eyebrow text-ink-muted">
               Pago
             </Text>
@@ -441,11 +509,13 @@ export default function CheckoutScreen() {
           </View>
         </View>
 
-        {/* 03 · Mi crédito */}
+        {/* Mi crédito */}
         {creditUsable && availableCreditCents > 0 && (
           <View className="mb-8">
             <View className="mb-4 flex-row items-baseline gap-3">
-              <Text className="font-sans-italic text-2xl text-brand">03</Text>
+              <Text className="font-sans-italic text-2xl text-brand">
+                {hasAddresses ? '04' : '03'}
+              </Text>
               <Text className="font-sans text-[11px] uppercase tracking-eyebrow text-ink-muted">
                 Mi crédito
               </Text>
@@ -487,11 +557,13 @@ export default function CheckoutScreen() {
           </View>
         )}
 
-        {/* 04 · Mis puntos */}
+        {/* Mis puntos */}
         {claimableCents > 0 && (
           <View className="mb-8">
             <View className="mb-4 flex-row items-baseline gap-3">
-              <Text className="font-sans-italic text-2xl text-brand">04</Text>
+              <Text className="font-sans-italic text-2xl text-brand">
+                {hasAddresses ? '05' : '04'}
+              </Text>
               <Text className="font-sans text-[11px] uppercase tracking-eyebrow text-ink-muted">
                 Mis puntos
               </Text>

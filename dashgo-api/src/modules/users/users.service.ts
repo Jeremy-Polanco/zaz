@@ -9,6 +9,7 @@ import { Subscription, SubscriptionStatus, User } from '../../entities';
 import { UserRole } from '../../entities/enums';
 import { AuthenticatedUser } from '../../common/types/authenticated-user';
 import { UpdateMeDto } from './dto/update-me.dto';
+import { UpdateUserAdminDto } from './dto/update-user-admin.dto';
 import {
   ListUsersQueryDto,
   UserSubscriptionFilter,
@@ -38,6 +39,26 @@ export class UsersService {
   async updateMe(user: AuthenticatedUser, dto: UpdateMeDto) {
     await this.users.update(user.id, dto);
     return this.getMe(user);
+  }
+
+  /**
+   * Admin patch of another user. Currently only the bebedero maintenance timer
+   * switch. SUPER_ADMIN_DELIVERY only.
+   */
+  async updateByAdmin(
+    actor: AuthenticatedUser,
+    id: string,
+    dto: UpdateUserAdminDto,
+  ): Promise<User> {
+    if (actor.role !== UserRole.SUPER_ADMIN_DELIVERY) {
+      throw new ForbiddenException();
+    }
+    const target = await this.users.findOne({ where: { id } });
+    if (!target) throw new NotFoundException();
+    await this.users.update(id, dto);
+    const updated = await this.users.findOne({ where: { id } });
+    if (!updated) throw new NotFoundException();
+    return updated;
   }
 
   /**

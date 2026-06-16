@@ -3,6 +3,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { Order, OrderItem, Product } from '../../entities';
 import { OrdersController } from './orders.controller';
 import { OrdersService } from './orders.service';
+import { SubscriberBebederoListener } from './subscriber-bebedero.listener';
 import { PaymentsModule } from '../payments/payments.module';
 import { PointsModule } from '../points/points.module';
 import { InvoicesModule } from '../invoices/invoices.module';
@@ -30,7 +31,7 @@ import { RentalsModule } from '../rentals/rentals.module';
     forwardRef(() => RentalsModule),
   ],
   controllers: [OrdersController],
-  providers: [OrdersService],
+  providers: [OrdersService, SubscriberBebederoListener],
   exports: [OrdersService],
 })
 export class OrdersModule {}

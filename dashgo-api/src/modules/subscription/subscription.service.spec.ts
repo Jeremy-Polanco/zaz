@@ -9,8 +9,10 @@ import { ConflictException, HttpException, HttpStatus, NotFoundException, Servic
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { ConfigService } from '@nestjs/config';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Repository } from 'typeorm';
 import { SubscriptionService } from './subscription.service';
+import { SUBSCRIPTION_ACTIVATED } from '../../common/events/subscription.events';
 import { Subscription, SubscriptionStatus } from '../../entities/subscription.entity';
 import { User } from '../../entities/user.entity';
 import { SubscriptionPlan } from '../../entities/subscription-plan.entity';
@@ -109,6 +111,7 @@ describe('SubscriptionService', () => {
   let usersRepo: jest.Mocked<Repository<User>>;
   let plansRepo: jest.Mocked<Repository<SubscriptionPlan>>;
   let configService: jest.Mocked<ConfigService>;
+  let events: { emit: jest.Mock };
 
   beforeEach(async () => {
     // Create a fresh mock Stripe instance for each test
@@ -147,10 +150,12 @@ describe('SubscriptionService', () => {
         { provide: getRepositoryToken(User), useValue: usersRepo },
         { provide: getRepositoryToken(SubscriptionPlan), useValue: plansRepo },
         { provide: ConfigService, useValue: configService },
+        { provide: EventEmitter2, useValue: { emit: jest.fn() } },
       ],
     }).compile();
 
     service = module.get<SubscriptionService>(SubscriptionService);
+    events = module.get(EventEmitter2);
     // Trigger onModuleInit to set up Stripe
     await service.onModuleInit();
   });
@@ -558,6 +563,7 @@ describe('SubscriptionService — bootstrap seed (T7)', () => {
         { provide: getRepositoryToken(User), useValue: usersRepo },
         { provide: getRepositoryToken(SubscriptionPlan), useValue: plansRepo },
         { provide: ConfigService, useValue: configService },
+        { provide: EventEmitter2, useValue: { emit: jest.fn() } },
       ],
     }).compile();
 
@@ -729,6 +735,7 @@ describe('SubscriptionService — updatePlan (T11–T22)', () => {
         { provide: getRepositoryToken(User), useValue: usersRepo },
         { provide: getRepositoryToken(SubscriptionPlan), useValue: plansRepo },
         { provide: ConfigService, useValue: configService },
+        { provide: EventEmitter2, useValue: { emit: jest.fn() } },
       ],
     }).compile();
 
@@ -961,6 +968,7 @@ describe('SubscriptionService — createCheckoutSession plan source (T23)', () =
         { provide: getRepositoryToken(User), useValue: usersRepo },
         { provide: getRepositoryToken(SubscriptionPlan), useValue: plansRepo },
         { provide: ConfigService, useValue: configService },
+        { provide: EventEmitter2, useValue: { emit: jest.fn() } },
       ],
     }).compile();
 
@@ -1093,6 +1101,7 @@ describe('SubscriptionService — getAdminPlan (T25)', () => {
         { provide: getRepositoryToken(User), useValue: usersRepo },
         { provide: getRepositoryToken(SubscriptionPlan), useValue: plansRepo },
         { provide: ConfigService, useValue: configService },
+        { provide: EventEmitter2, useValue: { emit: jest.fn() } },
       ],
     }).compile();
 
@@ -1173,6 +1182,7 @@ describe('SubscriptionService — getPlan (T9)', () => {
         { provide: getRepositoryToken(User), useValue: usersRepo },
         { provide: getRepositoryToken(SubscriptionPlan), useValue: plansRepo },
         { provide: ConfigService, useValue: configService },
+        { provide: EventEmitter2, useValue: { emit: jest.fn() } },
       ],
     }).compile();
 
@@ -1315,6 +1325,7 @@ describe('SubscriptionService — coverage completion', () => {
         { provide: getRepositoryToken(User), useValue: usersRepo },
         { provide: getRepositoryToken(SubscriptionPlan), useValue: plansRepo },
         { provide: ConfigService, useValue: configService },
+        { provide: EventEmitter2, useValue: { emit: jest.fn() } },
       ],
     }).compile();
 

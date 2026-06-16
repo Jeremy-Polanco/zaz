@@ -1,4 +1,12 @@
-import { Body, Controller, Get, Patch, Query, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  Patch,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -7,6 +15,7 @@ import type { AuthenticatedUser } from '../../common/types/authenticated-user';
 import { UserRole } from '../../entities/enums';
 import { UsersService } from './users.service';
 import { UpdateMeDto } from './dto/update-me.dto';
+import { UpdateUserAdminDto } from './dto/update-user-admin.dto';
 import { ListUsersQueryDto } from './dto/list-users-query.dto';
 
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -31,5 +40,15 @@ export class UsersController {
     @Query() query: ListUsersQueryDto,
   ) {
     return this.users.findAll(user, query);
+  }
+
+  @Roles(UserRole.SUPER_ADMIN_DELIVERY)
+  @Patch(':id')
+  updateByAdmin(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+    @Body() dto: UpdateUserAdminDto,
+  ) {
+    return this.users.updateByAdmin(user, id, dto);
   }
 }

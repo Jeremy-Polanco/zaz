@@ -12,7 +12,7 @@
  * Repositories are injected as jest mocks. No real DB.
  */
 
-import { ForbiddenException } from '@nestjs/common';
+import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { UsersService } from './users.service';
@@ -176,5 +176,51 @@ describe('UsersService.findAll (admin list)', () => {
     expect(result).toHaveLength(1);
     expect(result[0].hasActiveSubscription).toBe(false);
     expect(result[0].subscriptionStatus).toBeNull();
+  });
+});
+
+describe('UsersService.updateByAdmin', () => {
+  let service: UsersService;
+  let userRepo: ReturnType<typeof makeUserRepoMock>;
+
+  beforeEach(async () => {
+    userRepo = makeUserRepoMock();
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        UsersService,
+        { provide: getRepositoryToken(User), useValue: userRepo },
+      ],
+    }).compile();
+    service = module.get<UsersService>(UsersService);
+  });
+
+  it('rejects non-admin callers', async () => {
+    const client = { id: 'u', role: UserRole.CLIENT } as AuthenticatedUser;
+    await expect(
+      service.updateByAdmin(client, 'target-1', { maintenanceTimerDisabled: true }),
+    ).rejects.toThrow(ForbiddenException);
+    expect(userRepo.update).not.toHaveBeenCalled();
+  });
+
+  it('toggles maintenanceTimerDisabled on the target user', async () => {
+    userRepo.findOne
+      .mockResolvedValueOnce(fakeUser({ id: 'target-1', maintenanceTimerDisabled: false }))
+      .mockResolvedValueOnce(fakeUser({ id: 'target-1', maintenanceTimerDisabled: true }));
+
+    const result = await service.updateByAdmin(admin, 'target-1', {
+      maintenanceTimerDisabled: true,
+    });
+
+    expect(userRepo.update).toHaveBeenCalledWith('target-1', {
+      maintenanceTimerDisabled: true,
+    });
+    expect(result.maintenanceTimerDisabled).toBe(true);
+  });
+
+  it('throws NotFound when the target user does not exist', async () => {
+    userRepo.findOne.mockResolvedValueOnce(null);
+    await expect(
+      service.updateByAdmin(admin, 'ghost', { maintenanceTimerDisabled: true }),
+    ).rejects.toThrow(NotFoundException);
   });
 });

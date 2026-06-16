@@ -6,6 +6,20 @@ export const addressSchema = z.object({
   lng: z.number().optional(),
 })
 
+// Delivery address attached to an order. Built from one of the customer's saved
+// addresses (UserAddress) when they pick one at checkout — never free-typed.
+// Mirrors the backend DeliveryAddressDto: text/lat/lng required, rest optional.
+export const deliveryAddressSchema = z.object({
+  text: z.string(),
+  lat: z.number(),
+  lng: z.number(),
+  building: z.string().optional(),
+  houseNumber: z.string().optional(),
+  unit: z.string().optional(),
+  reference: z.string().optional(),
+})
+export type DeliveryAddressInput = z.infer<typeof deliveryAddressSchema>
+
 export const checkoutSchema = z.object({
   items: z
     .array(
@@ -19,6 +33,9 @@ export const checkoutSchema = z.object({
   stripePaymentIntentId: z.string().optional(),
   usePoints: z.boolean().optional(),
   useCredit: z.boolean().optional(),
+  // Optional: when the customer has saved addresses they pick which one this
+  // order goes to. Absent → colmado pins the location at delivery time (legacy).
+  deliveryAddress: deliveryAddressSchema.optional(),
 })
 
 export const phoneSchema = z

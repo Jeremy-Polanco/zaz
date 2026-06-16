@@ -1,8 +1,30 @@
 import { describe, it, expect } from 'vitest'
-import { formatAddressShort, addressDetailParts } from './address'
-import type { GeoAddress } from './types'
+import {
+  formatAddressShort,
+  addressDetailParts,
+  userAddressToGeoAddress,
+} from './address'
+import type { GeoAddress, UserAddress } from './types'
 
 const base: GeoAddress = { text: 'Calle Duarte 100, Santo Domingo' }
+
+function fakeUserAddress(overrides: Partial<UserAddress> = {}): UserAddress {
+  return {
+    id: 'addr-1',
+    userId: 'user-1',
+    label: 'Casa',
+    line1: 'Calle Duarte 100',
+    line2: null,
+    building: null,
+    lat: 18.47,
+    lng: -69.9,
+    instructions: null,
+    isDefault: false,
+    createdAt: '2024-01-01T00:00:00.000Z',
+    updatedAt: '2024-01-01T00:00:00.000Z',
+    ...overrides,
+  }
+}
 
 describe('formatAddressShort', () => {
   it('combines house number and reference', () => {
@@ -63,5 +85,41 @@ describe('addressDetailParts', () => {
 
   it('returns an empty list for a missing address', () => {
     expect(addressDetailParts(null)).toEqual([])
+  })
+})
+
+describe('userAddressToGeoAddress', () => {
+  it('maps line1/lat/lng and omits empty optional fields', () => {
+    expect(userAddressToGeoAddress(fakeUserAddress())).toEqual({
+      text: 'Calle Duarte 100',
+      lat: 18.47,
+      lng: -69.9,
+    })
+  })
+
+  it('appends line2 to text and maps building + instructions→reference', () => {
+    expect(
+      userAddressToGeoAddress(
+        fakeUserAddress({
+          line2: 'Apto 3B',
+          building: 'Torre B',
+          instructions: 'frente al colmado',
+        }),
+      ),
+    ).toEqual({
+      text: 'Calle Duarte 100, Apto 3B',
+      lat: 18.47,
+      lng: -69.9,
+      building: 'Torre B',
+      reference: 'frente al colmado',
+    })
+  })
+
+  it('omits whitespace-only optional fields rather than sending blanks', () => {
+    const result = userAddressToGeoAddress(
+      fakeUserAddress({ building: '   ', instructions: '  ' }),
+    )
+    expect(result).not.toHaveProperty('building')
+    expect(result).not.toHaveProperty('reference')
   })
 })

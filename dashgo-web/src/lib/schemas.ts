@@ -62,8 +62,24 @@ export const savedAddressSchema = z.object({
 })
 export type SavedAddressInput = z.infer<typeof savedAddressSchema>
 
-// The customer no longer provides a delivery address — the colmado captures
-// the location at delivery time. Checkout only carries payment + items + perks.
+// Delivery address attached to an order. Built from one of the customer's saved
+// addresses (UserAddress) when they pick one at checkout — never free-typed.
+// Mirrors the backend DeliveryAddressDto: text/lat/lng required, the rest optional.
+export const deliveryAddressSchema = z.object({
+  text: z.string(),
+  lat: z.number(),
+  lng: z.number(),
+  building: z.string().optional(),
+  houseNumber: z.string().optional(),
+  unit: z.string().optional(),
+  reference: z.string().optional(),
+})
+export type DeliveryAddressInput = z.infer<typeof deliveryAddressSchema>
+
+// Checkout carries payment + items + perks, plus an OPTIONAL delivery address:
+// when the customer has saved addresses they pick which one this order goes to.
+// With no saved address the field stays absent and the colmado pins the location
+// at delivery time (legacy behavior).
 export const checkoutSchema = z.object({
   paymentMethod: z.enum(['cash', 'digital']),
   items: z
@@ -76,6 +92,7 @@ export const checkoutSchema = z.object({
     .min(1, 'Agrega al menos un producto'),
   usePoints: z.boolean().optional(),
   useCredit: z.boolean().optional(),
+  deliveryAddress: deliveryAddressSchema.optional(),
 })
 export type CheckoutInput = z.infer<typeof checkoutSchema>
 
