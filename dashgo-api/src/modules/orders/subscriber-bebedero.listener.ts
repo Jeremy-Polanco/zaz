@@ -1,4 +1,9 @@
-import { ConflictException, Injectable, Logger } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  Logger,
+  OnApplicationBootstrap,
+} from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -6,6 +11,7 @@ import { Product } from '../../entities';
 import { PaymentMethod, UserRole } from '../../entities/enums';
 import { OrdersService } from './orders.service';
 import { RentalsService } from '../rentals/rentals.service';
+import { SubscriptionService } from '../subscription/subscription.service';
 import {
   SUBSCRIPTION_ACTIVATED,
   SubscriptionActivatedEvent,
@@ -25,7 +31,7 @@ import {
  * a replayed webhook never creates duplicates or breaks the listener.
  */
 @Injectable()
-export class SubscriberBebederoListener {
+export class SubscriberBebederoListener implements OnApplicationBootstrap {
   private readonly logger = new Logger(SubscriberBebederoListener.name);
 
   constructor(
@@ -33,14 +39,60 @@ export class SubscriberBebederoListener {
     private readonly products: Repository<Product>,
     private readonly orders: OrdersService,
     private readonly rentals: RentalsService,
+    private readonly subscriptions: SubscriptionService,
   ) {}
+
+  /**
+   * One-time backfill: provision the default bebedero for every active
+   * subscriber who subscribed BEFORE a default bebedero was configured (their
+   * subscription.activated event found no flagged product, so nothing was
+   * created). Idempotent — provisionForUser skips anyone who already has one —
+   * so it is safe to run on every boot. Runs in the background so it never
+   * blocks app readiness.
+   */
+  onApplicationBootstrap(): void {
+    void this.backfillMissingBebederos().catch((err) =>
+      this.logger.error(
+        `bebedero backfill failed: ${(err as Error).message}`,
+      ),
+    );
+  }
+
+  async backfillMissingBebederos(): Promise<{
+    created: number;
+    skipped: number;
+  }> {
+    const userIds = await this.subscriptions.listActiveSubscriberUserIds();
+    let created = 0;
+    let skipped = 0;
+    for (const userId of userIds) {
+      const result = await this.provisionForUser(userId);
+      if (result === 'created') created += 1;
+      else skipped += 1;
+    }
+    if (created > 0) {
+      this.logger.log(
+        `bebedero backfill: created ${created}, skipped ${skipped} (of ${userIds.length} active subscribers)`,
+      );
+    }
+    return { created, skipped };
+  }
 
   @OnEvent(SUBSCRIPTION_ACTIVATED)
   async handleSubscriptionActivated(
     event: SubscriptionActivatedEvent,
   ): Promise<void> {
-    const { userId } = event;
+    await this.provisionForUser(event.userId);
+  }
 
+  /**
+   * Create the $0 default-bebedero order for one subscriber, unless they
+   * already have a bebedero rental (idempotent) or no default is configured.
+   * Never throws — errors are logged so a single bad user can't abort a backfill.
+   */
+  private async provisionForUser(
+    userId: string,
+  ): Promise<'created' | 'skipped' | 'no-default'> {
     const bebedero = await this.products.findOne({
       where: { isDefaultSubscriberBebedero: true },
     });
@@ -48,7 +100,7 @@ export class SubscriberBebederoListener {
       this.logger.warn(
         `No default subscriber bebedero configured — skipping auto-order for user ${userId}`,
       );
-      return;
+      return 'no-default';
     }
 
     // Idempotency: skip if the user already holds (or is setting up) this rental.
@@ -60,7 +112,7 @@ export class SubscriberBebederoListener {
       this.logger.log(
         `User ${userId} already has a bebedero rental — skipping auto-order`,
       );
-      return;
+      return 'skipped';
     }
 
     try {
@@ -76,14 +128,16 @@ export class SubscriberBebederoListener {
       this.logger.log(
         `Auto-created free bebedero order for subscriber ${userId}`,
       );
+      return 'created';
     } catch (err) {
       if (err instanceof ConflictException) {
         // RENTAL_ALREADY_ACTIVE race — another path created it concurrently. Fine.
-        return;
+        return 'skipped';
       }
       this.logger.error(
         `Auto bebedero order failed for user ${userId}: ${(err as Error).message}`,
       );
+      return 'skipped';
     }
   }
 }

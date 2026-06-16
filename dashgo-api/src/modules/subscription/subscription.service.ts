@@ -443,6 +443,21 @@ export class SubscriptionService implements OnModuleInit {
   }
 
   /**
+   * User IDs of all currently-active subscribers (status IN ('active','past_due')
+   * AND current_period_end > NOW()). Used to backfill the default bebedero for
+   * subscribers who subscribed before one was configured. NO Stripe call.
+   */
+  async listActiveSubscriberUserIds(): Promise<string[]> {
+    const rows = await this.subscriptions
+      .createQueryBuilder('s')
+      .select('s.user_id', 'userId')
+      .where("s.status IN ('active','past_due')")
+      .andWhere('s.current_period_end > NOW()')
+      .getRawMany<{ userId: string }>();
+    return rows.map((r) => r.userId);
+  }
+
+  /**
    * Webhook dispatcher — called by PaymentsController.webhook().
    * Errors are caught by the caller and logged; never propagated as 500.
    */
