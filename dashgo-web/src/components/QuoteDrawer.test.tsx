@@ -32,7 +32,7 @@ const mockUseSuperUserAddresses = vi.mocked(useSuperUserAddresses)
 const baseOrder: Order = {
   id: 'order-001',
   customerId: 'customer-uuid-123',
-  customer: { id: 'customer-uuid-123', fullName: 'María García', email: 'maria@example.com', phone: null, role: 'client', addressDefault: null, referralCode: null, creditLocked: false },
+  customer: { id: 'customer-uuid-123', fullName: 'María García', email: 'maria@example.com', phone: null, role: 'client', addressDefault: null, referralCode: null, creditLocked: false, activeLocationId: null },
   status: 'pending_quote',
   deliveryAddress: { text: 'Calle Duarte 45', lat: 18.47, lng: -69.9 },
   subtotal: '50.00',
