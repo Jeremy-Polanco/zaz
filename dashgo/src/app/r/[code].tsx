@@ -43,7 +43,7 @@ export default function ReferralLandingScreen() {
               size="lg"
               onPress={() => router.replace('/(auth)/login')}
             >
-              Entrar a DashGo
+              Entrar a Udash
             </Button>
           </View>
         </View>
@@ -65,7 +65,7 @@ export default function ReferralLandingScreen() {
         </Text>
 
         <Text className="mt-6 max-w-sm text-center text-[15px] leading-[22px] text-ink-muted">
-          Creá tu cuenta usando este código y súmate a DashGo — tu colmado al
+          Creá tu cuenta usando este código y súmate a Udash — tu colmado al
           timbre.
         </Text>
 

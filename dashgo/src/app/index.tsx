@@ -23,7 +23,7 @@ export default function Index() {
 
   return (
     <View className="flex-1 items-center justify-center bg-paper">
-      <Text className="font-sans-semibold text-5xl text-ink">DashGo</Text>
+      <Text className="font-sans-semibold text-5xl text-ink">Udash</Text>
       <View className="mt-6 h-[2px] w-12 bg-accent" />
       <ActivityIndicator color="#1A1530" size="small" className="mt-6" />
     </View>

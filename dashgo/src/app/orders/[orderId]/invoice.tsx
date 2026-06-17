@@ -14,7 +14,7 @@ export default function InvoiceScreen() {
     if (!invoice) return
     const lines = [
       `Factura ${invoice.invoiceNumber}`,
-      `DashGo · ${formatDate(invoice.createdAt)}`,
+      `Udash · ${formatDate(invoice.createdAt)}`,
       '',
       ...invoice.items.map(
         (it) =>

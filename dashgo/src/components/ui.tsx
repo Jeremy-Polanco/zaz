@@ -237,20 +237,19 @@ export function DashGoMark({
   size?: number
   letterColor?: string
 }) {
-  // Wordmark: "Dash ⚡ Go" — the orange bolt is the speed signature and sits
-  // between the two words. Inter Tight Bold matches the rest of the type stack.
+  // Wordmark: "Udash" — the leading "U" carries the orange brand accent (the
+  // UDash monogram color); the rest sits in the neutral letter color. Inter
+  // Tight Bold matches the rest of the type stack.
   const letterStyle = {
     fontSize: size,
     fontWeight: '700' as const,
-    color: letterColor,
     letterSpacing: -1,
     lineHeight: size * 1.05,
   }
   return (
-    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
-      <Text style={letterStyle}>Dash</Text>
-      <BoltIcon size={size * 0.85} color="#FF8000" />
-      <Text style={letterStyle}>Go</Text>
+    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+      <Text style={[letterStyle, { color: '#FF8000' }]}>U</Text>
+      <Text style={[letterStyle, { color: letterColor }]}>dash</Text>
     </View>
   )
 }

@@ -117,13 +117,22 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       requireFullScreen: true,
       infoPlist: {
         NSLocationWhenInUseUsageDescription:
-          'DashGo uses your location to auto-select the nearest saved delivery address at checkout.',
+          'Udash uses your location to auto-select the nearest saved delivery address at checkout.',
+        // Stripe's SDK references the camera API (card scanning), so Apple
+        // requires a purpose string even though the cash-only launch does not
+        // actively use the camera. Without it, processing rejects with
+        // ITMS-90683 (missing NSCameraUsageDescription).
+        NSCameraUsageDescription:
+          'Udash uses the camera to scan payment cards at checkout when paying by card.',
+        // expo-secure-store can gate the keychain behind biometrics. Keep a
+        // clear, non-generic string so App Review does not flag a placeholder.
+        NSFaceIDUsageDescription:
+          'Udash uses Face ID to keep your session securely signed in.',
         // Skip the export-compliance prompt on every TestFlight build.
-        // DashGo uses only Apple's standard HTTPS — no custom crypto.
+        // Udash uses only Apple's standard HTTPS — no custom crypto.
         ITSAppUsesNonExemptEncryption: false,
-        // Ensure the home-screen label reads "DashGo" (capitalized),
-        // not the lowercase slug.
-        CFBundleDisplayName: 'DashGo',
+        // Ensure the home-screen label reads "Udash", not the lowercase slug.
+        CFBundleDisplayName: 'Udash',
       },
     },
     android: {
@@ -154,7 +163,8 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       [
         'expo-splash-screen',
         {
-          backgroundColor: '#000000',
+          // UDash navy — matches the monogram splash icon so it blends.
+          backgroundColor: '#021229',
           android: {
             image: './assets/images/splash-icon.png',
             imageWidth: 76,
@@ -164,7 +174,10 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       [
         '@stripe/stripe-react-native',
         {
-          merchantIdentifier: 'merchant.com.dashgo',
+          // No merchantIdentifier on purpose → no Apple Pay capability/
+          // entitlement is generated. Cash-only launch with card payments
+          // gated; Apple Pay is not offered. Re-add the merchant id here when
+          // Apple Pay is enabled.
           enableGooglePay: false,
         },
       ],

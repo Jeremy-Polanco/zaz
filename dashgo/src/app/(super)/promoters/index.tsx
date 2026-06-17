@@ -206,7 +206,7 @@ export default function SuperPromotersScreen() {
               eyebrow="Panel · Promotores"
               title="Promotores"
               italicTail="y códigos."
-              subtitle="Invitá gente para que traiga clientes a DashGo."
+              subtitle="Invitá gente para que traiga clientes a Udash."
             />
 
             <View className="mb-7 flex-row gap-2">

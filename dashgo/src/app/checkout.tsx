@@ -176,7 +176,7 @@ export default function CheckoutScreen() {
   const payWithSheet = async (orderId: string): Promise<boolean> => {
     const intent = await authorize.mutateAsync(orderId)
     const initResult = await initPaymentSheet({
-      merchantDisplayName: 'DashGo',
+      merchantDisplayName: 'Udash',
       paymentIntentClientSecret: intent.clientSecret,
       allowsDelayedPaymentMethods: false,
       returnURL: 'dashgo://stripe-redirect',

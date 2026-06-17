@@ -156,7 +156,7 @@ export default function OrderDetailScreen() {
     try {
       const intent = await authorize.mutateAsync(order.id)
       const initResult = await initPaymentSheet({
-        merchantDisplayName: 'DashGo',
+        merchantDisplayName: 'Udash',
         paymentIntentClientSecret: intent.clientSecret,
         allowsDelayedPaymentMethods: false,
         returnURL: 'dashgo://stripe-redirect',

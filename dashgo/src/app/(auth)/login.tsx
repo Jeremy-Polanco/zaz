@@ -36,7 +36,7 @@ import {
 // trigger renders on every tick.
 export const WHATSAPP_RETRY_COOLDOWN_SECONDS = 5
 export const WHATSAPP_FAILURE_ESCALATION_THRESHOLD = 3
-export const SUPPORT_EMAIL = 'support@dashgo.dev'
+export const SUPPORT_EMAIL = 'urban@dashgo.dev'
 
 function serverMessage(err: unknown, fallback: string) {
   return (

@@ -39,7 +39,7 @@ export default function CreditPayScreen() {
     try {
       const intent = await createIntent.mutateAsync()
       const initResult = await initPaymentSheet({
-        merchantDisplayName: 'DashGo',
+        merchantDisplayName: 'Udash',
         paymentIntentClientSecret: intent.clientSecret,
         allowsDelayedPaymentMethods: false,
         returnURL: 'dashgo://stripe-redirect',

@@ -265,7 +265,7 @@ function isProductionStripeKeyInvalid(key: string | undefined): boolean {
 function StripeUnavailableScreen() {
   return (
     <View style={styles.errorContainer}>
-      <Text style={styles.errorTitle}>DashGo</Text>
+      <Text style={styles.errorTitle}>Udash</Text>
       <Text style={styles.errorMessage}>
         No se pudo iniciar el pago. Por favor, contactá soporte.
       </Text>

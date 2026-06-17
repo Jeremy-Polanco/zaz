@@ -187,7 +187,7 @@ export default function PromoterDashboardScreen() {
   const shareCode = async () => {
     try {
       await Share.share({
-        message: `Te invito a DashGo — agua al timbre. Usa mi código: ${promoter.referralCode ?? ''} · ${promoter.shareUrl}`,
+        message: `Te invito a Udash — agua al timbre. Usa mi código: ${promoter.referralCode ?? ''} · ${promoter.shareUrl}`,
       })
     } catch {}
   }
