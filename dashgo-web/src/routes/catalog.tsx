@@ -2,6 +2,7 @@ import { createFileRoute, isRedirect, Link, redirect, useNavigate, useSearch } f
 import { useMemo, useState } from 'react'
 import { z } from 'zod'
 import { Button } from '../components/ui'
+import { CategoryCard } from '../components/CategoryCard'
 import { useCategories, useProducts, useCurrentUser } from '../lib/queries'
 import { useCart } from '../lib/cart'
 import { formatCents } from '../lib/utils'
@@ -11,6 +12,19 @@ import type { AuthUser, Product } from '../lib/types'
 const catalogSearchSchema = z.object({
   cat: z.string().optional(),
 })
+
+/**
+ * Category-first catalog (web↔mobile parity): with no category selected and no
+ * active search, show the category picker instead of every product. A real
+ * search overrides the picker so a query can still match across the whole
+ * catalog. Mirrors the mobile `showPicker` rule in dashgo/src/app/(tabs)/catalog.tsx.
+ */
+export function shouldShowCategoryPicker(
+  cat: string | undefined,
+  query: string,
+): boolean {
+  return !cat && query.trim() === ''
+}
 
 export const Route = createFileRoute('/catalog')({
   validateSearch: catalogSearchSchema,
@@ -40,6 +54,17 @@ function CatalogPage() {
 
   const q = query.trim().toLowerCase()
   const firstName = user?.fullName?.split(' ')[0] ?? ''
+  const showPicker = shouldShowCategoryPicker(cat, query)
+
+  const productCountBySlug = useMemo(() => {
+    const map = new Map<string, number>()
+    for (const p of products ?? []) {
+      if (p.category?.slug) {
+        map.set(p.category.slug, (map.get(p.category.slug) ?? 0) + 1)
+      }
+    }
+    return map
+  }, [products])
 
   const filtered = (products ?? []).filter((p) => {
     if (cat && p.category?.slug !== cat) return false
@@ -119,12 +144,15 @@ function CatalogPage() {
           ) : null}
         </div>
 
-        {categories && categories.length > 0 ? (
+        {!showPicker && categories && categories.length > 0 ? (
           <div className="-mb-1 mt-3 flex gap-2 overflow-x-auto pb-2">
             <CategoryChip
-              active={!cat}
-              onClick={() => setCat(undefined)}
-              label="Todos"
+              active={false}
+              onClick={() => {
+                setQuery('')
+                setCat(undefined)
+              }}
+              label="‹ Categorías"
             />
             {categories.map((c) => (
               <CategoryChip
@@ -138,68 +166,104 @@ function CatalogPage() {
         ) : null}
       </div>
 
-      {/* Greeting / contextual strip */}
-      <div className="mb-5 mt-4 flex items-end justify-between">
-        <div>
-          <p className="display text-base font-semibold leading-tight text-ink">
-            {q
-              ? `${filtered.length} resultado${filtered.length === 1 ? '' : 's'} para "${query}"`
-              : firstName
-                ? `Hola, ${firstName}.`
-                : 'Hola.'}
-          </p>
+      {showPicker ? (
+        /* Category-first picker — shown on arrival, no products dumped */
+        <div className="mt-4">
+          <div className="mb-6 flex flex-col gap-1">
+            <span className="eyebrow">
+              {firstName ? `Hola, ${firstName}` : 'Hola'}
+            </span>
+            <h2 className="display text-3xl font-semibold leading-tight text-ink">
+              Elegí una categoría
+            </h2>
+          </div>
+          {categories && categories.length > 0 ? (
+            <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
+              {categories.map((c) => (
+                <CategoryCard
+                  key={c.id}
+                  category={c}
+                  productCount={productCountBySlug.get(c.slug) ?? 0}
+                  variant="category"
+                  onClick={() => setCat(c.slug)}
+                />
+              ))}
+            </div>
+          ) : (
+            <div className="flex flex-col items-center gap-3 border border-dashed border-ink/15 px-8 py-20 text-center">
+              <span className="eyebrow">Sin categorías</span>
+              <p className="text-base text-ink-muted">
+                Aún no hay categorías disponibles.
+              </p>
+            </div>
+          )}
         </div>
-        <span className="nums text-xs text-ink-muted">
-          {filtered.length} ítems
-        </span>
-      </div>
-
-      {filtered.length > 0 ? (
-        <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
-          {filtered.map((p) => (
-            <ProductCard
-              key={p.id}
-              product={p}
-              quantity={items[p.id] ?? 0}
-              onDec={() => update(p.id, -1)}
-              onInc={() => update(p.id, 1)}
-            />
-          ))}
-        </ul>
       ) : (
-        <div className="flex flex-col items-center gap-3 border border-dashed border-ink/15 px-8 py-20 text-center">
-          <span className="eyebrow">
-            {q ? 'Sin resultados' : 'Catálogo vacío'}
-          </span>
-          <p className="text-base text-ink-muted">
-            {q
-              ? 'Sin resultados. Prueba con otra palabra.'
-              : cat
-                ? 'No hay productos en esta categoría.'
-                : 'No hay productos disponibles ahora mismo.'}
-          </p>
-        </div>
-      )}
+        <>
+          {/* Greeting / contextual strip */}
+          <div className="mb-5 mt-4 flex items-end justify-between">
+            <div>
+              <p className="display text-base font-semibold leading-tight text-ink">
+                {q
+                  ? `${filtered.length} resultado${filtered.length === 1 ? '' : 's'} para "${query}"`
+                  : firstName
+                    ? `Hola, ${firstName}.`
+                    : 'Hola.'}
+              </p>
+            </div>
+            <span className="nums text-xs text-ink-muted">
+              {filtered.length} ítems
+            </span>
+          </div>
 
-      {/* Suggested products */}
-      {!q && suggested.length > 0 ? (
-        <div className="mt-12">
-          <h3 className="display mb-4 text-xl font-semibold tracking-tight text-ink">
-            Ítems que te pueden interesar
-          </h3>
-          <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
-            {suggested.map((p) => (
-              <ProductCard
-                key={p.id}
-                product={p}
-                quantity={items[p.id] ?? 0}
-                onDec={() => update(p.id, -1)}
-                onInc={() => update(p.id, 1)}
-              />
-            ))}
-          </ul>
-        </div>
-      ) : null}
+          {filtered.length > 0 ? (
+            <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
+              {filtered.map((p) => (
+                <ProductCard
+                  key={p.id}
+                  product={p}
+                  quantity={items[p.id] ?? 0}
+                  onDec={() => update(p.id, -1)}
+                  onInc={() => update(p.id, 1)}
+                />
+              ))}
+            </ul>
+          ) : (
+            <div className="flex flex-col items-center gap-3 border border-dashed border-ink/15 px-8 py-20 text-center">
+              <span className="eyebrow">
+                {q ? 'Sin resultados' : 'Catálogo vacío'}
+              </span>
+              <p className="text-base text-ink-muted">
+                {q
+                  ? 'Sin resultados. Prueba con otra palabra.'
+                  : cat
+                    ? 'No hay productos en esta categoría.'
+                    : 'No hay productos disponibles ahora mismo.'}
+              </p>
+            </div>
+          )}
+
+          {/* Suggested products */}
+          {!q && suggested.length > 0 ? (
+            <div className="mt-12">
+              <h3 className="display mb-4 text-xl font-semibold tracking-tight text-ink">
+                Ítems que te pueden interesar
+              </h3>
+              <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
+                {suggested.map((p) => (
+                  <ProductCard
+                    key={p.id}
+                    product={p}
+                    quantity={items[p.id] ?? 0}
+                    onDec={() => update(p.id, -1)}
+                    onInc={() => update(p.id, 1)}
+                  />
+                ))}
+              </ul>
+            </div>
+          ) : null}
+        </>
+      )}
 
       {/* Sticky cart bar (mobile / smaller viewports) */}
       {totalItems > 0 ? (
