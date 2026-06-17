@@ -165,7 +165,7 @@ function SuperOrdersPage() {
                 onClick={() => setLocatingOrder(row.original)}
                 className="text-[0.7rem] uppercase tracking-[0.12em] text-brand hover:underline"
               >
-                {addr ? 'Editar ubicación' : '📍 Fijar ubicación'}
+                {addr ? '📍 Editar ubicación' : '📍 Fijar ubicación'}
               </button>
             </div>
           )
@@ -250,7 +250,7 @@ function SuperOrdersPage() {
                 className="text-[0.65rem] uppercase tracking-[0.12em] text-ink-muted hover:text-brand"
                 aria-label="Editar ubicación"
               >
-                Editar
+                📍 Editar
               </button>
             </div>
           )

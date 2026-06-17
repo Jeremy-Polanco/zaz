@@ -317,7 +317,7 @@ export default function SuperOrderDetailScreen() {
             >
               <Text className="font-sans-medium text-[11px] uppercase tracking-label text-ink">
                 {order.deliveryAddress
-                  ? 'Editar ubicación'
+                  ? '📍 Editar ubicación'
                   : '📍 Fijar ubicación'}
               </Text>
             </Pressable>

@@ -104,7 +104,7 @@ export function OrderAddressModal({
           </Button>
           {onEdit ? (
             <Button type="button" variant="accent" onClick={onEdit}>
-              Editar ubicación →
+              📍 Editar ubicación →
             </Button>
           ) : null}
         </div>

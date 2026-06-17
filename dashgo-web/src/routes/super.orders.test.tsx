@@ -59,7 +59,7 @@ function AddressCellDriver({ orders }: { orders: Order[] }) {
                 onClick={() => setLocatingOrder(order)}
                 data-testid={`addr-btn-${order.id}`}
               >
-                {addr ? 'Editar ubicación' : '📍 Fijar ubicación'}
+                {addr ? '📍 Editar ubicación' : '📍 Fijar ubicación'}
               </button>
             </div>
           </div>
