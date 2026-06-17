@@ -3,9 +3,14 @@ import { api, clearSession, setSession } from './api'
 import { getAccessToken } from './token-storage'
 import type {
   AdminCreditDetail,
+  AdminPlanResponse,
+  AdminRentalResponse,
+  AdminUser,
+  AdminUsersSubscriptionFilter,
   AuthorizedIntent,
   AuthUser,
   Category,
+  ChargeLateFeeResponse,
   CreateAddressInput,
   CreditAccountsPage,
   CreditMovementsPage,
@@ -14,6 +19,7 @@ import type {
   LoginResponse,
   MyCreditResponse,
   Order,
+  OrderStatus,
   Payout,
   PointsBalance,
   PointsEntry,
@@ -25,10 +31,12 @@ import type {
   PromoterMyStats,
   PromoterPublicInfo,
   Rental,
+  RentalFilter,
   ShippingQuote,
   Subscription,
   SubscriptionPlan,
   UpdateAddressInput,
+  UpdateSubscriptionPlanInput,
   UserAddress,
 } from './types'
 import type {
@@ -42,7 +50,6 @@ import type {
   SendOtpInput,
   VerifyOtpInput,
 } from './schemas'
-import type { OrderStatus } from './types'
 
 export type UpdateMeInput = {
   fullName?: string
@@ -869,6 +876,24 @@ export function useUsers() {
   })
 }
 
+/**
+ * Super-admin: GET /users?subscription= — users enriched with subscription
+ * status. `subscription` filters to 'active' or 'none'; omit for all users.
+ */
+export function useAdminUsers(subscription?: AdminUsersSubscriptionFilter) {
+  return useQuery<AdminUser[]>({
+    queryKey: ['users', 'admin', subscription ?? 'all'],
+    queryFn: async () => {
+      const q = new URLSearchParams()
+      if (subscription) q.set('subscription', subscription)
+      const qs = q.toString()
+      const { data } = await api.get<AdminUser[]>(qs ? `/users?${qs}` : '/users')
+      return data
+    },
+    staleTime: 30_000,
+  })
+}
+
 // ── Subscription hooks ────────────────────────────────────────────────────────
 
 /** Client: GET /me/subscription — current subscription or null */
@@ -934,6 +959,34 @@ export function useReactivateSubscription() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['me', 'subscription'] })
+    },
+  })
+}
+
+/** Super-admin: GET /admin/subscription/plan — current plan pricing (net + gross). */
+export function useAdminSubscriptionPlan() {
+  return useQuery<AdminPlanResponse>({
+    queryKey: ['admin', 'subscription', 'plan'],
+    queryFn: async () =>
+      (await api.get<AdminPlanResponse>('/admin/subscription/plan')).data,
+    staleTime: 30_000,
+  })
+}
+
+/** Super-admin: PUT /admin/subscription/plan — update the monthly net price. */
+export function useUpdateSubscriptionPlan() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (input: UpdateSubscriptionPlanInput) => {
+      const { data } = await api.put<AdminPlanResponse>(
+        '/admin/subscription/plan',
+        input,
+      )
+      return data
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['admin', 'subscription', 'plan'] })
+      qc.invalidateQueries({ queryKey: ['subscription', 'plan'] })
     },
   })
 }
@@ -1032,5 +1085,118 @@ export function useMyRentals() {
     queryKey: ['me', 'rentals'],
     queryFn: async () => (await api.get<Rental[]>('/me/rentals')).data,
     staleTime: 30_000,
+  })
+}
+
+// ── Admin rentals ───────────────────────────────────────────────────────────────
+
+/** Super-admin: GET /admin/rentals — paginated, filterable rental list. */
+export function useAdminRentals(filters: RentalFilter) {
+  return useQuery<AdminRentalResponse[]>({
+    queryKey: ['admin', 'rentals', filters],
+    queryFn: async () => {
+      const q = new URLSearchParams()
+      filters.status?.forEach((s) => q.append('status', s))
+      if (filters.userId) q.set('userId', filters.userId)
+      if (filters.productId) q.set('productId', filters.productId)
+      if (filters.page) q.set('page', String(filters.page))
+      if (filters.pageSize) q.set('pageSize', String(filters.pageSize))
+      const qs = q.toString()
+      const { data } = await api.get<{ items: AdminRentalResponse[] }>(
+        qs ? `/admin/rentals?${qs}` : '/admin/rentals',
+      )
+      return data.items
+    },
+    staleTime: 10_000,
+  })
+}
+
+/** Super-admin: POST /admin/rentals/:id/charge-late-fee — charge the late fee, optionally cancel. */
+export function useChargeLateFee() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async ({
+      rentalId,
+      alsoCancel,
+    }: {
+      rentalId: string
+      alsoCancel: boolean
+    }) => {
+      const { data } = await api.post<ChargeLateFeeResponse>(
+        `/admin/rentals/${rentalId}/charge-late-fee`,
+        { alsoCancel },
+      )
+      return data
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['admin', 'rentals'] })
+    },
+  })
+}
+
+/** Super-admin: POST /admin/rentals/:id/charge-theft-fee — charge the theft fee, optionally cancel. */
+export function useChargeTheftFee() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async ({
+      rentalId,
+      alsoCancel,
+    }: {
+      rentalId: string
+      alsoCancel: boolean
+    }) => {
+      const { data } = await api.post<ChargeLateFeeResponse>(
+        `/admin/rentals/${rentalId}/charge-theft-fee`,
+        { alsoCancel },
+      )
+      return data
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['admin', 'rentals'] })
+    },
+  })
+}
+
+/** Super-admin: POST /admin/rentals/:id/cancel — cancel the rental. */
+export function useCancelRental() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (rentalId: string) => {
+      const { data } = await api.post(`/admin/rentals/${rentalId}/cancel`)
+      return data
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['admin', 'rentals'] })
+    },
+  })
+}
+
+/** Super-admin: POST /admin/rentals/:id/retry-setup — retry a pending_setup rental. */
+export function useRetryRentalSetup() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (rentalId: string) => {
+      const { data } = await api.post(`/admin/rentals/${rentalId}/retry-setup`)
+      return data
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['admin', 'rentals'] })
+    },
+  })
+}
+
+/** Super-admin: POST /admin/rentals/:id/reset-maintenance — reset maintenance timer to +90d. */
+export function useResetMaintenance() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (rentalId: string) => {
+      const { data } = await api.post(
+        `/admin/rentals/${rentalId}/reset-maintenance`,
+      )
+      return data
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['admin', 'rentals'] })
+    },
   })
 }

@@ -18,6 +18,7 @@ import { productImageUrl } from '../../lib/api'
 import { formatCents } from '../../lib/format'
 import type { Product } from '../../lib/types'
 import { categorySelection } from '../../lib/category-selection'
+import { CategoryCard } from '../../components/CategoryCard'
 
 function QtyControl({
   qty,
@@ -396,6 +397,20 @@ export default function CatalogTab() {
 
   const q = query.trim().toLowerCase()
 
+  // Category-first: with no category selected and no active search, show the
+  // category picker instead of every product. Searching overrides the picker
+  // so a deliberate query can still match across the whole catalog.
+  const showPicker = activeSlug === null && q === ''
+
+  const productCountBySlug = useMemo(() => {
+    const m = new Map<string, number>()
+    for (const p of products ?? []) {
+      const slug = p.category?.slug
+      if (slug) m.set(slug, (m.get(slug) ?? 0) + 1)
+    }
+    return m
+  }, [products])
+
   const filtered = useMemo(() => {
     let list = products ?? []
     if (activeSlug) {
@@ -439,46 +454,45 @@ export default function CatalogTab() {
     )
   }
 
-  const renderHeader = () => (
-    <View>
-      {/* Search bar + view toggle */}
-      <View className="flex-row items-center gap-2.5 px-4 pb-3 pt-3">
-        <View className="h-10 flex-1 flex-row items-center gap-2 rounded-full border border-ink/15 bg-paper-deep px-3">
+  const renderSearchBar = () => (
+    <View className="flex-row items-center gap-2.5 px-4 pb-3 pt-3">
+      <View className="h-10 flex-1 flex-row items-center gap-2 rounded-full border border-ink/15 bg-paper-deep px-3">
+        <SymbolView
+          name={{ ios: 'magnifyingglass', android: 'search' }}
+          size={14}
+          tintColor="#6B6488"
+          resizeMode="scaleAspectFit"
+          fallback={<Text className="text-[14px] text-ink-muted">⌕</Text>}
+        />
+        <TextInput
+          value={query}
+          onChangeText={setQuery}
+          placeholder="Buscar productos…"
+          placeholderTextColor="#6B6488"
+          className="flex-1 font-sans text-[13px] text-ink"
+          autoCapitalize="none"
+          returnKeyType="search"
+        />
+        <Pressable className="p-1">
           <SymbolView
-            name={{ ios: 'magnifyingglass', android: 'search' }}
-            size={14}
+            name={{ ios: 'camera.fill', android: 'photo_camera' }}
+            size={16}
             tintColor="#6B6488"
             resizeMode="scaleAspectFit"
-            fallback={<Text className="text-[14px] text-ink-muted">⌕</Text>}
+            fallback={<Text className="text-ink-muted">📷</Text>}
           />
-          <TextInput
-            value={query}
-            onChangeText={setQuery}
-            placeholder="Buscar productos…"
-            placeholderTextColor="#6B6488"
-            className="flex-1 font-sans text-[13px] text-ink"
-            autoCapitalize="none"
-            returnKeyType="search"
+        </Pressable>
+        <Pressable className="p-1">
+          <SymbolView
+            name={{ ios: 'mic.fill', android: 'mic' }}
+            size={15}
+            tintColor="#6B6488"
+            resizeMode="scaleAspectFit"
+            fallback={<Text className="text-ink-muted">🎙</Text>}
           />
-          <Pressable className="p-1">
-            <SymbolView
-              name={{ ios: 'camera.fill', android: 'photo_camera' }}
-              size={16}
-              tintColor="#6B6488"
-              resizeMode="scaleAspectFit"
-              fallback={<Text className="text-ink-muted">📷</Text>}
-            />
-          </Pressable>
-          <Pressable className="p-1">
-            <SymbolView
-              name={{ ios: 'mic.fill', android: 'mic' }}
-              size={15}
-              tintColor="#6B6488"
-              resizeMode="scaleAspectFit"
-              fallback={<Text className="text-ink-muted">🎙</Text>}
-            />
-          </Pressable>
-        </View>
+        </Pressable>
+      </View>
+      {!showPicker && (
         <Pressable
           onPress={() => setViewMode((v) => (v === 'list' ? 'grid' : 'list'))}
           className="h-10 w-10 items-center justify-center border border-ink/15 bg-paper-deep"
@@ -496,9 +510,13 @@ export default function CatalogTab() {
             fallback={<Text className="text-ink">{viewMode === 'list' ? '▦' : '☰'}</Text>}
           />
         </Pressable>
-      </View>
+      )}
+    </View>
+  )
 
-      {/* Category chips */}
+  const renderListHeader = () => (
+    <View>
+      {/* Category chips — first chip returns to the category picker */}
       {(categories?.length ?? 0) > 0 && (
         <ScrollView
           horizontal
@@ -507,9 +525,12 @@ export default function CatalogTab() {
           className="border-b border-ink/10"
         >
           <CategoryChip
-            active={activeSlug === null}
-            onPress={() => setActiveSlug(null)}
-            label="Todos"
+            active={false}
+            onPress={() => {
+              setActiveSlug(null)
+              setQuery('')
+            }}
+            label="‹ Categorías"
           />
           {(categories ?? []).map((c) => (
             <CategoryChip
@@ -549,6 +570,46 @@ export default function CatalogTab() {
     </View>
   )
 
+  const renderPicker = () => (
+    <ScrollView contentContainerClassName="px-4 pb-40" keyboardShouldPersistTaps="handled">
+      <View className="pb-1 pt-2">
+        <Text className="font-sans text-[10px] uppercase tracking-eyebrow text-ink-muted">
+          {neighborhood}
+        </Text>
+        <Text className="mt-0.5 font-sans-semibold text-[15px] tracking-tight text-ink">
+          {firstName ? `Hola, ${firstName}.` : 'Hola.'}
+        </Text>
+        <Text className="mt-3 font-sans-semibold text-[20px] tracking-tight text-ink">
+          Elegí una categoría
+        </Text>
+      </View>
+      {(categories?.length ?? 0) === 0 ? (
+        <View className="items-center px-8 py-16">
+          <Text className="font-sans text-[10px] uppercase tracking-eyebrow text-ink-muted">
+            Sin categorías
+          </Text>
+          <Text className="mt-3 text-center text-[14px] text-ink-soft">
+            Aún no hay categorías disponibles.
+          </Text>
+        </View>
+      ) : (
+        <View className="mt-3 flex-row flex-wrap" style={{ gap: 8 }}>
+          {(categories ?? []).map((c, i) => (
+            <View key={c.id} style={{ width: '48.5%' }}>
+              <CategoryCard
+                category={c}
+                productCount={productCountBySlug.get(c.slug) ?? 0}
+                variant="category"
+                dark={i === 0}
+                onPress={() => setActiveSlug(c.slug)}
+              />
+            </View>
+          ))}
+        </View>
+      )}
+    </ScrollView>
+  )
+
   const renderFooter = () => {
     if (viewMode !== 'grid' || q !== '' || suggested.length === 0) return null
     return (
@@ -575,22 +636,26 @@ export default function CatalogTab() {
 
   return (
     <SafeAreaView edges={['top']} className="flex-1 bg-paper">
-      <FlatList
-        key={viewMode}
-        data={viewMode === 'grid' ? gridData : filtered}
-        keyExtractor={(p) => p.id}
-        numColumns={viewMode === 'grid' ? 2 : 1}
-        columnWrapperStyle={
-          viewMode === 'grid'
-            ? { gap: 8, paddingHorizontal: 8, marginBottom: 8 }
-            : undefined
-        }
-        contentContainerClassName={viewMode === 'grid' ? 'pb-40' : 'px-5 pb-40'}
-        ItemSeparatorComponent={
-          viewMode === 'list' ? () => <View className="h-px bg-ink/10" /> : undefined
-        }
-        ListHeaderComponent={renderHeader}
-        renderItem={({ item }) => {
+      {renderSearchBar()}
+      {showPicker ? (
+        renderPicker()
+      ) : (
+        <FlatList
+          key={viewMode}
+          data={viewMode === 'grid' ? gridData : filtered}
+          keyExtractor={(p) => p.id}
+          numColumns={viewMode === 'grid' ? 2 : 1}
+          columnWrapperStyle={
+            viewMode === 'grid'
+              ? { gap: 8, paddingHorizontal: 8, marginBottom: 8 }
+              : undefined
+          }
+          contentContainerClassName={viewMode === 'grid' ? 'pb-40' : 'px-5 pb-40'}
+          ItemSeparatorComponent={
+            viewMode === 'list' ? () => <View className="h-px bg-ink/10" /> : undefined
+          }
+          ListHeaderComponent={renderListHeader}
+          renderItem={({ item }) => {
           if (item.id === SPACER_ID) return <View style={{ flex: 1 }} />
           return viewMode === 'list' ? (
             <ProductRow product={item} qty={cartState.items[item.id] ?? 0} />
@@ -612,11 +677,12 @@ export default function CatalogTab() {
             </Text>
           </View>
         }
-        ListFooterComponent={renderFooter}
-        refreshing={isRefetching}
-        onRefresh={refetch}
-        keyboardShouldPersistTaps="handled"
-      />
+          ListFooterComponent={renderFooter}
+          refreshing={isRefetching}
+          onRefresh={refetch}
+          keyboardShouldPersistTaps="handled"
+        />
+      )}
 
       {itemsCount > 0 && (
         <View className="absolute bottom-20 left-3 right-3 flex-row items-center gap-3 bg-ink px-3 py-3">

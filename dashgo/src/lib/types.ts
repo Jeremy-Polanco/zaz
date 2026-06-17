@@ -131,6 +131,42 @@ export interface Rental {
   lastMaintenanceAt: string | null
 }
 
+/** Super-admin rental row, enriched with operational + customer detail. Mirrors web. */
+export interface AdminRentalResponse {
+  id: string
+  userId: string
+  userName: string
+  userPhone: string | null
+  productId: string
+  productName: string
+  status: RentalStatus
+  monthlyRentCents: number
+  lateFeeCents: number
+  theftFeeCents: number
+  theftFeeChargedAt: string | null
+  stripeSubscriptionId: string | null
+  currentPeriodEnd: string | null
+  activatedAt: string | null
+  canceledAt: string | null
+  nextMaintenanceAt: string | null
+  daysDelinquent: number
+  createdAt: string
+}
+
+export type RentalFilter = {
+  status?: string[]
+  userId?: string
+  productId?: string
+  page?: number
+  pageSize?: number
+}
+
+export type ChargeLateFeeResponse = {
+  chargedCents: number
+  paymentIntentId: string
+  subscriptionCanceled: boolean
+}
+
 export interface OrderItem {
   id: string
   orderId: string
@@ -416,6 +452,41 @@ export interface SubscriptionPlan {
   currency: 'usd'
   interval: 'month'
 }
+
+// ── Admin: subscription plan editor ─────────────────────────────────────────────
+
+export interface AdminPlanResponse {
+  id: string
+  stripeProductId: string
+  activeStripePriceId: string
+  /** Net (pre-tax) price — the editable source of truth. */
+  unitAmountCents: number
+  /** Tax-inclusive price actually charged in Stripe. */
+  grossAmountCents: number
+  currency: string
+  interval: string
+  updatedAt: string
+}
+
+export interface UpdateSubscriptionPlanInput {
+  unitAmountCents: number
+}
+
+// ── Admin: users ────────────────────────────────────────────────────────────────
+
+export interface AdminUser {
+  id: string
+  email: string | null
+  fullName: string
+  phone: string | null
+  role: UserRole
+  referralCode: string | null
+  createdAt: string
+  hasActiveSubscription: boolean
+  subscriptionStatus: string | null
+}
+
+export type AdminUsersSubscriptionFilter = 'active' | 'none'
 
 // ── User Addresses ────────────────────────────────────────────────────────────
 

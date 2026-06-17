@@ -7,6 +7,7 @@
  *   3. Single-payment product does NOT show rental badge
  */
 import React from 'react'
+import { fireEvent } from '@testing-library/react-native'
 import { renderWithProviders } from '../../test/test-utils'
 
 // ── module mocks ──────────────────────────────────────────────────────────────
@@ -98,7 +99,14 @@ function makeProduct(overrides: Partial<Product> = {}): Product {
     createdAt: '2024-01-01T00:00:00Z',
     promoterCommissionPct: '0',
     pointsPct: '0',
-    categoryId: null,
+    categoryId: 'cat-1',
+    category: {
+      id: 'cat-1',
+      name: 'Bebederos',
+      slug: 'bebederos',
+      iconEmoji: null,
+      displayOrder: 0,
+    },
     displayOrder: 0,
     offerLabel: null,
     offerDiscountPct: null,
@@ -121,7 +129,15 @@ function setupMocks(products: Product[]) {
   } as unknown as ReturnType<typeof useProducts>)
 
   mockUseCategories.mockReturnValue({
-    data: [],
+    data: [
+      {
+        id: 'cat-1',
+        name: 'Bebederos',
+        slug: 'bebederos',
+        iconEmoji: null,
+        displayOrder: 0,
+      },
+    ],
     isPending: false,
   } as unknown as ReturnType<typeof useCategories>)
 
@@ -138,6 +154,8 @@ afterEach(() => {
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 describe('CatalogTab — rental badge', () => {
+  // The catalog is category-first: products only render after a category is
+  // picked. Each test enters the "Bebederos" category before asserting.
   it('shows "Alquiler" text for a rental product', () => {
     const rentalProduct = makeProduct({
       id: 'rental-1',
@@ -148,6 +166,7 @@ describe('CatalogTab — rental badge', () => {
     })
     setupMocks([rentalProduct])
     const { getByText } = renderWithProviders(<CatalogTab />)
+    fireEvent.press(getByText('Bebederos'))
     expect(getByText(/Alquiler/)).toBeTruthy()
   })
 
@@ -161,6 +180,7 @@ describe('CatalogTab — rental badge', () => {
     })
     setupMocks([rentalProduct])
     const { getByText } = renderWithProviders(<CatalogTab />)
+    fireEvent.press(getByText('Bebederos'))
     // Should show something like "Alquiler $20/mes"
     expect(getByText(/\$20/)).toBeTruthy()
   })
@@ -172,7 +192,8 @@ describe('CatalogTab — rental badge', () => {
       pricingMode: 'single_payment',
     })
     setupMocks([singleProduct])
-    const { queryByText } = renderWithProviders(<CatalogTab />)
+    const { getByText, queryByText } = renderWithProviders(<CatalogTab />)
+    fireEvent.press(getByText('Bebederos'))
     expect(queryByText(/Alquiler/)).toBeNull()
   })
 
@@ -184,7 +205,8 @@ describe('CatalogTab — rental badge', () => {
     // Remove pricingMode entirely
     delete (noModeProduct as Partial<Product>).pricingMode
     setupMocks([noModeProduct])
-    const { queryByText } = renderWithProviders(<CatalogTab />)
+    const { getByText, queryByText } = renderWithProviders(<CatalogTab />)
+    fireEvent.press(getByText('Bebederos'))
     expect(queryByText(/Alquiler/)).toBeNull()
   })
 })
