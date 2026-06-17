@@ -13,6 +13,16 @@ import {
 import { formatDate } from '../lib/utils'
 import { TOKEN_KEY } from '../lib/api'
 
+/**
+ * The subscription perks, in one place (web↔mobile parity — mirrored in
+ * dashgo/src/app/(tabs)/subscription.tsx). The free bebedero is a real benefit:
+ * the API auto-provisions a $0 order for the product flagged
+ * isDefaultSubscriberBebedero when a subscription activates
+ * (dashgo-api .../orders/subscriber-bebedero.listener.ts), so we advertise it.
+ */
+export const SUBSCRIPTION_PERKS =
+  'Bebedero gratis, envío gratis y mantenimiento sin costo.'
+
 export const Route = createFileRoute('/subscription')({
   validateSearch: z.object({
     session: z.enum(['success', 'canceled']).optional(),
@@ -58,14 +68,13 @@ function SubscriptionPage() {
             Mi <span className="italic text-brand">suscripción.</span>
           </>
         }
-        subtitle="Envío gratis y mantenimiento del bebedero sin costo."
+        subtitle={SUBSCRIPTION_PERKS}
       />
 
       {session === 'success' && (
         <div className="mb-6 border border-green-200 bg-green-50 px-5 py-4">
           <p className="text-sm font-medium text-green-800">
-            ¡Suscripción activada! Ya puedes disfrutar de envío gratis y
-            mantenimiento del bebedero sin costo.
+            {`¡Suscripción activada! ${SUBSCRIPTION_PERKS}`}
           </p>
         </div>
       )}
@@ -77,8 +86,7 @@ function SubscriptionPage() {
             ${plan ? (plan.priceCents / 100).toFixed(2) : '10.00'} / mes
           </p>
           <p className="mb-6 text-base text-ink-muted">
-            Impuestos incluidos · Envío gratis y mantenimiento del bebedero sin
-            costo. Cancela cuando quieras.
+            {`Impuestos incluidos · ${SUBSCRIPTION_PERKS} Cancela cuando quieras.`}
           </p>
           <Button
             variant="accent"
@@ -123,8 +131,7 @@ function SubscriptionPage() {
             Activo hasta {formatDate(sub.currentPeriodEnd)}, no se renovará.
           </p>
           <p className="mb-6 text-sm text-yellow-700">
-            Aún tienes envío gratis y mantenimiento del bebedero sin costo hasta
-            esa fecha.
+            Aún tienes envío gratis y mantenimiento sin costo hasta esa fecha.
           </p>
           <div className="flex flex-wrap gap-3">
             <Button
@@ -148,7 +155,7 @@ function SubscriptionPage() {
         <div className="border border-red-200 bg-red-50 p-8">
           <p className="mb-2 text-base font-medium text-red-800">
             Tu pago está pendiente. Actualizá tu medio de pago para seguir con
-            el envío gratis y el mantenimiento del bebedero sin costo.
+            el envío gratis y el mantenimiento sin costo.
           </p>
           <Button
             variant="accent"

@@ -17,6 +17,15 @@ import { Button, Eyebrow, Hairline } from '../../components/ui'
 const SUCCESS_URL = 'dashgo://subscription?success=1'
 const CANCEL_URL = 'dashgo://subscription?cancel=1'
 
+/**
+ * The subscription perks, in one place (web↔mobile parity — mirrored in
+ * dashgo-web/src/routes/subscription.tsx). The free bebedero is a real benefit:
+ * the API auto-provisions a $0 order for the product flagged
+ * isDefaultSubscriberBebedero when a subscription activates, so we advertise it.
+ */
+export const SUBSCRIPTION_PERKS =
+  'Bebedero gratis, envío gratis y mantenimiento sin costo.'
+
 export default function SubscriptionTab() {
   const params = useLocalSearchParams<{ success?: string; cancel?: string }>()
   const { data: sub, isPending: subPending, refetch } = useMySubscription()
@@ -93,14 +102,13 @@ export default function SubscriptionTab() {
           </Text>
         </View>
         <Text className="mt-2 text-[13px] text-ink-soft">
-          Envío gratis y mantenimiento del bebedero sin costo.
+          {SUBSCRIPTION_PERKS}
         </Text>
 
         {toastVisible && (
           <View className="mt-4 border border-green-200 bg-green-50 px-4 py-3">
             <Text className="font-sans text-[12px] text-green-800">
-              ¡Suscripción activada! Ya puedes disfrutar de envío gratis y
-              mantenimiento del bebedero sin costo.
+              {`¡Suscripción activada! ${SUBSCRIPTION_PERKS}`}
             </Text>
           </View>
         )}
@@ -114,8 +122,7 @@ export default function SubscriptionTab() {
               {plan ? formatCents(plan.priceCents) : '$10.00'} / mes
             </Text>
             <Text className="mt-2 text-[14px] text-ink-soft">
-              Impuestos incluidos · Envío gratis y mantenimiento del bebedero
-              sin costo. Cancela cuando quieras.
+              {`Impuestos incluidos · ${SUBSCRIPTION_PERKS} Cancela cuando quieras.`}
             </Text>
             <View className="mt-5">
               <Button
@@ -159,8 +166,7 @@ export default function SubscriptionTab() {
               Activo hasta {formatDate(sub.currentPeriodEnd)}, no se renovará.
             </Text>
             <Text className="mt-1 text-[13px] text-yellow-700">
-              Aún tienes envío gratis y mantenimiento del bebedero sin costo
-              hasta esa fecha.
+              Aún tienes envío gratis y mantenimiento sin costo hasta esa fecha.
             </Text>
             <View className="mt-5 gap-3">
               <Button
@@ -182,7 +188,7 @@ export default function SubscriptionTab() {
             </Text>
             <Text className="mt-1 text-[13px] text-red-700">
               Actualizá tu medio de pago para seguir con el envío gratis y el
-              mantenimiento del bebedero sin costo.
+              mantenimiento sin costo.
             </Text>
             <View className="mt-5">
               <Button onPress={openPortal} disabled={portal.isPending}>

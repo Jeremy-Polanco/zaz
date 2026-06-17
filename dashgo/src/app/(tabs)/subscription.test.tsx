@@ -88,7 +88,7 @@ import {
   useReactivateSubscription,
 } from '../../lib/queries'
 import { useLocalSearchParams, useFocusEffect } from 'expo-router'
-import SubscriptionTab from './subscription'
+import SubscriptionTab, { SUBSCRIPTION_PERKS } from './subscription'
 import type { Subscription, SubscriptionPlan } from '../../lib/types'
 
 // ── typed mock helpers ────────────────────────────────────────────────────────
@@ -172,12 +172,21 @@ describe('SubscriptionTab — state: loading', () => {
   })
 })
 
+describe('subscription perks copy', () => {
+  it('advertises the free bebedero alongside the other perks', () => {
+    expect(SUBSCRIPTION_PERKS).toMatch(/bebedero/i)
+    expect(SUBSCRIPTION_PERKS).toMatch(/gratis/i)
+  })
+})
+
 describe('SubscriptionTab — state: none (no subscription)', () => {
   it('shows subscription plan price and subscribe button', () => {
     setupMocks({ data: null })
     const { getByText } = renderWithProviders(<SubscriptionTab />)
     expect(getByText('$10.00 / mes')).toBeTruthy()
     expect(getByText('Suscribirme')).toBeTruthy()
+    // The free bebedero perk must be advertised on the acquisition surface
+    expect(getByText(SUBSCRIPTION_PERKS)).toBeTruthy()
   })
 })
 

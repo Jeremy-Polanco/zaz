@@ -13,6 +13,12 @@ vi.mock('../lib/queries', () => ({
   useReactivateSubscription: vi.fn(),
 }))
 vi.mock('../lib/api', () => ({ api: { get: vi.fn() }, TOKEN_KEY: 'dashgo.token' }))
+// Stub createFileRoute so we can import the real subscription module (for the
+// exported perks copy) without a full router context.
+vi.mock('@tanstack/react-router', () => ({
+  createFileRoute: () => () => ({}),
+  redirect: vi.fn(),
+}))
 
 import {
   useMySubscription,
@@ -22,6 +28,7 @@ import {
   useCancelSubscription,
   useReactivateSubscription,
 } from '../lib/queries'
+import { SUBSCRIPTION_PERKS } from './subscription'
 
 const mockSub = vi.mocked(useMySubscription)
 const mockPlan = vi.mocked(useSubscriptionPlan)
@@ -169,6 +176,13 @@ function SubscriptionStateDriver({ session }: { session?: 'success' | 'canceled'
     </div>
   )
 }
+
+describe('subscription perks copy', () => {
+  it('advertises the free bebedero alongside the other perks', () => {
+    expect(SUBSCRIPTION_PERKS).toMatch(/bebedero/i)
+    expect(SUBSCRIPTION_PERKS).toMatch(/gratis/i)
+  })
+})
 
 describe('subscription route — all 5 states', () => {
   beforeEach(() => {
