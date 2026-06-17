@@ -63,8 +63,10 @@ export function MaintenanceBanner() {
         | undefined
     )?.response?.data?.message ?? 'No pudimos crear la orden. Intentá de nuevo.'
 
+  // w-full defeats the flex-parent auto-margin shrink; max-w-6xl + px-6 match
+  // the catalog products container so the banner lines up with it exactly.
   return (
-    <div className="mx-auto max-w-7xl px-6 pt-6">
+    <div className="mx-auto w-full max-w-6xl px-6 pt-6">
       {overdue ? (
         <div className="border-l-4 border-bad bg-bad/5 p-5">
           <p className="display text-xl font-semibold text-ink">
