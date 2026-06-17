@@ -3,10 +3,11 @@ import { useMemo, useState } from 'react'
 import { DataTable } from '../components/DataTable'
 import { QuoteDrawer } from '../components/QuoteDrawer'
 import { OrderLocationDrawer } from '../components/OrderLocationDrawer'
+import { OrderAddressModal } from '../components/OrderAddressModal'
 import { Button, SectionHeading } from '../components/ui'
 import { useOrders, useUpdateOrderStatus } from '../lib/queries'
 import { formatDate, formatMoney } from '../lib/utils'
-import { formatAddressShort } from '../lib/address'
+import { formatAddressLine } from '../lib/address'
 import type { Order, OrderStatus } from '../lib/types'
 import type { ColumnDef } from '@tanstack/react-table'
 import { TOKEN_KEY, api } from '../lib/api'
@@ -83,6 +84,7 @@ function SuperOrdersPage() {
   const updateStatus = useUpdateOrderStatus()
   const [quotingOrder, setQuotingOrder] = useState<Order | null>(null)
   const [locatingOrder, setLocatingOrder] = useState<Order | null>(null)
+  const [detailOrder, setDetailOrder] = useState<Order | null>(null)
   const [listFilter, setListFilter] = useState<ListFilter>('pending')
 
   const activeStatuses: OrderStatus[] = [
@@ -139,20 +141,33 @@ function SuperOrdersPage() {
         header: 'Dirección',
         accessorFn: (row) =>
           row.deliveryAddress
-            ? formatAddressShort(row.deliveryAddress)
+            ? formatAddressLine(row.deliveryAddress)
             : 'Sin ubicación',
         cell: ({ getValue, row }) => {
           const addr = row.original.deliveryAddress
-          return addr ? (
-            <span className="text-ink-soft">{getValue<string>()}</span>
-          ) : (
-            <button
-              type="button"
-              onClick={() => setLocatingOrder(row.original)}
-              className="text-[0.7rem] uppercase tracking-[0.12em] text-brand hover:underline"
-            >
-              📍 Fijar ubicación
-            </button>
+          // Show the combined line (address · building · apto/piso). Clicking it
+          // opens the read-only details modal. The button stays available even
+          // once an address exists, so the colmado can re-pin or add another
+          // saved location (parity with the mobile "Fijar/Editar" toggle).
+          return (
+            <div className="flex flex-col items-start gap-1">
+              {addr && (
+                <button
+                  type="button"
+                  onClick={() => setDetailOrder(row.original)}
+                  className="text-left text-ink-soft hover:underline"
+                >
+                  {getValue<string>()}
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => setLocatingOrder(row.original)}
+                className="text-[0.7rem] uppercase tracking-[0.12em] text-brand hover:underline"
+              >
+                {addr ? 'Editar ubicación' : '📍 Fijar ubicación'}
+              </button>
+            </div>
           )
         },
       },
@@ -415,6 +430,17 @@ function SuperOrdersPage() {
         <OrderLocationDrawer
           order={locatingOrder}
           onClose={() => setLocatingOrder(null)}
+        />
+      )}
+
+      {detailOrder && (
+        <OrderAddressModal
+          order={detailOrder}
+          onClose={() => setDetailOrder(null)}
+          onEdit={() => {
+            setLocatingOrder(detailOrder)
+            setDetailOrder(null)
+          }}
         />
       )}
     </>

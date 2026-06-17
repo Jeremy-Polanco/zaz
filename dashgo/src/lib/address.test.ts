@@ -4,6 +4,7 @@
  */
 import {
   formatAddressShort,
+  formatAddressLine,
   addressDetailParts,
   userAddressToGeoAddress,
 } from './address'
@@ -59,6 +60,39 @@ describe('formatAddressShort', () => {
   it('handles a missing address', () => {
     expect(formatAddressShort(null)).toBe('Sin ubicación')
     expect(formatAddressShort({ text: '' })).toBe('Sin ubicación')
+  })
+})
+
+describe('formatAddressLine', () => {
+  it('joins address, building and apto/piso with " · "', () => {
+    expect(
+      formatAddressLine({
+        ...base,
+        building: 'Edif. 4',
+        unit: 'Apto 3B',
+      }),
+    ).toBe('Calle Duarte 100, Santo Domingo · Edif. 4 · Apto 3B')
+  })
+
+  it('shows just the address line when there is no building or unit', () => {
+    expect(formatAddressLine(base)).toBe('Calle Duarte 100, Santo Domingo')
+  })
+
+  it('falls back to the house number when there is no free-text', () => {
+    expect(
+      formatAddressLine({ text: '', houseNumber: '24', unit: 'Apto 3B' }),
+    ).toBe('Casa 24 · Apto 3B')
+  })
+
+  it('ignores whitespace-only building and unit', () => {
+    expect(formatAddressLine({ ...base, building: '  ', unit: '  ' })).toBe(
+      'Calle Duarte 100, Santo Domingo',
+    )
+  })
+
+  it('handles a missing address', () => {
+    expect(formatAddressLine(null)).toBe('Sin ubicación')
+    expect(formatAddressLine({ text: '' })).toBe('Sin ubicación')
   })
 })
 

@@ -14,6 +14,7 @@ import { router } from 'expo-router'
 import { SymbolView } from 'expo-symbols'
 import { useOrders, useUpdateOrderStatus } from '../../lib/queries'
 import { formatDate, formatMoney } from '../../lib/format'
+import { formatAddressLine } from '../../lib/address'
 import type { GeoAddress, Order, OrderStatus } from '../../lib/types'
 import { Button, Eyebrow, Hairline, KpiCard } from '../../components/ui'
 import { SuscriptorBadge } from '../../components/SuscriptorBadge'
@@ -87,7 +88,9 @@ function OrderCard({
               {order.customer?.fullName ?? 'Cliente'}
             </Text>
             <Text className="mt-0.5 text-[13px] text-ink-soft">
-              {order.deliveryAddress?.text ?? 'A coordinar'}
+              {order.deliveryAddress
+                ? formatAddressLine(order.deliveryAddress)
+                : 'A coordinar'}
             </Text>
           </View>
           <View className="items-end gap-2">

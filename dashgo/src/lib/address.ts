@@ -53,6 +53,25 @@ export function formatAddressShort(
 }
 
 /**
+ * One-line address for the orders list: the street / free-text line, then the
+ * building and the apartment/floor, joined with " · " (e.g. "Calle 1, Casa 24 ·
+ * Edif. 4 · Apto 3B"). Falls back to the house number when there's no free-text,
+ * and to "Sin ubicación" when empty. Use addressDetailParts() for the full
+ * breakdown (reference, etc.) shown in the order detail.
+ */
+export function formatAddressLine(
+  addr: GeoAddress | null | undefined,
+): string {
+  if (!addr) return 'Sin ubicación'
+  const house = clean(addr.houseNumber)
+  const primary = clean(addr.text) || (house ? `Casa ${house}` : '')
+  const segments = [primary, clean(addr.building), clean(addr.unit)].filter(
+    Boolean,
+  )
+  return segments.length ? segments.join(' · ') : 'Sin ubicación'
+}
+
+/**
  * Full set of structured address fields for the order detail view, in the
  * order a driver reads them. Render-agnostic so web and mobile share the labels
  * and the empty-field skipping. The free-text `text` is shown separately.
