@@ -11,6 +11,7 @@ import { SafeAreaView } from 'react-native-safe-area-context'
 import { useAdminUsers } from '../../lib/queries'
 import type { AdminUser, AdminUsersSubscriptionFilter, UserRole } from '../../lib/types'
 import { Eyebrow, Hairline, SectionHead } from '../../components/ui'
+import { UserAddressesPanel } from '../../components/UserAddressesPanel'
 
 const ROLE_LABELS: Record<UserRole, string> = {
   client: 'Cliente',
@@ -46,6 +47,7 @@ function SubscriptionBadge({ active }: { active: boolean }) {
 }
 
 function UserRow({ item }: { item: AdminUser }) {
+  const [expanded, setExpanded] = useState(false)
   return (
     <View className="border-b border-ink/10 py-4">
       <View className="flex-row items-start justify-between gap-3">
@@ -62,10 +64,20 @@ function UserRow({ item }: { item: AdminUser }) {
             </Text>
           ) : null}
         </View>
-        <View className="items-end">
+        <View className="items-end gap-2">
           <SubscriptionBadge active={item.hasActiveSubscription} />
+          <Pressable onPress={() => setExpanded((v) => !v)} hitSlop={8}>
+            <Text className="font-sans text-[10px] uppercase tracking-label text-brand">
+              {expanded ? 'Ocultar' : 'Direcciones'}
+            </Text>
+          </Pressable>
         </View>
       </View>
+      {expanded ? (
+        <View className="mt-3">
+          <UserAddressesPanel userId={item.id} />
+        </View>
+      ) : null}
     </View>
   )
 }

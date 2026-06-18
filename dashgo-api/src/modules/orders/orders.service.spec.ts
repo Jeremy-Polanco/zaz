@@ -18,6 +18,7 @@ import { getRepositoryToken } from '@nestjs/typeorm';
 import { DataSource, EntityManager, Repository } from 'typeorm';
 import { OrdersService } from './orders.service';
 import { Order, OrderItem, Product } from '../../entities';
+import { UserAddress } from '../../entities/user-address.entity';
 import { OrderStatus, PaymentMethod, UserRole } from '../../entities/enums';
 import { AuthenticatedUser } from '../../common/types/authenticated-user';
 import { PaymentsService } from '../payments/payments.service';
@@ -133,6 +134,7 @@ describe('OrdersService', () => {
   let ordersRepo: jest.Mocked<Repository<Order>>;
   let itemsRepo: jest.Mocked<Repository<OrderItem>>;
   let productsRepo: jest.Mocked<Repository<Product>>;
+  let userAddressesRepo: jest.Mocked<Repository<UserAddress>>;
   let dataSource: jest.Mocked<DataSource>;
   let paymentsService: jest.Mocked<PaymentsService>;
   let pointsService: jest.Mocked<PointsService>;
@@ -148,6 +150,7 @@ describe('OrdersService', () => {
     ordersRepo = makeRepoMock<Order>();
     itemsRepo = makeRepoMock<OrderItem>();
     productsRepo = makeRepoMock<Product>();
+    userAddressesRepo = makeRepoMock<UserAddress>();
 
     paymentsService = {
       createAuthorizationIntent: jest.fn(),
@@ -217,6 +220,7 @@ describe('OrdersService', () => {
         { provide: getRepositoryToken(Order), useValue: ordersRepo },
         { provide: getRepositoryToken(OrderItem), useValue: itemsRepo },
         { provide: getRepositoryToken(Product), useValue: productsRepo },
+        { provide: getRepositoryToken(UserAddress), useValue: userAddressesRepo },
         { provide: DataSource, useValue: dataSource },
         { provide: PaymentsService, useValue: paymentsService },
         { provide: PointsService, useValue: pointsService },
@@ -921,6 +925,186 @@ describe('OrdersService', () => {
       })();
 
       expect(capturedSubtotal).toBe('5.00'); // 500 cents / 100
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Address book: auto-save first pinned location + auto-inherit default
+  // ─────────────────────────────────────────────────────────────────────────
+
+  describe('setDeliveryAddress — auto-save first location to customer', () => {
+    const admin = fakeUser(UserRole.SUPER_ADMIN_DELIVERY);
+    const address = {
+      text: 'Calle 1',
+      lat: 18.48,
+      lng: -69.93,
+      building: 'Edif. 4',
+      houseNumber: '24',
+      unit: 'Apto 3B',
+      reference: 'frente al colmado',
+    } as import('./dto/create-order.dto').DeliveryAddressDto;
+
+    it('auto-saves the first location as the customer default with full detail', async () => {
+      ordersRepo.findOne.mockResolvedValue(fakeOrder({ customerId: 'cust-9' }));
+      ordersRepo.update.mockResolvedValue({ affected: 1 } as never);
+      userAddressesRepo.count.mockResolvedValue(0);
+      userAddressesRepo.save.mockResolvedValue({} as never);
+
+      await service.setDeliveryAddress('order-1', address, admin);
+
+      expect(userAddressesRepo.count).toHaveBeenCalledWith({
+        where: { userId: 'cust-9' },
+      });
+      expect(userAddressesRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          userId: 'cust-9',
+          line1: 'Calle 1',
+          line2: 'Apto 3B',
+          building: 'Edif. 4',
+          instructions: 'frente al colmado',
+          lat: 18.48,
+          lng: -69.93,
+          isDefault: true,
+        }),
+      );
+      expect(userAddressesRepo.save).toHaveBeenCalledTimes(1);
+    });
+
+    it('does NOT auto-save when the customer already has saved addresses', async () => {
+      ordersRepo.findOne.mockResolvedValue(fakeOrder({ customerId: 'cust-9' }));
+      ordersRepo.update.mockResolvedValue({ affected: 1 } as never);
+      userAddressesRepo.count.mockResolvedValue(2);
+
+      await service.setDeliveryAddress('order-1', address, admin);
+
+      expect(userAddressesRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('still persists the order location even if the auto-save throws', async () => {
+      ordersRepo.findOne.mockResolvedValue(fakeOrder({ customerId: 'cust-9' }));
+      ordersRepo.update.mockResolvedValue({ affected: 1 } as never);
+      userAddressesRepo.count.mockResolvedValue(0);
+      userAddressesRepo.save.mockRejectedValue(new Error('db down'));
+
+      await expect(
+        service.setDeliveryAddress('order-1', address, admin),
+      ).resolves.toBeDefined();
+      expect(ordersRepo.update).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('create — auto-inherit customer default address', () => {
+    const product = fakeProduct({
+      id: 'prod-water',
+      priceToPublic: '5.00',
+      pricingMode: 'single_payment',
+    });
+
+    it('fills deliveryAddress from the customer default when none is provided', async () => {
+      productsRepo.find.mockResolvedValue([product]);
+      setupMixedCartCreateTx([product]);
+      userAddressesRepo.findOne.mockResolvedValue({
+        id: 'a1',
+        userId: 'user-1',
+        label: 'Casa',
+        line1: 'Calle Duarte 100',
+        line2: 'Apto 3B',
+        building: 'Torre B',
+        lat: 18.47,
+        lng: -69.9,
+        instructions: 'frente al colmado',
+        isDefault: true,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      } as UserAddress);
+
+      const dtoNoAddr = {
+        items: [{ productId: 'prod-water', quantity: 1 }],
+        paymentMethod: PaymentMethod.CASH,
+        usePoints: false,
+        useCredit: false,
+      } as import('./dto/create-order.dto').CreateOrderDto;
+
+      await service.create(fakeUser(UserRole.CLIENT), dtoNoAddr);
+
+      const txCallback = (dataSource.transaction as jest.Mock).mock
+        .calls[0][0] as (mgr: EntityManager) => Promise<unknown>;
+      let capturedAddress: Order['deliveryAddress'] | undefined;
+
+      await (async () => {
+        const orderRepo = makeRepoMock<Order>();
+        const itemRepo = makeRepoMock<OrderItem>();
+        orderRepo.create.mockImplementation((d) => {
+          capturedAddress = (d as Partial<Order>).deliveryAddress;
+          return { ...d, id: 'order-1' } as Order;
+        });
+        orderRepo.save.mockResolvedValue(fakeOrder());
+        orderRepo.update.mockResolvedValue({ affected: 1 } as never);
+        itemRepo.save.mockResolvedValue({} as never);
+        itemRepo.create.mockImplementation((d) => d as OrderItem);
+        const mgr = {
+          getRepository: (entity: unknown) => {
+            if (entity === Order) return orderRepo;
+            if (entity === OrderItem) return itemRepo;
+            return makeRepoMock();
+          },
+        };
+        await txCallback(mgr as unknown as EntityManager);
+      })();
+
+      expect(capturedAddress).toEqual({
+        text: 'Calle Duarte 100, Apto 3B',
+        lat: 18.47,
+        lng: -69.9,
+        building: 'Torre B',
+        houseNumber: null,
+        unit: null,
+        reference: 'frente al colmado',
+      });
+    });
+
+    it('leaves deliveryAddress null when the customer has no default', async () => {
+      productsRepo.find.mockResolvedValue([product]);
+      setupMixedCartCreateTx([product]);
+      userAddressesRepo.findOne.mockResolvedValue(null);
+
+      const dtoNoAddr = {
+        items: [{ productId: 'prod-water', quantity: 1 }],
+        paymentMethod: PaymentMethod.CASH,
+        usePoints: false,
+        useCredit: false,
+      } as import('./dto/create-order.dto').CreateOrderDto;
+
+      await service.create(fakeUser(UserRole.CLIENT), dtoNoAddr);
+
+      const txCallback = (dataSource.transaction as jest.Mock).mock
+        .calls[0][0] as (mgr: EntityManager) => Promise<unknown>;
+      let capturedAddress: Order['deliveryAddress'] | undefined = {
+        text: 'sentinel',
+      };
+
+      await (async () => {
+        const orderRepo = makeRepoMock<Order>();
+        const itemRepo = makeRepoMock<OrderItem>();
+        orderRepo.create.mockImplementation((d) => {
+          capturedAddress = (d as Partial<Order>).deliveryAddress;
+          return { ...d, id: 'order-1' } as Order;
+        });
+        orderRepo.save.mockResolvedValue(fakeOrder());
+        orderRepo.update.mockResolvedValue({ affected: 1 } as never);
+        itemRepo.save.mockResolvedValue({} as never);
+        itemRepo.create.mockImplementation((d) => d as OrderItem);
+        const mgr = {
+          getRepository: (entity: unknown) => {
+            if (entity === Order) return orderRepo;
+            if (entity === OrderItem) return itemRepo;
+            return makeRepoMock();
+          },
+        };
+        await txCallback(mgr as unknown as EntityManager);
+      })();
+
+      expect(capturedAddress).toBeNull();
     });
   });
 

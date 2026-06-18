@@ -1068,6 +1068,59 @@ export function useCreateAddressForUser(userId: string) {
   })
 }
 
+/** Super-admin: PATCH /admin/users/:userId/addresses/:id — update a saved address. */
+export function useUpdateAddressForUser(userId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async ({
+      id,
+      input,
+    }: {
+      id: string
+      input: UpdateAddressInput
+    }) =>
+      (
+        await api.patch<UserAddress>(
+          `/admin/users/${userId}/addresses/${id}`,
+          {
+            ...input,
+            ...(input.lat !== undefined ? { lat: roundCoord(input.lat) } : {}),
+            ...(input.lng !== undefined ? { lng: roundCoord(input.lng) } : {}),
+          },
+        )
+      ).data,
+    onSuccess: () =>
+      qc.invalidateQueries({ queryKey: ['admin', 'users', userId, 'addresses'] }),
+  })
+}
+
+/** Super-admin: PATCH /admin/users/:userId/addresses/:id/set-default — promote to default. */
+export function useSetDefaultAddressForUser(userId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (id: string) =>
+      (
+        await api.patch<UserAddress>(
+          `/admin/users/${userId}/addresses/${id}/set-default`,
+        )
+      ).data,
+    onSuccess: () =>
+      qc.invalidateQueries({ queryKey: ['admin', 'users', userId, 'addresses'] }),
+  })
+}
+
+/** Super-admin: DELETE /admin/users/:userId/addresses/:id — remove a saved address. */
+export function useDeleteAddressForUser(userId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (id: string) => {
+      await api.delete(`/admin/users/${userId}/addresses/${id}`)
+    },
+    onSuccess: () =>
+      qc.invalidateQueries({ queryKey: ['admin', 'users', userId, 'addresses'] }),
+  })
+}
+
 /** Super-admin: PUT /admin/subscription/plan — update monthly price */
 export function useUpdateSubscriptionPlan() {
   const qc = useQueryClient()

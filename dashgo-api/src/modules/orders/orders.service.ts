@@ -10,7 +10,13 @@ import { InjectRepository } from '@nestjs/typeorm';
 import * as Sentry from '@sentry/node';
 import { DataSource, FindOptionsWhere, In, Not, Repository } from 'typeorm';
 import { Order, OrderItem, Product } from '../../entities';
-import { OrderStatus, PaymentMethod, UserRole } from '../../entities/enums';
+import { UserAddress } from '../../entities/user-address.entity';
+import {
+  OrderStatus,
+  PaymentMethod,
+  UserRole,
+  type GeoAddress,
+} from '../../entities/enums';
 import { AuthenticatedUser } from '../../common/types/authenticated-user';
 import { TAX_RATE } from '../../common/tax';
 import { CreateOrderDto, DeliveryAddressDto } from './dto/create-order.dto';
@@ -57,6 +63,8 @@ export class OrdersService {
     @InjectRepository(Order) private readonly orders: Repository<Order>,
     @InjectRepository(OrderItem) private readonly items: Repository<OrderItem>,
     @InjectRepository(Product) private readonly products: Repository<Product>,
+    @InjectRepository(UserAddress)
+    private readonly userAddresses: Repository<UserAddress>,
     private readonly dataSource: DataSource,
     private readonly payments: PaymentsService,
     private readonly points: PointsService,
@@ -332,12 +340,23 @@ export class OrdersService {
       const taxCents = skipQuote ? Math.round(taxableCents * TAX_RATE) : 0;
       const totalCents = taxableCents + taxCents;
 
+      // When no address is supplied, fall back to the customer's default saved
+      // location so subsequent orders auto-inherit it (the colmado can still
+      // re-pin at delivery). Mirrors the frontend userAddressToGeoAddress map.
+      let resolvedDeliveryAddress: GeoAddress | null = dto.deliveryAddress ?? null;
+      if (!resolvedDeliveryAddress) {
+        const def = await this.userAddresses.findOne({
+          where: { userId: user.id, isDefault: true },
+        });
+        if (def) resolvedDeliveryAddress = this.userAddressToDeliveryAddress(def);
+      }
+
       const order = orderRepo.create({
         customerId: user.id,
         status: skipQuote ? OrderStatus.QUOTED : OrderStatus.PENDING_QUOTE,
-        // Customers no longer send an address — the super-admin sets it at
-        // delivery time. Persist null when absent.
-        deliveryAddress: dto.deliveryAddress ?? null,
+        // Defaults to the customer's saved default address (above); the
+        // super-admin can override/re-pin at delivery time.
+        deliveryAddress: resolvedDeliveryAddress,
         subtotal: (subtotalCents / 100).toFixed(2),
         pointsRedeemed: (pointsRedeemedCents / 100).toFixed(2),
         shipping: '0.00',
@@ -480,9 +499,32 @@ export class OrdersService {
   }
 
   /**
+   * Maps a saved UserAddress to an order's GeoAddress snapshot. Mirrors the
+   * frontend userAddressToGeoAddress: line2 folds into the text line, building
+   * carries over, and the driver note (instructions) becomes the reference.
+   */
+  private userAddressToDeliveryAddress(a: UserAddress): GeoAddress {
+    const line2 = (a.line2 ?? '').trim();
+    const text = line2 ? `${a.line1}, ${line2}` : a.line1;
+    const building = (a.building ?? '').trim();
+    const reference = (a.instructions ?? '').trim();
+    return {
+      text,
+      lat: a.lat,
+      lng: a.lng,
+      building: building || null,
+      houseNumber: null,
+      unit: null,
+      reference: reference || null,
+    };
+  }
+
+  /**
    * Super-admin sets/updates an order's delivery address. Used at delivery
    * time: the colmado captures the customer's GPS on arrival and pins the
-   * exact destination. Customers never send an address themselves.
+   * exact destination. The FIRST location pinned for a customer who has no
+   * saved address yet is auto-saved to their address book (as default), so
+   * subsequent orders auto-inherit it; further locations are added explicitly.
    */
   async setDeliveryAddress(
     id: string,
@@ -506,6 +548,42 @@ export class OrdersService {
         reference: address.reference ?? null,
       },
     });
+
+    // Auto-save the FIRST location to the customer's address book so future
+    // orders inherit it. Only when they have none yet — additional locations
+    // are added deliberately via the users module. Non-blocking: a failure
+    // here must not undo the order's pinned location.
+    try {
+      const existing = await this.userAddresses.count({
+        where: { userId: order.customerId },
+      });
+      if (existing === 0) {
+        const houseNumber = (address.houseNumber ?? '').trim();
+        const line1 =
+          address.text?.trim() ||
+          (houseNumber ? `Casa ${houseNumber}` : 'Ubicación');
+        await this.userAddresses.save(
+          this.userAddresses.create({
+            userId: order.customerId,
+            label: 'Principal',
+            line1,
+            line2: address.unit?.trim() || null,
+            building: address.building?.trim() || null,
+            instructions: address.reference?.trim() || null,
+            lat: address.lat,
+            lng: address.lng,
+            isDefault: true,
+          }),
+        );
+      }
+    } catch (err) {
+      this.logger.warn(
+        `Auto-save of first address for customer ${order.customerId} failed: ${
+          (err as Error).message
+        }`,
+      );
+    }
+
     return this.findOne(id, user);
   }
 

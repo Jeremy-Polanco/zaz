@@ -364,6 +364,67 @@ export function useCreateAddressForUser(userId: string) {
   })
 }
 
+/** Super-admin: GET /admin/users/:userId/addresses — a customer's saved addresses. */
+export function useSuperUserAddresses(userId: string | undefined) {
+  return useQuery<UserAddress[]>({
+    queryKey: ['users', userId, 'addresses'],
+    queryFn: async () =>
+      (await api.get<UserAddress[]>(`/admin/users/${userId}/addresses`)).data,
+    enabled: !!userId,
+    staleTime: 30_000,
+  })
+}
+
+/** Super-admin: PATCH /admin/users/:userId/addresses/:id — update a saved address. */
+export function useUpdateAddressForUser(userId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async ({ id, ...body }: { id: string } & UpdateAddressInput) => {
+      const { data } = await api.patch<UserAddress>(
+        `/admin/users/${userId}/addresses/${id}`,
+        {
+          ...body,
+          ...(body.lat !== undefined ? { lat: roundCoord(body.lat) } : {}),
+          ...(body.lng !== undefined ? { lng: roundCoord(body.lng) } : {}),
+        },
+      )
+      return data
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['users', userId, 'addresses'] })
+    },
+  })
+}
+
+/** Super-admin: PATCH /admin/users/:userId/addresses/:id/set-default — promote to default. */
+export function useSetDefaultAddressForUser(userId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const { data } = await api.patch<UserAddress>(
+        `/admin/users/${userId}/addresses/${id}/set-default`,
+      )
+      return data
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['users', userId, 'addresses'] })
+    },
+  })
+}
+
+/** Super-admin: DELETE /admin/users/:userId/addresses/:id — remove a saved address. */
+export function useDeleteAddressForUser(userId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (id: string) => {
+      await api.delete(`/admin/users/${userId}/addresses/${id}`)
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['users', userId, 'addresses'] })
+    },
+  })
+}
+
 export function useAuthorizeOrder() {
   const qc = useQueryClient()
   return useMutation({

@@ -1,6 +1,7 @@
 import { createFileRoute, isRedirect, redirect } from '@tanstack/react-router'
-import { useMemo, useState } from 'react'
+import { Fragment, useMemo, useState } from 'react'
 import { SectionHeading } from '../components/ui'
+import { UserAddressesPanel } from '../components/UserAddressesPanel'
 import { useAdminUsers } from '../lib/queries'
 import { TOKEN_KEY, api } from '../lib/api'
 import type { AdminUser, AdminUsersSubscriptionFilter, AuthUser } from '../lib/types'
@@ -57,6 +58,7 @@ function SuperUsersPage() {
     AdminUsersSubscriptionFilter | undefined
   >(undefined)
   const [searchText, setSearchText] = useState('')
+  const [expandedId, setExpandedId] = useState<string | null>(null)
 
   const { data: users, isPending } = useAdminUsers(subscription)
 
@@ -134,32 +136,56 @@ function SuperUsersPage() {
                 <th className="p-4 text-left text-[10px] font-medium uppercase tracking-wide text-ink-muted">
                   Suscripción
                 </th>
+                <th className="p-4 text-right text-[10px] font-medium uppercase tracking-wide text-ink-muted">
+                  Direcciones
+                </th>
               </tr>
             </thead>
             <tbody>
               {filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="py-12 text-center text-ink-muted">
+                  <td colSpan={6} className="py-12 text-center text-ink-muted">
                     Sin usuarios que coincidan
                   </td>
                 </tr>
               ) : (
-                filtered.map((u) => (
-                  <tr
-                    key={u.id}
-                    className="border-b border-ink/5 transition-colors hover:bg-ink/3"
-                  >
-                    <td className="p-4 font-medium text-ink">{u.fullName}</td>
-                    <td className="p-4 text-ink-muted">{u.phone ?? '—'}</td>
-                    <td className="hidden p-4 text-ink-muted md:table-cell">{u.email ?? '—'}</td>
-                    <td className="hidden p-4 text-[11px] uppercase tracking-wide text-ink-muted sm:table-cell">
-                      {u.role}
-                    </td>
-                    <td className="p-4">
-                      <SubscriptionBadge user={u} />
-                    </td>
-                  </tr>
-                ))
+                filtered.map((u) => {
+                  const expanded = expandedId === u.id
+                  return (
+                    <Fragment key={u.id}>
+                      <tr className="border-b border-ink/5 transition-colors hover:bg-ink/3">
+                        <td className="p-4 font-medium text-ink">{u.fullName}</td>
+                        <td className="p-4 text-ink-muted">{u.phone ?? '—'}</td>
+                        <td className="hidden p-4 text-ink-muted md:table-cell">{u.email ?? '—'}</td>
+                        <td className="hidden p-4 text-[11px] uppercase tracking-wide text-ink-muted sm:table-cell">
+                          {u.role}
+                        </td>
+                        <td className="p-4">
+                          <SubscriptionBadge user={u} />
+                        </td>
+                        <td className="p-4 text-right">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setExpandedId(expanded ? null : u.id)
+                            }
+                            aria-expanded={expanded}
+                            className="text-[0.65rem] uppercase tracking-[0.12em] text-brand hover:underline"
+                          >
+                            {expanded ? 'Ocultar' : 'Direcciones'}
+                          </button>
+                        </td>
+                      </tr>
+                      {expanded && (
+                        <tr className="border-b border-ink/10 bg-ink/3">
+                          <td colSpan={6} className="p-4">
+                            <UserAddressesPanel userId={u.id} />
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
+                  )
+                })
               )}
             </tbody>
           </table>

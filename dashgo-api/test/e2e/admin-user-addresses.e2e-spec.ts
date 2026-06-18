@@ -1,14 +1,18 @@
 /**
- * E2E spec: GET /admin/users/:userId/addresses — super-admin view of a user's addresses
+ * E2E spec: /admin/users/:userId/addresses — super-admin management of a user's
+ * addresses (full CRUD: list, create, update, set-default, delete).
  *
- * Pair F (T35/T36):
  *   (f1) no JWT → 401
  *   (f2) CLIENT role → 403
  *   (f3) PROMOTER role → 403
  *   (f4) SUPER_ADMIN_DELIVERY → 200 with target user's addresses
  *   (f5) SUPER_ADMIN_DELIVERY, non-existent userId (valid UUID) → 200 []
  *   (f6) SUPER_ADMIN_DELIVERY, malformed userId (not a UUID) → 400
- *   (f7) POST /admin/users/:userId/addresses → 404 (endpoint not implemented)
+ *   (f7) POST   → 201 creates an address
+ *   (f8) PATCH  :id → 200 updates whitelisted fields
+ *   (f9) PATCH  :id/set-default → 200 promotes to default
+ *  (f10) DELETE :id → 204 removes the address
+ *  (f11) CLIENT writing → 403
  */
 
 // Stripe must be mocked BEFORE any imports that load it.
@@ -64,6 +68,9 @@ describe('GET /admin/users/:userId/addresses E2E', () => {
   let clientToken: string;
   let promoterToken: string;
   let superToken: string;
+
+  // Address created by the write-endpoint tests, reused across them.
+  let createdId: string;
 
   beforeAll(async () => {
     process.env.DB_HOST = 'localhost';
@@ -194,16 +201,59 @@ describe('GET /admin/users/:userId/addresses E2E', () => {
   });
 
   // ---------------------------------------------------------------------------
-  // No write endpoints (spec requirement: only GET exists)
+  // Write endpoints (super-admin full CRUD). Ordered: create → update →
+  // set-default → delete, reusing the created address id.
   // ---------------------------------------------------------------------------
 
-  describe('No write endpoints', () => {
-    it('(f7) POST /admin/users/:userId/addresses → 404 (not implemented)', async () => {
+  describe('Write endpoints', () => {
+    it('(f7) POST creates an address → 201', async () => {
       const res = await request(app.getHttpServer())
         .post(`/admin/users/${targetUser.id}/addresses`)
         .set('Authorization', `Bearer ${superToken}`)
-        .send({ label: 'Test', line1: 'Test St', lat: 18.47, lng: -69.9 });
-      expect(res.status).toBe(404);
+        .send({ label: 'Trabajo', line1: 'Av. 27 de Febrero', lat: 18.46, lng: -69.92 });
+
+      expect(res.status).toBe(201);
+      expect(res.body.label).toBe('Trabajo');
+      expect(res.body.userId).toBe(targetUser.id);
+      createdId = res.body.id as string;
+    });
+
+    it('(f8) PATCH :id updates whitelisted fields → 200', async () => {
+      const res = await request(app.getHttpServer())
+        .patch(`/admin/users/${targetUser.id}/addresses/${createdId}`)
+        .set('Authorization', `Bearer ${superToken}`)
+        .send({ label: 'Trabajo Centro', instructions: 'piso 5' });
+
+      expect(res.status).toBe(200);
+      expect(res.body.label).toBe('Trabajo Centro');
+      expect(res.body.instructions).toBe('piso 5');
+    });
+
+    it('(f9) PATCH :id/set-default promotes it → 200', async () => {
+      const res = await request(app.getHttpServer())
+        .patch(`/admin/users/${targetUser.id}/addresses/${createdId}/set-default`)
+        .set('Authorization', `Bearer ${superToken}`);
+
+      expect(res.status).toBe(200);
+      expect(res.body.isDefault).toBe(true);
+    });
+
+    it('(f10) DELETE :id removes it → 204', async () => {
+      const res = await request(app.getHttpServer())
+        .delete(`/admin/users/${targetUser.id}/addresses/${createdId}`)
+        .set('Authorization', `Bearer ${superToken}`);
+
+      expect(res.status).toBe(204);
+    });
+
+    it('(f11) CLIENT cannot write → 403', async () => {
+      const res = await request(app.getHttpServer())
+        .patch(
+          `/admin/users/${targetUser.id}/addresses/00000000-0000-0000-0000-000000000099/set-default`,
+        )
+        .set('Authorization', `Bearer ${clientToken}`);
+
+      expect(res.status).toBe(403);
     });
   });
 });
