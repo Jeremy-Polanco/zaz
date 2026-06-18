@@ -511,6 +511,41 @@ describe('OrdersService', () => {
     });
   });
 
+  describe('backfillAutoConfirmFreeShippingOrders (one-time backfill)', () => {
+    it('runs auto-confirm on every QUOTED order and counts those confirmed', async () => {
+      ordersRepo.find.mockResolvedValue([
+        fakeOrder({ id: 'o1', status: OrderStatus.QUOTED }),
+        fakeOrder({ id: 'o2', status: OrderStatus.QUOTED }),
+      ]);
+      const autoSpy = spyAutoConfirmFree();
+      // Post-confirm re-fetch: o1 became confirmed, o2 stayed QUOTED (didn't qualify)
+      ordersRepo.findOne
+        .mockResolvedValueOnce(
+          fakeOrder({ id: 'o1', status: OrderStatus.CONFIRMED_BY_COLMADO }),
+        )
+        .mockResolvedValueOnce(fakeOrder({ id: 'o2', status: OrderStatus.QUOTED }));
+
+      const result = await service.backfillAutoConfirmFreeShippingOrders();
+
+      expect(ordersRepo.find).toHaveBeenCalledWith({
+        where: { status: OrderStatus.QUOTED },
+      });
+      expect(autoSpy).toHaveBeenCalledWith('o1');
+      expect(autoSpy).toHaveBeenCalledWith('o2');
+      expect(result).toEqual({ scanned: 2, confirmed: 1 });
+    });
+
+    it('returns zero and runs nothing when there are no QUOTED orders', async () => {
+      ordersRepo.find.mockResolvedValue([]);
+      const autoSpy = spyAutoConfirmFree();
+
+      const result = await service.backfillAutoConfirmFreeShippingOrders();
+
+      expect(autoSpy).not.toHaveBeenCalled();
+      expect(result).toEqual({ scanned: 0, confirmed: 0 });
+    });
+  });
+
   // -------------------------------------------------------------------------
   // create — overdue gate
   // -------------------------------------------------------------------------

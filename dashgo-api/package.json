@@ -13,6 +13,7 @@
     "start:prod": "node dist/main",
     "lint": "eslint \"{src,apps,libs,test}/**/*.ts\" --fix",
     "seed": "ts-node -r tsconfig-paths/register src/database/seed.ts",
+    "backfill:auto-confirm": "ts-node -r tsconfig-paths/register src/database/backfill-auto-confirm.ts",
     "test": "jest --selectProjects unit",
     "test:unit": "jest --selectProjects unit",
     "test:watch": "jest --selectProjects unit --watch",

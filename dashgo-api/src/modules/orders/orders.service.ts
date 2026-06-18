@@ -827,6 +827,32 @@ export class OrdersService {
     }
   }
 
+  /**
+   * One-time backfill: apply the free-shipping auto-confirm to orders that were
+   * already stuck in QUOTED ("Por confirmar") before auto-confirm shipped. Runs
+   * the same guarded, non-blocking tryAutoConfirmFreeOrder per order, so it only
+   * touches qualifying ones (free shipping, nothing owed by card) and is safe to
+   * re-run (already-confirmed orders are no longer QUOTED, so they're skipped).
+   * Invoked from the standalone script src/database/backfill-auto-confirm.ts.
+   */
+  async backfillAutoConfirmFreeShippingOrders(): Promise<{
+    scanned: number;
+    confirmed: number;
+  }> {
+    const quoted = await this.orders.find({
+      where: { status: OrderStatus.QUOTED },
+    });
+    let confirmed = 0;
+    for (const o of quoted) {
+      await this.tryAutoConfirmFreeOrder(o.id);
+      const after = await this.orders.findOne({ where: { id: o.id } });
+      if (after?.status === OrderStatus.CONFIRMED_BY_COLMADO) confirmed++;
+    }
+    this.logger.log(
+      `backfill auto-confirm: scanned ${quoted.length} QUOTED orders, confirmed ${confirmed}`,
+    );
+    return { scanned: quoted.length, confirmed };
+  }
 
   async updateStatus(
     id: string,
