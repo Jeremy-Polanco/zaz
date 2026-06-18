@@ -252,6 +252,21 @@ describe('OrdersService', () => {
       )
       .mockResolvedValue(undefined);
 
+  type AutoConfirmFreeTarget = {
+    tryAutoConfirmFreeOrder(orderId: string): Promise<void>;
+  };
+  const callAutoConfirmFree = (orderId: string) =>
+    (
+      service as unknown as AutoConfirmFreeTarget
+    ).tryAutoConfirmFreeOrder(orderId);
+  const spyAutoConfirmFree = () =>
+    jest
+      .spyOn(
+        service as unknown as AutoConfirmFreeTarget,
+        'tryAutoConfirmFreeOrder',
+      )
+      .mockResolvedValue(undefined);
+
   describe('confirmNonStripeOrder — skip-quote auto-confirm', () => {
     const user = fakeUser(UserRole.CLIENT);
 
@@ -362,6 +377,137 @@ describe('OrdersService', () => {
       await service.autoConfirmSkipQuoteByIntentId('pi_unknown');
 
       expect(confirmSpy).not.toHaveBeenCalled();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // free-shipping auto-confirm (customer never taps "Confirmar pedido")
+  // -------------------------------------------------------------------------
+
+  describe('tryAutoConfirmFreeOrder — free-shipping / $0 auto-confirm', () => {
+    const freeQuotedCash = (overrides: Partial<Order> = {}) =>
+      fakeOrder({
+        status: OrderStatus.QUOTED,
+        paymentMethod: PaymentMethod.CASH,
+        shipping: '0.00',
+        totalAmount: '0.00',
+        creditApplied: '0.00',
+        stripePaymentIntentId: null,
+        ...overrides,
+      });
+
+    it('auto-confirms a free-shipping cash order (PENDING_VALIDATION + decrement stock)', async () => {
+      ordersRepo.findOne.mockResolvedValue(freeQuotedCash());
+      ordersRepo.update.mockResolvedValue({} as never);
+      const confirmSpy = spyConfirmStock();
+
+      await callAutoConfirmFree('order-1');
+
+      expect(ordersRepo.update).toHaveBeenCalledWith('order-1', {
+        status: OrderStatus.PENDING_VALIDATION,
+      });
+      expect(confirmSpy).toHaveBeenCalledWith('order-1');
+    });
+
+    it('does NOT auto-confirm when shipping is charged (> 0)', async () => {
+      ordersRepo.findOne.mockResolvedValue(
+        freeQuotedCash({ shipping: '5.00', totalAmount: '15.00' }),
+      );
+      const confirmSpy = spyConfirmStock();
+
+      await callAutoConfirmFree('order-1');
+
+      expect(confirmSpy).not.toHaveBeenCalled();
+    });
+
+    it('does NOT auto-confirm a digital order that still owes a card charge', async () => {
+      ordersRepo.findOne.mockResolvedValue(
+        freeQuotedCash({
+          paymentMethod: PaymentMethod.DIGITAL,
+          totalAmount: '10.00',
+          creditApplied: '0.00',
+        }),
+      );
+      const confirmSpy = spyConfirmStock();
+
+      await callAutoConfirmFree('order-1');
+
+      expect(confirmSpy).not.toHaveBeenCalled();
+    });
+
+    it('auto-confirms a $0 digital order (nothing owed by card)', async () => {
+      ordersRepo.findOne.mockResolvedValue(
+        freeQuotedCash({ paymentMethod: PaymentMethod.DIGITAL, totalAmount: '0.00' }),
+      );
+      ordersRepo.update.mockResolvedValue({} as never);
+      const confirmSpy = spyConfirmStock();
+
+      await callAutoConfirmFree('order-1');
+
+      expect(confirmSpy).toHaveBeenCalledWith('order-1');
+    });
+
+    it('auto-confirms a free-shipping digital order fully covered by credit', async () => {
+      ordersRepo.findOne.mockResolvedValue(
+        freeQuotedCash({
+          paymentMethod: PaymentMethod.DIGITAL,
+          totalAmount: '10.00',
+          creditApplied: '10.00',
+        }),
+      );
+      ordersRepo.update.mockResolvedValue({} as never);
+      const confirmSpy = spyConfirmStock();
+
+      await callAutoConfirmFree('order-1');
+
+      expect(confirmSpy).toHaveBeenCalledWith('order-1');
+    });
+
+    it('no-op when the order is not QUOTED', async () => {
+      ordersRepo.findOne.mockResolvedValue(
+        freeQuotedCash({ status: OrderStatus.PENDING_QUOTE }),
+      );
+      const confirmSpy = spyConfirmStock();
+
+      await callAutoConfirmFree('order-1');
+
+      expect(confirmSpy).not.toHaveBeenCalled();
+    });
+
+    it('no-op when a digital hold is already pending (stripePaymentIntentId set)', async () => {
+      ordersRepo.findOne.mockResolvedValue(
+        freeQuotedCash({
+          paymentMethod: PaymentMethod.DIGITAL,
+          stripePaymentIntentId: 'pi_1',
+        }),
+      );
+      const confirmSpy = spyConfirmStock();
+
+      await callAutoConfirmFree('order-1');
+
+      expect(confirmSpy).not.toHaveBeenCalled();
+    });
+
+    it('no-op when no order matches the id', async () => {
+      ordersRepo.findOne.mockResolvedValue(null);
+      const confirmSpy = spyConfirmStock();
+
+      await callAutoConfirmFree('order-x');
+
+      expect(confirmSpy).not.toHaveBeenCalled();
+    });
+
+    it('is non-blocking: a stock failure does not throw', async () => {
+      ordersRepo.findOne.mockResolvedValue(freeQuotedCash());
+      ordersRepo.update.mockResolvedValue({} as never);
+      jest
+        .spyOn(
+          service as unknown as ConfirmStockSpyTarget,
+          'confirmAndDecrementStock',
+        )
+        .mockRejectedValue(new Error('Stock insuficiente'));
+
+      await expect(callAutoConfirmFree('order-1')).resolves.toBeUndefined();
     });
   });
 
@@ -725,6 +871,9 @@ describe('OrdersService', () => {
 
       subscriptionService.isActiveSubscriber.mockResolvedValue(true);
       ordersRepo.update.mockResolvedValue({ affected: 1 } as never);
+      // Isolate the quote assertion from the free-shipping auto-confirm
+      // side effect (covered separately in its own tests).
+      spyAutoConfirmFree();
 
       await service.setQuote('order-1', 300 /* admin quoted 3.00 */, superUser);
 
@@ -765,6 +914,85 @@ describe('OrdersService', () => {
       // Shipping should be non-zero
       const updateCall = ordersRepo.update.mock.calls[0][1] as Record<string, unknown>;
       expect(updateCall.shipping).not.toBe('0.00');
+    });
+
+    it('auto-confirms after quoting when shipping is free (subscriber benefit)', async () => {
+      const order = fakeOrder({
+        status: OrderStatus.PENDING_QUOTE,
+        customerId: 'user-1',
+        customer: fakeUser() as never,
+        subtotal: '10.00',
+        pointsRedeemed: '0.00',
+      });
+      ordersRepo.findOne
+        .mockResolvedValueOnce(order)
+        .mockResolvedValueOnce({ ...order, shipping: '0.00' } as never);
+      subscriptionService.isActiveSubscriber.mockResolvedValue(true);
+      ordersRepo.update.mockResolvedValue({ affected: 1 } as never);
+      const autoSpy = spyAutoConfirmFree();
+
+      await service.setQuote('order-1', 300, superUser);
+
+      expect(autoSpy).toHaveBeenCalledWith('order-1');
+    });
+
+    it('does NOT auto-confirm after quoting when shipping is charged', async () => {
+      const order = fakeOrder({
+        status: OrderStatus.PENDING_QUOTE,
+        customerId: 'user-1',
+        customer: fakeUser() as never,
+        subtotal: '10.00',
+        pointsRedeemed: '0.00',
+      });
+      ordersRepo.findOne
+        .mockResolvedValueOnce(order)
+        .mockResolvedValueOnce({ ...order, shipping: '3.00' } as never);
+      subscriptionService.isActiveSubscriber.mockResolvedValue(false);
+      ordersRepo.update.mockResolvedValue({ affected: 1 } as never);
+      const autoSpy = spyAutoConfirmFree();
+
+      await service.setQuote('order-1', 300, superUser);
+
+      expect(autoSpy).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('create — free-shipping auto-confirm', () => {
+    const dto = {
+      items: [{ productId: 'prod-1', quantity: 1 }],
+      deliveryAddress: { text: '123 Test', lat: 18.4861, lng: -69.9312 },
+      paymentMethod: PaymentMethod.CASH,
+      usePoints: false,
+      useCredit: false,
+    } as import('./dto/create-order.dto').CreateOrderDto;
+
+    it('auto-confirms a free-shipping cash order that lands in QUOTED at creation', async () => {
+      ordersRepo.count.mockResolvedValueOnce(0);
+      productsRepo.find.mockResolvedValue([fakeProduct()]);
+      setupMixedCartCreateTx([fakeProduct()], {
+        status: OrderStatus.QUOTED,
+        shipping: '0.00',
+        paymentMethod: PaymentMethod.CASH,
+        totalAmount: '0.00',
+      });
+      const autoSpy = spyAutoConfirmFree();
+
+      await service.create(fakeUser(UserRole.CLIENT), dto);
+
+      expect(autoSpy).toHaveBeenCalledWith('order-1');
+    });
+
+    it('does NOT auto-confirm an order left in PENDING_QUOTE (needs admin quote)', async () => {
+      ordersRepo.count.mockResolvedValueOnce(0);
+      productsRepo.find.mockResolvedValue([fakeProduct()]);
+      setupMixedCartCreateTx([fakeProduct()], {
+        status: OrderStatus.PENDING_QUOTE,
+      });
+      const autoSpy = spyAutoConfirmFree();
+
+      await service.create(fakeUser(UserRole.CLIENT), dto);
+
+      expect(autoSpy).not.toHaveBeenCalled();
     });
   });
 

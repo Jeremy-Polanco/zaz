@@ -426,7 +426,16 @@ export class OrdersService {
       return persisted;
     });
 
-    const order = await this.findOne(saved.id, user);
+    let order = await this.findOne(saved.id, user);
+
+    // Auto-confirm free-shipping / $0 orders so the customer never taps
+    // "Confirmar pedido" (the free subscriber bebedero, standardized water
+    // deliveries, etc.). Only orders already in QUOTED qualify — the helper
+    // re-checks free shipping + that nothing is owed by card. Non-blocking.
+    if (order.status === OrderStatus.QUOTED) {
+      await this.tryAutoConfirmFreeOrder(order.id);
+      order = await this.findOne(saved.id, user);
+    }
 
     // Fire-and-forget SMS notification — never block the HTTP response on Twilio.
     void this.twilio
@@ -494,6 +503,12 @@ export class OrdersService {
       quotedAt: order.quotedAt ?? new Date(),
       wasSubscriberAtQuote: isSub,
     });
+
+    // Free shipping (subscriber benefit or admin-quoted $0) means nothing is
+    // owed by card — auto-confirm so the customer skips the manual confirm tap.
+    if (effectiveShippingCents === 0) {
+      await this.tryAutoConfirmFreeOrder(id);
+    }
 
     return this.findOne(id, user);
   }
@@ -756,6 +771,56 @@ export class OrdersService {
     } catch (err) {
       this.logger.warn(
         `auto-confirm skip-quote order ${orderId} failed — left in PENDING_VALIDATION for manual review: ${
+          (err as Error).message
+        }`,
+      );
+    }
+  }
+
+  /**
+   * Auto-confirm an order the customer should never have to tap "Confirmar
+   * pedido" for: one with FREE SHIPPING and nothing owed upfront by card. Fires
+   * when an order ENTERS the QUOTED state — at creation for skip-cotización
+   * orders (the free subscriber bebedero, standardized water deliveries) and at
+   * setQuote for subscriber free shipping. Advances QUOTED → PENDING_VALIDATION
+   * → CONFIRMED_BY_COLMADO (decrements stock).
+   *
+   * Guardrail: only when there is nothing to charge by card — cash (paid on
+   * delivery), $0 total, or fully covered by credit. A digital order that still
+   * owes a balance is left in QUOTED so the customer authorizes payment.
+   *
+   * NON-BLOCKING: any failure (e.g. insufficient stock) is swallowed and the
+   * order left for manual handling — this must never break order creation or
+   * quoting. Mirrors tryAutoConfirmSkipQuote.
+   */
+  private async tryAutoConfirmFreeOrder(orderId: string): Promise<void> {
+    try {
+      const order = await this.orders.findOne({ where: { id: orderId } });
+      if (!order) return;
+      if (order.status !== OrderStatus.QUOTED) return;
+      // A digital order awaiting its card hold is driven by the payment webhook.
+      if (order.stripePaymentIntentId !== null) return;
+
+      const shippingCents = Math.round(parseFloat(order.shipping) * 100);
+      if (shippingCents !== 0) return; // not free shipping → keep manual confirm
+
+      const totalCents = Math.round(parseFloat(order.totalAmount) * 100);
+      const creditAppliedCents = Math.round(
+        parseFloat(order.creditApplied) * 100,
+      );
+      const nothingOwedByCard =
+        order.paymentMethod === PaymentMethod.CASH ||
+        totalCents === 0 ||
+        creditAppliedCents >= totalCents;
+      if (!nothingOwedByCard) return; // digital balance → must authorize payment
+
+      await this.orders.update(orderId, {
+        status: OrderStatus.PENDING_VALIDATION,
+      });
+      await this.confirmAndDecrementStock(orderId);
+    } catch (err) {
+      this.logger.warn(
+        `auto-confirm free order ${orderId} failed — left for manual confirm: ${
           (err as Error).message
         }`,
       );
