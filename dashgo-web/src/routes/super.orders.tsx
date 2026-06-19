@@ -116,7 +116,9 @@ function SuperOrdersPage() {
     if (listFilter === 'pending') return activeStatuses.includes(o.status)
     if (listFilter === 'delivered')
       return o.status === 'delivered' && isToday(o.createdAt)
-    return true
+    // 'all' — everything EXCEPT cancelled. A cancelled order is dead weight in a
+    // delivery-route view; the row still lives in the DB and on its invoice.
+    return o.status !== 'cancelled'
   })
 
   const columns = useMemo<ColumnDef<Order>[]>(
