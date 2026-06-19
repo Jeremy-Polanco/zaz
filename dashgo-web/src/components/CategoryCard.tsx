@@ -5,13 +5,15 @@ type Props = {
   category: Category
   productCount: number
   variant?: 'category' | 'all'
+  dark?: boolean
   onClick?: () => void
 }
 
-export function CategoryCard({ category, productCount, variant = 'category', onClick }: Props) {
+export function CategoryCard({ category, productCount, variant = 'category', dark = false, onClick }: Props) {
   const [showImage, setShowImage] = useState(true)
   const isAll = variant === 'all'
   const imageUrl = !isAll && category.imageUrl && showImage ? category.imageUrl : null
+  const onDark = dark && !imageUrl && !isAll
 
   return (
     <article
@@ -27,7 +29,9 @@ export function CategoryCard({ category, productCount, variant = 'category', onC
       className={`relative aspect-square cursor-pointer overflow-hidden border transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-accent ${
         isAll
           ? 'border-accent bg-accent text-brand-dark'
-          : 'border-ink/15 bg-paper-deep hover:border-ink'
+          : dark
+            ? 'border-transparent bg-ink'
+            : 'border-ink/15 bg-paper-deep hover:border-ink'
       }`}
     >
       {/* Background image */}
@@ -57,14 +61,14 @@ export function CategoryCard({ category, productCount, variant = 'category', onC
       >
         <p
           className={`eyebrow text-[0.68rem] ${
-            isAll || imageUrl ? 'text-paper/80' : 'text-ink-muted'
+            isAll || imageUrl ? 'text-paper/80' : onDark ? 'text-paper/55' : 'text-ink-muted'
           }`}
         >
           {productCount} productos
         </p>
         <p
           className={`display mt-0.5 text-[0.9rem] font-semibold leading-tight ${
-            isAll || imageUrl ? 'text-paper' : 'text-ink'
+            isAll || imageUrl ? 'text-paper' : onDark ? 'text-paper' : 'text-ink'
           }`}
         >
           {isAll ? 'Ver todo el catálogo' : category.name}

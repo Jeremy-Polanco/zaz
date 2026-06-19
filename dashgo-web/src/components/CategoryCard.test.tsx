@@ -72,6 +72,23 @@ describe('CategoryCard', () => {
     expect(article.className).toContain('bg-accent')
   })
 
+  it('dark variant uses the ink surface (mirrors the mobile first-card treatment)', () => {
+    render(<CategoryCard category={baseCategory} productCount={4} dark />)
+    const article = screen.getByRole('button')
+    // Dark cards drop the light grey surface for the dark ink background.
+    expect(article.className).toContain('bg-ink')
+    expect(article.className).not.toContain('bg-paper-deep')
+    // Name text flips to light on the dark surface.
+    expect(screen.getByText('Agua').className).toContain('text-paper')
+  })
+
+  it('defaults to the light surface when dark is not set', () => {
+    render(<CategoryCard category={baseCategory} productCount={4} />)
+    const article = screen.getByRole('button')
+    expect(article.className).toContain('bg-paper-deep')
+    expect(article.className).not.toContain('bg-ink')
+  })
+
   it('has correct aria-label for a category card', () => {
     render(<CategoryCard category={baseCategory} productCount={5} />)
     const article = screen.getByRole('button')

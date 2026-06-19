@@ -179,12 +179,13 @@ function CatalogPage() {
           </div>
           {categories && categories.length > 0 ? (
             <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
-              {categories.map((c) => (
+              {categories.map((c, i) => (
                 <CategoryCard
                   key={c.id}
                   category={c}
                   productCount={productCountBySlug.get(c.slug) ?? 0}
                   variant="category"
+                  dark={i === 0}
                   onClick={() => setCat(c.slug)}
                 />
               ))}
