@@ -126,6 +126,11 @@ function CreditPayForm({ amountCents }: { amountCents: number }) {
 
     const { error: confirmError, paymentIntent } = await stripe.confirmPayment({
       elements,
+      // return_url is required: the intent uses automatic_payment_methods
+      // (allow_redirects defaults to 'always'), so confirmPayment rejects
+      // without one even with redirect 'if_required'. Cards that don't need a
+      // redirect still resolve inline; 3DS/Link land back on /credit.
+      confirmParams: { return_url: `${window.location.origin}/credit` },
       redirect: 'if_required',
     })
 

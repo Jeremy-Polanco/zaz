@@ -51,6 +51,13 @@ function OrderDetailPage() {
   const authorize = useAuthorizeOrder()
   const qc = useQueryClient()
   const [authIntent, setAuthIntent] = useState<AuthorizedIntent | null>(null)
+  // Bridges the brief window between a successful client-side card
+  // authorization and the webhook flipping the order out of `quoted` (when
+  // authorizedAt — the durable truth — gets set). Checkout's inline auth and the
+  // recovery form below write `order-paid:<id>` to sessionStorage on success.
+  const [justPaid, setJustPaid] = useState(
+    () => sessionStorage.getItem(`order-paid:${orderId}`) === '1',
+  )
 
   if (isPending) {
     return (
@@ -198,18 +205,20 @@ function OrderDetailPage() {
         )}
 
       {/*
-        Skip-cotización digital orders are paid INLINE at checkout — they must
-        never re-show the "Cotización lista → Autorizar" panel here. Once the
-        card is authorized the order carries a stripePaymentIntentId; the webhook
-        then advances quoted → pending_validation. While that's in flight, just
-        show a processing state (no pay button) so the customer can't re-trigger
-        a charge.
+        Skip-cotización digital order whose card WAS authorized — show a
+        processing state (no pay button) while the webhook advances quoted →
+        pending_validation → confirmed. Gated on REAL authorization: authorizedAt
+        (the webhook's durable signal) or justPaid (the in-flight window right
+        after a successful client-side auth). NOT on stripePaymentIntentId — an
+        intent exists the moment we prepare payment, BEFORE the customer
+        authorizes, so keying off it told "ya autorizamos" to people who never
+        actually paid (e.g. abandoned the card sheet).
       */}
-      {order.status === 'quoted' &&
+      {(order.status === 'quoted' || order.status === 'pending_validation') &&
         order.paymentMethod === 'digital' &&
         !isFullCredit &&
         order.skipQuote &&
-        order.stripePaymentIntentId && (
+        (order.authorizedAt || justPaid) && (
           <div className="mb-8 border-l-4 border-accent bg-accent/5 p-5">
             <p className="display text-xl font-semibold">Procesando tu pago…</p>
             <p className="mt-2 text-sm text-ink-soft">
@@ -220,15 +229,19 @@ function OrderDetailPage() {
         )}
 
       {/*
-        Recovery only: a skip-cotización order with no intent means the customer
-        abandoned the inline payment at checkout. Let them finish it here instead
-        of getting stuck — but this is the exception, not the normal flow.
+        Recovery: a skip-cotización order that is NOT authorized yet — the
+        customer abandoned the inline payment, whether or not an intent was
+        already prepared. Let them finish here instead of getting stuck on a
+        misleading "procesando". Re-authorizing is safe: the intent is created
+        with a stable idempotency key (order_<id>_intent), so it returns the same
+        PaymentIntent rather than a second charge.
       */}
       {order.status === 'quoted' &&
         order.paymentMethod === 'digital' &&
         !isFullCredit &&
         order.skipQuote &&
-        !order.stripePaymentIntentId && (
+        !order.authorizedAt &&
+        !justPaid && (
           <div className="mb-8 border-l-4 border-accent bg-accent/5 p-5">
             <p className="display text-xl font-semibold">
               Completá tu pago — total {formatCents(totalCents)}
@@ -259,7 +272,10 @@ function OrderDetailPage() {
               <CardAuthForm
                 clientSecret={authIntent.clientSecret}
                 amountCents={stripeAmountCents}
+                returnUrl={`${window.location.origin}/orders/${order.id}`}
                 onAuthorized={() => {
+                  sessionStorage.setItem(`order-paid:${order.id}`, '1')
+                  setJustPaid(true)
                   qc.invalidateQueries({ queryKey: ['order', order.id] })
                   qc.invalidateQueries({ queryKey: ['orders'] })
                 }}
@@ -307,6 +323,7 @@ function OrderDetailPage() {
             <CardAuthForm
               clientSecret={authIntent.clientSecret}
               amountCents={stripeAmountCents}
+              returnUrl={`${window.location.origin}/orders/${order.id}`}
               onAuthorized={() => {
                 // Webhook moves the order to PENDING_VALIDATION (and auto-confirms
                 // skip-quote orders). Refetch so the UI reflects the new status.

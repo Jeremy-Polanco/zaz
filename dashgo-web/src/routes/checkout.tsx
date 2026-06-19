@@ -271,7 +271,13 @@ function CheckoutPage() {
         <CardAuthForm
           clientSecret={inlinePay.clientSecret}
           amountCents={inlinePay.amount}
-          onAuthorized={() => goToOrder(inlinePay.orderId)}
+          returnUrl={`${window.location.origin}/orders/${inlinePay.orderId}`}
+          onAuthorized={() => {
+            // Signal the order page to show "procesando" through the brief gap
+            // before the webhook sets authorizedAt (see orders.$orderId.index).
+            sessionStorage.setItem(`order-paid:${inlinePay.orderId}`, '1')
+            goToOrder(inlinePay.orderId)
+          }}
         />
       </div>
     )

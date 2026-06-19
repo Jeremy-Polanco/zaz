@@ -21,10 +21,18 @@ import { formatCents } from '../lib/utils'
 export function CardAuthForm({
   clientSecret,
   amountCents,
+  returnUrl,
   onAuthorized,
 }: {
   clientSecret: string
   amountCents: number
+  /**
+   * Absolute URL Stripe redirects back to if the card requires a redirect
+   * (3DS, Link). REQUIRED: the intent is created with automatic_payment_methods
+   * (allow_redirects defaults to 'always'), so confirmPayment rejects without a
+   * return_url even when redirect is 'if_required'.
+   */
+  returnUrl: string
   onAuthorized: () => void
 }) {
   return (
@@ -32,16 +40,22 @@ export function CardAuthForm({
       stripe={getStripe()}
       options={{ clientSecret, appearance: { theme: 'flat' } }}
     >
-      <CardAuthInner amountCents={amountCents} onAuthorized={onAuthorized} />
+      <CardAuthInner
+        amountCents={amountCents}
+        returnUrl={returnUrl}
+        onAuthorized={onAuthorized}
+      />
     </Elements>
   )
 }
 
 function CardAuthInner({
   amountCents,
+  returnUrl,
   onAuthorized,
 }: {
   amountCents: number
+  returnUrl: string
   onAuthorized: () => void
 }) {
   const stripe = useStripe()
@@ -57,6 +71,7 @@ function CardAuthInner({
 
     const { error: confirmError, paymentIntent } = await stripe.confirmPayment({
       elements,
+      confirmParams: { return_url: returnUrl },
       redirect: 'if_required',
     })
 
