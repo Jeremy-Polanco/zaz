@@ -289,7 +289,6 @@ export class RentalsService implements OnModuleInit {
 
   private async performActivation(rental: Rental, user: User): Promise<Rental> {
     const stripe = this.requireStripe();
-    const trialEnd = Math.floor(Date.now() / 1000) + 30 * 86400;
     const rentalId = rental.id;
 
     // A 30-day trial defers the first rent charge to next month (so a subscriber
@@ -297,14 +296,17 @@ export class RentalsService implements OnModuleInit {
     // with a trial + proration_behavior 'none', Stripe rejects an explicit anchor
     // ("anchored invoice must be prorated"). The trial alone anchors the cycle.
     //
-    // The idempotency key includes trialEnd so a retry (which computes a fresh
-    // trialEnd) gets a NEW key instead of colliding with the failed first call's
-    // poisoned key ("can only be used with the same parameters").
+    // Use trial_period_days (a constant) instead of an absolute, clock-derived
+    // trial_end so the request parameters stay STABLE across retries. Paired with
+    // a stable idempotency key (rentalId only), a retry replays the identical
+    // call: Stripe returns the ORIGINAL subscription instead of either rejecting
+    // on mismatched params ("can only be used with the same parameters") or —
+    // worse — minting a second subscription and double-billing the customer.
     const sub = await stripe.subscriptions.create(
       {
         customer: user.stripeCustomerId,
         items: [{ price: rental.stripePriceId }],
-        trial_end: trialEnd,
+        trial_period_days: 30,
         proration_behavior: 'none',
         metadata: {
           rentalId,
@@ -312,7 +314,7 @@ export class RentalsService implements OnModuleInit {
           productId: rental.productId,
         },
       },
-      { idempotencyKey: `rental-setup-${rentalId}-${trialEnd}` },
+      { idempotencyKey: `rental-setup-${rentalId}` },
     );
 
     const subObj = sub as {

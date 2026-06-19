@@ -317,10 +317,11 @@ describe('RentalsService', () => {
       expect((stripeCall['metadata'] as Record<string, string>)['productId']).toBe('product-1');
       expect(stripeCall['proration_behavior']).toBe('none');
 
-      // trial_end is ~30 days out (first charge next month — no double-charge).
-      const trialEnd = stripeCall['trial_end'] as number;
-      const expectedTrialEnd = Math.floor(Date.now() / 1000) + 30 * 86400;
-      expect(Math.abs(trialEnd - expectedTrialEnd)).toBeLessThan(5); // within 5 seconds
+      // 30-day trial defers the first charge to next month (no double-charge).
+      // A constant trial_period_days (not a clock-derived trial_end) keeps the
+      // request params stable across retries so the idempotency key is honored.
+      expect(stripeCall['trial_period_days']).toBe(30);
+      expect(stripeCall['trial_end']).toBeUndefined();
 
       // billing_cycle_anchor must NOT be sent: with a trial + proration_behavior
       // 'none', Stripe rejects an explicit anchor ("anchored invoice must be
@@ -335,7 +336,7 @@ describe('RentalsService', () => {
       expect(result.currentPeriodEnd).toBeInstanceOf(Date);
     });
 
-    it('T21: idempotency key is rental-setup-{rentalId}-{trialEnd} (retry-safe)', async () => {
+    it('T21: idempotency key is the stable rental-setup-{rentalId} (retry-safe, no dup subs)', async () => {
       const user = fakeUser({ stripeCustomerId: 'cus_abc' });
       const rental = fakeRental({ id: 'rental-xyz', status: RentalStatus.PENDING_SETUP });
 
@@ -345,12 +346,11 @@ describe('RentalsService', () => {
 
       await service.activateForOrder('rental-xyz');
 
-      // The key includes the trial_end so a later retry (with a fresh trial_end)
-      // gets a NEW key instead of colliding with a poisoned one.
-      const stripeCall = mockStripeInstance.subscriptions.create.mock.calls[0][0] as Record<string, unknown>;
-      const trialEnd = stripeCall['trial_end'] as number;
+      // STABLE key (rentalId only): a retry replays the identical call
+      // (trial_period_days is constant), so Stripe returns the original
+      // subscription instead of minting a duplicate and double-billing.
       const callOptions = mockStripeInstance.subscriptions.create.mock.calls[0][1] as Record<string, unknown>;
-      expect(callOptions?.['idempotencyKey']).toBe(`rental-setup-rental-xyz-${trialEnd}`);
+      expect(callOptions?.['idempotencyKey']).toBe('rental-setup-rental-xyz');
     });
   });
 
@@ -1222,12 +1222,11 @@ describe('RentalsService', () => {
       // subscriptions.create called
       expect(mockStripeInstance.subscriptions.create).toHaveBeenCalledTimes(1);
 
-      // Idempotency key is rental-setup-{rentalId}-{trialEnd} — retry-safe so a
-      // re-attempt with a fresh trial_end never collides with a poisoned key.
-      const stripeCall = mockStripeInstance.subscriptions.create.mock.calls[0][0] as Record<string, unknown>;
-      const trialEnd = stripeCall['trial_end'] as number;
+      // Idempotency key is the stable rental-setup-{rentalId}: a retry replays
+      // the identical call (constant trial_period_days), so Stripe returns the
+      // original subscription instead of creating a duplicate.
       const callOptions = mockStripeInstance.subscriptions.create.mock.calls[0][1] as Record<string, unknown>;
-      expect(callOptions?.['idempotencyKey']).toBe(`rental-setup-rental-7-${trialEnd}`);
+      expect(callOptions?.['idempotencyKey']).toBe('rental-setup-rental-7');
 
       // Result is active
       expect(result.status).toBe(RentalStatus.ACTIVE);
