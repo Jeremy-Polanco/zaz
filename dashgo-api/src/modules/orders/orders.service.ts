@@ -908,6 +908,10 @@ export class OrdersService {
     candidates: number;
     byStatus: Record<string, number>;
     cancelled: number;
+    // Reversal map: every affected order with its status BEFORE cancellation.
+    // Save the dry-run output — this is how you'd undo a soft-delete on a Dev
+    // Database (no managed backups / point-in-time recovery).
+    orders: Array<{ id: string; prevStatus: OrderStatus }>;
   }> {
     const rentalOrderIds = new Set(
       await this.rentalsService.getOrderIdsWithRentals(),
@@ -921,8 +925,10 @@ export class OrdersService {
     );
 
     const byStatus: Record<string, number> = {};
+    const affected: Array<{ id: string; prevStatus: OrderStatus }> = [];
     for (const o of candidates) {
       byStatus[o.status] = (byStatus[o.status] ?? 0) + 1;
+      affected.push({ id: o.id, prevStatus: o.status });
     }
 
     let cancelled = 0;
@@ -947,6 +953,7 @@ export class OrdersService {
       candidates: candidates.length,
       byStatus,
       cancelled,
+      orders: affected,
     };
   }
 

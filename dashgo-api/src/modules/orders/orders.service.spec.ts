@@ -581,6 +581,10 @@ describe('OrdersService', () => {
           [OrderStatus.PENDING_QUOTE]: 1,
         },
         cancelled: 0,
+        orders: [
+          { id: 'o1', prevStatus: OrderStatus.QUOTED },
+          { id: 'o2', prevStatus: OrderStatus.PENDING_QUOTE },
+        ],
       });
     });
 
