@@ -16,6 +16,14 @@ export function productImageUrl(productId: string, version?: string | null) {
   return version ? `${base}?v=${encodeURIComponent(version)}` : base
 }
 
+// Category images are served by the API at a relative path the backend builds
+// (e.g. `/categories/:id/image?t=...`). The web client lives on a different
+// origin than the API, so the bare path would resolve against the web origin
+// and 404. Prefix it with the API origin; absolute URLs pass through untouched.
+export function categoryImageUrl(path: string) {
+  return /^https?:\/\//i.test(path) ? path : `${API_URL}${path}`
+}
+
 export const api = axios.create({
   baseURL: API_URL,
   headers: { 'Content-Type': 'application/json' },

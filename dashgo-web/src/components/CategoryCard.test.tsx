@@ -30,7 +30,24 @@ describe('CategoryCard', () => {
     // Query by CSS class or directly find the img element.
     const imgs = document.querySelectorAll('img')
     expect(imgs.length).toBe(1)
+    // Absolute URLs pass through categoryImageUrl untouched.
     expect(imgs[0]).toHaveAttribute('src', 'https://example.com/agua.jpg')
+  })
+
+  it('prefixes an API-served relative imageUrl with the API origin (web↔mobile parity)', () => {
+    // The backend returns a bare path like `/categories/:id/image?t=...`. On web
+    // that must be resolved against the API origin, not the web origin, or it 404s
+    // and falls back to the emoji — which is exactly the bug this fixes.
+    const apiServed: Category = {
+      ...baseCategory,
+      imageUrl: '/categories/cat-001/image?t=42',
+    }
+    render(<CategoryCard category={apiServed} productCount={4} />)
+    const img = document.querySelector('img')
+    expect(img).toHaveAttribute(
+      'src',
+      'http://localhost:3001/api/categories/cat-001/image?t=42',
+    )
   })
 
   it('shows emoji when no imageUrl is set', () => {

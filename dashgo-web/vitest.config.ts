@@ -15,6 +15,10 @@ export default defineConfig({
     exclude: ['e2e/**', 'node_modules/**'],
     environment: 'jsdom',
     setupFiles: ['./src/test/setup.ts'],
+    // api.ts throws at import time if VITE_API_URL is missing. Components that
+    // import it (e.g. CategoryCard, for categoryImageUrl) need a value present
+    // so the module loads under test. Mirrors the prod shape: base ends in /api.
+    env: { VITE_API_URL: 'http://localhost:3001/api' },
     globals: true,
     typecheck: {
       tsconfig: './tsconfig.test.json',

@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { categoryImageUrl } from '../lib/api'
 import type { Category } from '../lib/types'
 
 type Props = {
@@ -12,7 +13,8 @@ type Props = {
 export function CategoryCard({ category, productCount, variant = 'category', dark = false, onClick }: Props) {
   const [showImage, setShowImage] = useState(true)
   const isAll = variant === 'all'
-  const imageUrl = !isAll && category.imageUrl && showImage ? category.imageUrl : null
+  const imageUrl =
+    !isAll && category.imageUrl && showImage ? categoryImageUrl(category.imageUrl) : null
   const onDark = dark && !imageUrl && !isAll
 
   return (
