@@ -202,6 +202,7 @@ describe('OrdersService', () => {
       activateForOrder: jest.fn().mockResolvedValue({} as never),
       createForOrder: jest.fn().mockResolvedValue({}),
       cancelPendingForOrder: jest.fn().mockResolvedValue(undefined),
+      getOrderIdsWithRentals: jest.fn().mockResolvedValue([]),
       countBebederoRentalsForUser: jest.fn().mockResolvedValue(0),
       ensureBebederoRatePrices: jest.fn().mockResolvedValue({
         freePriceId: 'price_free_existing',
@@ -543,6 +544,79 @@ describe('OrdersService', () => {
 
       expect(autoSpy).not.toHaveBeenCalled();
       expect(result).toEqual({ scanned: 0, confirmed: 0 });
+    });
+  });
+
+  describe('cancelNonRentalOrders (one-time op)', () => {
+    type CancelReversalsTarget = {
+      cancelOrderWithReversals(order: Order): Promise<void>;
+    };
+    const spyCancelReversals = () =>
+      jest
+        .spyOn(
+          service as unknown as CancelReversalsTarget,
+          'cancelOrderWithReversals',
+        )
+        .mockResolvedValue(undefined);
+
+    it('dry run: reports the breakdown by status and writes nothing', async () => {
+      rentalsService.getOrderIdsWithRentals.mockResolvedValue(['o-rental']);
+      ordersRepo.find.mockResolvedValue([
+        fakeOrder({ id: 'o-rental', status: OrderStatus.QUOTED }), // kept (rental-linked)
+        fakeOrder({ id: 'o1', status: OrderStatus.QUOTED }),
+        fakeOrder({ id: 'o2', status: OrderStatus.PENDING_QUOTE }),
+        fakeOrder({ id: 'o3', status: OrderStatus.CANCELLED }), // skipped (already cancelled)
+      ]);
+      const spy = spyCancelReversals();
+
+      const result = await service.cancelNonRentalOrders({ dryRun: true });
+
+      expect(spy).not.toHaveBeenCalled();
+      expect(result).toEqual({
+        dryRun: true,
+        rentalLinkedKept: 1,
+        candidates: 2,
+        byStatus: {
+          [OrderStatus.QUOTED]: 1,
+          [OrderStatus.PENDING_QUOTE]: 1,
+        },
+        cancelled: 0,
+      });
+    });
+
+    it('apply: cancels non-rental, non-cancelled orders; keeps rental-linked', async () => {
+      rentalsService.getOrderIdsWithRentals.mockResolvedValue(['o-rental']);
+      ordersRepo.find.mockResolvedValue([
+        fakeOrder({ id: 'o-rental', status: OrderStatus.QUOTED }),
+        fakeOrder({ id: 'o1', status: OrderStatus.QUOTED }),
+        fakeOrder({ id: 'o2', status: OrderStatus.CANCELLED }),
+      ]);
+      const spy = spyCancelReversals();
+
+      const result = await service.cancelNonRentalOrders({ dryRun: false });
+
+      expect(spy).toHaveBeenCalledTimes(1);
+      expect(spy).toHaveBeenCalledWith(expect.objectContaining({ id: 'o1' }));
+      expect(result.cancelled).toBe(1);
+      expect(result.rentalLinkedKept).toBe(1);
+    });
+
+    it('respects the statuses filter', async () => {
+      rentalsService.getOrderIdsWithRentals.mockResolvedValue([]);
+      ordersRepo.find.mockResolvedValue([
+        fakeOrder({ id: 'o1', status: OrderStatus.QUOTED }),
+        fakeOrder({ id: 'o2', status: OrderStatus.DELIVERED }),
+      ]);
+      const spy = spyCancelReversals();
+
+      const result = await service.cancelNonRentalOrders({
+        dryRun: false,
+        statuses: [OrderStatus.QUOTED],
+      });
+
+      expect(spy).toHaveBeenCalledTimes(1);
+      expect(spy).toHaveBeenCalledWith(expect.objectContaining({ id: 'o1' }));
+      expect(result.candidates).toBe(1);
     });
   });
 

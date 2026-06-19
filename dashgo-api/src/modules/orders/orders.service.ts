@@ -854,6 +854,102 @@ export class OrdersService {
     return { scanned: quoted.length, confirmed };
   }
 
+  /**
+   * Cancel an order and atomically reverse its side-effects: refund applied
+   * credit, restore redeemed points, cancel any pending_setup rentals tied to
+   * it, and re-increment stock if it had been decremented (confirmed/in-route).
+   * Shared by the admin status-change path (updateStatus) and the
+   * cancel-non-rental-orders one-time op.
+   */
+  private async cancelOrderWithReversals(order: Order): Promise<void> {
+    const wasStockDecremented =
+      order.status === OrderStatus.CONFIRMED_BY_COLMADO ||
+      order.status === OrderStatus.IN_DELIVERY_ROUTE;
+
+    await this.dataSource.transaction(async (cancelTx) => {
+      await cancelTx
+        .getRepository(Order)
+        .update(order.id, { status: OrderStatus.CANCELLED });
+      if (parseFloat(order.creditApplied || '0') > 0) {
+        await this.credit.reverseCharge(order.id, cancelTx);
+      }
+      await this.points.reverseRedemptionForOrder(order.id, cancelTx);
+      await this.rentalsService.cancelPendingForOrder(order.id, cancelTx);
+      if (wasStockDecremented) {
+        const itemRepo = cancelTx.getRepository(OrderItem);
+        const productRepo = cancelTx.getRepository(Product);
+        const items = await itemRepo.find({ where: { orderId: order.id } });
+        for (const item of items) {
+          await productRepo.increment(
+            { id: item.productId },
+            'stock',
+            item.quantity,
+          );
+        }
+      }
+    });
+  }
+
+  /**
+   * One-time op: soft-delete (cancel) every order NOT linked to a rental,
+   * keeping the rental-triggering orders. Reuses cancelOrderWithReversals so
+   * credit / points / stock are properly reversed — never a raw status flip.
+   * Already-cancelled orders are skipped (idempotent). With dryRun=true it only
+   * reports the breakdown and writes NOTHING. An optional `statuses` filter
+   * limits which order statuses are touched. Invoked from the standalone script
+   * src/database/cancel-non-rental-orders.ts.
+   */
+  async cancelNonRentalOrders(opts: {
+    dryRun: boolean;
+    statuses?: OrderStatus[];
+  }): Promise<{
+    dryRun: boolean;
+    rentalLinkedKept: number;
+    candidates: number;
+    byStatus: Record<string, number>;
+    cancelled: number;
+  }> {
+    const rentalOrderIds = new Set(
+      await this.rentalsService.getOrderIdsWithRentals(),
+    );
+    const all = await this.orders.find();
+    const candidates = all.filter(
+      (o) =>
+        o.status !== OrderStatus.CANCELLED &&
+        !rentalOrderIds.has(o.id) &&
+        (!opts.statuses || opts.statuses.includes(o.status)),
+    );
+
+    const byStatus: Record<string, number> = {};
+    for (const o of candidates) {
+      byStatus[o.status] = (byStatus[o.status] ?? 0) + 1;
+    }
+
+    let cancelled = 0;
+    if (!opts.dryRun) {
+      for (const o of candidates) {
+        await this.cancelOrderWithReversals(o);
+        cancelled++;
+      }
+    }
+
+    this.logger.log(
+      `cancel-non-rental (${opts.dryRun ? 'DRY RUN' : 'APPLY'}): kept ${
+        rentalOrderIds.size
+      } rental-linked order id(s); ${candidates.length} candidate(s) ${
+        opts.dryRun ? 'would be cancelled' : 'cancelled'
+      } — byStatus ${JSON.stringify(byStatus)}`,
+    );
+
+    return {
+      dryRun: opts.dryRun,
+      rentalLinkedKept: rentalOrderIds.size,
+      candidates: candidates.length,
+      byStatus,
+      cancelled,
+    };
+  }
+
   async updateStatus(
     id: string,
     dto: UpdateOrderStatusDto,
@@ -883,41 +979,7 @@ export class OrdersService {
     } else if (isDelivering) {
       await this.markDelivered(order.id);
     } else if (dto.status === OrderStatus.CANCELLED) {
-      // Wrap cancel in a TX so every side-effect reversal commits atomically
-      // with the status flip.
-      //
-      // Reversed on cancel:
-      //   - Credit: refund any creditApplied (T4.4)
-      //   - Points: restore claimable status of any entries we redeemed
-      //   - Stock: re-increment if the order had been confirmed (stock was
-      //     decremented during pending_validation → confirmed_by_colmado)
-      //   - Rentals: cancel any pending_setup rentals tied to the order
-      const wasStockDecremented =
-        order.status === OrderStatus.CONFIRMED_BY_COLMADO ||
-        order.status === OrderStatus.IN_DELIVERY_ROUTE;
-
-      await this.dataSource.transaction(async (cancelTx) => {
-        await cancelTx
-          .getRepository(Order)
-          .update(id, { status: OrderStatus.CANCELLED });
-        if (parseFloat(order.creditApplied || '0') > 0) {
-          await this.credit.reverseCharge(order.id, cancelTx);
-        }
-        await this.points.reverseRedemptionForOrder(order.id, cancelTx);
-        await this.rentalsService.cancelPendingForOrder(order.id, cancelTx);
-        if (wasStockDecremented) {
-          const itemRepo = cancelTx.getRepository(OrderItem);
-          const productRepo = cancelTx.getRepository(Product);
-          const items = await itemRepo.find({ where: { orderId: order.id } });
-          for (const item of items) {
-            await productRepo.increment(
-              { id: item.productId },
-              'stock',
-              item.quantity,
-            );
-          }
-        }
-      });
+      await this.cancelOrderWithReversals(order);
     } else {
       await this.orders.update(id, { status: dto.status });
     }

@@ -10,7 +10,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import * as Sentry from '@sentry/node';
-import { DataSource, EntityManager, In, Repository } from 'typeorm';
+import { DataSource, EntityManager, In, IsNull, Not, Repository } from 'typeorm';
 import Stripe = require('stripe');
 import { Rental, RentalStatus } from '../../entities/rental.entity';
 import { User } from '../../entities/user.entity';
@@ -358,6 +358,20 @@ export class RentalsService implements OnModuleInit {
     }
 
     return this.rentals.save(rental);
+  }
+
+  /**
+   * Order ids that triggered a rental. Used by the cancel-non-rental-orders
+   * one-time op to KEEP rental-linked orders while cancelling everything else.
+   */
+  async getOrderIdsWithRentals(): Promise<string[]> {
+    const rows = await this.rentals.find({
+      where: { orderId: Not(IsNull()) },
+      select: { id: true, orderId: true },
+    });
+    return rows
+      .map((r) => r.orderId)
+      .filter((id): id is string => id !== null);
   }
 
   // ─────────────────────────────────────────────────────────────────────────
