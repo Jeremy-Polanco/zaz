@@ -494,6 +494,23 @@ describe('RentalsService', () => {
 
       expect(result.status).toBe(RentalStatus.PENDING_SETUP);
     });
+
+    it('T25c: allowDuplicate=true → skips the guard, creates even with an active rental', async () => {
+      const savedRental = fakeRental({ status: RentalStatus.PENDING_SETUP });
+      dataSource._mockEntityManager.save.mockResolvedValueOnce(savedRental);
+
+      const result = await service.createForOrder({
+        userId: 'user-1',
+        productId: 'product-1',
+        orderId: 'order-dup',
+        product: fakeProduct(),
+        allowDuplicate: true,
+      });
+
+      // The blocking pre-check (SELECT ... FOR UPDATE) is never consulted.
+      expect(dataSource._mockEntityManager.findOne).not.toHaveBeenCalled();
+      expect(result.status).toBe(RentalStatus.PENDING_SETUP);
+    });
   });
 
   // ─────────────────────────────────────────────────────────────────────────

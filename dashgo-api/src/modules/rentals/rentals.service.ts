@@ -60,6 +60,13 @@ export interface CreateForOrderParams {
    */
   monthlyRentCentsOverride?: number;
   stripePriceIdOverride?: string;
+  /**
+   * Bypass the one-active-rental-per-(user,product) guard. Set ONLY for explicit
+   * customer orders that intentionally stack rentals (e.g. an additional
+   * bebedero). Omit for the auto free-bebedero provisioning so replayed webhooks
+   * stay idempotent.
+   */
+  allowDuplicate?: boolean;
 }
 
 export interface ListAdminFilters {
@@ -169,21 +176,26 @@ export class RentalsService implements OnModuleInit {
   ): Promise<Rental> {
     const { userId, productId, orderId, product } = params;
 
-    // T26: pre-check — SELECT FOR UPDATE to prevent race conditions
-    const existing = await em.findOne(Rental, {
-      where: {
-        userId,
-        productId,
-        status: In(BLOCKING_STATUSES),
-      },
-      lock: { mode: 'pessimistic_write' },
-    });
-
-    if (existing) {
-      throw new ConflictException({
-        code: 'RENTAL_ALREADY_ACTIVE',
-        message: 'Ya existe un alquiler activo para este usuario y producto.',
+    // Pre-check — SELECT FOR UPDATE to prevent race conditions. Skipped for
+    // explicit customer orders that intentionally stack rentals (allowDuplicate);
+    // kept for the auto free-bebedero path so concurrent webhook replays can't
+    // mint duplicates (the pessimistic lock serializes them).
+    if (!params.allowDuplicate) {
+      const existing = await em.findOne(Rental, {
+        where: {
+          userId,
+          productId,
+          status: In(BLOCKING_STATUSES),
+        },
+        lock: { mode: 'pessimistic_write' },
       });
+
+      if (existing) {
+        throw new ConflictException({
+          code: 'RENTAL_ALREADY_ACTIVE',
+          message: 'Ya existe un alquiler activo para este usuario y producto.',
+        });
+      }
     }
 
     // Snapshot pricing at creation time. Subscriber bebedero overrides win over

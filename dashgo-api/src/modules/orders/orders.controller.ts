@@ -39,7 +39,11 @@ export class OrdersController {
     @Body() dto: CreateOrderDto,
     @CurrentUser() user: AuthenticatedUser,
   ) {
-    return this.orders.create(user, dto);
+    // Customer-initiated orders may intentionally stack rentals (e.g. a second
+    // bebedero, billed at the additional rate). The auto free-bebedero
+    // provisioning calls orders.create() WITHOUT this flag, so it stays
+    // idempotent against replayed Stripe webhooks.
+    return this.orders.create(user, dto, { allowDuplicateRental: true });
   }
 
   @Patch(':id/status')

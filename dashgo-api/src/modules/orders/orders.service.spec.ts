@@ -1687,6 +1687,58 @@ describe('OrdersService', () => {
 
       expect(rentalsService.createForOrder).not.toHaveBeenCalled();
     });
+
+    it('allowDuplicateRental=true: skips the pre-check and stacks a second rental', async () => {
+      productsRepo.find.mockResolvedValue([rentalProduct]);
+      // User already holds an active rental of this product — normally a 409.
+      rentalsService.findActiveByUserAndProduct.mockResolvedValue({
+        id: 'rental-existing',
+      } as never);
+
+      const savedOrder = fakeOrder({ id: 'order-dup-1' });
+      (dataSource.transaction as jest.Mock).mockImplementation(
+        async (cb: (mgr: EntityManager) => Promise<unknown>) => {
+          const orderRepo = makeRepoMock<Order>();
+          const itemRepo = makeRepoMock<OrderItem>();
+          orderRepo.create.mockImplementation(
+            (d) => ({ ...d, id: 'order-dup-1' }) as Order,
+          );
+          orderRepo.save.mockResolvedValue(savedOrder);
+          orderRepo.update.mockResolvedValue({ affected: 1 } as never);
+          itemRepo.save.mockResolvedValue({} as never);
+          itemRepo.create.mockImplementation((d) => d as OrderItem);
+          const mgr = {
+            getRepository: (entity: unknown) => {
+              if (entity === Order) return orderRepo;
+              if (entity === OrderItem) return itemRepo;
+              return makeRepoMock();
+            },
+          } as unknown as EntityManager;
+          return cb(mgr);
+        },
+      );
+      ordersRepo.findOne.mockResolvedValue(
+        fakeOrder({
+          id: 'order-dup-1',
+          customer: fakeUser() as never,
+          items: [],
+        }),
+      );
+
+      await expect(
+        service.create(fakeUser(UserRole.CLIENT), rentalCartDto, {
+          allowDuplicateRental: true,
+        }),
+      ).resolves.toBeDefined();
+
+      // Guard bypassed: the pre-check is never consulted, and the rental is
+      // created with allowDuplicate so the inner guard is skipped too.
+      expect(rentalsService.findActiveByUserAndProduct).not.toHaveBeenCalled();
+      expect(rentalsService.createForOrder).toHaveBeenCalledWith(
+        expect.objectContaining({ allowDuplicate: true }),
+        expect.anything(),
+      );
+    });
   });
 
   // ─────────────────────────────────────────────────────────────────────────

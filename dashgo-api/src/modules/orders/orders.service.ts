@@ -104,7 +104,11 @@ export class OrdersService {
     return order;
   }
 
-  async create(user: AuthenticatedUser, dto: CreateOrderDto) {
+  async create(
+    user: AuthenticatedUser,
+    dto: CreateOrderDto,
+    opts: { allowDuplicateRental?: boolean } = {},
+  ) {
     if (user.role !== UserRole.CLIENT && user.role !== UserRole.PROMOTER) {
       throw new ForbiddenException('Solo clientes pueden crear pedidos');
     }
@@ -171,17 +175,25 @@ export class OrdersService {
       });
     }
 
-    // T63: Pre-check — for each rental item, ensure no active rental already exists.
-    // This runs BEFORE TX (outside any transaction) per the design spec.
-    for (const input of dto.items) {
-      const product = byId.get(input.productId)!;
-      if (product.pricingMode === 'rental') {
-        const existing = await this.rentalsService.findActiveByUserAndProduct(user.id, product.id);
-        if (existing) {
-          throw new ConflictException({
-            code: 'RENTAL_ALREADY_ACTIVE',
-            message: `Ya tenés un alquiler activo de "${product.name}". Cancelá el actual antes de pedir otro.`,
-          });
+    // Pre-check — by default a user may hold only ONE active rental per product.
+    // This is what keeps the auto-provisioned free bebedero idempotent against
+    // replayed Stripe webhooks (the listener calls create() WITHOUT the flag).
+    // Explicit customer orders pass allowDuplicateRental=true to intentionally
+    // stack rentals (e.g. a second bebedero, billed at the additional rate).
+    if (!opts.allowDuplicateRental) {
+      for (const input of dto.items) {
+        const product = byId.get(input.productId)!;
+        if (product.pricingMode === 'rental') {
+          const existing = await this.rentalsService.findActiveByUserAndProduct(
+            user.id,
+            product.id,
+          );
+          if (existing) {
+            throw new ConflictException({
+              code: 'RENTAL_ALREADY_ACTIVE',
+              message: `Ya tenés un alquiler activo de "${product.name}". Cancelá el actual antes de pedir otro.`,
+            });
+          }
         }
       }
     }
@@ -400,6 +412,7 @@ export class OrdersService {
               product,
               monthlyRentCentsOverride: rate?.monthlyRentCents,
               stripePriceIdOverride: rate?.stripePriceId,
+              allowDuplicate: opts.allowDuplicateRental,
             },
             tx,
           );
