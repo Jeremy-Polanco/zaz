@@ -281,6 +281,23 @@ export function useCurrentUser() {
   })
 }
 
+/**
+ * Super-admin: DELETE /users/:id — irreversibly deletes a user account.
+ * Runs the full deletion flow server-side (anonymizes orders, cascades
+ * related rows, durable audit). Invalidates the admin users list on success.
+ */
+export function useDeleteUser() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (id: string) => {
+      await api.delete(`/users/${id}`)
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['users'] })
+    },
+  })
+}
+
 export type CreateProductInput = {
   name: string
   description?: string

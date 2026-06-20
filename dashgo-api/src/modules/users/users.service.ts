@@ -8,6 +8,7 @@ import { Repository } from 'typeorm';
 import { Subscription, SubscriptionStatus, User } from '../../entities';
 import { UserRole } from '../../entities/enums';
 import { AuthenticatedUser } from '../../common/types/authenticated-user';
+import { AuthService } from '../auth/auth.service';
 import { UpdateMeDto } from './dto/update-me.dto';
 import { UpdateUserAdminDto } from './dto/update-user-admin.dto';
 import {
@@ -28,6 +29,7 @@ export type AdminUser = User & {
 export class UsersService {
   constructor(
     @InjectRepository(User) private readonly users: Repository<User>,
+    private readonly auth: AuthService,
   ) {}
 
   async getMe(user: AuthenticatedUser) {
@@ -59,6 +61,34 @@ export class UsersService {
     const updated = await this.users.findOne({ where: { id } });
     if (!updated) throw new NotFoundException();
     return updated;
+  }
+
+  /**
+   * Admin "delete user". SUPER_ADMIN_DELIVERY only. Hard-deletes the target via
+   * the shared AuthService.deleteAccount flow — same transaction, order
+   * anonymization, RESTRICT-FK cleanup, durable audit row and Stripe cleanup as
+   * self-service deletion — but tags the audit as admin-initiated and records
+   * which admin did it.
+   *
+   * An admin cannot delete their own account through this endpoint (guardrail
+   * against self-lockout / accidents). They can still use DELETE /auth/me for a
+   * deliberate self-deletion.
+   */
+  async deleteByAdmin(actor: AuthenticatedUser, id: string): Promise<void> {
+    if (actor.role !== UserRole.SUPER_ADMIN_DELIVERY) {
+      throw new ForbiddenException();
+    }
+    if (actor.id === id) {
+      throw new ForbiddenException(
+        'No podés eliminar tu propia cuenta de administrador desde acá.',
+      );
+    }
+    const target = await this.users.findOne({ where: { id } });
+    if (!target) throw new NotFoundException();
+    await this.auth.deleteAccount(id, {
+      requestedVia: 'admin',
+      requestedByUserId: actor.id,
+    });
   }
 
   /**

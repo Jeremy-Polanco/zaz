@@ -36,6 +36,15 @@ export class AccountDeletion {
   @Column({ name: 'requested_via', type: 'text', nullable: true })
   requestedVia!: string | null;
 
+  /**
+   * When an admin deleted the account (requested_via = 'admin'), the id of the
+   * super admin who performed the deletion. NULL for self-service ('in-app')
+   * deletions. No FK — both the actor and the target user rows may be gone by
+   * the time this is audited.
+   */
+  @Column({ name: 'requested_by_user_id', type: 'uuid', nullable: true })
+  requestedByUserId!: string | null;
+
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt!: Date;
 }

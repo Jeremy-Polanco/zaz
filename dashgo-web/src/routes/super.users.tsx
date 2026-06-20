@@ -2,7 +2,7 @@ import { createFileRoute, isRedirect, redirect } from '@tanstack/react-router'
 import { Fragment, useMemo, useState } from 'react'
 import { SectionHeading } from '../components/ui'
 import { UserAddressesPanel } from '../components/UserAddressesPanel'
-import { useAdminUsers } from '../lib/queries'
+import { useAdminUsers, useCurrentUser, useDeleteUser } from '../lib/queries'
 import { TOKEN_KEY, api } from '../lib/api'
 import type { AdminUser, AdminUsersSubscriptionFilter, AuthUser } from '../lib/types'
 
@@ -51,6 +51,73 @@ const FILTER_OPTIONS: {
   { label: 'Sin suscripción', value: 'none' },
 ]
 
+// ── Delete confirmation modal ─────────────────────────────────────────────────
+
+function DeleteUserModal({
+  user,
+  onCancel,
+  onConfirm,
+  isDeleting,
+  error,
+}: {
+  user: AdminUser
+  onCancel: () => void
+  onConfirm: () => void
+  isDeleting: boolean
+  error: string | null
+}) {
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-ink/60 px-4"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="delete-user-title"
+    >
+      <div className="w-full max-w-md border border-ink/15 bg-paper p-6 shadow-xl">
+        <h2
+          id="delete-user-title"
+          className="text-lg font-semibold text-ink"
+        >
+          Eliminar usuario
+        </h2>
+        <p className="mt-3 text-sm text-ink-muted">
+          Vas a eliminar a{' '}
+          <span className="font-medium text-ink">{user.fullName}</span>
+          {user.phone ? ` (${user.phone})` : ''}. Esta acción es{' '}
+          <span className="font-medium text-bad">irreversible</span>: se
+          borran sus direcciones, suscripción, créditos y puntos. Sus órdenes se
+          conservan anonimizadas.
+        </p>
+
+        {error && (
+          <p className="mt-3 border border-bad/40 bg-bad/10 px-3 py-2 text-sm text-bad">
+            {error}
+          </p>
+        )}
+
+        <div className="mt-6 flex justify-end gap-3">
+          <button
+            type="button"
+            onClick={onCancel}
+            disabled={isDeleting}
+            className="border border-ink/20 px-4 py-2 text-sm text-ink-muted transition-colors hover:border-ink/40 disabled:opacity-50"
+          >
+            Cancelar
+          </button>
+          <button
+            type="button"
+            onClick={onConfirm}
+            disabled={isDeleting}
+            className="bg-bad px-4 py-2 text-sm font-medium text-paper transition-opacity hover:opacity-90 disabled:opacity-50"
+          >
+            {isDeleting ? 'Eliminando…' : 'Eliminar definitivamente'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ── Main page ──────────────────────────────────────────────────────────────────
 
 function SuperUsersPage() {
@@ -59,8 +126,11 @@ function SuperUsersPage() {
   >(undefined)
   const [searchText, setSearchText] = useState('')
   const [expandedId, setExpandedId] = useState<string | null>(null)
+  const [pendingDelete, setPendingDelete] = useState<AdminUser | null>(null)
 
   const { data: users, isPending } = useAdminUsers(subscription)
+  const { data: me } = useCurrentUser()
+  const deleteUser = useDeleteUser()
 
   const filtered = useMemo(() => {
     if (!users) return []
@@ -139,12 +209,15 @@ function SuperUsersPage() {
                 <th className="p-4 text-right text-[10px] font-medium uppercase tracking-wide text-ink-muted">
                   Direcciones
                 </th>
+                <th className="p-4 text-right text-[10px] font-medium uppercase tracking-wide text-ink-muted">
+                  Acciones
+                </th>
               </tr>
             </thead>
             <tbody>
               {filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="py-12 text-center text-ink-muted">
+                  <td colSpan={7} className="py-12 text-center text-ink-muted">
                     Sin usuarios que coincidan
                   </td>
                 </tr>
@@ -175,10 +248,25 @@ function SuperUsersPage() {
                             {expanded ? 'Ocultar' : 'Direcciones'}
                           </button>
                         </td>
+                        <td className="p-4 text-right">
+                          {me?.id === u.id ? (
+                            <span className="text-[0.6rem] uppercase tracking-[0.12em] text-ink-muted/60">
+                              Vos
+                            </span>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => setPendingDelete(u)}
+                              className="text-[0.65rem] uppercase tracking-[0.12em] text-bad hover:underline"
+                            >
+                              Eliminar
+                            </button>
+                          )}
+                        </td>
                       </tr>
                       {expanded && (
                         <tr className="border-b border-ink/10 bg-ink/3">
-                          <td colSpan={6} className="p-4">
+                          <td colSpan={7} className="p-4">
                             <UserAddressesPanel userId={u.id} />
                           </td>
                         </tr>
@@ -194,6 +282,31 @@ function SuperUsersPage() {
             {filtered.length} usuario{filtered.length !== 1 ? 's' : ''}
           </div>
         </div>
+      )}
+
+      {pendingDelete && (
+        <DeleteUserModal
+          user={pendingDelete}
+          isDeleting={deleteUser.isPending}
+          error={
+            deleteUser.isError
+              ? 'No se pudo eliminar el usuario. Intentá de nuevo.'
+              : null
+          }
+          onCancel={() => {
+            if (deleteUser.isPending) return
+            deleteUser.reset()
+            setPendingDelete(null)
+          }}
+          onConfirm={() => {
+            deleteUser.mutate(pendingDelete.id, {
+              onSuccess: () => {
+                setExpandedId((id) => (id === pendingDelete.id ? null : id))
+                setPendingDelete(null)
+              },
+            })
+          }}
+        />
       )}
     </div>
   )

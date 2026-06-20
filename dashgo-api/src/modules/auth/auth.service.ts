@@ -416,7 +416,12 @@ export class AuthService implements OnModuleInit {
    * Wraps everything in a single TypeORM transaction so a partial failure
    * rolls back. Logs an audit warning before commit.
    */
-  async deleteAccount(userId: string): Promise<void> {
+  async deleteAccount(
+    userId: string,
+    options: { requestedVia?: string; requestedByUserId?: string | null } = {},
+  ): Promise<void> {
+    const requestedVia = options.requestedVia ?? 'in-app';
+    const requestedByUserId = options.requestedByUserId ?? null;
     const user = await this.users.findOne({ where: { id: userId } });
     if (!user) {
       throw new NotFoundException('Usuario no encontrado');
@@ -517,7 +522,8 @@ export class AuthService implements OnModuleInit {
           hashedPhone,
           hashedEmail,
           stripeCustomerId: stripeCustomerId ?? null,
-          requestedVia: 'in-app',
+          requestedVia,
+          requestedByUserId,
         }),
       );
 
@@ -549,7 +555,7 @@ export class AuthService implements OnModuleInit {
     }
 
     this.logger.warn(
-      `[ACCOUNT_DELETE] user=${userId} phone=${phone ?? '(none)'} stripeCustomerId=${stripeCustomerId ?? '(none)'}`,
+      `[ACCOUNT_DELETE] user=${userId} phone=${phone ?? '(none)'} stripeCustomerId=${stripeCustomerId ?? '(none)'} via=${requestedVia}${requestedByUserId ? ` by=${requestedByUserId}` : ''}`,
     );
   }
 }

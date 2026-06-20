@@ -1,8 +1,12 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
+  HttpCode,
+  HttpStatus,
   Param,
+  ParseUUIDPipe,
   Patch,
   Query,
   UseGuards,
@@ -50,5 +54,21 @@ export class UsersController {
     @Body() dto: UpdateUserAdminDto,
   ) {
     return this.users.updateByAdmin(user, id, dto);
+  }
+
+  /**
+   * Super-admin hard-delete of a user. Returns 204 No Content on success.
+   * Irreversible — runs the full account-deletion flow (anonymizes orders,
+   * cascades related rows, writes a durable audit trail). An admin cannot
+   * delete their own account here (403).
+   */
+  @Roles(UserRole.SUPER_ADMIN_DELIVERY)
+  @Delete(':id')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  async deleteByAdmin(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<void> {
+    await this.users.deleteByAdmin(user, id);
   }
 }

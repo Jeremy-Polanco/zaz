@@ -16,6 +16,7 @@ import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { UsersService } from './users.service';
+import { AuthService } from '../auth/auth.service';
 import { User } from '../../entities/user.entity';
 import { SubscriptionStatus } from '../../entities/subscription.entity';
 import { UserRole } from '../../entities/enums';
@@ -77,6 +78,7 @@ describe('UsersService.findAll (admin list)', () => {
       providers: [
         UsersService,
         { provide: getRepositoryToken(User), useValue: userRepo },
+        { provide: AuthService, useValue: { deleteAccount: jest.fn() } },
       ],
     }).compile();
 
@@ -189,6 +191,7 @@ describe('UsersService.updateByAdmin', () => {
       providers: [
         UsersService,
         { provide: getRepositoryToken(User), useValue: userRepo },
+        { provide: AuthService, useValue: { deleteAccount: jest.fn() } },
       ],
     }).compile();
     service = module.get<UsersService>(UsersService);
@@ -222,5 +225,58 @@ describe('UsersService.updateByAdmin', () => {
     await expect(
       service.updateByAdmin(admin, 'ghost', { maintenanceTimerDisabled: true }),
     ).rejects.toThrow(NotFoundException);
+  });
+});
+
+describe('UsersService.deleteByAdmin', () => {
+  let service: UsersService;
+  let userRepo: ReturnType<typeof makeUserRepoMock>;
+  let auth: { deleteAccount: jest.Mock };
+
+  beforeEach(async () => {
+    userRepo = makeUserRepoMock();
+    auth = { deleteAccount: jest.fn().mockResolvedValue(undefined) };
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        UsersService,
+        { provide: getRepositoryToken(User), useValue: userRepo },
+        { provide: AuthService, useValue: auth },
+      ],
+    }).compile();
+    service = module.get<UsersService>(UsersService);
+  });
+
+  it('rejects non-admin callers and never deletes', async () => {
+    const client = { id: 'u', role: UserRole.CLIENT } as AuthenticatedUser;
+    await expect(service.deleteByAdmin(client, 'target-1')).rejects.toThrow(
+      ForbiddenException,
+    );
+    expect(auth.deleteAccount).not.toHaveBeenCalled();
+  });
+
+  it('blocks an admin from deleting their own account', async () => {
+    await expect(service.deleteByAdmin(admin, admin.id)).rejects.toThrow(
+      ForbiddenException,
+    );
+    expect(auth.deleteAccount).not.toHaveBeenCalled();
+  });
+
+  it('deletes the target via AuthService, tagging the audit as admin-initiated', async () => {
+    userRepo.findOne.mockResolvedValueOnce(fakeUser({ id: 'target-1' }));
+
+    await service.deleteByAdmin(admin, 'target-1');
+
+    expect(auth.deleteAccount).toHaveBeenCalledWith('target-1', {
+      requestedVia: 'admin',
+      requestedByUserId: admin.id,
+    });
+  });
+
+  it('throws NotFound when the target user does not exist', async () => {
+    userRepo.findOne.mockResolvedValueOnce(null);
+    await expect(service.deleteByAdmin(admin, 'ghost')).rejects.toThrow(
+      NotFoundException,
+    );
+    expect(auth.deleteAccount).not.toHaveBeenCalled();
   });
 });
