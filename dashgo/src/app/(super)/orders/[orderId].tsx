@@ -11,7 +11,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { router, useLocalSearchParams } from 'expo-router'
 import { useQuery } from '@tanstack/react-query'
-import { SymbolView } from 'expo-symbols'
+import { ScreenHeader } from '../../../components/ScreenHeader'
 import { api } from '../../../lib/api'
 import { useUpdateOrderStatus } from '../../../lib/queries'
 import { formatDate, formatMoney } from '../../../lib/format'
@@ -163,29 +163,18 @@ export default function SuperOrderDetailScreen() {
   }
 
   return (
-    <SafeAreaView edges={['top']} className="flex-1 bg-paper">
-      {/* Top bar */}
-      <View className="flex-row items-center justify-between border-b border-ink/10 px-5 py-3">
-        <Pressable
-          onPress={() => router.back()}
-          className="-ml-1 flex-row items-center gap-1 px-1 py-1 active:opacity-60"
-        >
-          <SymbolView
-            name={{ ios: 'chevron.left', android: 'chevron_left' }}
-            size={14}
-            tintColor="#1A1530"
-            resizeMode="scaleAspectFit"
-            fallback={<Text className="text-ink">←</Text>}
-          />
-          <Text className="font-sans-medium text-[13px] text-ink">Ruta</Text>
-        </Pressable>
-        <Text
-          className="font-sans-medium text-[12px] uppercase tracking-label text-ink-muted"
-          numberOfLines={1}
-        >
-          {order.id.slice(0, 8)}
-        </Text>
-      </View>
+    <View className="flex-1 bg-paper">
+      <ScreenHeader
+        title="Pedido"
+        right={
+          <Text
+            className="font-sans-medium text-[13px] uppercase tracking-label text-ink-muted"
+            numberOfLines={1}
+          >
+            {order.id.slice(0, 8)}
+          </Text>
+        }
+      />
 
       <ScrollView
         contentContainerClassName="pb-32"
@@ -540,6 +529,6 @@ export default function SuperOrderDetailScreen() {
           onClose={() => setPinningLocation(false)}
         />
       )}
-    </SafeAreaView>
+    </View>
   )
 }

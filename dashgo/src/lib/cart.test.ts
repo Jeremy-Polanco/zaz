@@ -77,4 +77,41 @@ describe('cart — signal pattern', () => {
     expect(total).toBe(3)
     expect(items['p1']).toBeUndefined()
   })
+
+  describe('set — absolute quantity (typed via the number pad)', () => {
+    it('sets an exact quantity', () => {
+      cart.set('product-1', 7)
+      expect(cart.get().items['product-1']).toBe(7)
+    })
+
+    it('OVERRIDES the existing quantity (does not increment)', () => {
+      cart.update('product-1', 2)
+      cart.set('product-1', 5)
+      expect(cart.get().items['product-1']).toBe(5)
+    })
+
+    it('removes the item when set to 0', () => {
+      cart.update('product-1', 3)
+      cart.set('product-1', 0)
+      expect(cart.get().items['product-1']).toBeUndefined()
+    })
+
+    it('clamps negatives to 0 (removes)', () => {
+      cart.set('product-1', -4)
+      expect(cart.get().items['product-1']).toBeUndefined()
+    })
+
+    it('floors decimal quantities', () => {
+      cart.set('product-1', 3.9)
+      expect(cart.get().items['product-1']).toBe(3)
+    })
+
+    it('notifies subscribers', () => {
+      const listener = jest.fn()
+      const unsubscribe = cart.subscribe(listener)
+      cart.set('product-1', 4)
+      expect(listener).toHaveBeenCalledTimes(1)
+      unsubscribe()
+    })
+  })
 })

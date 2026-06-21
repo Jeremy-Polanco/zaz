@@ -58,28 +58,29 @@ export function MoreSheet({
             <Pressable
               key={item.route}
               onPress={() => go(item.route)}
-              className={`flex-row items-center gap-4 py-4 active:bg-ink/5 ${
+              accessibilityRole="button"
+              className={`flex-row items-center gap-4 py-5 active:bg-ink/5 ${
                 i > 0 ? 'border-t border-ink/10' : ''
               }`}
             >
-              <View className="h-10 w-10 items-center justify-center border border-ink/15 bg-paper-deep">
+              <View className="h-12 w-12 items-center justify-center rounded-xl border border-ink/15 bg-paper-deep">
                 <SymbolView
                   name={item.icon}
-                  size={20}
+                  size={24}
                   tintColor={ACCENT}
                   resizeMode="scaleAspectFit"
-                  fallback={<Text style={{ fontSize: 16, color: ACCENT }}>•</Text>}
+                  fallback={<Text style={{ fontSize: 18, color: ACCENT }}>•</Text>}
                 />
               </View>
-              <Text className="flex-1 font-sans-medium text-[16px] text-ink">
+              <Text className="flex-1 font-sans-medium text-[18px] text-ink">
                 {item.label}
               </Text>
               <SymbolView
                 name={{ ios: 'chevron.right', android: 'chevron_right' }}
-                size={16}
+                size={18}
                 tintColor="#6B6488"
                 resizeMode="scaleAspectFit"
-                fallback={<Text className="text-ink-muted">›</Text>}
+                fallback={<Text className="text-[20px] text-ink-muted">›</Text>}
               />
             </Pressable>
           ))}

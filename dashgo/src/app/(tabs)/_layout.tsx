@@ -1,54 +1,20 @@
 import { useEffect, useState } from 'react'
 import { Tabs, router } from 'expo-router'
-import { Text } from 'react-native'
-import { SymbolView, type AndroidSymbol } from 'expo-symbols'
-import type { SFSymbol } from 'sf-symbols-typescript'
 import { useCurrentUser } from '../../lib/queries'
 import { MoreSheet, type MoreSheetItem } from '../../components/MoreSheet'
-
-const ACCENT = '#1A1530'
-const MUTED = '#6B6488'
-
-type IconName = {
-  ios: SFSymbol
-  android: AndroidSymbol
-}
-
-function TabIcon({ focused, name }: { focused: boolean; name: IconName }) {
-  return (
-    <SymbolView
-      name={{ ios: name.ios, android: name.android }}
-      size={24}
-      tintColor={focused ? ACCENT : MUTED}
-      resizeMode="scaleAspectFit"
-      fallback={
-        <Text style={{ fontSize: 18, color: focused ? ACCENT : MUTED }}>
-          •
-        </Text>
-      }
-    />
-  )
-}
-
-function TabLabel({ focused, children }: { focused: boolean; children: string }) {
-  return (
-    <Text
-      numberOfLines={1}
-      className={`font-sans text-[10px] uppercase tracking-label ${
-        focused ? 'text-ink' : 'text-ink-muted'
-      }`}
-    >
-      {children}
-    </Text>
-  )
-}
+import {
+  TabBarIcon,
+  TabBarLabel,
+  useTabBarScreenOptions,
+  type TabIconName,
+} from '../../components/tabBar'
 
 const ICONS = {
   home: { ios: 'house.fill', android: 'home' },
   catalog: { ios: 'square.grid.2x2.fill', android: 'apps' },
   orders: { ios: 'bag.fill', android: 'shopping_bag' },
   more: { ios: 'ellipsis', android: 'more_horiz' },
-} as const satisfies Record<string, IconName>
+} as const satisfies Record<string, TabIconName>
 
 // Overflow options for clients — surfaced through the "Más" bottom sheet.
 const CLIENT_MORE_ITEMS: MoreSheetItem[] = [
@@ -63,6 +29,7 @@ export default function TabLayout() {
   const { data: user, isPending } = useCurrentUser()
   const isClient = user?.role === 'client'
   const [moreOpen, setMoreOpen] = useState(false)
+  const screenOptions = useTabBarScreenOptions()
 
   useEffect(() => {
     if (isPending) return
@@ -73,53 +40,38 @@ export default function TabLayout() {
 
   return (
     <>
-      <Tabs
-        screenOptions={{
-          headerShown: false,
-          tabBarActiveTintColor: ACCENT,
-          tabBarInactiveTintColor: MUTED,
-          tabBarStyle: {
-            backgroundColor: '#FAFAFC',
-            borderTopColor: 'rgba(26,26,26,0.15)',
-            borderTopWidth: 1,
-            height: 72,
-            paddingTop: 8,
-            paddingBottom: 10,
-          },
-          tabBarShowLabel: true,
-        }}
-      >
+      <Tabs screenOptions={screenOptions}>
         <Tabs.Screen
           name="index"
           options={{
             title: 'Inicio',
             href: isClient ? '/(tabs)' : null,
-            tabBarIcon: ({ focused }) => <TabIcon focused={focused} name={ICONS.home} />,
-            tabBarLabel: ({ focused }) => <TabLabel focused={focused}>Inicio</TabLabel>,
+            tabBarIcon: ({ focused }) => <TabBarIcon focused={focused} name={ICONS.home} />,
+            tabBarLabel: ({ focused }) => <TabBarLabel focused={focused}>Inicio</TabBarLabel>,
           }}
         />
         <Tabs.Screen
           name="catalog"
           options={{
             title: 'Catálogo',
-            tabBarIcon: ({ focused }) => <TabIcon focused={focused} name={ICONS.catalog} />,
-            tabBarLabel: ({ focused }) => <TabLabel focused={focused}>Catálogo</TabLabel>,
+            tabBarIcon: ({ focused }) => <TabBarIcon focused={focused} name={ICONS.catalog} />,
+            tabBarLabel: ({ focused }) => <TabBarLabel focused={focused}>Catálogo</TabBarLabel>,
           }}
         />
         <Tabs.Screen
           name="orders"
           options={{
             title: 'Pedidos',
-            tabBarIcon: ({ focused }) => <TabIcon focused={focused} name={ICONS.orders} />,
-            tabBarLabel: ({ focused }) => <TabLabel focused={focused}>Pedidos</TabLabel>,
+            tabBarIcon: ({ focused }) => <TabBarIcon focused={focused} name={ICONS.orders} />,
+            tabBarLabel: ({ focused }) => <TabBarLabel focused={focused}>Pedidos</TabBarLabel>,
           }}
         />
         <Tabs.Screen
           name="more"
           options={{
             title: 'Más',
-            tabBarIcon: ({ focused }) => <TabIcon focused={focused} name={ICONS.more} />,
-            tabBarLabel: ({ focused }) => <TabLabel focused={focused}>Más</TabLabel>,
+            tabBarIcon: ({ focused }) => <TabBarIcon focused={focused} name={ICONS.more} />,
+            tabBarLabel: ({ focused }) => <TabBarLabel focused={focused}>Más</TabBarLabel>,
           }}
           listeners={{
             tabPress: (e) => {

@@ -71,7 +71,7 @@ export default function ReferralLandingScreen() {
 
         <View className="mt-10 items-center">
           <Eyebrow>Código</Eyebrow>
-          <Pressable onPress={goLogin}>
+          <Pressable onPress={goLogin} className="min-h-[48px] justify-center py-3">
             <Text className="mt-2 font-sans text-[22px] tracking-[6px] text-brand">
               {code}
             </Text>

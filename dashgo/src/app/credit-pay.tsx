@@ -112,16 +112,16 @@ export default function CreditPayScreen() {
             deuda.
           </Text>
         </View>
-        <Text className="mt-2 text-[13px] text-ink-soft">
+        <Text className="mt-2 text-[15px] text-ink-soft">
           Paga tu balance pendiente con tarjeta. Una vez confirmado, tu crédito se libera al instante.
         </Text>
 
         {locked && (
           <View className="mt-6 border border-red-200 bg-red-50 px-4 py-3">
-            <Text className="font-sans text-[10px] uppercase tracking-label text-red-700">
+            <Text className="font-sans text-[12px] uppercase tracking-label text-red-700">
               Cuenta bloqueada
             </Text>
-            <Text className="mt-1 font-sans text-[13px] text-red-700">
+            <Text className="mt-1 font-sans text-[15px] text-red-700">
               Tu cuenta está vencida. Salda tu deuda para volver a usar la app.
             </Text>
           </View>
@@ -130,7 +130,7 @@ export default function CreditPayScreen() {
         <Hairline className="my-8" />
 
         <View className="border border-ink/15 bg-paper p-5">
-          <Text className="font-sans text-[10px] uppercase tracking-label text-ink-muted">
+          <Text className="font-sans text-[12px] uppercase tracking-label text-ink-muted">
             Monto a pagar
           </Text>
           <Text
@@ -140,7 +140,7 @@ export default function CreditPayScreen() {
             {formatCents(amountOwedCents)}
           </Text>
           {credit?.dueDate ? (
-            <Text className="mt-2 font-sans text-[12px] text-ink-soft">
+            <Text className="mt-2 font-sans text-[14px] text-ink-soft">
               Vencimiento: {formatDate(credit.dueDate)}
             </Text>
           ) : null}
@@ -148,7 +148,7 @@ export default function CreditPayScreen() {
 
         {done ? (
           <View className="mt-8 border border-green-300 bg-green-50 px-4 py-4">
-            <Text className="font-sans text-[10px] uppercase tracking-label text-green-700">
+            <Text className="font-sans text-[12px] uppercase tracking-label text-green-700">
               Pago recibido
             </Text>
             <Text className="mt-1 font-sans-semibold text-[16px] text-green-800">
@@ -165,7 +165,7 @@ export default function CreditPayScreen() {
             >
               Pagar {formatCents(amountOwedCents)} →
             </Button>
-            <Text className="mt-3 text-center font-sans text-[11px] text-ink-muted">
+            <Text className="mt-3 text-center font-sans text-[13px] text-ink-muted">
               Procesado por Stripe. Tus datos no se guardan en nuestros servidores.
             </Text>
           </View>

@@ -37,12 +37,12 @@ function Chip({
   return (
     <Pressable
       onPress={onPress}
-      className={`px-3 py-1.5 ${
+      className={`px-3.5 py-2.5 ${
         active ? 'bg-accent' : 'border border-ink/15 bg-transparent active:bg-ink/5'
       }`}
     >
       <Text
-        className={`font-sans-medium text-[10px] uppercase tracking-label ${
+        className={`font-sans-medium text-[12px] uppercase tracking-label ${
           active ? 'text-brand-dark' : 'text-ink-soft'
         }`}
       >
@@ -79,11 +79,11 @@ function CommissionRow({ entry }: { entry: PromoterCommissionEntry }) {
             <Text className="font-sans-semibold text-[15px] text-ink">
               {statusLabel(entry)}
             </Text>
-            <Text className="mt-0.5 font-sans text-[10px] uppercase tracking-label text-ink-muted">
+            <Text className="mt-0.5 font-sans text-[12px] uppercase tracking-label text-ink-muted">
               {formatDate(entry.createdAt)}
             </Text>
             {entry.referredUserName ? (
-              <Text className="mt-1 text-[13px] text-ink-muted">
+              <Text className="mt-1 text-[15px] text-ink-muted">
                 de{' '}
                 <Text className="font-medium text-ink">
                   {entry.referredUserName}
@@ -91,7 +91,7 @@ function CommissionRow({ entry }: { entry: PromoterCommissionEntry }) {
               </Text>
             ) : null}
             {entry.status === 'pending' && entry.claimableAt ? (
-              <Text className="mt-1 font-sans text-[10px] uppercase tracking-label text-ink-muted">
+              <Text className="mt-1 font-sans text-[12px] uppercase tracking-label text-ink-muted">
                 Vesta {formatDate(entry.claimableAt)}
               </Text>
             ) : null}
@@ -175,7 +175,7 @@ export default function PromoterCommissionsScreen() {
           ListFooterComponent={
             data && data.totalPages > 1 ? (
               <View className="mt-6 flex-row items-center justify-between border-t border-ink/10 pt-4">
-                <Text className="font-sans text-[10px] uppercase tracking-label text-ink-muted">
+                <Text className="font-sans text-[12px] uppercase tracking-label text-ink-muted">
                   Página {data.page} de {data.totalPages} · {data.totalCount}
                 </Text>
                 <View className="flex-row gap-2">

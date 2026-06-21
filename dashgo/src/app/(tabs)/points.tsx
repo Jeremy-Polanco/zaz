@@ -16,7 +16,7 @@ function SummaryCard({
 }) {
   return (
     <View className="flex-1 border border-ink/15 bg-paper p-4">
-      <Text className="font-sans text-[10px] uppercase tracking-label text-ink-muted">
+      <Text className="font-sans text-[12px] uppercase tracking-label text-ink-muted">
         {label}
       </Text>
       <Text
@@ -56,19 +56,19 @@ function EntryRow({ entry }: { entry: PointsEntry }) {
     <View className="py-4">
       <View className="flex-row items-start justify-between">
         <View className="flex-1 pr-3">
-          <Text className="font-sans text-[10px] uppercase tracking-label text-ink-muted">
+          <Text className="font-sans text-[12px] uppercase tracking-label text-ink-muted">
             {formatDate(entry.createdAt)} · {typeLabel}
           </Text>
           <Text className="mt-1 font-sans-semibold text-[15px] text-ink">
             {statusLabel}
           </Text>
           {entry.status === 'pending' && entry.claimableAt && (
-            <Text className="mt-1 font-sans text-[10px] uppercase tracking-label text-ink-muted">
+            <Text className="mt-1 font-sans text-[12px] uppercase tracking-label text-ink-muted">
               Disponible el {formatDate(entry.claimableAt)}
             </Text>
           )}
           {entry.status === 'claimable' && entry.expiresAt && (
-            <Text className="mt-1 font-sans text-[10px] uppercase tracking-label text-ink-muted">
+            <Text className="mt-1 font-sans text-[12px] uppercase tracking-label text-ink-muted">
               Vence el {formatDate(entry.expiresAt)}
             </Text>
           )}

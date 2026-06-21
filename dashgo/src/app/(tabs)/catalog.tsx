@@ -7,6 +7,7 @@ import {
   ActivityIndicator,
   ScrollView,
   TextInput,
+  Modal,
 } from 'react-native'
 import { Image } from 'expo-image'
 import { SafeAreaView } from 'react-native-safe-area-context'
@@ -24,33 +25,112 @@ function QtyControl({
   qty,
   onDec,
   onInc,
+  onSet,
+  name,
   small = false,
   disabled,
 }: {
   qty: number
   onDec: () => void
   onInc: () => void
+  /** Set the exact quantity (typed via the number pad). */
+  onSet: (qty: number) => void
+  /** Product name, shown as the title of the quantity editor. */
+  name?: string
   small?: boolean
   disabled?: boolean
 }) {
   const heightClass = small ? 'h-8' : 'h-9'
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState('')
+
+  const openEditor = () => {
+    setDraft(qty > 0 ? String(qty) : '')
+    setEditing(true)
+  }
+  const confirm = () => {
+    const n = parseInt(draft, 10)
+    onSet(Number.isNaN(n) ? 0 : Math.max(0, n))
+    setEditing(false)
+  }
+
+  // Type-a-quantity editor: tap → number pad → OK writes the exact qty to cart.
+  const editor = (
+    <Modal
+      visible={editing}
+      transparent
+      animationType="fade"
+      onRequestClose={() => setEditing(false)}
+    >
+      <Pressable
+        onPress={() => setEditing(false)}
+        className="flex-1 items-center justify-center bg-ink/40 px-8"
+      >
+        <Pressable
+          onPress={() => {}}
+          className="w-full max-w-[320px] border border-ink/10 bg-paper p-5"
+        >
+          {name ? (
+            <Text className="mb-1 font-sans-semibold text-[16px] text-ink">
+              {name}
+            </Text>
+          ) : null}
+          <Text className="mb-3 font-sans text-[13px] uppercase tracking-label text-ink-muted">
+            Cantidad
+          </Text>
+          <TextInput
+            value={draft}
+            onChangeText={(t) => setDraft(t.replace(/[^0-9]/g, ''))}
+            keyboardType="number-pad"
+            autoFocus
+            selectTextOnFocus
+            onSubmitEditing={confirm}
+            placeholder="0"
+            placeholderTextColor="#9ca3af"
+            className="border border-ink/20 px-4 py-3 text-center font-sans-semibold text-[26px] text-ink"
+            style={{ fontVariant: ['tabular-nums'] }}
+          />
+          <View className="mt-4 flex-row gap-3">
+            <Pressable
+              onPress={() => setEditing(false)}
+              className="flex-1 items-center justify-center border border-ink/20 py-3 active:bg-ink/5"
+            >
+              <Text className="font-sans-medium text-[15px] text-ink">
+                Cancelar
+              </Text>
+            </Pressable>
+            <Pressable
+              onPress={confirm}
+              className="flex-1 items-center justify-center bg-ink py-3 active:opacity-80"
+            >
+              <Text className="font-sans-medium text-[15px] text-paper">OK</Text>
+            </Pressable>
+          </View>
+        </Pressable>
+      </Pressable>
+    </Modal>
+  )
+
   if (qty === 0) {
     return (
-      <Pressable
-        onPress={onInc}
-        disabled={disabled}
-        className={`items-center justify-center border ${heightClass} ${
-          disabled ? 'border-ink/15' : 'border-ink/40 active:bg-ink/5'
-        }`}
-      >
-        <Text
-          className={`font-sans-medium text-[10px] uppercase tracking-label ${
-            disabled ? 'text-ink-muted' : 'text-ink'
+      <>
+        <Pressable
+          onPress={openEditor}
+          disabled={disabled}
+          className={`items-center justify-center border ${heightClass} ${
+            disabled ? 'border-ink/15' : 'border-ink/40 active:bg-ink/5'
           }`}
         >
-          Agregar +
-        </Text>
-      </Pressable>
+          <Text
+            className={`font-sans-medium text-[12px] uppercase tracking-label ${
+              disabled ? 'text-ink-muted' : 'text-ink'
+            }`}
+          >
+            Agregar +
+          </Text>
+        </Pressable>
+        {editor}
+      </>
     )
   }
   return (
@@ -61,18 +141,21 @@ function QtyControl({
       >
         <Text className="font-sans-semibold text-[14px] text-ink">−</Text>
       </Pressable>
-      <Text
-        className="flex-1 text-center font-sans-semibold text-[13px] text-ink"
-        style={{ fontVariant: ['tabular-nums'] }}
-      >
-        {qty}
-      </Text>
+      <Pressable onPress={openEditor} className="flex-1 self-stretch justify-center">
+        <Text
+          className="text-center font-sans-semibold text-[13px] text-ink"
+          style={{ fontVariant: ['tabular-nums'] }}
+        >
+          {qty}
+        </Text>
+      </Pressable>
       <Pressable
         onPress={onInc}
         className={`items-center justify-center ${heightClass} ${small ? 'w-8' : 'w-9'}`}
       >
         <Text className="font-sans-semibold text-[14px] text-ink">+</Text>
       </Pressable>
+      {editor}
     </View>
   )
 }
@@ -189,7 +272,7 @@ function ProductCard({ product, qty }: { product: Product; qty: number }) {
       {/* Body */}
       <View className="px-2.5 pb-3 pt-2.5">
         <Text
-          className="min-h-[34px] font-sans-medium text-[13px] leading-[17px] text-ink"
+          className="min-h-[34px] font-sans-medium text-[15px] leading-[19px] text-ink"
           numberOfLines={2}
         >
           {product.name}
@@ -226,15 +309,17 @@ function ProductCard({ product, qty }: { product: Product; qty: number }) {
 
         <View className="mt-2.5">
           {unavailable ? (
-            <Text className="font-sans text-[10px] uppercase tracking-label text-ink-muted">
+            <Text className="font-sans text-[12px] uppercase tracking-label text-ink-muted">
               Sin stock
             </Text>
           ) : (
             <QtyControl
               qty={qty}
               small
+              name={product.name}
               onDec={() => cart.update(product.id, -1)}
               onInc={() => cart.update(product.id, +1)}
+              onSet={(q) => cart.set(product.id, q)}
             />
           )}
         </View>
@@ -278,7 +363,7 @@ function ProductRow({ product, qty }: { product: Product; qty: number }) {
           {product.name}
         </Text>
         {product.description && (
-          <Text className="mt-0.5 text-[12px] leading-[16px] text-ink-soft" numberOfLines={2}>
+          <Text className="mt-0.5 text-[14px] leading-[18px] text-ink-soft" numberOfLines={2}>
             {product.description}
           </Text>
         )}
@@ -310,15 +395,17 @@ function ProductRow({ product, qty }: { product: Product; qty: number }) {
             )}
           </View>
           {unavailable ? (
-            <Text className="font-sans text-[11px] uppercase tracking-label text-ink-muted">
+            <Text className="font-sans text-[13px] uppercase tracking-label text-ink-muted">
               Sin stock
             </Text>
           ) : (
             <View style={{ minWidth: 110 }}>
               <QtyControl
                 qty={qty}
+                name={product.name}
                 onDec={() => cart.update(product.id, -1)}
                 onInc={() => cart.update(product.id, +1)}
+                onSet={(q) => cart.set(product.id, q)}
               />
             </View>
           )}
@@ -469,7 +556,7 @@ export default function CatalogTab() {
           onChangeText={setQuery}
           placeholder="Buscar productos…"
           placeholderTextColor="#6B6488"
-          className="flex-1 font-sans text-[13px] text-ink"
+          className="flex-1 font-sans text-[15px] text-ink"
           autoCapitalize="none"
           returnKeyType="search"
         />
@@ -546,7 +633,7 @@ export default function CatalogTab() {
       {/* Greeting / contextual strip */}
       <View className="flex-row items-end justify-between px-4 pb-1 pt-3.5">
         <View className="flex-1 pr-2">
-          <Text className="font-sans text-[10px] uppercase tracking-eyebrow text-ink-muted">
+          <Text className="font-sans text-[12px] uppercase tracking-eyebrow text-ink-muted">
             {neighborhood}
           </Text>
           <Text
@@ -573,7 +660,7 @@ export default function CatalogTab() {
   const renderPicker = () => (
     <ScrollView contentContainerClassName="px-4 pb-40" keyboardShouldPersistTaps="handled">
       <View className="pb-1 pt-2">
-        <Text className="font-sans text-[10px] uppercase tracking-eyebrow text-ink-muted">
+        <Text className="font-sans text-[12px] uppercase tracking-eyebrow text-ink-muted">
           {neighborhood}
         </Text>
         <Text className="mt-0.5 font-sans-semibold text-[15px] tracking-tight text-ink">
@@ -585,7 +672,7 @@ export default function CatalogTab() {
       </View>
       {(categories?.length ?? 0) === 0 ? (
         <View className="items-center px-8 py-16">
-          <Text className="font-sans text-[10px] uppercase tracking-eyebrow text-ink-muted">
+          <Text className="font-sans text-[12px] uppercase tracking-eyebrow text-ink-muted">
             Sin categorías
           </Text>
           <Text className="mt-3 text-center text-[14px] text-ink-soft">
@@ -665,7 +752,7 @@ export default function CatalogTab() {
         }}
         ListEmptyComponent={
           <View className="items-center px-8 py-16">
-            <Text className="font-sans text-[10px] uppercase tracking-eyebrow text-ink-muted">
+            <Text className="font-sans text-[12px] uppercase tracking-eyebrow text-ink-muted">
               {q ? 'Sin resultados' : 'Catálogo vacío'}
             </Text>
             <Text className="mt-3 text-center text-[14px] text-ink-soft">
@@ -709,7 +796,7 @@ export default function CatalogTab() {
             className="h-10 items-center justify-center bg-accent px-4 active:bg-accent-dark"
             onPress={() => router.push('/checkout')}
           >
-            <Text className="font-sans-semibold text-[11px] uppercase tracking-label text-brand-dark">
+            <Text className="font-sans-semibold text-[13px] uppercase tracking-label text-brand-dark">
               Checkout →
             </Text>
           </Pressable>

@@ -53,7 +53,7 @@ function RentalCard({ rental }: { rental: Rental }) {
             {rental.productName}
           </Text>
           <View className={`shrink-0 border px-2 py-1 ${meta.box}`}>
-            <Text className={`font-sans text-[10px] uppercase tracking-label ${meta.text}`}>
+            <Text className={`font-sans text-[12px] uppercase tracking-label ${meta.text}`}>
               {meta.label}
             </Text>
           </View>
@@ -66,12 +66,12 @@ function RentalCard({ rental }: { rental: Rental }) {
           <Text className="font-sans text-[13px] text-ink-muted">/mes</Text>
         </Text>
         {rental.nextChargeAt ? (
-          <Text className="mt-1 font-sans text-[10px] uppercase tracking-label text-ink-muted">
+          <Text className="mt-1 font-sans text-[12px] uppercase tracking-label text-ink-muted">
             Próximo cargo: {formatDate(rental.nextChargeAt)}
           </Text>
         ) : null}
         {rental.status === 'pending_setup' ? (
-          <Text className="mt-2 border-l-2 border-accent pl-3 font-sans text-[13px] text-ink-soft">
+          <Text className="mt-2 border-l-2 border-accent pl-3 font-sans text-[15px] text-ink-soft">
             Estamos terminando de configurar tu alquiler. Te avisamos cuando esté
             activo.
           </Text>

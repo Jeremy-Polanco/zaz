@@ -59,7 +59,7 @@ function UserRow({ item }: { item: AdminUser }) {
             {item.phone ?? '—'} · {ROLE_LABELS[item.role]}
           </Text>
           {item.email ? (
-            <Text className="mt-0.5 font-sans text-[12px] text-ink-soft" numberOfLines={1}>
+            <Text className="mt-0.5 font-sans text-[14px] text-ink-soft" numberOfLines={1}>
               {item.email}
             </Text>
           ) : null}

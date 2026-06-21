@@ -71,7 +71,7 @@ function ActionChip({
   return (
     <Pressable
       onPress={onPress}
-      className={`border px-3 py-1.5 active:opacity-70 ${
+      className={`min-h-[44px] justify-center border px-3 py-3 active:opacity-70 ${
         danger ? 'border-bad/40 bg-bad/5' : 'border-ink/20 bg-paper'
       }`}
     >
@@ -119,7 +119,7 @@ function ConfirmSheet({
         <Text className="mt-2 font-sans-semibold text-[18px] leading-[24px] text-ink">
           {action.label}
         </Text>
-        <Text className="mt-2 font-sans text-[13px] text-ink-soft">
+        <Text className="mt-2 font-sans text-[15px] text-ink-soft">
           Esta acción no se puede deshacer. ¿Querés continuar?
         </Text>
         <View className="mt-6 flex-row gap-3">
@@ -172,7 +172,7 @@ function RentalRow({
             {rental.userName}
           </Text>
           {rental.userPhone ? (
-            <Text className="mt-0.5 font-sans text-[11px] text-ink-muted">
+            <Text className="mt-0.5 font-sans text-[13px] text-ink-muted">
               {rental.userPhone}
             </Text>
           ) : null}
@@ -429,7 +429,7 @@ export default function SuperRentalsScreen() {
                 <Pressable
                   key={f.label}
                   onPress={() => setStatusFilter(f.value)}
-                  className={`border px-3 py-1.5 ${
+                  className={`min-h-[44px] justify-center border px-3 py-3 ${
                     statusFilter === f.value
                       ? 'border-ink bg-ink'
                       : 'border-ink/20 bg-paper'

@@ -30,6 +30,7 @@ import {
   Hairline,
   SectionHead,
 } from '../../../components/ui'
+import { ScreenHeader } from '../../../components/ScreenHeader'
 
 function BalanceCard({
   label,
@@ -308,18 +309,10 @@ export default function SuperPromoterDetailScreen() {
   }
 
   return (
-    <SafeAreaView edges={['top']} className="flex-1 bg-paper">
+    <View className="flex-1 bg-paper">
+      <ScreenHeader title="Promotor" />
       <ScrollView contentContainerClassName="px-5 pb-12">
-        <View className="pt-4">
-          <Pressable
-            onPress={() => router.back()}
-            className="mb-2 self-start px-1 py-2"
-          >
-            <Text className="font-sans text-[11px] uppercase tracking-label text-ink-muted">
-              ← Promotores
-            </Text>
-          </Pressable>
-
+        <View className="pt-2">
           <SectionHead
             eyebrow="Promotor · Detalle"
             title={promoter.fullName}
@@ -328,7 +321,7 @@ export default function SuperPromoterDetailScreen() {
           />
         </View>
 
-        <View className="mb-5 flex-row gap-3">
+        <View className="mb-5 mt-2 flex-row gap-3">
           <BalanceCard
             label="Disponible"
             cents={balances.claimableCents}
@@ -451,6 +444,6 @@ export default function SuperPromoterDetailScreen() {
         isPending={createPayout.isPending}
         errorMsg={errorMsg}
       />
-    </SafeAreaView>
+    </View>
   )
 }

@@ -144,7 +144,7 @@ export default function SuperSubscriptionScreen() {
               >
                 El cliente pagará {formatCents(grossCents)} / mes
               </Text>
-              <Text className="mt-0.5 font-sans text-[12px] text-ink-soft">
+              <Text className="mt-0.5 font-sans text-[14px] text-ink-soft">
                 Neto {formatCents(netCents)} + impuesto {TAX_PERCENT_LABEL}
               </Text>
             </View>
@@ -152,14 +152,14 @@ export default function SuperSubscriptionScreen() {
 
           {success ? (
             <View className="mt-4 border border-ok/40 bg-ok/10 px-4 py-3">
-              <Text className="font-sans text-[12px] text-ok">
+              <Text className="font-sans text-[14px] text-ok">
                 Precio actualizado correctamente.
               </Text>
             </View>
           ) : null}
           {error ? (
             <View className="mt-4 border border-bad/40 bg-bad/10 px-4 py-3">
-              <Text className="font-sans text-[12px] text-bad">{error}</Text>
+              <Text className="font-sans text-[14px] text-bad">{error}</Text>
             </View>
           ) : null}
 

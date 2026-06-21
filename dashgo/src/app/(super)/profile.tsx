@@ -49,7 +49,7 @@ export default function SuperProfileScreen() {
             </Text>
           </View>
           <Text
-            className="mt-3 text-[13px] leading-[20px]"
+            className="mt-3 text-[15px] leading-[20px]"
             style={{ color: 'rgba(255,255,255,0.7)', maxWidth: 280 }}
           >
             Tu sesión, identidad y atajos del panel.
@@ -66,7 +66,7 @@ export default function SuperProfileScreen() {
               <Text className="font-sans-semibold text-[22px] leading-[26px] text-ink">
                 {user?.fullName ?? '—'}
               </Text>
-              <Text className="mt-0.5 text-[13px] text-ink-soft">
+              <Text className="mt-0.5 text-[15px] text-ink-soft">
                 {user?.phone ?? ''}
               </Text>
             </View>

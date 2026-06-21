@@ -32,10 +32,10 @@ function ReferredRow({ customer }: { customer: ReferredCustomerSummary }) {
     <View className="border-b border-ink/10 py-3">
       <View className="flex-row items-start justify-between gap-3">
         <View className="flex-1">
-          <Text className="text-[15px] font-medium text-ink">
+          <Text className="text-[16px] font-medium text-ink">
             {customer.fullName}
           </Text>
-          <Text className="mt-0.5 font-sans text-[10px] uppercase tracking-label text-ink-muted">
+          <Text className="mt-0.5 font-sans text-[12px] uppercase tracking-label text-ink-muted">
             {customer.firstOrderAt
               ? `Primera orden ${formatDate(customer.firstOrderAt)}`
               : 'Aún no pidió'}
@@ -83,10 +83,10 @@ function CommissionMiniRow({ entry }: { entry: PromoterCommissionEntry }) {
       <View className="flex-1 flex-row items-start gap-2.5">
         <View className={`mt-1.5 h-1.5 w-1.5 rounded-full ${commissionDot(entry)}`} />
         <View className="flex-1">
-          <Text className="font-sans-medium text-[14px] text-ink">
+          <Text className="font-sans-medium text-[15px] text-ink">
             {commissionLabel(entry)}
           </Text>
-          <Text className="mt-0.5 font-sans text-[10px] uppercase tracking-label text-ink-muted">
+          <Text className="mt-0.5 font-sans text-[12px] uppercase tracking-label text-ink-muted">
             {formatDate(entry.createdAt)}
             {entry.referredUserName ? ` · ${entry.referredUserName}` : ''}
           </Text>
@@ -114,11 +114,11 @@ function PayoutMiniRow({ payout }: { payout: Payout }) {
           >
             {formatCents(payout.amountCents)}
           </Text>
-          <Text className="mt-0.5 font-sans text-[10px] uppercase tracking-label text-ink-muted">
+          <Text className="mt-0.5 font-sans text-[12px] uppercase tracking-label text-ink-muted">
             {formatDate(payout.createdAt)}
           </Text>
           {payout.notes ? (
-            <Text className="mt-1 text-[12px] text-ink-muted">
+            <Text className="mt-1 text-[14px] text-ink-muted">
               "{payout.notes}"
             </Text>
           ) : null}
@@ -228,7 +228,7 @@ export default function PromoterDashboardScreen() {
             </View>
           </View>
           <Text
-            className="mt-3 text-[13px] leading-[20px]"
+            className="mt-3 text-[15px] leading-[22px]"
             style={{ color: 'rgba(255,255,255,0.7)', maxWidth: 280 }}
           >
             Tu código, tus referidos, tus comisiones. Comparte y ganá.
@@ -295,7 +295,7 @@ export default function PromoterDashboardScreen() {
 
           <Hairline className="mt-5" />
           <Text
-            className="mt-3 font-sans text-[10px] uppercase tracking-label text-ink-muted"
+            className="mt-3 font-sans text-[12px] uppercase tracking-label text-ink-muted"
             numberOfLines={2}
           >
             {promoter.shareUrl}
@@ -306,14 +306,14 @@ export default function PromoterDashboardScreen() {
         <View className="mt-7 px-5">
           <View className="mb-3 flex-row items-baseline justify-between">
             <Eyebrow>Clientes referidos</Eyebrow>
-            <Text className="font-sans text-[10px] uppercase tracking-label text-ink-muted">
+            <Text className="font-sans text-[12px] uppercase tracking-label text-ink-muted">
               {referredCustomers.length}{' '}
               {referredCustomers.length === 1 ? 'persona' : 'personas'}
             </Text>
           </View>
           {referredCustomers.length === 0 ? (
             <View className="border border-ink/10 px-4 py-6">
-              <Text className="text-center text-[13px] text-ink-muted">
+              <Text className="text-center text-[15px] text-ink-muted">
                 Sin referidos todavía.{'\n'}Comparte tu código.
               </Text>
             </View>
@@ -332,16 +332,16 @@ export default function PromoterDashboardScreen() {
             <Eyebrow>Últimas comisiones</Eyebrow>
             <Pressable
               onPress={() => router.push('/(promoter)/commissions')}
-              className="px-2 py-1"
+              className="px-2 py-2"
             >
-              <Text className="font-sans-medium text-[10px] uppercase tracking-label text-brand">
+              <Text className="font-sans-medium text-[12px] uppercase tracking-label text-brand">
                 Ver todo →
               </Text>
             </Pressable>
           </View>
           {recentCommissions.length === 0 ? (
             <View className="border border-ink/10 px-4 py-6">
-              <Text className="text-center text-[13px] text-ink-muted">
+              <Text className="text-center text-[15px] text-ink-muted">
                 Sin comisiones todavía.
               </Text>
             </View>
@@ -360,16 +360,16 @@ export default function PromoterDashboardScreen() {
             <Eyebrow>Pagos recibidos</Eyebrow>
             <Pressable
               onPress={() => router.push('/(promoter)/payouts')}
-              className="px-2 py-1"
+              className="px-2 py-2"
             >
-              <Text className="font-sans-medium text-[10px] uppercase tracking-label text-brand">
+              <Text className="font-sans-medium text-[12px] uppercase tracking-label text-brand">
                 Ver todo →
               </Text>
             </Pressable>
           </View>
           {payouts.length === 0 ? (
             <View className="border border-ink/10 px-4 py-6">
-              <Text className="text-center text-[13px] text-ink-muted">
+              <Text className="text-center text-[15px] text-ink-muted">
                 Sin pagos todavía.
               </Text>
             </View>

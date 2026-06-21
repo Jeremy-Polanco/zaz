@@ -1,6 +1,7 @@
 {
   "cli": {
-    "version": ">= 16.0.0"
+    "version": ">= 16.0.0",
+    "appVersionSource": "local"
   },
   "build": {
     "development": {
@@ -20,17 +21,10 @@
     },
     "production": {
       "distribution": "store",
-      "autoIncrement": true,
-      "ios": {
-        "autoIncrement": "buildNumber"
-      },
-      "android": {
-        "autoIncrement": "versionCode"
-      },
       "env": {
         "EXPO_PUBLIC_API_URL": "https://api.dashgo.dev/api",
-        "EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY": "$EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY",
-        "EXPO_PUBLIC_SENTRY_DSN": "$EXPO_PUBLIC_SENTRY_DSN"
+        "EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY": "pk_live_51Temp41W7cEOMeLGnq2k9OcRGBYYqtJAinXqwh3FTUiwlqMJayzwDqxB8W2CqWNmPfa9oBEJMs1cVjKTI7unAmbN00RnFwRFI7",
+        "SENTRY_DISABLE_AUTO_UPLOAD": "true"
       }
     }
   },

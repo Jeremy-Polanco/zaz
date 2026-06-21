@@ -14,6 +14,7 @@ import type { Order } from '../../../lib/types'
 import { formatCents } from '../../../lib/format'
 import { BreakdownRow, Button, Eyebrow, Hairline, StatusStepper } from '../../../components/ui'
 import { SuscriptorBadge } from '../../../components/SuscriptorBadge'
+import { ScreenHeader } from '../../../components/ScreenHeader'
 
 const LIVE_STATUSES = [
   'pending_quote',
@@ -187,9 +188,10 @@ export default function OrderDetailScreen() {
   }
 
   return (
-    <SafeAreaView className="flex-1 bg-paper">
+    <View className="flex-1 bg-paper">
+      <ScreenHeader title="Pedido" />
       <ScrollView contentContainerClassName="grow">
-        <View className="px-6 pt-6">
+        <View className="px-6 pt-2">
           <Eyebrow>Pedido · {order.id.slice(0, 8)}</Eyebrow>
           <View className="mt-3">
             <StatusLabel
@@ -208,7 +210,7 @@ export default function OrderDetailScreen() {
               <Text className="font-sans-semibold text-[18px] text-ink">
                 Esperando cotización
               </Text>
-              <Text className="mt-2 font-sans text-[13px] text-ink-soft">
+              <Text className="mt-2 font-sans text-[15px] text-ink-soft">
                 En breve el repartidor te manda el costo del envío. Esta
                 pantalla se actualiza sola.
               </Text>
@@ -220,7 +222,7 @@ export default function OrderDetailScreen() {
               <Text className="font-sans-semibold text-[18px] text-ink">
                 Total {formatCents(totalCents)}
               </Text>
-              <Text className="mt-2 font-sans text-[13px] text-ink-soft">
+              <Text className="mt-2 font-sans text-[15px] text-ink-soft">
                 Confirma para que salga a entregar. Pagas en efectivo al
                 recibir.
               </Text>
@@ -243,7 +245,7 @@ export default function OrderDetailScreen() {
                 <Text className="font-sans-semibold text-[18px] text-ink">
                   Total {formatCents(totalCents)}
                 </Text>
-                <Text className="mt-2 font-sans text-[13px] text-ink-soft">
+                <Text className="mt-2 font-sans text-[15px] text-ink-soft">
                   Este pedido se cubre 100% con tu crédito —{' '}
                   {formatCents(creditAppliedCents)}. No requiere pago con
                   tarjeta.
@@ -277,7 +279,7 @@ export default function OrderDetailScreen() {
                 <Text className="font-sans-semibold text-[18px] text-ink">
                   Procesando tu pago…
                 </Text>
-                <Text className="mt-2 font-sans text-[13px] text-ink-soft">
+                <Text className="mt-2 font-sans text-[15px] text-ink-soft">
                   Ya autorizamos el cobro en tu tarjeta. Estamos confirmando tu
                   pedido — esta pantalla se actualiza sola.
                 </Text>
@@ -299,12 +301,12 @@ export default function OrderDetailScreen() {
                   Completá tu pago — {formatCents(totalCents)}
                 </Text>
                 {creditAppliedCents > 0 && (
-                  <Text className="mt-2 font-sans text-[13px] text-brand">
+                  <Text className="mt-2 font-sans text-[15px] text-brand">
                     Crédito aplicado: −{formatCents(creditAppliedCents)} · Pago
                     con tarjeta: {formatCents(stripeAmountCents)}
                   </Text>
                 )}
-                <Text className="mt-2 font-sans text-[13px] text-ink-soft">
+                <Text className="mt-2 font-sans text-[15px] text-ink-soft">
                   Quedó un paso pendiente. Autorizá el cobro — retenemos el monto
                   y lo cobramos solo cuando te entreguemos.
                 </Text>
@@ -334,12 +336,12 @@ export default function OrderDetailScreen() {
                   Total {formatCents(totalCents)}
                 </Text>
                 {creditAppliedCents > 0 && (
-                  <Text className="mt-2 font-sans text-[13px] text-brand">
+                  <Text className="mt-2 font-sans text-[15px] text-brand">
                     Crédito aplicado: −{formatCents(creditAppliedCents)} · Pago
                     con tarjeta: {formatCents(stripeAmountCents)}
                   </Text>
                 )}
-                <Text className="mt-2 font-sans text-[13px] text-ink-soft">
+                <Text className="mt-2 font-sans text-[15px] text-ink-soft">
                   Autorizá el cobro. Retenemos el monto y lo cobramos solo cuando
                   te entreguemos.
                 </Text>
@@ -391,7 +393,7 @@ export default function OrderDetailScreen() {
                   {it.quantity}×
                 </Text>
                 <View className="flex-1">
-                  <Text className="font-sans-semibold text-[14px] text-ink">
+                  <Text className="font-sans-semibold text-[15px] text-ink">
                     {it.product?.name ?? it.productId.slice(0, 8)}
                   </Text>
                   <Text
@@ -504,6 +506,6 @@ export default function OrderDetailScreen() {
         </View>
         <View className="h-8" />
       </ScrollView>
-    </SafeAreaView>
+    </View>
   )
 }

@@ -8,7 +8,7 @@ import { statusLabel } from '../lib/format'
 export function Eyebrow({ children, className = '', tone = 'muted' }: { children: ReactNode; className?: string; tone?: 'muted' | 'accent' | 'ink' }) {
   const color = tone === 'accent' ? 'text-brand' : tone === 'ink' ? 'text-ink' : 'text-ink-muted'
   return (
-    <Text className={`font-sans text-[11px] uppercase tracking-eyebrow ${color} ${className}`}>
+    <Text className={`font-sans-medium text-[12px] uppercase tracking-eyebrow ${color} ${className}`}>
       {children}
     </Text>
   )
@@ -40,7 +40,7 @@ export function Button({
   ...rest
 }: ButtonProps & { className?: string }) {
   const base = 'flex-row items-center justify-center rounded-xs'
-  const height = size === 'lg' ? 'h-14' : 'h-12'
+  const height = size === 'lg' ? 'h-[58px]' : 'h-[52px]'
   const px = size === 'lg' ? 'px-6' : 'px-5'
   const variants: Record<string, { bg: string; text: string; pressed: string }> = {
     ink: { bg: 'bg-ink', text: 'text-paper', pressed: 'active:bg-ink-soft' },
@@ -60,7 +60,7 @@ export function Button({
       {loading ? (
         <ActivityIndicator color={loaderColor} />
       ) : (
-        <Text className={`font-sans-medium text-[12px] uppercase tracking-label ${v.text}`}>
+        <Text className={`font-sans-medium text-[14px] uppercase tracking-label ${v.text}`}>
           {children}
         </Text>
       )}
@@ -81,9 +81,9 @@ const STATUS_STYLE: Record<OrderStatus, { border: string; bg: string; text: stri
 export function StatusBadge({ status }: { status: OrderStatus }) {
   const s = STATUS_STYLE[status]
   return (
-    <View className={`flex-row items-center gap-1.5 border px-2 py-1 ${s.border} ${s.bg}`}>
-      <View className={`h-[6px] w-[6px] rounded-full ${s.dot}`} />
-      <Text className={`font-sans text-[10px] uppercase tracking-label ${s.text}`}>
+    <View className={`flex-row items-center gap-1.5 border px-2.5 py-1 ${s.border} ${s.bg}`}>
+      <View className={`h-[7px] w-[7px] rounded-full ${s.dot}`} />
+      <Text className={`font-sans-medium text-[12px] uppercase tracking-label ${s.text}`}>
         {statusLabel(status)}
       </Text>
     </View>
@@ -125,7 +125,7 @@ export function Metric({ label, value, accent = false }: { label: string; value:
 
 export function FieldLabel({ children }: { children: ReactNode }) {
   return (
-    <Text className="mb-2 font-sans text-[11px] uppercase tracking-eyebrow text-ink-muted">
+    <Text className="mb-2 font-sans-medium text-[13px] uppercase tracking-eyebrow text-ink-muted">
       {children}
     </Text>
   )
@@ -134,7 +134,7 @@ export function FieldLabel({ children }: { children: ReactNode }) {
 export function FieldError({ message }: { message?: string }) {
   if (!message) return null
   return (
-    <Text className="mt-1.5 font-sans text-[11px] uppercase tracking-label text-bad">
+    <Text className="mt-1.5 font-sans-medium text-[13px] uppercase tracking-label text-bad">
       {message}
     </Text>
   )
@@ -168,7 +168,7 @@ export function PhoneField<T extends FieldValues>({
           <TextInput
             testID={testID}
             ref={ref}
-            className="h-11 border-b border-ink/25 pb-1 font-sans text-[18px] text-ink"
+            className="h-12 border-b border-ink/25 pb-1 font-sans text-[19px] text-ink"
             autoCapitalize="none"
             keyboardType="phone-pad"
             autoComplete="tel"
@@ -289,7 +289,7 @@ export function StatusStepper({ status }: { status: OrderStatus }) {
               className={`h-[3px] ${done || active ? 'bg-brand' : 'bg-ink/15'}`}
             />
             <Text
-              className={`mt-1.5 font-sans-medium text-[9px] uppercase tracking-label ${active ? 'text-brand' : 'text-ink-muted'}`}
+              className={`mt-1.5 font-sans-medium text-[10px] uppercase tracking-label ${active ? 'text-brand' : 'text-ink-muted'}`}
               numberOfLines={1}
             >
               {STEPPER_SHORT[s]}
@@ -363,7 +363,7 @@ export function KpiCard({
           className={`h-1.5 w-1.5 rounded-full ${dotColor}`}
           style={pulse ? { opacity: 0.85 } : undefined}
         />
-        <Text className="font-sans-medium text-[10px] uppercase tracking-label text-ink-muted">
+        <Text className="font-sans-medium text-[12px] uppercase tracking-label text-ink-muted">
           {label}
         </Text>
       </View>
@@ -404,10 +404,10 @@ export function BreakdownRow({
         ? 'text-ok'
         : 'text-ink'
   return (
-    <View className="flex-row items-center justify-between py-2">
-      <Text className="font-sans text-[13px] text-ink-soft">{label}</Text>
+    <View className="flex-row items-center justify-between py-2.5">
+      <Text className="font-sans text-[15px] text-ink-soft">{label}</Text>
       <Text
-        className={`font-sans-medium text-[14px] ${tone} ${italic ? 'italic' : ''}`}
+        className={`font-sans-medium text-[16px] ${tone} ${italic ? 'italic' : ''}`}
         style={{ fontVariant: ['tabular-nums'] }}
       >
         {value}

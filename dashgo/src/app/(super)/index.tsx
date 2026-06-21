@@ -87,7 +87,7 @@ function OrderCard({
             <Text className="mt-1 font-sans-semibold text-[20px] leading-[24px] text-ink">
               {order.customer?.fullName ?? 'Cliente'}
             </Text>
-            <Text className="mt-0.5 text-[13px] text-ink-soft">
+            <Text className="mt-0.5 text-[15px] text-ink-soft">
               {order.deliveryAddress
                 ? formatAddressLine(order.deliveryAddress)
                 : 'A coordinar'}
@@ -126,7 +126,7 @@ function OrderCard({
               >
                 {item.quantity}×
               </Text>
-              <Text className="flex-1 text-[14px] text-ink-soft">
+              <Text className="flex-1 text-[15px] text-ink-soft">
                 {item.product?.name ?? 'Producto'}
               </Text>
               <Text
@@ -160,17 +160,17 @@ function OrderCard({
         <View className="mb-3 flex-row gap-2">
           <Pressable
             onPress={() => openMaps(order.deliveryAddress!)}
-            className="flex-1 flex-row items-center justify-center border border-ink/20 bg-paper py-2 active:bg-paper-deep"
+            className="min-h-[48px] flex-1 flex-row items-center justify-center border border-ink/20 bg-paper py-3 active:bg-paper-deep"
           >
-            <Text className="font-sans text-[11px] uppercase tracking-label text-ink">
+            <Text className="font-sans text-[13px] uppercase tracking-label text-ink">
               Maps ↗
             </Text>
           </Pressable>
           <Pressable
             onPress={() => openWaze(order.deliveryAddress!)}
-            className="flex-1 flex-row items-center justify-center border border-ink/20 bg-paper py-2 active:bg-paper-deep"
+            className="min-h-[48px] flex-1 flex-row items-center justify-center border border-ink/20 bg-paper py-3 active:bg-paper-deep"
           >
-            <Text className="font-sans text-[11px] uppercase tracking-label text-ink">
+            <Text className="font-sans text-[13px] uppercase tracking-label text-ink">
               Waze ↗
             </Text>
           </Pressable>
@@ -360,12 +360,12 @@ export default function SuperOrdersScreen() {
                     <Pressable
                       key={f.id}
                       onPress={() => setFilter(f.id)}
-                      className={`px-3 py-1.5 ${
+                      className={`px-4 py-2.5 ${
                         sel ? 'bg-ink' : 'border border-ink/15 bg-transparent'
                       }`}
                     >
                       <Text
-                        className={`font-sans-medium text-[10px] uppercase tracking-label ${
+                        className={`font-sans-medium text-[12px] uppercase tracking-label ${
                           sel ? 'text-paper' : 'text-ink-soft'
                         }`}
                       >

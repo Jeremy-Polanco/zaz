@@ -101,13 +101,13 @@ export default function SubscriptionTab() {
             suscripción.
           </Text>
         </View>
-        <Text className="mt-2 text-[13px] text-ink-soft">
+        <Text className="mt-2 text-[15px] text-ink-soft">
           {SUBSCRIPTION_PERKS}
         </Text>
 
         {toastVisible && (
           <View className="mt-4 border border-green-200 bg-green-50 px-4 py-3">
-            <Text className="font-sans text-[12px] text-green-800">
+            <Text className="font-sans text-[14px] text-green-800">
               {`¡Suscripción activada! ${SUBSCRIPTION_PERKS}`}
             </Text>
           </View>
@@ -138,7 +138,7 @@ export default function SubscriptionTab() {
           <View className="border border-ink/15 bg-paper p-6">
             <View className="mb-3 flex-row">
               <View className="rounded-full bg-green-100 px-3 py-1">
-                <Text className="font-sans text-[10px] uppercase tracking-label text-green-700">
+                <Text className="font-sans text-[12px] uppercase tracking-label text-green-700">
                   Activa
                 </Text>
               </View>
@@ -165,7 +165,7 @@ export default function SubscriptionTab() {
             <Text className="font-sans-semibold text-[15px] text-yellow-800">
               Activo hasta {formatDate(sub.currentPeriodEnd)}, no se renovará.
             </Text>
-            <Text className="mt-1 text-[13px] text-yellow-700">
+            <Text className="mt-1 text-[15px] text-yellow-700">
               Aún tienes envío gratis y mantenimiento sin costo hasta esa fecha.
             </Text>
             <View className="mt-5 gap-3">
@@ -186,7 +186,7 @@ export default function SubscriptionTab() {
             <Text className="font-sans-semibold text-[15px] text-red-800">
               Tu pago está pendiente.
             </Text>
-            <Text className="mt-1 text-[13px] text-red-700">
+            <Text className="mt-1 text-[15px] text-red-700">
               Actualizá tu medio de pago para seguir con el envío gratis y el
               mantenimiento sin costo.
             </Text>

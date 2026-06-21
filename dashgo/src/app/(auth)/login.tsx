@@ -392,20 +392,20 @@ function WhatsAppFailureBlock({
     >
       <Text
         testID="whatsapp-failure-eyebrow"
-        className="mb-2 font-sans-medium text-[11px] uppercase tracking-label text-bad"
+        className="mb-2 font-sans-medium text-[13px] uppercase tracking-label text-bad"
       >
         {copy.eyebrow}
       </Text>
       <Text
         testID="whatsapp-failure-message"
-        className="mb-3 font-sans text-[14px] leading-[20px] text-ink"
+        className="mb-3 font-sans text-[15px] leading-[22px] text-ink"
       >
         {copy.message}
       </Text>
       {copy.bullets.map((bullet, i) => (
         <Text
           key={i}
-          className="mb-1 font-sans text-[13px] leading-[18px] text-ink-soft"
+          className="mb-1 font-sans text-[15px] leading-[20px] text-ink-soft"
         >
           • {bullet}
         </Text>
@@ -415,7 +415,7 @@ function WhatsAppFailureBlock({
       {!escalated &&
         code === WHATSAPP_ERROR_CODES.WHATSAPP_SEND_FAILED &&
         copy.bullets.length > 0 && (
-          <Text className="mb-3 font-sans text-[13px] leading-[18px] text-ink-soft">
+          <Text className="mb-3 font-sans text-[15px] leading-[20px] text-ink-soft">
             • O escribinos a soporte: {SUPPORT_EMAIL}
           </Text>
         )}
@@ -426,11 +426,11 @@ function WhatsAppFailureBlock({
             testID="whatsapp-failure-retry-btn"
             disabled={cooldownLeft > 0 || isPending}
             onPress={handleRetry}
-            className={`border border-ink px-4 py-2 ${
+            className={`border border-ink px-4 py-3 ${
               cooldownLeft > 0 || isPending ? 'opacity-50' : ''
             }`}
           >
-            <Text className="font-sans-medium text-[12px] uppercase tracking-label text-ink">
+            <Text className="font-sans-medium text-[14px] uppercase tracking-label text-ink">
               {isPending
                 ? 'Reintentando…'
                 : cooldownLeft > 0
@@ -443,9 +443,9 @@ function WhatsAppFailureBlock({
           <Pressable
             testID="whatsapp-failure-call-support-btn"
             onPress={handleCallSupport}
-            className="border border-ink px-4 py-2"
+            className="border border-ink px-4 py-3"
           >
-            <Text className="font-sans-medium text-[12px] uppercase tracking-label text-ink">
+            <Text className="font-sans-medium text-[14px] uppercase tracking-label text-ink">
               Llamar a soporte
             </Text>
           </Pressable>
@@ -453,9 +453,9 @@ function WhatsAppFailureBlock({
         <Pressable
           testID="whatsapp-failure-support-btn"
           onPress={handleSupportEmail}
-          className="px-2 py-2"
+          className="px-2 py-3"
         >
-          <Text className="font-sans text-[12px] uppercase tracking-label text-ink-muted underline">
+          <Text className="font-sans text-[13px] uppercase tracking-label text-ink-muted underline">
             Contactar soporte
           </Text>
         </Pressable>
@@ -525,7 +525,7 @@ export function PhoneOnlyStep({
       {referralCode ? (
         <View className="mb-6 flex-row items-center gap-2 self-start bg-brand-light px-2.5 py-1.5">
           <BoltIcon size={11} color="#1A1530" />
-          <Text className="font-sans-medium text-[11px] uppercase tracking-label text-brand">
+          <Text className="font-sans-medium text-[13px] uppercase tracking-label text-brand">
             Registrándote con:{' '}
             <Text className="text-brand">{referralCode}</Text>
           </Text>
@@ -543,7 +543,7 @@ export function PhoneOnlyStep({
 
       {needsName && (
         <View className="mb-8">
-          <Text className="mb-3 border-l-2 border-accent pl-3 font-sans text-[13px] text-ink">
+          <Text className="mb-3 border-l-2 border-accent pl-3 font-sans text-[15px] leading-[21px] text-ink">
             Primer ingreso detectado — dinos cómo te llamas para crear tu
             cuenta.
           </Text>
@@ -571,7 +571,7 @@ export function PhoneOnlyStep({
       )}
 
       {login.isError && !isFirstLoginError(login.error) && (
-        <Text className="mb-4 font-sans text-[11px] uppercase tracking-label text-bad">
+        <Text className="mb-4 font-sans text-[13px] uppercase tracking-label text-bad">
           {serverMessage(login.error, 'No pudimos iniciar sesión')}
         </Text>
       )}
@@ -662,7 +662,7 @@ function PhoneStep({
           isPending={sendOtp.isPending}
         />
       ) : sendOtp.isError ? (
-        <Text className="mb-4 font-sans text-[11px] uppercase tracking-label text-bad">
+        <Text className="mb-4 font-sans text-[13px] uppercase tracking-label text-bad">
           {serverMessage(sendOtp.error, 'No pudimos mandar el código')}
         </Text>
       ) : null}
@@ -785,8 +785,8 @@ function CodeStep({
         Mandamos un código a{' '}
         <Text className="font-sans text-ink">{phone}</Text>.
       </Text>
-      <Pressable onPress={onBack} className="mb-6">
-        <Text className="font-sans text-[11px] uppercase tracking-label text-ink-muted">
+      <Pressable onPress={onBack} className="mb-6 py-1">
+        <Text className="font-sans text-[13px] uppercase tracking-label text-ink-muted">
           ← Usar otro número
         </Text>
       </Pressable>
@@ -794,7 +794,7 @@ function CodeStep({
       {referralCode ? (
         <View className="mb-6 flex-row items-center gap-2 self-start bg-brand-light px-2.5 py-1.5">
           <BoltIcon size={11} color="#1A1530" />
-          <Text className="font-sans-medium text-[11px] uppercase tracking-label text-brand">
+          <Text className="font-sans-medium text-[13px] uppercase tracking-label text-brand">
             Registrándote con:{' '}
             <Text className="text-brand">{referralCode}</Text>
           </Text>
@@ -826,7 +826,7 @@ function CodeStep({
 
       {needsName && (
         <View className="mb-8">
-          <Text className="mb-3 border-l-2 border-accent pl-3 font-sans text-[13px] text-ink">
+          <Text className="mb-3 border-l-2 border-accent pl-3 font-sans text-[15px] leading-[21px] text-ink">
             Primer ingreso detectado — dinos cómo te llamas para crear tu
             cuenta.
           </Text>
@@ -853,7 +853,7 @@ function CodeStep({
       )}
 
       {verifyOtp.isError && !isFirstLoginError(verifyOtp.error) && (
-        <Text className="mb-4 font-sans text-[11px] uppercase tracking-label text-bad">
+        <Text className="mb-4 font-sans text-[13px] uppercase tracking-label text-bad">
           {serverMessage(verifyOtp.error, 'Código inválido')}
         </Text>
       )}
@@ -871,9 +871,9 @@ function CodeStep({
       <Pressable
         onPress={onResend}
         disabled={secondsLeft > 0 || sendOtp.isPending}
-        className={`mt-5 self-start ${secondsLeft > 0 || sendOtp.isPending ? 'opacity-50' : ''}`}
+        className={`mt-5 self-start py-1 ${secondsLeft > 0 || sendOtp.isPending ? 'opacity-50' : ''}`}
       >
-        <Text className="font-sans text-[11px] uppercase tracking-label text-ink-muted">
+        <Text className="font-sans text-[13px] uppercase tracking-label text-ink-muted">
           {secondsLeft > 0
             ? `Reenviar en ${secondsLeft}s`
             : sendOtp.isPending

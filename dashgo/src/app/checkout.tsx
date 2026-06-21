@@ -338,7 +338,7 @@ export default function CheckoutScreen() {
         <View className="mb-10">
           <View className="mb-4 flex-row items-baseline gap-3">
             <Text className="font-sans-italic text-2xl text-brand">01</Text>
-            <Text className="font-sans text-[11px] uppercase tracking-eyebrow text-ink-muted">
+            <Text className="font-sans text-[13px] uppercase tracking-eyebrow text-ink-muted">
               Resumen
             </Text>
           </View>
@@ -384,7 +384,7 @@ export default function CheckoutScreen() {
                       >
                         {formatCents(li.product.monthlyRentCents)} (primer mes)
                       </Text>
-                      <Text className="font-sans text-[10px] text-ink-muted">
+                      <Text className="font-sans text-[12px] text-ink-muted">
                         luego {formatCents(li.product.monthlyRentCents)}/mes
                       </Text>
                     </View>
@@ -413,7 +413,7 @@ export default function CheckoutScreen() {
           <View className="mb-8">
             <View className="mb-4 flex-row items-baseline gap-3">
               <Text className="font-sans-italic text-2xl text-brand">02</Text>
-              <Text className="font-sans text-[11px] uppercase tracking-eyebrow text-ink-muted">
+              <Text className="font-sans text-[13px] uppercase tracking-eyebrow text-ink-muted">
                 Entrega
               </Text>
             </View>
@@ -424,7 +424,7 @@ export default function CheckoutScreen() {
                   <Pressable
                     key={addr.id}
                     onPress={() => setSelectedAddressId(addr.id)}
-                    className={`flex-row items-center justify-between border px-4 py-3 ${
+                    className={`min-h-[48px] flex-row items-center justify-between border px-4 py-3 ${
                       selected ? 'border-ink bg-ink/5' : 'border-ink/20 bg-paper'
                     }`}
                   >
@@ -437,7 +437,7 @@ export default function CheckoutScreen() {
                           </Text>
                         ) : null}
                       </Text>
-                      <Text className="mt-0.5 font-sans text-[13px] text-ink-muted" numberOfLines={1}>
+                      <Text className="mt-0.5 font-sans text-[15px] text-ink-muted" numberOfLines={1}>
                         {addr.line1}
                       </Text>
                     </View>
@@ -459,7 +459,7 @@ export default function CheckoutScreen() {
             <Text className="font-sans-italic text-2xl text-brand">
               {hasAddresses ? '03' : '02'}
             </Text>
-            <Text className="font-sans text-[11px] uppercase tracking-eyebrow text-ink-muted">
+            <Text className="font-sans text-[13px] uppercase tracking-eyebrow text-ink-muted">
               Pago
             </Text>
           </View>
@@ -471,7 +471,7 @@ export default function CheckoutScreen() {
               }`}
             >
               <Text
-                className={`font-sans text-[10px] uppercase tracking-label ${
+                className={`font-sans text-[12px] uppercase tracking-label ${
                   paymentMethod === 'cash' ? 'text-paper/70' : 'text-ink-muted'
                 }`}
               >
@@ -492,7 +492,7 @@ export default function CheckoutScreen() {
               }`}
             >
               <Text
-                className={`font-sans text-[10px] uppercase tracking-label ${
+                className={`font-sans text-[12px] uppercase tracking-label ${
                   paymentMethod === 'digital' ? 'text-paper/70' : 'text-ink-muted'
                 }`}
               >
@@ -516,7 +516,7 @@ export default function CheckoutScreen() {
               <Text className="font-sans-italic text-2xl text-brand">
                 {hasAddresses ? '04' : '03'}
               </Text>
-              <Text className="font-sans text-[11px] uppercase tracking-eyebrow text-ink-muted">
+              <Text className="font-sans text-[13px] uppercase tracking-eyebrow text-ink-muted">
                 Mi crédito
               </Text>
             </View>
@@ -529,7 +529,7 @@ export default function CheckoutScreen() {
               <View className="flex-row items-center justify-between">
                 <View className="flex-1 pr-3">
                   <Text
-                    className={`font-sans text-[10px] uppercase tracking-label ${
+                    className={`font-sans text-[12px] uppercase tracking-label ${
                       useCredit ? 'text-paper/70' : 'text-ink-muted'
                     }`}
                   >
@@ -564,7 +564,7 @@ export default function CheckoutScreen() {
               <Text className="font-sans-italic text-2xl text-brand">
                 {hasAddresses ? '05' : '04'}
               </Text>
-              <Text className="font-sans text-[11px] uppercase tracking-eyebrow text-ink-muted">
+              <Text className="font-sans text-[13px] uppercase tracking-eyebrow text-ink-muted">
                 Mis puntos
               </Text>
             </View>
@@ -577,7 +577,7 @@ export default function CheckoutScreen() {
               <View className="flex-row items-center justify-between">
                 <View className="flex-1 pr-3">
                   <Text
-                    className={`font-sans text-[10px] uppercase tracking-label ${
+                    className={`font-sans text-[12px] uppercase tracking-label ${
                       usePoints ? 'text-paper/70' : 'text-ink-muted'
                     }`}
                   >
@@ -608,7 +608,7 @@ export default function CheckoutScreen() {
         {/* Total band */}
         <View className="border-t-2 border-ink pt-4">
           <View className="mb-2 flex-row items-baseline justify-between">
-            <Text className="font-sans text-[11px] uppercase tracking-label text-ink-muted">
+            <Text className="font-sans text-[13px] uppercase tracking-label text-ink-muted">
               Subtotal
             </Text>
             <Text
@@ -620,7 +620,7 @@ export default function CheckoutScreen() {
           </View>
           {hasRentalItems && (
             <View className="mb-2 flex-row items-baseline justify-between">
-              <Text className="font-sans text-[11px] uppercase tracking-label text-brand">
+              <Text className="font-sans text-[13px] uppercase tracking-label text-brand">
                 Primer mes alquiler
               </Text>
               <Text
@@ -633,7 +633,7 @@ export default function CheckoutScreen() {
           )}
           {redeemCents > 0 && (
             <View className="mb-2 flex-row items-baseline justify-between">
-              <Text className="font-sans text-[11px] uppercase tracking-label text-brand">
+              <Text className="font-sans text-[13px] uppercase tracking-label text-brand">
                 Descuento por puntos
               </Text>
               <Text
@@ -646,7 +646,7 @@ export default function CheckoutScreen() {
           )}
           {creditAppliedCents > 0 && (
             <View className="mb-2 flex-row items-baseline justify-between">
-              <Text className="font-sans text-[11px] uppercase tracking-label text-brand">
+              <Text className="font-sans text-[13px] uppercase tracking-label text-brand">
                 Crédito aplicado
               </Text>
               <Text
@@ -658,7 +658,7 @@ export default function CheckoutScreen() {
             </View>
           )}
           <View className="mb-2 flex-row items-baseline justify-between">
-            <Text className="font-sans text-[11px] uppercase tracking-label text-ink-muted">
+            <Text className="font-sans text-[13px] uppercase tracking-label text-ink-muted">
               Envío
             </Text>
             {allSkipQuote ? (
@@ -677,7 +677,7 @@ export default function CheckoutScreen() {
             )}
           </View>
           <View className="mb-3 flex-row items-baseline justify-between">
-            <Text className="font-sans text-[11px] uppercase tracking-label text-ink-muted">
+            <Text className="font-sans text-[13px] uppercase tracking-label text-ink-muted">
               Impuestos
             </Text>
             {allSkipQuote ? (
@@ -705,7 +705,7 @@ export default function CheckoutScreen() {
               {formatCents(allSkipQuote ? skipQuoteTotalCents : previewTotalCents)}
             </Text>
           </View>
-          <Text className="mt-3 font-sans text-[11px] text-ink-muted">
+          <Text className="mt-3 font-sans text-[13px] text-ink-muted">
             {allSkipQuote
               ? 'Sin cotización — este es el total final. Confirmás y pagás.'
               : 'El repartidor cotiza el envío y te avisamos para confirmar el total.'}
@@ -715,7 +715,7 @@ export default function CheckoutScreen() {
         {/* Monthly recurring disclosure — only for pure-rental carts */}
         {monthlyRecurringCents > 0 && !hasMixedCart && (
           <View className="mt-4 border border-brand/30 bg-brand-light/20 px-4 py-3">
-            <Text className="font-sans text-[11px] uppercase tracking-label text-brand">
+            <Text className="font-sans text-[13px] uppercase tracking-label text-brand">
               Cargo recurrente mensual
             </Text>
             <Text
@@ -724,7 +724,7 @@ export default function CheckoutScreen() {
             >
               {formatCents(monthlyRecurringCents)}/mes
             </Text>
-            <Text className="mt-1 font-sans text-[11px] text-ink-muted">
+            <Text className="mt-1 font-sans text-[13px] text-ink-muted">
               A partir del segundo mes, el cargo mensual se aplicará automáticamente.
             </Text>
           </View>
@@ -736,14 +736,14 @@ export default function CheckoutScreen() {
             <Text className="font-sans text-[13px] text-bad">
               No podés combinar productos de alquiler con productos de compra única.
             </Text>
-            <Text className="mt-1 font-sans text-[11px] text-ink-muted">
+            <Text className="mt-1 font-sans text-[13px] text-ink-muted">
               Hacé pedidos separados: uno para alquileres y otro para compras únicas.
             </Text>
           </View>
         )}
 
         {error && (
-          <Text className="mt-4 font-sans text-[11px] uppercase tracking-label text-bad">
+          <Text className="mt-4 font-sans text-[13px] uppercase tracking-label text-bad">
             {error}
           </Text>
         )}

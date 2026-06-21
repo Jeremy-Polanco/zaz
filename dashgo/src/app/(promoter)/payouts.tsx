@@ -21,16 +21,16 @@ function PayoutRow({ payout }: { payout: Payout }) {
           >
             {formatCents(payout.amountCents)}
           </Text>
-          <Text className="mt-0.5 font-sans text-[10px] uppercase tracking-label text-ink-muted">
+          <Text className="mt-0.5 font-sans text-[12px] uppercase tracking-label text-ink-muted">
             {formatDate(payout.createdAt)}
           </Text>
           {payout.notes ? (
-            <Text className="mt-2 text-[13px] text-ink">
+            <Text className="mt-2 text-[15px] text-ink">
               “{payout.notes}”
             </Text>
           ) : null}
           {payout.createdBy ? (
-            <Text className="mt-1 font-sans text-[10px] uppercase tracking-label text-ink-muted">
+            <Text className="mt-1 font-sans text-[12px] uppercase tracking-label text-ink-muted">
               Emitido por {payout.createdBy.fullName}
             </Text>
           ) : null}

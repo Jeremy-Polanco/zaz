@@ -349,7 +349,7 @@ function ProductForm({
               )}
             </Text>
             <Text
-              className="mt-0.5 font-sans text-[11px] text-ink-muted"
+              className="mt-0.5 font-sans text-[13px] text-ink-muted"
               numberOfLines={1}
             >
               {state.description || 'Sin descripción'}
@@ -429,7 +429,7 @@ function ProductForm({
                 onChangeText={(t) => setState((s) => ({ ...s, name: t }))}
               />
               <FieldError message={state.errors.name} />
-              <Text className="mt-1 font-sans text-[10px] text-ink-muted">
+              <Text className="mt-1 font-sans text-[12px] text-ink-muted">
                 2+ caracteres. Aparece en catálogo, checkout, factura.
               </Text>
             </View>
@@ -447,7 +447,7 @@ function ProductForm({
                   setState((s) => ({ ...s, description: t }))
                 }
               />
-              <Text className="mt-1 font-sans text-[10px] text-ink-muted">
+              <Text className="mt-1 font-sans text-[12px] text-ink-muted">
                 2 líneas como máximo. Se trunca en catálogo.
               </Text>
             </View>
@@ -575,7 +575,7 @@ function ProductForm({
                 <Text className="font-sans-semibold text-[13px] text-ink">
                   Oferta activa
                 </Text>
-                <Text className="mt-0.5 font-sans text-[11px] text-ink-muted">
+                <Text className="mt-0.5 font-sans text-[13px] text-ink-muted">
                   {state.offerOpen
                     ? `Descuento ${discountN || 0}%`
                     : 'Sin descuento'}
@@ -827,7 +827,7 @@ function ProductForm({
                 style={{ fontVariant: ['tabular-nums'] }}
               />
               <FieldError message={state.errors.displayOrderText} />
-              <Text className="mt-1 font-sans text-[10px] text-ink-muted">
+              <Text className="mt-1 font-sans text-[12px] text-ink-muted">
                 Menor número aparece primero en el catálogo.
               </Text>
             </View>
@@ -846,7 +846,7 @@ function ProductForm({
                 style={{ fontVariant: ['tabular-nums'] }}
               />
               <FieldError message={state.errors.promoterCommissionText} />
-              <Text className="mt-1 font-sans text-[10px] text-ink-muted">
+              <Text className="mt-1 font-sans text-[12px] text-ink-muted">
                 Lo que gana un promotor por cada venta de este producto.
               </Text>
             </View>
@@ -865,7 +865,7 @@ function ProductForm({
                 style={{ fontVariant: ['tabular-nums'] }}
               />
               <FieldError message={state.errors.pointsText} />
-              <Text className="mt-1 font-sans text-[10px] text-ink-muted">
+              <Text className="mt-1 font-sans text-[12px] text-ink-muted">
                 Devolución en puntos al cliente, sobre el precio efectivo.
               </Text>
             </View>
@@ -929,7 +929,7 @@ function SectionHeader({
           {title}
         </Text>
         {hint ? (
-          <Text className="mt-0.5 font-sans text-[11px] text-ink-muted">
+          <Text className="mt-0.5 font-sans text-[13px] text-ink-muted">
             {hint}
           </Text>
         ) : null}
@@ -995,7 +995,7 @@ function ToggleRow({
       </View>
       <View className="flex-1">
         <Text className="font-sans-semibold text-[13px] text-ink">{label}</Text>
-        <Text className="mt-0.5 font-sans text-[11px] text-ink-muted">
+        <Text className="mt-0.5 font-sans text-[13px] text-ink-muted">
           {sub}
         </Text>
       </View>
@@ -1077,7 +1077,7 @@ function ProductRow({
 
           <View className="mt-1 flex-row items-center gap-2">
             {product.category && (
-              <Text className="font-sans text-[11px] text-ink-muted">
+              <Text className="font-sans text-[13px] text-ink-muted">
                 {product.category.iconEmoji ?? '·'} {product.category.name}
               </Text>
             )}
@@ -1092,7 +1092,7 @@ function ProductRow({
 
           {product.description && (
             <Text
-              className="mt-1 text-[12px] leading-[16px] text-ink-soft"
+              className="mt-1 text-[14px] leading-[18px] text-ink-soft"
               numberOfLines={1}
             >
               {product.description}
@@ -1129,16 +1129,16 @@ function ProductRow({
           <Pressable
             onPress={() => onStock(-1)}
             disabled={updating || product.stock <= 0}
-            className="h-7 w-7 items-center justify-center border border-ink/15 bg-paper active:bg-paper-deep"
+            className="h-9 w-9 items-center justify-center border border-ink/15 bg-paper active:bg-paper-deep"
           >
-            <Text className="font-sans-semibold text-[14px] text-ink">−</Text>
+            <Text className="font-sans-semibold text-[16px] text-ink">−</Text>
           </Pressable>
           <Pressable
             onPress={() => onStock(1)}
             disabled={updating}
-            className="h-7 w-7 items-center justify-center border border-ink/15 bg-paper active:bg-paper-deep"
+            className="h-9 w-9 items-center justify-center border border-ink/15 bg-paper active:bg-paper-deep"
           >
-            <Text className="font-sans-semibold text-[14px] text-ink">+</Text>
+            <Text className="font-sans-semibold text-[16px] text-ink">+</Text>
           </Pressable>
         </View>
       </View>

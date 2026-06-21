@@ -72,11 +72,13 @@ function assertProductionStripeKey() {
  *     via EAS Update can target the right runtime version channel.
  */
 function resolveIosBuildNumber(): string {
-  // EAS injects EAS_BUILD_NUMBER for the current build when autoIncrement
-  // is enabled in eas.json. Falls back to '1' for local prebuild/dev runs.
+  // appVersionSource is 'local' (eas.json) — the build number comes from here.
+  // EAS_BUILD_NUMBER is still honored if injected; otherwise use the explicit
+  // value below. BUMP THIS by 1 before each App Store/TestFlight upload —
+  // Apple rejects a duplicate buildNumber on the same version (1.0).
   const fromEas = process.env.EAS_BUILD_NUMBER
   if (fromEas && fromEas.length > 0) return fromEas
-  return '1'
+  return '4'
 }
 
 function resolveAndroidVersionCode(): number {
@@ -217,6 +219,9 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     extra: {
       apiUrl: process.env.EXPO_PUBLIC_API_URL,
       stripePublishableKey: process.env.EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY,
+      eas: {
+        projectId: '4a871bfe-e7dc-4fee-8ccb-5b18ab8ad3b2',
+      },
     },
   }
 }

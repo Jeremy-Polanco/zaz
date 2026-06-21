@@ -9,6 +9,7 @@ import { SafeAreaView } from 'react-native-safe-area-context'
 import { router, Stack } from 'expo-router'
 import { useMyAddresses } from '../../lib/queries'
 import type { UserAddress } from '../../lib/types'
+import { ScreenHeader } from '../../components/ScreenHeader'
 
 function AddressCard({ address }: { address: UserAddress }) {
   return (
@@ -23,13 +24,13 @@ function AddressCard({ address }: { address: UserAddress }) {
           </Text>
           {address.isDefault && (
             <View className="rounded-sm bg-brand/10 px-1.5 py-0.5">
-              <Text className="text-[11px] font-sans-medium text-brand">
+              <Text className="text-[12px] font-sans-medium text-brand">
                 Por defecto
               </Text>
             </View>
           )}
         </View>
-        <Text className="text-[14px] text-ink-soft" numberOfLines={1}>
+        <Text className="text-[15px] text-ink-soft" numberOfLines={1}>
           {address.line1}
         </Text>
       </View>
@@ -55,17 +56,18 @@ export default function AddressesIndex() {
   return (
     <SafeAreaView edges={['bottom']} className="flex-1 bg-paper">
       <Stack.Screen options={{ title: 'Mis direcciones' }} />
+      <ScreenHeader title="Mis direcciones" />
       <View className="flex-1 px-5">
         {list.length === 0 ? (
           <View className="flex-1 items-center justify-center gap-4">
-            <Text className="text-[16px] text-ink-soft">
+            <Text className="text-[17px] text-ink-soft">
               Sin direcciones guardadas
             </Text>
             <Pressable
               onPress={() => router.push('/addresses/new' as never)}
-              className="rounded-lg bg-brand px-6 py-3 active:opacity-70"
+              className="min-h-[48px] justify-center rounded-lg bg-brand px-6 py-3 active:opacity-70"
             >
-              <Text className="font-sans-semibold text-[15px] text-paper">
+              <Text className="font-sans-semibold text-[16px] text-paper">
                 + Agregar dirección
               </Text>
             </Pressable>

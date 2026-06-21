@@ -214,14 +214,14 @@ function CategoryRow({
           <Pressable
             onPress={() => onMove(-1)}
             disabled={moving}
-            className="h-9 w-9 items-center justify-center border border-ink/20 bg-paper active:bg-paper-deep"
+            className="h-11 w-11 items-center justify-center border border-ink/20 bg-paper active:bg-paper-deep"
           >
             <Text className="font-sans-semibold text-lg text-ink">↑</Text>
           </Pressable>
           <Pressable
             onPress={() => onMove(1)}
             disabled={moving}
-            className="h-9 w-9 items-center justify-center border border-ink/20 bg-paper active:bg-paper-deep"
+            className="h-11 w-11 items-center justify-center border border-ink/20 bg-paper active:bg-paper-deep"
           >
             <Text className="font-sans-semibold text-lg text-ink">↓</Text>
           </Pressable>

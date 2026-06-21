@@ -28,6 +28,14 @@ export const cart = {
     state = { items: next }
     emit()
   },
+  set(productId: string, qty: number) {
+    const q = Math.max(0, Math.floor(qty))
+    const next = { ...state.items }
+    if (q === 0) delete next[productId]
+    else next[productId] = q
+    state = { items: next }
+    emit()
+  },
   clear() {
     state = { items: {} }
     emit()

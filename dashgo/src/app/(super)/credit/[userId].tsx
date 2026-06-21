@@ -21,7 +21,8 @@ import {
 } from '../../../lib/queries'
 import { formatCents, formatDate } from '../../../lib/format'
 import type { CreditMovement } from '../../../lib/types'
-import { Button, Card, Eyebrow, FieldLabel, Hairline, SectionHead } from '../../../components/ui'
+import { Button, Card, Eyebrow, FieldLabel, Hairline } from '../../../components/ui'
+import { ScreenHeader } from '../../../components/ScreenHeader'
 
 function movementTypeLabel(type: string) {
   switch (type) {
@@ -278,18 +279,17 @@ export default function SuperCreditDetailScreen() {
   }
 
   return (
-    <SafeAreaView edges={['top']} className="flex-1 bg-paper">
+    <View className="flex-1 bg-paper">
+      <ScreenHeader
+        title={account?.user?.fullName ?? 'Crédito'}
+        subtitle="Crédito fiado"
+      />
       <FlatList
         data={movementsPage?.items ?? []}
         keyExtractor={(m) => m.id}
         contentContainerClassName="px-5 pb-12"
         ListHeaderComponent={
-          <View className="pt-6">
-            <SectionHead
-              eyebrow="Crédito fiado"
-              title={account?.user?.fullName ?? userId ?? ''}
-            />
-
+          <View className="pt-4">
             {/* Balance summary */}
             <View className="mb-6 flex-row gap-2">
               <StatCard
@@ -405,6 +405,6 @@ export default function SuperCreditDetailScreen() {
           ) : null
         }
       />
-    </SafeAreaView>
+    </View>
   )
 }

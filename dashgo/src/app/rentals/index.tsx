@@ -6,6 +6,7 @@ import { useMyRentals } from '../../lib/queries'
 import { formatCents, formatDate } from '../../lib/format'
 import { productImageUrl } from '../../lib/api'
 import type { Rental, RentalStatus } from '../../lib/types'
+import { ScreenHeader } from '../../components/ScreenHeader'
 
 // ─── Status badge config ──────────────────────────────────────────────────────
 
@@ -96,12 +97,12 @@ function RentalCard({ rental }: { rental: Rental }) {
           </Text>
 
           {rental.nextChargeAt && (
-            <Text className="mt-1 font-sans text-[12px] text-ink-soft">
+            <Text className="mt-1 font-sans text-[14px] text-ink-soft">
               Próximo cargo: {formatDate(rental.nextChargeAt)}
             </Text>
           )}
           {rental.status === 'pending_setup' && (
-            <Text className="mt-2 font-sans text-[12px] text-amber-800">
+            <Text className="mt-2 font-sans text-[14px] text-amber-800">
               {PENDING_SETUP_COPY}
             </Text>
           )}
@@ -130,16 +131,17 @@ export default function RentalsIndex() {
   return (
     <SafeAreaView edges={['bottom']} className="flex-1 bg-paper">
       <Stack.Screen options={{ title: 'Mis alquileres' }} />
+      <ScreenHeader title="Alquileres" />
 
       {list.length === 0 ? (
         <View className="flex-1 items-center justify-center px-8">
-          <Text className="font-sans text-[10px] uppercase tracking-eyebrow text-ink-muted">
+          <Text className="font-sans text-[12px] uppercase tracking-eyebrow text-ink-muted">
             Sin alquileres
           </Text>
-          <Text className="mt-3 text-center text-[16px] text-ink-soft">
+          <Text className="mt-3 text-center text-[17px] text-ink-soft">
             No tienes alquileres activos.
           </Text>
-          <Text className="mt-1 text-center text-[13px] text-ink-muted">
+          <Text className="mt-1 text-center text-[15px] text-ink-muted">
             Cuando alquiles un producto, lo verás aquí.
           </Text>
         </View>

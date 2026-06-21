@@ -44,7 +44,7 @@ function SummaryCard({
 }) {
   return (
     <View className="flex-1 border border-ink/15 bg-paper p-4">
-      <Text className="font-sans text-[10px] uppercase tracking-label text-ink-muted">
+      <Text className="font-sans text-[12px] uppercase tracking-label text-ink-muted">
         {label}
       </Text>
       <Text
@@ -64,11 +64,11 @@ function MovementRow({ mv }: { mv: CreditMovement }) {
     <View className="py-4">
       <View className="flex-row items-start justify-between gap-3">
         <View className="flex-1 pr-3">
-          <Text className="font-sans text-[10px] uppercase tracking-label text-ink-muted">
+          <Text className="font-sans text-[12px] uppercase tracking-label text-ink-muted">
             {formatDate(mv.createdAt)} · {movementTypeLabel(mv.type)}
           </Text>
           {mv.note ? (
-            <Text className="mt-0.5 font-sans text-[13px] text-ink-soft">{mv.note}</Text>
+            <Text className="mt-0.5 font-sans text-[15px] text-ink-soft">{mv.note}</Text>
           ) : null}
         </View>
         <Text
@@ -120,7 +120,7 @@ export default function CreditTab() {
                 crédito.
               </Text>
             </View>
-            <Text className="mt-2 text-[13px] text-ink-soft">
+            <Text className="mt-2 text-[15px] text-ink-soft">
               Saldo disponible para tus pedidos.
             </Text>
 
@@ -147,7 +147,7 @@ export default function CreditTab() {
 
                 {data?.status === 'overdue' && (
                   <View className="mt-4 border border-red-200 bg-red-50 px-4 py-3">
-                    <Text className="font-sans text-[11px] uppercase tracking-label text-red-700">
+                    <Text className="font-sans text-[13px] uppercase tracking-label text-red-700">
                       Cuenta vencida — salda tu deuda para volver a usar la app.
                     </Text>
                   </View>
@@ -160,7 +160,7 @@ export default function CreditTab() {
                     <View className="flex-row items-center justify-between">
                       <View className="flex-1 pr-3">
                         <Text
-                          className={`font-sans text-[10px] uppercase tracking-label ${user?.creditLocked ? 'text-red-700' : 'text-accent-dark'}`}
+                          className={`font-sans text-[12px] uppercase tracking-label ${user?.creditLocked ? 'text-red-700' : 'text-accent-dark'}`}
                         >
                           Saldo pendiente
                         </Text>

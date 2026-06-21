@@ -15,6 +15,7 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { savedAddressSchema, type SavedAddressInput } from '../../lib/schemas'
 import { useCreateAddress } from '../../lib/queries'
 import { MapPicker } from '../../components/MapPicker'
+import { ScreenHeader } from '../../components/ScreenHeader'
 
 const FALLBACK_LAT = 18.4861
 const FALLBACK_LNG = -69.9312
@@ -51,6 +52,7 @@ export default function NewAddress() {
   return (
     <SafeAreaView edges={['bottom']} className="flex-1 bg-paper">
       <Stack.Screen options={{ title: 'Nueva dirección' }} />
+      <ScreenHeader title="Nueva dirección" />
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         className="flex-1"
@@ -61,7 +63,7 @@ export default function NewAddress() {
         >
           {/* Label */}
           <View className="gap-1.5">
-            <Text className="font-sans-medium text-[13px] uppercase tracking-wide text-ink-soft">
+            <Text className="font-sans-medium text-[15px] uppercase tracking-wide text-ink-soft">
               Nombre
             </Text>
             <Controller
@@ -80,13 +82,13 @@ export default function NewAddress() {
               )}
             />
             {errors.label && (
-              <Text className="text-[13px] text-red-500">{errors.label.message}</Text>
+              <Text className="text-[15px] text-red-500">{errors.label.message}</Text>
             )}
           </View>
 
           {/* Line 1 */}
           <View className="gap-1.5">
-            <Text className="font-sans-medium text-[13px] uppercase tracking-wide text-ink-soft">
+            <Text className="font-sans-medium text-[15px] uppercase tracking-wide text-ink-soft">
               Dirección
             </Text>
             <Controller
@@ -105,15 +107,15 @@ export default function NewAddress() {
               )}
             />
             {errors.line1 && (
-              <Text className="text-[13px] text-red-500">{errors.line1.message}</Text>
+              <Text className="text-[15px] text-red-500">{errors.line1.message}</Text>
             )}
           </View>
 
           {/* Line 2 (optional) */}
           <View className="gap-1.5">
-            <Text className="font-sans-medium text-[13px] uppercase tracking-wide text-ink-soft">
+            <Text className="font-sans-medium text-[15px] uppercase tracking-wide text-ink-soft">
               Apto / Piso{' '}
-              <Text className="normal-case font-sans text-[11px]">(opcional)</Text>
+              <Text className="normal-case font-sans text-[13px]">(opcional)</Text>
             </Text>
             <Controller
               control={control}
@@ -134,7 +136,7 @@ export default function NewAddress() {
 
           {/* Map Picker */}
           <View className="gap-1.5">
-            <Text className="font-sans-medium text-[13px] uppercase tracking-wide text-ink-soft">
+            <Text className="font-sans-medium text-[15px] uppercase tracking-wide text-ink-soft">
               Ubica el pin
             </Text>
             <MapPicker
@@ -148,9 +150,9 @@ export default function NewAddress() {
 
           {/* Instructions (optional) */}
           <View className="gap-1.5">
-            <Text className="font-sans-medium text-[13px] uppercase tracking-wide text-ink-soft">
+            <Text className="font-sans-medium text-[15px] uppercase tracking-wide text-ink-soft">
               Instrucciones{' '}
-              <Text className="normal-case font-sans text-[11px]">(opcional)</Text>
+              <Text className="normal-case font-sans text-[13px]">(opcional)</Text>
             </Text>
             <Controller
               control={control}

@@ -4,6 +4,7 @@ import { useLocalSearchParams, router } from 'expo-router'
 import { useInvoice } from '../../../lib/queries'
 import { formatDate, formatMoney } from '../../../lib/format'
 import { Button, Eyebrow, Hairline } from '../../../components/ui'
+import { ScreenHeader } from '../../../components/ScreenHeader'
 
 export default function InvoiceScreen() {
   const params = useLocalSearchParams<{ orderId: string }>()
@@ -71,18 +72,17 @@ export default function InvoiceScreen() {
   const taxRatePct = (parseFloat(invoice.taxRate) * 100).toFixed(3)
 
   return (
-    <SafeAreaView edges={['top']} className="flex-1 bg-paper">
-      <ScrollView contentContainerClassName="px-5 pb-8">
-        <View className="flex-row items-center justify-between pt-4">
-          <Button variant="ghost" onPress={() => router.back()}>
-            ← Volver
-          </Button>
+    <View className="flex-1 bg-paper">
+      <ScreenHeader
+        title="Factura"
+        right={
           <Button variant="accent" onPress={share}>
             Compartir
           </Button>
-        </View>
-
-        <View className="mt-6 border-b-2 border-ink pb-6">
+        }
+      />
+      <ScrollView contentContainerClassName="px-5 pb-8">
+        <View className="mt-2 border-b-2 border-ink pb-6">
           <Eyebrow>Factura</Eyebrow>
           <Text className="mt-3 font-sans-semibold text-[44px] leading-[48px] text-ink">
             DashGo
@@ -113,7 +113,7 @@ export default function InvoiceScreen() {
             <Text className="mt-2 font-sans-semibold text-[18px] text-ink">
               {invoice.customer.fullName}
             </Text>
-            <Text className="mt-1 font-sans text-[12px] text-ink-soft">
+            <Text className="mt-1 font-sans text-[14px] text-ink-soft">
               {invoice.customer.phone ?? '—'}
             </Text>
           </View>
@@ -139,7 +139,7 @@ export default function InvoiceScreen() {
                 className="flex-row items-start justify-between border-b border-ink/10 py-3"
               >
                 <View className="flex-1 pr-3">
-                  <Text className="font-sans-medium text-[14px] text-ink">
+                  <Text className="font-sans-medium text-[15px] text-ink">
                     {item.productName}
                   </Text>
                   <Text
@@ -228,6 +228,6 @@ export default function InvoiceScreen() {
           DashGo · dashgo.dev
         </Text>
       </ScrollView>
-    </SafeAreaView>
+    </View>
   )
 }

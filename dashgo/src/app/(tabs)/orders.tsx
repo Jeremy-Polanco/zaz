@@ -12,7 +12,7 @@ function OrderCard({ order }: { order: Order }) {
     <View className="py-5">
       <View className="mb-3 flex-row items-start justify-between">
         <View className="flex-1 pr-3">
-          <Text className="font-sans text-[11px] uppercase tracking-label text-ink-muted">
+          <Text className="font-sans text-[13px] uppercase tracking-label text-ink-muted">
             {formatDate(order.createdAt)}
           </Text>
           <Text className="mt-1 font-sans-semibold text-[20px] leading-[24px] text-ink">
@@ -26,7 +26,7 @@ function OrderCard({ order }: { order: Order }) {
       </View>
 
       <View className="flex-row items-center justify-between">
-        <Text className="font-sans text-[11px] uppercase tracking-label text-ink-muted">
+        <Text className="font-sans text-[13px] uppercase tracking-label text-ink-muted">
           {itemCount} {itemCount === 1 ? 'producto' : 'productos'} · {order.paymentMethod === 'cash' ? 'Efectivo' : 'Digital'}
         </Text>
         <Text
@@ -45,9 +45,9 @@ function OrderCard({ order }: { order: Order }) {
               params: { orderId: order.id },
             })
           }
-          className="mt-3"
+          className="mt-3 min-h-[48px] justify-center"
         >
-          <Text className="font-sans text-[11px] uppercase tracking-label text-brand">
+          <Text className="font-sans text-[13px] uppercase tracking-label text-brand">
             Ver factura →
           </Text>
         </Pressable>

@@ -31,7 +31,7 @@ function AccountLink({ label, iosIcon, androidIcon, href, hint }: AccountLinkPro
         <View>
           <Text className="font-sans-medium text-[16px] text-ink">{label}</Text>
           {hint ? (
-            <Text className="font-sans text-[11px] text-ink-muted">{hint}</Text>
+            <Text className="font-sans text-[13px] text-ink-muted">{hint}</Text>
           ) : null}
         </View>
       </View>
@@ -91,7 +91,7 @@ export default function PromoterProfileScreen() {
             </Text>
           </View>
           <Text
-            className="mt-3 text-[13px] leading-[20px]"
+            className="mt-3 text-[15px] leading-[22px]"
             style={{ color: 'rgba(255,255,255,0.7)', maxWidth: 280 }}
           >
             Tu identidad, tu actividad y tu sesión.
@@ -110,7 +110,7 @@ export default function PromoterProfileScreen() {
               <Text className="font-sans-semibold text-[22px] leading-[26px] text-ink">
                 {user?.fullName ?? '—'}
               </Text>
-              <Text className="mt-0.5 text-[13px] text-ink-soft">
+              <Text className="mt-0.5 text-[15px] text-ink-soft">
                 {user?.phone ?? ''}
               </Text>
             </View>

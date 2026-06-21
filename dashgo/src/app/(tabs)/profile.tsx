@@ -110,7 +110,7 @@ export default function ProfileTab() {
             <Text className="font-sans-semibold text-[22px] leading-[26px] text-ink">
               {user?.fullName ?? '—'}
             </Text>
-            <Text className="mt-0.5 text-[13px] text-ink-soft">{user?.phone ?? ''}</Text>
+            <Text className="mt-0.5 text-[15px] text-ink-soft">{user?.phone ?? ''}</Text>
           </View>
         </View>
 
@@ -171,7 +171,7 @@ export default function ProfileTab() {
 
         {successToast && (
           <View className="mt-6 border border-ok/40 bg-ok/10 px-4 py-3">
-            <Text className="font-sans text-[12px] text-ok">
+            <Text className="font-sans text-[14px] text-ok">
               Cuenta eliminada. Te vamos a extrañar.
             </Text>
           </View>
@@ -199,7 +199,7 @@ export default function ProfileTab() {
             testID="delete-account-button"
             className="h-14 flex-row items-center justify-center border border-bad/40 px-6 active:bg-bad/5"
           >
-            <Text className="font-sans-medium text-[12px] uppercase tracking-label text-bad">
+            <Text className="font-sans-medium text-[14px] uppercase tracking-label text-bad">
               Eliminar mi cuenta
             </Text>
           </Pressable>

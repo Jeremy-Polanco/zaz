@@ -112,15 +112,15 @@ export default function HomeTab() {
                     {lastDelivered.items?.[0]?.product?.name ?? 'Pedido anterior'}
                     {(lastDelivered.items?.length ?? 0) > 1 ? ` +${(lastDelivered.items?.length ?? 0) - 1}` : ''}
                   </Text>
-                  <Text className="font-sans text-[11px] text-ink-muted">
+                  <Text className="font-sans text-[13px] text-ink-muted">
                     Entregado · {formatMoney(lastDelivered.totalAmount ?? '0')}
                   </Text>
                 </View>
                 <Pressable
                   onPress={() => router.navigate('/(tabs)/catalog')}
-                  className="h-9 items-center justify-center border border-ink/40 px-3"
+                  className="min-h-[48px] items-center justify-center border border-ink/40 px-3"
                 >
-                  <Text className="font-sans-medium text-[10px] uppercase tracking-label text-ink">
+                  <Text className="font-sans-medium text-[12px] uppercase tracking-label text-ink">
                     Repetir →
                   </Text>
                 </Pressable>
