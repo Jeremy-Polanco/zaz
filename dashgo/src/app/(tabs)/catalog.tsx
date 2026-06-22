@@ -560,24 +560,6 @@ export default function CatalogTab() {
           autoCapitalize="none"
           returnKeyType="search"
         />
-        <Pressable className="p-1">
-          <SymbolView
-            name={{ ios: 'camera.fill', android: 'photo_camera' }}
-            size={16}
-            tintColor="#6B6488"
-            resizeMode="scaleAspectFit"
-            fallback={<Text className="text-ink-muted">📷</Text>}
-          />
-        </Pressable>
-        <Pressable className="p-1">
-          <SymbolView
-            name={{ ios: 'mic.fill', android: 'mic' }}
-            size={15}
-            tintColor="#6B6488"
-            resizeMode="scaleAspectFit"
-            fallback={<Text className="text-ink-muted">🎙</Text>}
-          />
-        </Pressable>
       </View>
       {!showPicker && (
         <Pressable

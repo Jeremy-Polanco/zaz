@@ -5,7 +5,7 @@ import { router } from 'expo-router'
 import { useCategories, useCurrentUser, useOrders, useProducts } from '../../lib/queries'
 import { categorySelection } from '../../lib/category-selection'
 import { CategoryCard } from '../../components/CategoryCard'
-import { BoltIcon, Eyebrow, Hairline, PlaceholderImage, SpeedBanner } from '../../components/ui'
+import { BoltIcon, Eyebrow, Hairline, PlaceholderImage } from '../../components/ui'
 import { MaintenanceBanner } from '../../components/MaintenanceBanner'
 import { formatMoney } from '../../lib/format'
 
@@ -41,7 +41,6 @@ export default function HomeTab() {
 
   const cats = categories ?? []
   const firstName = user?.fullName?.split(' ')[0] ?? ''
-  const neighborhood = user?.addressDefault?.text?.split('·').pop()?.trim() ?? 'New York'
 
   function handleCategoryPress(slug: string) {
     categorySelection.set(slug)
@@ -54,7 +53,7 @@ export default function HomeTab() {
         {/* Header: greeting + brand tile */}
         <View className="flex-row items-start justify-between">
           <View className="flex-1 pr-4">
-            <Eyebrow className="mb-3">Inicio · {neighborhood}</Eyebrow>
+            <Eyebrow className="mb-3">Inicio</Eyebrow>
             <Text className="font-sans-semibold text-[36px] leading-[40px] tracking-tight text-ink">
               ¿Qué{' '}
               <Text className="font-sans-italic text-ink">necesitas</Text>
@@ -66,13 +65,10 @@ export default function HomeTab() {
           </View>
         </View>
 
-        {/* Speed banner */}
-        <View className="mt-6">
-          <SpeedBanner estimate="30–45 min" zone={neighborhood} />
-        </View>
-
         {/* Bebedero maintenance countdown / alert */}
-        <MaintenanceBanner />
+        <View className="mt-6">
+          <MaintenanceBanner />
+        </View>
 
         {/* Categories */}
         <View className="mt-7 flex-col gap-3">

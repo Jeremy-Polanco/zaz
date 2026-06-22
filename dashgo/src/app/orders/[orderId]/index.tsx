@@ -209,7 +209,7 @@ export default function OrderDetailScreen() {
           </View>
           {order.status !== 'cancelled' && (
             <View className="mb-6 mt-5">
-              <StatusStepper status={order.status} />
+              <StatusStepper status={order.status} variant="customer" />
             </View>
           )}
 

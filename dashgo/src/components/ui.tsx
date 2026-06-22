@@ -272,27 +272,53 @@ const STEPPER_SHORT: Record<OrderStatus, string> = {
   cancelled: 'Cancelado',
 }
 
-export function StatusStepper({ status }: { status: OrderStatus }) {
-  const idx = STEPPER_ORDER.indexOf(status)
+// Customer-facing journey: the 6 internal ops states collapse into 3 plain
+// steps. The customer pays, then it's pending, then it's delivered — no
+// "cotizar/validar/confirmar" noise. The admin keeps the detailed stepper.
+const CUSTOMER_STEPS = ['Pagar', 'Pendiente', 'Entregado'] as const
+function customerStepIndex(status: OrderStatus): number {
+  if (status === 'delivered') return 2
+  if (
+    status === 'pending_validation' ||
+    status === 'confirmed_by_colmado' ||
+    status === 'in_delivery_route'
+  )
+    return 1 // paid / being prepared / on the way → "Pendiente"
+  return 0 // pending_quote, quoted → "Pagar"
+}
+
+export function StatusStepper({
+  status,
+  variant = 'detailed',
+}: {
+  status: OrderStatus
+  /** 'customer' = 3 plain steps; 'detailed' = full 6-state ops view (admin). */
+  variant?: 'customer' | 'detailed'
+}) {
+  const isCustomer = variant === 'customer'
+  const labels = isCustomer
+    ? [...CUSTOMER_STEPS]
+    : STEPPER_ORDER.map((s) => STEPPER_SHORT[s])
+  const idx = isCustomer
+    ? customerStepIndex(status)
+    : STEPPER_ORDER.indexOf(status)
+  const textSize = isCustomer ? 'text-[13px]' : 'text-[10px]'
   return (
     <View className="flex-row items-start gap-1">
-      {STEPPER_ORDER.map((s, i) => {
+      {labels.map((label, i) => {
         const done = i < idx
         const active = i === idx
         const dim = !done && !active
         return (
-          <View
-            key={s}
-            className={`flex-1 ${dim ? 'opacity-40' : ''}`}
-          >
+          <View key={label} className={`flex-1 ${dim ? 'opacity-40' : ''}`}>
             <View
               className={`h-[3px] ${done || active ? 'bg-brand' : 'bg-ink/15'}`}
             />
             <Text
-              className={`mt-1.5 font-sans-medium text-[10px] uppercase tracking-label ${active ? 'text-brand' : 'text-ink-muted'}`}
+              className={`mt-1.5 font-sans-medium ${textSize} uppercase tracking-label ${active ? 'text-brand' : 'text-ink-muted'}`}
               numberOfLines={1}
             >
-              {STEPPER_SHORT[s]}
+              {label}
             </Text>
           </View>
         )

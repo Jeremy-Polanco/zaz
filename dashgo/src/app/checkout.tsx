@@ -15,6 +15,7 @@ import {
   useOrders,
   usePointsBalance,
   useProducts,
+  useUpdateOrderStatus,
 } from '../lib/queries'
 import { userAddressToGeoAddress } from '../lib/address'
 import { formatCents } from '../lib/format'
@@ -34,6 +35,7 @@ export default function CheckoutScreen() {
   const createOrder = useCreateOrder()
   const confirmOrder = useConfirmNonStripeOrder()
   const authorize = useAuthorizeOrder()
+  const updateStatus = useUpdateOrderStatus()
   const { initPaymentSheet, presentPaymentSheet } = useStripe()
   const { data: orders } = useOrders()
 
@@ -223,15 +225,42 @@ export default function CheckoutScreen() {
       )
       const fullCredit = creditCents > 0 && creditCents >= totalCents
 
-      let paidOk = false
+      // Digital pay-now: an unpaid digital order must NOT linger. The cart is
+      // where an unpaid order lives — so the order only "sticks" once the card
+      // is actually authorized. If the customer dismisses the sheet (or the
+      // card fails), we cancel the just-created order (server-side this reverses
+      // any applied credit/points and re-increments stock) and KEEP the cart so
+      // they can pay whenever they want.
       if (isSkipQuote && created.paymentMethod === 'digital' && !fullCredit) {
-        // Pay with the card sheet inline. On cancel/failure, fall through to the
-        // order screen where the customer can retry the "Pagar" step.
-        paidOk = await payWithSheet(created.id)
-      } else if (
-        isSkipQuote &&
-        (created.paymentMethod === 'cash' || fullCredit)
-      ) {
+        const paidOk = await payWithSheet(created.id)
+        if (!paidOk) {
+          try {
+            await updateStatus.mutateAsync({
+              id: created.id,
+              status: 'cancelled',
+            })
+          } catch {
+            // Best-effort rollback — the order screen / admin can still cancel.
+          }
+          // Preserve a real failure reason (e.g. card declined) if payWithSheet
+          // set one; otherwise show the friendly "cart still here" note.
+          setError(
+            (prev) =>
+              prev ??
+              'No completaste el pago. Tu carrito sigue acá cuando quieras pagar.',
+          )
+          return // keep the cart, stay on checkout — no order created
+        }
+        // Authorized → the order is real now.
+        cart.clear()
+        router.replace({
+          pathname: '/orders/[orderId]',
+          params: { orderId: created.id, paid: '1' },
+        })
+        return
+      }
+
+      if (isSkipQuote && (created.paymentMethod === 'cash' || fullCredit)) {
         // One-click: no card needed (cash, or fully covered by credit). The
         // server auto-confirms skip-quote orders from here. Non-blocking.
         try {
@@ -241,14 +270,12 @@ export default function CheckoutScreen() {
         }
       }
 
+      // Cash / full-credit / quote-required orders: nothing to pay inline, so
+      // the order is placed and we hand off to the order screen.
       cart.clear()
-      // paid=1 only when the card was actually authorized — the order screen
-      // uses it to show "procesando" through the webhook gap instead of the
-      // retry button. A dismissed PaymentSheet (paidOk=false) lands on the
-      // retry state.
       router.replace({
         pathname: '/orders/[orderId]',
-        params: { orderId: created.id, ...(paidOk ? { paid: '1' } : {}) },
+        params: { orderId: created.id },
       })
     } catch (e) {
       setError(
