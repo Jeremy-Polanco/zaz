@@ -223,10 +223,11 @@ export default function CheckoutScreen() {
       )
       const fullCredit = creditCents > 0 && creditCents >= totalCents
 
+      let paidOk = false
       if (isSkipQuote && created.paymentMethod === 'digital' && !fullCredit) {
         // Pay with the card sheet inline. On cancel/failure, fall through to the
-        // order screen where the customer can retry the "Autorizar" step.
-        await payWithSheet(created.id)
+        // order screen where the customer can retry the "Pagar" step.
+        paidOk = await payWithSheet(created.id)
       } else if (
         isSkipQuote &&
         (created.paymentMethod === 'cash' || fullCredit)
@@ -241,9 +242,13 @@ export default function CheckoutScreen() {
       }
 
       cart.clear()
+      // paid=1 only when the card was actually authorized — the order screen
+      // uses it to show "procesando" through the webhook gap instead of the
+      // retry button. A dismissed PaymentSheet (paidOk=false) lands on the
+      // retry state.
       router.replace({
         pathname: '/orders/[orderId]',
-        params: { orderId: created.id },
+        params: { orderId: created.id, ...(paidOk ? { paid: '1' } : {}) },
       })
     } catch (e) {
       setError(

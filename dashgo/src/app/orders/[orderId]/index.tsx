@@ -75,13 +75,20 @@ function StatusLabel({
 }
 
 export default function OrderDetailScreen() {
-  const { orderId } = useLocalSearchParams<{ orderId: string }>()
+  const { orderId, paid } = useLocalSearchParams<{
+    orderId: string
+    paid?: string
+  }>()
   const { data: order, isPending, error } = useOrder(orderId)
   const confirmCash = useConfirmCashOrder()
   const confirmNonStripe = useConfirmNonStripeOrder()
   const authorize = useAuthorizeOrder()
   const { initPaymentSheet, presentPaymentSheet } = useStripe()
   const [paying, setPaying] = useState(false)
+  // Bridges the gap between a successful card authorization and the webhook
+  // setting authorizedAt. Set by checkout (paid=1 param after a successful
+  // PaymentSheet) and by the on-screen "Pagar" button below.
+  const [justPaid, setJustPaid] = useState(paid === '1')
 
   if (isPending) {
     return (
@@ -175,8 +182,9 @@ export default function OrderDetailScreen() {
         }
         return
       }
-      // Success — Stripe fires amount_capturable_updated, webhook moves order
-      // to PENDING_VALIDATION. The query refetch picks it up.
+      // Success — show the processing state right away while the webhook
+      // (amount_capturable_updated → PENDING_VALIDATION) catches up.
+      setJustPaid(true)
     } catch (e) {
       setPaying(false)
       Alert.alert(
@@ -263,18 +271,20 @@ export default function OrderDetailScreen() {
             )}
 
           {/*
-            Skip-cotización digital orders are paid INLINE at checkout — they
-            must never re-show the "Pagar" panel here. Once the card is
-            authorized the order carries a stripePaymentIntentId; the webhook
-            then advances quoted → pending_validation. While that's in flight,
-            show a processing state (no button) so the customer can't re-trigger
-            a charge.
+            Skip-cotización digital order whose card WAS authorized — show a
+            processing state (no button) while the webhook advances quoted →
+            pending_validation. Gated on REAL authorization (authorizedAt) or
+            justPaid (the window right after a successful PaymentSheet), NOT on
+            stripePaymentIntentId — that's set the moment we prepare payment,
+            BEFORE the customer authorizes, so cancelling the sheet used to
+            leave the order stuck on "procesando" with no way out.
           */}
-          {order.status === 'quoted' &&
+          {(order.status === 'quoted' ||
+            order.status === 'pending_validation') &&
             order.paymentMethod === 'digital' &&
             !isFullCredit &&
             order.skipQuote &&
-            order.stripePaymentIntentId && (
+            (order.authorizedAt || justPaid) && (
               <View className="mb-6 border-l-4 border-accent bg-accent/10 p-4">
                 <Text className="font-sans-semibold text-[18px] text-ink">
                   Procesando tu pago…
@@ -287,15 +297,18 @@ export default function OrderDetailScreen() {
             )}
 
           {/*
-            Recovery only: a skip-cotización order with no intent means the
-            customer abandoned the inline payment at checkout. Let them finish
-            it here instead of getting stuck — the exception, not the norm.
+            Recovery: a skip-cotización order that is NOT authorized yet — the
+            customer dismissed the PaymentSheet (with or without an intent
+            already prepared). Let them retry here instead of getting stuck.
+            Re-paying is safe: the intent uses a stable idempotency key, so it
+            reuses the same PaymentIntent rather than charging twice.
           */}
           {order.status === 'quoted' &&
             order.paymentMethod === 'digital' &&
             !isFullCredit &&
             order.skipQuote &&
-            !order.stripePaymentIntentId && (
+            !order.authorizedAt &&
+            !justPaid && (
               <View className="mb-6 border-l-4 border-accent bg-accent/10 p-4">
                 <Text className="font-sans-semibold text-[18px] text-ink">
                   Completá tu pago — {formatCents(totalCents)}
