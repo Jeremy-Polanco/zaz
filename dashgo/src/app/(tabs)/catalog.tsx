@@ -466,8 +466,6 @@ export default function CatalogTab() {
   }, [])
 
   const firstName = user?.fullName?.split(' ')[0] ?? ''
-  const neighborhood =
-    user?.addressDefault?.text?.split('·').pop()?.trim() ?? 'Washington Heights'
 
   const totalCents = useMemo(() => {
     if (!products) return 0
@@ -615,11 +613,8 @@ export default function CatalogTab() {
       {/* Greeting / contextual strip */}
       <View className="flex-row items-end justify-between px-4 pb-1 pt-3.5">
         <View className="flex-1 pr-2">
-          <Text className="font-sans text-[12px] uppercase tracking-eyebrow text-ink-muted">
-            {neighborhood}
-          </Text>
           <Text
-            className="mt-0.5 font-sans-semibold text-[15px] tracking-tight text-ink"
+            className="font-sans-semibold text-[15px] tracking-tight text-ink"
             numberOfLines={1}
           >
             {q
@@ -642,10 +637,7 @@ export default function CatalogTab() {
   const renderPicker = () => (
     <ScrollView contentContainerClassName="px-4 pb-40" keyboardShouldPersistTaps="handled">
       <View className="pb-1 pt-2">
-        <Text className="font-sans text-[12px] uppercase tracking-eyebrow text-ink-muted">
-          {neighborhood}
-        </Text>
-        <Text className="mt-0.5 font-sans-semibold text-[15px] tracking-tight text-ink">
+        <Text className="font-sans-semibold text-[15px] tracking-tight text-ink">
           {firstName ? `Hola, ${firstName}.` : 'Hola.'}
         </Text>
         <Text className="mt-3 font-sans-semibold text-[20px] tracking-tight text-ink">
