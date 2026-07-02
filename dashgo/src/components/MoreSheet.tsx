@@ -2,6 +2,7 @@ import { Modal, Pressable, ScrollView, Text, View } from 'react-native'
 import { router } from 'expo-router'
 import { SymbolView, type AndroidSymbol } from 'expo-symbols'
 import type { SFSymbol } from 'sf-symbols-typescript'
+import Constants from 'expo-constants'
 import { Eyebrow } from './ui'
 
 export type MoreSheetItem = {
@@ -28,6 +29,14 @@ export function MoreSheet({
   items: MoreSheetItem[]
 }) {
   if (!visible) return null
+
+  // Runtime version/build — baked per binary, so this is a reliable way to
+  // confirm exactly which TestFlight build is actually running on the device.
+  const appVersion = Constants.expoConfig?.version ?? '—'
+  const buildNumber =
+    Constants.expoConfig?.ios?.buildNumber ??
+    Constants.expoConfig?.android?.versionCode ??
+    '—'
 
   const go = (route: string) => {
     onClose()
@@ -85,6 +94,9 @@ export function MoreSheet({
             </Pressable>
           ))}
         </ScrollView>
+        <Text className="mt-4 text-center font-sans text-[12px] text-ink-muted">
+          Udash v{appVersion} ({buildNumber})
+        </Text>
       </View>
     </Modal>
   )
