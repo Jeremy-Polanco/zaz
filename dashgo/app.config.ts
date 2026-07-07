@@ -78,7 +78,7 @@ function resolveIosBuildNumber(): string {
   // Apple rejects a duplicate buildNumber on the same version (1.0).
   const fromEas = process.env.EAS_BUILD_NUMBER
   if (fromEas && fromEas.length > 0) return fromEas
-  return '6'
+  return '7'
 }
 
 function resolveAndroidVersionCode(): number {
