@@ -1,10 +1,10 @@
 import { View, Text, FlatList, ActivityIndicator, Pressable } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { router } from 'expo-router'
-import { useOrders } from '../../lib/queries'
+import { useCurrentUser, useOrders } from '../../lib/queries'
 import { formatDate, formatMoney } from '../../lib/format'
 import type { Order } from '../../lib/types'
-import { Eyebrow, Hairline, StatusBadge } from '../../components/ui'
+import { Button, Eyebrow, Hairline, StatusBadge } from '../../components/ui'
 
 function OrderCard({ order }: { order: Order }) {
   const itemCount = order.items?.length ?? 0
@@ -59,7 +59,52 @@ function OrderCard({ order }: { order: Order }) {
 }
 
 export default function OrdersTab() {
+  const { data: user, isPending: userPending } = useCurrentUser()
   const { data: orders, isPending, refetch, isRefetching } = useOrders()
+
+  if (userPending) {
+    return (
+      <SafeAreaView className="flex-1 items-center justify-center bg-paper">
+        <ActivityIndicator color="#1A1530" size="small" />
+      </SafeAreaView>
+    )
+  }
+
+  // Guest: order history is account-based — invite to log in instead of
+  // fetching (useOrders is disabled without a session, so isPending would
+  // never resolve here).
+  if (!user) {
+    return (
+      <SafeAreaView edges={['top']} className="flex-1 bg-paper">
+        <View className="px-5 pt-6">
+          <Eyebrow className="mb-3">Historial</Eyebrow>
+          <View className="flex-row flex-wrap items-baseline">
+            <Text className="font-sans-semibold text-[40px] leading-[44px] text-ink">
+              Mis{' '}
+            </Text>
+            <Text className="font-sans-italic text-[40px] leading-[44px] text-brand">
+              pedidos.
+            </Text>
+          </View>
+          <Hairline className="mt-6" />
+          <View className="items-center py-20">
+            <Eyebrow>Tu cuenta te espera</Eyebrow>
+            <Text className="mt-3 text-center text-[15px] text-ink-soft">
+              Iniciá sesión para hacer pedidos{'\n'}y ver tu historial acá.
+            </Text>
+            <Button
+              variant="accent"
+              size="lg"
+              className="mt-6"
+              onPress={() => router.push('/(auth)/login')}
+            >
+              Iniciar sesión →
+            </Button>
+          </View>
+        </View>
+      </SafeAreaView>
+    )
+  }
 
   if (isPending) {
     return (

@@ -25,9 +25,17 @@ const CLIENT_MORE_ITEMS: MoreSheetItem[] = [
   { label: 'Mi cuenta', icon: { ios: 'person.crop.circle.fill', android: 'account_circle' }, route: '/(tabs)/profile' },
 ]
 
+// Guests (no session) only see the door into the account — every other
+// overflow option is account-based and appears after login.
+const GUEST_MORE_ITEMS: MoreSheetItem[] = [
+  { label: 'Iniciar sesión', icon: { ios: 'person.crop.circle.fill', android: 'account_circle' }, route: '/(auth)/login' },
+]
+
 export default function TabLayout() {
   const { data: user, isPending } = useCurrentUser()
   const isClient = user?.role === 'client'
+  // Guests share the client tab bar — browse is public, account tabs prompt login.
+  const isGuest = !user
   const [moreOpen, setMoreOpen] = useState(false)
   const screenOptions = useTabBarScreenOptions()
 
@@ -45,7 +53,7 @@ export default function TabLayout() {
           name="index"
           options={{
             title: 'Inicio',
-            href: isClient ? '/(tabs)' : null,
+            href: isClient || isGuest ? '/(tabs)' : null,
             tabBarIcon: ({ focused }) => <TabBarIcon focused={focused} name={ICONS.home} />,
             tabBarLabel: ({ focused }) => <TabBarLabel focused={focused}>Inicio</TabBarLabel>,
           }}
@@ -92,7 +100,7 @@ export default function TabLayout() {
       <MoreSheet
         visible={moreOpen}
         onClose={() => setMoreOpen(false)}
-        items={CLIENT_MORE_ITEMS}
+        items={isGuest ? GUEST_MORE_ITEMS : CLIENT_MORE_ITEMS}
       />
     </>
   )

@@ -33,7 +33,12 @@ import { ReorderProductsDto } from './dto/reorder-products.dto';
 export class ProductsController {
   constructor(private readonly products: ProductsService) {}
 
-  /** Catálogo público (cualquier usuario autenticado). */
+  /**
+   * Catálogo público — sin autenticación (Apple 5.1.1: los invitados deben
+   * poder ver productos sin registrarse). Solo expone productos disponibles
+   * vía el DTO de cliente; el throttler global sigue aplicando.
+   */
+  @Public()
   @Get()
   findAll() {
     return this.products.findAllPublic();

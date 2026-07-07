@@ -768,7 +768,14 @@ export default function CatalogTab() {
           </View>
           <Pressable
             className="h-10 items-center justify-center bg-accent px-4 active:bg-accent-dark"
-            onPress={() => router.push('/checkout')}
+            // Guests browse and fill the cart freely; the account is only
+            // required to place the order (Apple 5.1.1). After login they
+            // land straight back on checkout with the cart intact.
+            onPress={() =>
+              user
+                ? router.push('/checkout')
+                : router.push({ pathname: '/(auth)/login', params: { next: '/checkout' } })
+            }
           >
             <Text className="font-sans-semibold text-[13px] uppercase tracking-label text-brand-dark">
               Checkout →

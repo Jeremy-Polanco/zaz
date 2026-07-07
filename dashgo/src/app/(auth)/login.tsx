@@ -176,11 +176,24 @@ function computeSecondsLeft(expiresAt: string | null): number {
 }
 
 export default function LoginScreen() {
-  const params = useLocalSearchParams<{ ref?: string }>()
+  const params = useLocalSearchParams<{ ref?: string; next?: string }>()
   const referralCode =
     typeof params.ref === 'string' && params.ref.length === 8
       ? params.ref.toUpperCase()
       : undefined
+  // Guest flows (Apple 5.1.1) pass the screen to return to after login —
+  // e.g. /checkout. Only same-app absolute paths are honored.
+  const next =
+    typeof params.next === 'string' && params.next.startsWith('/')
+      ? params.next
+      : undefined
+  const handleVerified = (role: UserRole) => {
+    if (role === 'client' && next) {
+      router.replace(next as Parameters<typeof router.replace>[0])
+      return
+    }
+    routeByRole(role)
+  }
   const [step, setStep] = useState<'phone' | 'code'>('phone')
   const [phone, setPhone] = useState('')
   const [expiresAt, setExpiresAt] = useState<string | null>(null)
@@ -265,7 +278,7 @@ export default function LoginScreen() {
           {!otpEnabled ? (
             <PhoneOnlyStep
               referralCode={referralCode}
-              onVerified={routeByRole}
+              onVerified={handleVerified}
             />
           ) : step === 'phone' ? (
             <PhoneStep
@@ -282,9 +295,21 @@ export default function LoginScreen() {
               referralCode={referralCode}
               onBack={() => setStep('phone')}
               onResent={(exp) => setExpiresAt(exp)}
-              onVerified={routeByRole}
+              onVerified={handleVerified}
             />
           )}
+
+          {/* Apple 5.1.1 — the login screen must never be a wall: browsing
+              the catalog is available without an account. */}
+          <Pressable
+            testID="login-browse-as-guest"
+            onPress={() => router.replace('/(tabs)')}
+            className="mt-8 min-h-[44px] items-center justify-center self-center px-4"
+          >
+            <Text className="font-sans text-[13px] uppercase tracking-label text-ink-muted underline">
+              Explorar sin cuenta →
+            </Text>
+          </Pressable>
         </View>
       </ScrollView>
     </SafeAreaView>

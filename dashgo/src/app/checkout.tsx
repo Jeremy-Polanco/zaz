@@ -27,7 +27,16 @@ import { Button, Eyebrow, Hairline } from '../components/ui'
 
 export default function CheckoutScreen() {
   const cartState = useCart()
-  const { data: user } = useCurrentUser()
+  const { data: user, isPending: userPending } = useCurrentUser()
+
+  // Placing an order is account-based (Apple 5.1.1 boundary): guests who
+  // reach checkout — e.g. via deep link — are sent to login and bounced
+  // straight back here afterwards. The cart survives (module-level state).
+  useEffect(() => {
+    if (!userPending && !user) {
+      router.replace({ pathname: '/(auth)/login', params: { next: '/checkout' } })
+    }
+  }, [user, userPending])
   const { data: products } = useProducts()
   const { data: pointsBalance } = usePointsBalance()
   const { data: creditData } = useMyCredit()

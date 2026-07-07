@@ -8,8 +8,10 @@ export default function Index() {
 
   useEffect(() => {
     if (isPending) return
+    // Guests browse freely (Apple 5.1.1) — login is only demanded at
+    // account-based actions (checkout, orders, perfil).
     if (!user) {
-      router.replace('/(auth)/login')
+      router.replace('/(tabs)')
       return
     }
     if (user.role === 'super_admin_delivery') {

@@ -17,6 +17,7 @@ jest.mock('../lib/queries', () => ({
   useCreateOrder: jest.fn(),
   useConfirmNonStripeOrder: jest.fn(),
   useAuthorizeOrder: jest.fn(),
+  useUpdateOrderStatus: jest.fn(),
   useOrders: jest.fn(),
   useCurrentUser: jest.fn(),
   useMyCredit: jest.fn(),

@@ -204,9 +204,13 @@ export function useUpdateInventory() {
 }
 
 export function useOrders() {
+  // Account-only endpoint — disabled for guests so public browse screens
+  // (home, catálogo) never fire 401s while logged out.
+  const { data: user } = useCurrentUser()
   return useQuery<Order[]>({
     queryKey: ['orders'],
     queryFn: async () => (await api.get<Order[]>('/orders')).data,
+    enabled: !!user,
   })
 }
 
@@ -246,9 +250,13 @@ export function useRequestMaintenance() {
 }
 
 export function usePointsBalance() {
+  // Account-only — disabled for guests (checkout mounts briefly before the
+  // login redirect kicks in).
+  const { data: user } = useCurrentUser()
   return useQuery<PointsBalance>({
     queryKey: ['points', 'balance'],
     queryFn: async () => (await api.get<PointsBalance>('/points/balance')).data,
+    enabled: !!user,
   })
 }
 
@@ -769,10 +777,13 @@ export function useCreatePayout() {
 // ── Credit ("Fiado") ──────────────────────────────────────────────────────────
 
 export function useMyCredit() {
+  // Account-only — disabled for guests.
+  const { data: user } = useCurrentUser()
   return useQuery<MyCreditResponse>({
     queryKey: ['credit', 'me'],
     queryFn: async () => (await api.get<MyCreditResponse>('/me/credit')).data,
     staleTime: 30_000,
+    enabled: !!user,
   })
 }
 
@@ -959,10 +970,13 @@ export function useAdminUsers(subscription?: AdminUsersSubscriptionFilter) {
 
 /** Client: GET /me/subscription — current subscription or null */
 export function useMySubscription() {
+  // Account-only — disabled for guests.
+  const { data: user } = useCurrentUser()
   return useQuery<Subscription | null>({
     queryKey: ['me', 'subscription'],
     queryFn: async () => (await api.get<Subscription | null>('/me/subscription')).data,
     staleTime: 30_000,
+    enabled: !!user,
   })
 }
 
@@ -1056,10 +1070,13 @@ export function useUpdateSubscriptionPlan() {
 
 /** Client: GET /me/addresses — list saved addresses */
 export function useMyAddresses() {
+  // Account-only — disabled for guests.
+  const { data: user } = useCurrentUser()
   return useQuery<UserAddress[]>({
     queryKey: ['me', 'addresses'],
     queryFn: async () => (await api.get<UserAddress[]>('/me/addresses')).data,
     staleTime: 30_000,
+    enabled: !!user,
   })
 }
 
@@ -1142,10 +1159,14 @@ export function useSetActiveLocation() {
 
 /** Client: GET /me/rentals — list the authenticated user's rentals */
 export function useMyRentals() {
+  // Account-only — disabled for guests (MaintenanceBanner renders on the
+  // public home screen).
+  const { data: user } = useCurrentUser()
   return useQuery<Rental[]>({
     queryKey: ['me', 'rentals'],
     queryFn: async () => (await api.get<Rental[]>('/me/rentals')).data,
     staleTime: 30_000,
+    enabled: !!user,
   })
 }
 
