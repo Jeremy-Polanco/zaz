@@ -51,15 +51,32 @@ export class ProductsService implements OnModuleInit {
     this.stripe = new Stripe(secret);
   }
 
-  /** Catálogo público — productos disponibles, en el orden definido por el admin. */
-  async findAllPublic(): Promise<ProductForClient[]> {
+  /**
+   * Catálogo público — productos disponibles, en el orden definido por el
+   * admin. El endpoint es anónimo (Apple 5.1.1), así que además del DTO de
+   * cliente se omiten los términos internos del negocio: la comisión de
+   * promotores y el % de puntos solo viajan por /products/admin. Los fees de
+   * alquiler (robo/mora) SÍ son públicos — el catálogo del cliente los
+   * muestra como disclosure.
+   */
+  async findAllPublic(): Promise<
+    Omit<ProductForClient, 'promoterCommissionPct' | 'pointsPct'>[]
+  > {
     const rows = await this.products.find({
       where: { isAvailable: true },
       relations: ['category'],
       order: { displayOrder: 'ASC', createdAt: 'DESC' },
     });
     const now = new Date();
-    return rows.map((p) => this.toClient(p, now));
+    return rows.map((p) => {
+      const { promoterCommissionPct, pointsPct, ...pub } = this.toClient(
+        p,
+        now,
+      );
+      void promoterCommissionPct;
+      void pointsPct;
+      return pub;
+    });
   }
 
   /** Catálogo editable (super admin) — todos los productos. */
