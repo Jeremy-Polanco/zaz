@@ -16,7 +16,8 @@
       "distribution": "internal",
       "env": {
         "EXPO_PUBLIC_API_URL": "https://api-staging.dashgo.dev/api",
-        "EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY": "pk_test_51TNgYHFn1dRnuWEYTHrbdEQPtHRpuOC0qcy9Zv5PLjh8isy8mIyhe14KxZcStldGu3g1aiu3ZkGS0t0WoIxsDoyP00VvhnVrSX"
+        "EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY": "pk_test_51TNgYHFn1dRnuWEYTHrbdEQPtHRpuOC0qcy9Zv5PLjh8isy8mIyhe14KxZcStldGu3g1aiu3ZkGS0t0WoIxsDoyP00VvhnVrSX",
+        "SENTRY_DISABLE_AUTO_UPLOAD": "true"
       }
     },
     "production": {
