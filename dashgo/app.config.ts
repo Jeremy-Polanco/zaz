@@ -1,10 +1,10 @@
 import { ExpoConfig, ConfigContext } from 'expo/config'
 
 /**
- * Runtime guard: refuse to ship without a valid live Stripe key in production.
+ * Build guard: refuse to ship without a valid live Stripe key in production.
  *
- * If NODE_ENV === 'production' (EAS production builds set this), the
- * publishable key MUST be a non-empty `pk_live_*` value. We reject:
+ * If the EAS build profile is `production`, the publishable key MUST be a
+ * non-empty `pk_live_*` value. We reject:
  *   - undefined / missing key
  *   - empty string key
  *   - test keys (pk_test_*)
@@ -13,12 +13,17 @@ import { ExpoConfig, ConfigContext } from 'expo/config'
  * Throwing here fails the build loudly instead of shipping a checkout
  * surface that cannot tokenize cards (or worse, ships sandbox credentials).
  *
+ * Keyed on EAS_BUILD_PROFILE, NOT on NODE_ENV: EAS bundles EVERY release
+ * build (preview included) with NODE_ENV=production, and the preview
+ * profile intentionally carries a pk_test key against staging — checking
+ * NODE_ENV made preview builds fail in the Bundle JavaScript phase.
+ *
  * Note: at runtime we ALSO guard inside RootLayout (_layout.tsx) — that
  * catches cases the build-time check misses (e.g., EAS secret revoked
- * between build and OTA update).
+ * between build and OTA update, or non-EAS build paths).
  */
 function assertProductionStripeKey() {
-  const isProd = process.env.NODE_ENV === 'production'
+  const isProd = process.env.EAS_BUILD_PROFILE === 'production'
   const key = process.env.EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY
   if (!isProd) return
 
