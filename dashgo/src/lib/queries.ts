@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, clearSession, setSession } from './api'
+import { unregisterPushToken } from './push'
 import { getAccessToken } from './token-storage'
 import type {
   AdminCreditDetail,
@@ -140,6 +141,9 @@ export function useVerifyOtp() {
 export function useLogout() {
   const qc = useQueryClient()
   return async () => {
+    // Before the session clears — the DELETE needs the auth header. Best
+    // effort: unregisterPushToken swallows its own errors.
+    await unregisterPushToken()
     await clearSession()
     qc.setQueryData(['auth', 'me'], null)
     qc.invalidateQueries()

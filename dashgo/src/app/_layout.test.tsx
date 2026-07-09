@@ -130,6 +130,11 @@ jest.mock('../lib/queries', () => ({
   useCurrentUser: () => ({ data: null }),
   useUpdateMe: () => ({ mutate: jest.fn() }),
 }))
+jest.mock('../lib/push', () => ({
+  usePushNotifications: jest.fn(),
+  registerForPushNotifications: jest.fn(),
+  unregisterPushToken: jest.fn(),
+}))
 jest.mock('../lib/geo', () => ({
   requestDeviceLocation: jest.fn(),
   reverseGeocode: jest.fn(),

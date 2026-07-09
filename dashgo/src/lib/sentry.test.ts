@@ -364,6 +364,11 @@ describe('_layout module-load ordering', () => {
         requestDeviceLocation: jest.fn(),
         reverseGeocode: jest.fn(),
       }))
+      jest.doMock('../lib/push', () => ({
+        usePushNotifications: jest.fn(),
+        registerForPushNotifications: jest.fn(),
+        unregisterPushToken: jest.fn(),
+      }))
       jest.doMock('../components/NetworkBanner', () => ({
         NetworkBanner: () => null,
         notifyNetworkError: jest.fn(),

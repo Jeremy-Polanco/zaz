@@ -4,11 +4,13 @@ import { getRepositoryToken } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { User } from '../../entities/user.entity';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
+import { PushService } from '../notifications/push.service';
 import { WinBackCron } from './win-back.cron';
 
 describe('WinBackCron', () => {
   let usersRepo: jest.Mocked<Pick<Repository<User>, 'query' | 'update'>>;
   let whatsapp: { sendTemplate: jest.Mock };
+  let push: { sendToUser: jest.Mock };
 
   async function build(templateName: string | undefined): Promise<WinBackCron> {
     usersRepo = {
@@ -16,12 +18,14 @@ describe('WinBackCron', () => {
       update: jest.fn().mockResolvedValue({ affected: 1 }),
     } as unknown as jest.Mocked<Pick<Repository<User>, 'query' | 'update'>>;
     whatsapp = { sendTemplate: jest.fn().mockResolvedValue(true) };
+    push = { sendToUser: jest.fn().mockResolvedValue(0) };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         WinBackCron,
         { provide: getRepositoryToken(User), useValue: usersRepo },
         { provide: WhatsAppService, useValue: whatsapp },
+        { provide: PushService, useValue: push },
         {
           provide: ConfigService,
           useValue: {
@@ -43,15 +47,7 @@ describe('WinBackCron', () => {
     last_order: new Date('2026-06-01T00:00:00Z'),
   };
 
-  it('skips entirely (no query, no sends) when the template is not configured', async () => {
-    const cron = await build(undefined);
-    const result = await cron.runDaily();
-    expect(result).toEqual({ candidates: 0, sent: 0 });
-    expect(usersRepo.query).not.toHaveBeenCalled();
-    expect(whatsapp.sendTemplate).not.toHaveBeenCalled();
-  });
-
-  it('sends the reminder with the first name and stamps lastOrderReminderAt', async () => {
+  it('sends the WhatsApp reminder with the first name and stamps lastOrderReminderAt', async () => {
     const cron = await build('winback_es');
     usersRepo.query.mockResolvedValue([lapsedRow]);
 
@@ -68,10 +64,30 @@ describe('WinBackCron', () => {
     expect(result).toEqual({ candidates: 1, sent: 1 });
   });
 
-  it('does NOT stamp the reminder when Meta skipped the send (unconfigured downstream)', async () => {
+  it('stamps via push alone when WhatsApp is unconfigured (push-first rollout)', async () => {
+    const cron = await build(undefined);
+    usersRepo.query.mockResolvedValue([lapsedRow]);
+    whatsapp.sendTemplate.mockResolvedValue(false);
+    push.sendToUser.mockResolvedValue(1);
+
+    const result = await cron.runDaily();
+
+    expect(push.sendToUser).toHaveBeenCalledWith(
+      'user-1',
+      expect.stringContaining('María'),
+      expect.any(String),
+    );
+    expect(usersRepo.update).toHaveBeenCalledWith('user-1', {
+      lastOrderReminderAt: expect.any(Date),
+    });
+    expect(result).toEqual({ candidates: 1, sent: 1 });
+  });
+
+  it('does NOT stamp when neither channel took the message (retries tomorrow)', async () => {
     const cron = await build('winback_es');
     usersRepo.query.mockResolvedValue([lapsedRow]);
     whatsapp.sendTemplate.mockResolvedValue(false);
+    push.sendToUser.mockResolvedValue(0);
 
     const result = await cron.runDaily();
 

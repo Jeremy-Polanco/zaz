@@ -14,6 +14,7 @@ import {
   PointsLedgerEntry,
   Product,
   PromoterCommissionEntry,
+  PushToken,
   Rental,
   StripeWebhookEvent,
   Subscription,
@@ -68,6 +69,7 @@ export const buildDatabaseConfig = (
     UserAddress,
     AccountDeletion,
     StripeWebhookEvent,
+    PushToken,
   ],
   // Belt-and-suspenders: hard-disable synchronize in production regardless of env var.
   // The env schema also enforces DB_SYNCHRONIZE='false' in production.

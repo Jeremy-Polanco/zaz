@@ -18,3 +18,4 @@ export * from './user-address.entity';
 export * from './rental.entity';
 export * from './account-deletion.entity';
 export * from './stripe-webhook-event.entity';
+export * from './push-token.entity';

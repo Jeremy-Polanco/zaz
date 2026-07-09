@@ -191,6 +191,10 @@ export default ({ config }: ConfigContext): ExpoConfig => {
         },
       ],
       'expo-secure-store',
+      // Remote push (order tracking + win-back). Adds the iOS aps-environment
+      // entitlement at prebuild; EAS manages the APNs key in the cloud. The
+      // backend sends through the Expo Push API (see dashgo-api PushService).
+      'expo-notifications',
       // Sentry config plugin. Wires the native iOS / Android crash reporter
       // into prebuild. Source maps and dSYMs are uploaded automatically when
       // SENTRY_AUTH_TOKEN is present in the EAS build environment. With no

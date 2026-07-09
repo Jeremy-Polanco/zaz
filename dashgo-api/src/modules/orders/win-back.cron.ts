@@ -5,11 +5,12 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { User } from '../../entities/user.entity';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
+import { PushService } from '../notifications/push.service';
 
 /**
- * Win-back reminder — customers who haven't ordered in 8+ days get ONE
- * WhatsApp nudge (marketing template WHATSAPP_WINBACK_TEMPLATE_NAME, one body
- * variable: first name).
+ * Win-back reminder — customers who haven't ordered in 8+ days get ONE nudge
+ * per lapse, over both channels: push (Expo, free) and WhatsApp (marketing
+ * template WHATSAPP_WINBACK_TEMPLATE_NAME, one body variable: first name).
  *
  * "Once per lapse": a user is reminded only when their last reminder predates
  * their last order — i.e. they ordered again after the previous nudge and then
@@ -31,6 +32,7 @@ export class WinBackCron {
   constructor(
     @InjectRepository(User) private readonly users: Repository<User>,
     private readonly whatsapp: WhatsAppService,
+    private readonly push: PushService,
     config: ConfigService,
   ) {
     this.templateName =
@@ -39,13 +41,6 @@ export class WinBackCron {
 
   @Cron('0 11 * * *', { timeZone: 'America/New_York' })
   async runDaily(): Promise<{ candidates: number; sent: number }> {
-    if (!this.templateName) {
-      this.logger.log(
-        'WinBackCron: WHATSAPP_WINBACK_TEMPLATE_NAME not set — skipping run',
-      );
-      return { candidates: 0, sent: 0 };
-    }
-
     // Lapsed clients: last non-cancelled order is 8+ days old, phone on file,
     // and not yet reminded for THIS lapse (reminder predates the last order).
     const rows: Array<{
@@ -76,22 +71,40 @@ export class WinBackCron {
     for (const row of rows) {
       const firstName =
         (row.full_name ?? '').trim().split(/\s+/)[0] || 'Hola';
+
+      // Push first (free, no template gate)...
+      let pushAccepted = 0;
       try {
-        const delivered = await this.whatsapp.sendTemplate(
+        pushAccepted = await this.push.sendToUser(
+          row.id,
+          `${firstName}, te extrañamos 👋`,
+          'Hace más de una semana que no pides en Udash. Entra y pide lo de siempre 🛒',
+        );
+      } catch (err) {
+        this.logger.error(
+          `WinBackCron: push failed for user ${row.id}: ${(err as Error).message}`,
+        );
+      }
+
+      // ...then WhatsApp (skips itself while the template isn't configured).
+      let whatsappDelivered = false;
+      try {
+        whatsappDelivered = await this.whatsapp.sendTemplate(
           row.phone,
           this.templateName,
           [firstName],
         );
-        // Only stamp the reminder when Meta actually accepted the message, so
-        // an unconfigured/failed send retries on the next daily run.
-        if (delivered) {
-          await this.users.update(row.id, { lastOrderReminderAt: new Date() });
-          sent += 1;
-        }
       } catch (err) {
         this.logger.error(
-          `WinBackCron: send failed for user ${row.id}: ${(err as Error).message}`,
+          `WinBackCron: WhatsApp failed for user ${row.id}: ${(err as Error).message}`,
         );
+      }
+
+      // Stamp only when at least one channel actually took the message, so a
+      // user with no devices and no WhatsApp template retries tomorrow.
+      if (pushAccepted > 0 || whatsappDelivered) {
+        await this.users.update(row.id, { lastOrderReminderAt: new Date() });
+        sent += 1;
       }
     }
 

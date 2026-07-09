@@ -45,6 +45,7 @@ import {
 } from '@expo-google-fonts/inter-tight'
 import { useFonts } from 'expo-font'
 import { useCurrentUser, useUpdateMe } from '../lib/queries'
+import { usePushNotifications } from '../lib/push'
 import { requestDeviceLocation, reverseGeocode } from '../lib/geo'
 import { NetworkBanner, notifyNetworkError } from '../components/NetworkBanner'
 
@@ -188,8 +189,10 @@ const queryClient = new QueryClient({
 })
 
 function AppStack() {
+  const { data: user } = useCurrentUser()
   useBootstrapLocation()
   useCreditLockoutGate()
+  usePushNotifications(user?.id)
   return (
     <Stack
       screenOptions={{

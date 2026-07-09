@@ -3,18 +3,22 @@ import { ConfigService } from '@nestjs/config';
 import { OrderStatus } from '../../entities/enums';
 import type { Order } from '../../entities/order.entity';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
+import { PushService } from '../notifications/push.service';
 import { OrderNotificationsService } from './order-notifications.service';
 
 describe('OrderNotificationsService', () => {
   let service: OrderNotificationsService;
   let whatsapp: { sendTemplate: jest.Mock };
+  let push: { sendToUser: jest.Mock };
 
   beforeEach(async () => {
     whatsapp = { sendTemplate: jest.fn().mockResolvedValue(true) };
+    push = { sendToUser: jest.fn().mockResolvedValue(1) };
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         OrderNotificationsService,
         { provide: WhatsAppService, useValue: whatsapp },
+        { provide: PushService, useValue: push },
         {
           provide: ConfigService,
           useValue: {
@@ -37,7 +41,12 @@ describe('OrderNotificationsService', () => {
     status: OrderStatus,
     customer: unknown = DEFAULT_CUSTOMER,
   ): Order {
-    return { id: 'order-1', status, customer } as unknown as Order;
+    return {
+      id: 'order-1',
+      status,
+      customer,
+      customerId: 'customer-1',
+    } as unknown as Order;
   }
 
   it.each([
@@ -65,6 +74,32 @@ describe('OrderNotificationsService', () => {
   it('sends nothing for pending_validation (customer just paid in-app)', async () => {
     service.notifyStatus(orderWith(OrderStatus.PENDING_VALIDATION));
     await Promise.resolve();
+    expect(whatsapp.sendTemplate).not.toHaveBeenCalled();
+    expect(push.sendToUser).not.toHaveBeenCalled();
+  });
+
+  it('sends a push with a capitalized standalone body and the orderId for deep-linking', async () => {
+    service.notifyStatus(orderWith(OrderStatus.IN_DELIVERY_ROUTE));
+    await Promise.resolve();
+    expect(push.sendToUser).toHaveBeenCalledTimes(1);
+    const [userId, title, body, data] = push.sendToUser.mock.calls[0] as [
+      string,
+      string,
+      string,
+      Record<string, string>,
+    ];
+    expect(userId).toBe('customer-1');
+    expect(title).toBe('Tu pedido Udash');
+    expect(body.charAt(0)).toBe(body.charAt(0).toUpperCase());
+    expect(data).toEqual({ orderId: 'order-1' });
+  });
+
+  it('still pushes when the phone is missing (push and WhatsApp are independent)', async () => {
+    service.notifyStatus(
+      orderWith(OrderStatus.DELIVERED, { phone: null, fullName: 'X' }),
+    );
+    await Promise.resolve();
+    expect(push.sendToUser).toHaveBeenCalledTimes(1);
     expect(whatsapp.sendTemplate).not.toHaveBeenCalled();
   });
 

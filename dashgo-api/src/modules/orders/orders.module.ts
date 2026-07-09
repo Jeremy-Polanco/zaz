@@ -9,6 +9,7 @@ import { SubscriberBebederoListener } from './subscriber-bebedero.listener';
 import { OrderNotificationsService } from './order-notifications.service';
 import { WinBackCron } from './win-back.cron';
 import { WhatsAppModule } from '../whatsapp/whatsapp.module';
+import { NotificationsModule } from '../notifications/notifications.module';
 import { PaymentsModule } from '../payments/payments.module';
 import { PointsModule } from '../points/points.module';
 import { InvoicesModule } from '../invoices/invoices.module';
@@ -23,6 +24,7 @@ import { RentalsModule } from '../rentals/rentals.module';
   imports: [
     TypeOrmModule.forFeature([Order, OrderItem, Product, UserAddress, User]),
     WhatsAppModule,
+    NotificationsModule,
     PaymentsModule,
     PointsModule,
     InvoicesModule,
