@@ -16,7 +16,7 @@ import { useOrders, useUpdateOrderStatus } from '../../lib/queries'
 import { formatDate, formatMoney } from '../../lib/format'
 import { formatAddressLine } from '../../lib/address'
 import type { GeoAddress, Order, OrderStatus } from '../../lib/types'
-import { Button, Eyebrow, Hairline, KpiCard } from '../../components/ui'
+import { Button, Eyebrow, Hairline, KpiCard, StatusBadge } from '../../components/ui'
 import { SuscriptorBadge } from '../../components/SuscriptorBadge'
 import { QuoteBottomSheet } from '../../components/QuoteBottomSheet'
 import { LocationSelector } from '../../components/LocationSelector'
@@ -33,6 +33,18 @@ function nextLabel(status: OrderStatus): string {
   if (status === 'confirmed_by_colmado') return 'Salir a entregar'
   if (status === 'in_delivery_route') return 'Marcar entregado'
   return ''
+}
+
+// Local-day check: an order "de hoy" is one created today in the viewer's
+// timezone (admin is in New Jersey, same TZ as the delivery ops).
+function isToday(iso: string): boolean {
+  const d = new Date(iso)
+  const now = new Date()
+  return (
+    d.getFullYear() === now.getFullYear() &&
+    d.getMonth() === now.getMonth() &&
+    d.getDate() === now.getDate()
+  )
 }
 
 function openMaps(addr: GeoAddress) {
@@ -94,6 +106,7 @@ function OrderCard({
             </Text>
           </View>
           <View className="items-end gap-2">
+            {isTerminal && <StatusBadge status={order.status} />}
             <View className="flex-row items-center gap-1 opacity-70">
               <Text className="font-sans-medium text-[10px] uppercase tracking-label text-ink-muted">
                 Detalle
@@ -238,6 +251,8 @@ type RouteFilter =
   | 'quoted'
   | 'pending_validation'
   | 'in_delivery_route'
+  | 'delivered'
+  | 'history'
 
 export default function SuperOrdersScreen() {
   const { data: orders, isPending, refetch, isRefetching } = useOrders()
@@ -252,12 +267,23 @@ export default function SuperOrdersScreen() {
       pendingConfirm: list.filter((o) => o.status === 'pending_validation').length,
       readyToGo: list.filter((o) => o.status === 'confirmed_by_colmado').length,
       inRoute: list.filter((o) => o.status === 'in_delivery_route').length,
-      delivered: list.filter((o) => o.status === 'delivered').length,
+      // "Entregados" es métrica del día (negocio de entrega same-day), igual que web.
+      delivered: list.filter(
+        (o) => o.status === 'delivered' && isToday(o.createdAt),
+      ).length,
     }
   }, [orders])
 
-  const activeOrders = useMemo(() => {
-    const baseActive = (orders ?? []).filter(
+  const visibleOrders = useMemo(() => {
+    const list = orders ?? []
+    if (filter === 'delivered') {
+      return list.filter((o) => o.status === 'delivered' && isToday(o.createdAt))
+    }
+    if (filter === 'history') {
+      // Historial: todo menos cancelados (igual que el filtro "all" de la web).
+      return list.filter((o) => o.status !== 'cancelled')
+    }
+    const baseActive = list.filter(
       (o) =>
         o.status === 'pending_quote' ||
         o.status === 'quoted' ||
@@ -311,7 +337,7 @@ export default function SuperOrdersScreen() {
   return (
     <SafeAreaView edges={['top']} className="flex-1 bg-paper">
       <FlatList
-        data={activeOrders}
+        data={visibleOrders}
         keyExtractor={(o) => o.id}
         contentContainerClassName="px-5 pb-8"
         ListHeaderComponent={
@@ -348,11 +374,13 @@ export default function SuperOrdersScreen() {
               >
                 {(
                   [
-                    { id: 'all', label: 'Todos' },
+                    { id: 'all', label: 'Activos' },
                     { id: 'pending_quote', label: 'Por cotizar' },
                     { id: 'quoted', label: 'Cotizados' },
                     { id: 'pending_validation', label: 'Por confirmar' },
                     { id: 'in_delivery_route', label: 'En ruta' },
+                    { id: 'delivered', label: 'Entregados hoy' },
+                    { id: 'history', label: 'Historial' },
                   ] as const
                 ).map((f) => {
                   const sel = filter === f.id
