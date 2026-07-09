@@ -15,6 +15,7 @@
     "seed": "ts-node -r tsconfig-paths/register src/database/seed.ts",
     "backfill:auto-confirm": "ts-node -r tsconfig-paths/register src/database/backfill-auto-confirm.ts",
     "cancel:non-rental": "ts-node -r tsconfig-paths/register src/database/cancel-non-rental-orders.ts",
+    "admin:delivery": "ts-node -r tsconfig-paths/register src/database/make-delivery-admin.ts",
     "test": "jest --selectProjects unit",
     "test:unit": "jest --selectProjects unit",
     "test:watch": "jest --selectProjects unit --watch",
