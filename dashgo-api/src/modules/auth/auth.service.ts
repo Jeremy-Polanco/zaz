@@ -364,8 +364,11 @@ export class AuthService implements OnModuleInit {
     const accessToken = await this.jwt.signAsync(payload, {
       expiresIn: this.config.get<StringValue>('JWT_ACCESS_TTL', '1h'),
     });
+    // "Remember this device": the mobile/web clients rotate the refresh token
+    // on every silent refresh, so an active device never expires — 365d only
+    // bounds how long a fully idle device stays logged in before needing OTP.
     const refreshToken = await this.jwt.signAsync(payload, {
-      expiresIn: this.config.get<StringValue>('JWT_REFRESH_TTL', '7d'),
+      expiresIn: this.config.get<StringValue>('JWT_REFRESH_TTL', '365d'),
     });
 
     return {

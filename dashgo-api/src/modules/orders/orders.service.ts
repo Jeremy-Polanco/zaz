@@ -29,6 +29,7 @@ import { ShippingService } from '../shipping/shipping.service';
 import { CreditService } from '../credit/credit.service';
 import { SubscriptionService } from '../subscription/subscription.service';
 import { TwilioService } from '../twilio/twilio.service';
+import { OrderNotificationsService } from './order-notifications.service';
 import { RentalsService } from '../rentals/rentals.service';
 import {
   SUBSCRIBER_BEBEDERO_RENT_CENTS,
@@ -75,6 +76,7 @@ export class OrdersService {
     private readonly subscriptionService: SubscriptionService,
     private readonly twilio: TwilioService,
     private readonly rentalsService: RentalsService,
+    private readonly orderNotifications: OrderNotificationsService,
   ) {}
 
   private buildScope(user: AuthenticatedUser): FindOptionsWhere<Order> {
@@ -459,6 +461,10 @@ export class OrdersService {
         ),
       );
 
+    // Customer-facing tracking: "recibimos tu pedido" (or "confirmado" if the
+    // order auto-confirmed above). Fire-and-forget like the SMS.
+    this.orderNotifications.notifyStatus(order);
+
     return order;
   }
 
@@ -523,7 +529,10 @@ export class OrdersService {
       await this.tryAutoConfirmFreeOrder(id);
     }
 
-    return this.findOne(id, user);
+    const quoted = await this.findOne(id, user);
+    // "Tu cotización está lista" (or "confirmado" if it auto-confirmed above).
+    this.orderNotifications.notifyStatus(quoted);
+    return quoted;
   }
 
   /**
@@ -1004,7 +1013,9 @@ export class OrdersService {
       await this.orders.update(id, { status: dto.status });
     }
 
-    return this.findOne(id, user);
+    const updated = await this.findOne(id, user);
+    this.orderNotifications.notifyStatus(updated);
+    return updated;
   }
 
   private async markDelivered(orderId: string) {

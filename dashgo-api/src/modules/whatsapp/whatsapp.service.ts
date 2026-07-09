@@ -104,8 +104,6 @@ export class WhatsAppService {
       return;
     }
 
-    const url = `${GRAPH_BASE}/${this.apiVersion}/${this.phoneNumberId}/messages`;
-
     const components: unknown[] = [
       { type: 'body', parameters: [{ type: 'text', text: code }] },
     ];
@@ -118,6 +116,55 @@ export class WhatsAppService {
       });
     }
 
+    await this.postTemplate(to, this.templateName!, this.templateLang, components);
+  }
+
+  /**
+   * Send an arbitrary pre-approved template (utility/marketing) with plain
+   * text body variables — used for order-status updates and win-back
+   * reminders. Unlike sendOtp this NEVER throws when unconfigured: business
+   * notifications are best-effort and must not break the calling flow, so we
+   * log-and-skip instead. Throws WhatsAppApiError only on a real Meta/network
+   * failure (callers catch and log).
+   *
+   * Returns true when a message was handed to Meta, false when skipped.
+   */
+  async sendTemplate(
+    to: string,
+    templateName: string | null | undefined,
+    bodyParams: string[],
+    lang?: string,
+  ): Promise<boolean> {
+    const preview = `${templateName}(${bodyParams.join(', ')})`;
+    if (SEEDED_DEV_PHONE_REGEX.test(to)) {
+      this.logger.log(`[DEV SEED TEMPLATE] → whatsapp:${to}: ${preview}`);
+      return false;
+    }
+    if (!templateName || !this.phoneNumberId || !this.accessToken) {
+      this.logger.log(
+        `[TEMPLATE SKIPPED — not configured] → whatsapp:${to}: ${preview}`,
+      );
+      return false;
+    }
+
+    const components: unknown[] = [
+      {
+        type: 'body',
+        parameters: bodyParams.map((text) => ({ type: 'text', text })),
+      },
+    ];
+    await this.postTemplate(to, templateName, lang ?? this.templateLang, components);
+    return true;
+  }
+
+  private async postTemplate(
+    to: string,
+    templateName: string,
+    lang: string,
+    components: unknown[],
+  ): Promise<void> {
+    const url = `${GRAPH_BASE}/${this.apiVersion}/${this.phoneNumberId}/messages`;
+
     const payload = {
       messaging_product: 'whatsapp',
       recipient_type: 'individual',
@@ -125,8 +172,8 @@ export class WhatsAppService {
       to: to.replace(/^\+/, ''),
       type: 'template',
       template: {
-        name: this.templateName,
-        language: { code: this.templateLang },
+        name: templateName,
+        language: { code: lang },
         components,
       },
     };

@@ -2,9 +2,13 @@ import { forwardRef, Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { Order, OrderItem, Product } from '../../entities';
 import { UserAddress } from '../../entities/user-address.entity';
+import { User } from '../../entities/user.entity';
 import { OrdersController } from './orders.controller';
 import { OrdersService } from './orders.service';
 import { SubscriberBebederoListener } from './subscriber-bebedero.listener';
+import { OrderNotificationsService } from './order-notifications.service';
+import { WinBackCron } from './win-back.cron';
+import { WhatsAppModule } from '../whatsapp/whatsapp.module';
 import { PaymentsModule } from '../payments/payments.module';
 import { PointsModule } from '../points/points.module';
 import { InvoicesModule } from '../invoices/invoices.module';
@@ -17,7 +21,8 @@ import { RentalsModule } from '../rentals/rentals.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Order, OrderItem, Product, UserAddress]),
+    TypeOrmModule.forFeature([Order, OrderItem, Product, UserAddress, User]),
+    WhatsAppModule,
     PaymentsModule,
     PointsModule,
     InvoicesModule,
@@ -32,7 +37,12 @@ import { RentalsModule } from '../rentals/rentals.module';
     forwardRef(() => RentalsModule),
   ],
   controllers: [OrdersController],
-  providers: [OrdersService, SubscriberBebederoListener],
+  providers: [
+    OrdersService,
+    SubscriberBebederoListener,
+    OrderNotificationsService,
+    WinBackCron,
+  ],
   exports: [OrdersService],
 })
 export class OrdersModule {}

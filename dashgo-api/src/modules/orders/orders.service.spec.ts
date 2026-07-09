@@ -30,6 +30,7 @@ import { CreditService } from '../credit/credit.service';
 import { SubscriptionService } from '../subscription/subscription.service';
 import { TwilioService } from '../twilio/twilio.service';
 import { RentalsService } from '../rentals/rentals.service';
+import { OrderNotificationsService } from './order-notifications.service';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -232,6 +233,10 @@ describe('OrdersService', () => {
         { provide: SubscriptionService, useValue: subscriptionService },
         { provide: TwilioService, useValue: twilioService },
         { provide: RentalsService, useValue: rentalsService },
+        {
+          provide: OrderNotificationsService,
+          useValue: { notifyStatus: jest.fn() },
+        },
       ],
     }).compile();
 

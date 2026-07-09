@@ -85,6 +85,14 @@ export class User {
   @Column({ name: 'maintenance_timer_disabled', type: 'boolean', default: false })
   maintenanceTimerDisabled!: boolean;
 
+  /**
+   * When the win-back WhatsApp reminder was last sent (WinBackCron). One
+   * reminder per lapse: the cron only sends again once this predates the
+   * user's most recent order. NULL = never reminded.
+   */
+  @Column({ name: 'last_order_reminder_at', type: 'timestamptz', nullable: true })
+  lastOrderReminderAt!: Date | null;
+
   @CreateDateColumn({ name: 'created_at' })
   createdAt!: Date;
 

@@ -25,7 +25,10 @@ export const envSchema = z
     // Auth
     JWT_SECRET: z.string().min(32),
     JWT_ACCESS_TTL: z.string().default('1h'),
-    JWT_REFRESH_TTL: z.string().default('7d'),
+    // 365d = "remember this device". Clients rotate the refresh token on every
+    // silent refresh, so this only bounds how long a fully idle device stays
+    // signed in before asking for OTP again.
+    JWT_REFRESH_TTL: z.string().default('365d'),
 
     // Stripe
     // FIX CRITICAL-G2 — both keys must be non-empty WHEN SET. An empty
@@ -75,6 +78,13 @@ export const envSchema = z
     WHATSAPP_OTP_TEMPLATE_LANG: z.string().default('es'),
     WHATSAPP_API_VERSION: z.string().default('v22.0'),
     WHATSAPP_OTP_TEMPLATE_HAS_BUTTON: z.enum(['true', 'false']).default('true'),
+    // Customer-facing notification templates (optional — notifications are
+    // best-effort and skipped with a log line until these are approved+set).
+    //   ORDER_UPDATE: utility template, 2 body vars ({{1}} nombre, {{2}} estado).
+    //   WINBACK: marketing template, 1 body var ({{1}} nombre) — the 8-day
+    //   "no has pedido" reminder.
+    WHATSAPP_ORDER_TEMPLATE_NAME: z.string().optional(),
+    WHATSAPP_WINBACK_TEMPLATE_NAME: z.string().optional(),
 
     // Order SMS notifications
     ORDER_SMS_NOTIFY_NUMBERS: z
