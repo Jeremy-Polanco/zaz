@@ -9,7 +9,15 @@ import { Button, Eyebrow, Hairline, StatusBadge } from '../../components/ui'
 function OrderCard({ order }: { order: Order }) {
   const itemCount = order.items?.length ?? 0
   return (
-    <View className="py-5">
+    <Pressable
+      onPress={() =>
+        router.push({
+          pathname: '/orders/[orderId]',
+          params: { orderId: order.id },
+        })
+      }
+      className="py-5 active:opacity-70"
+    >
       <View className="mb-3 flex-row items-start justify-between">
         <View className="flex-1 pr-3">
           <Text className="font-sans text-[13px] uppercase tracking-label text-ink-muted">
@@ -37,7 +45,7 @@ function OrderCard({ order }: { order: Order }) {
         </Text>
       </View>
 
-      {order.status === 'delivered' && (
+      {order.status === 'delivered' ? (
         <Pressable
           onPress={() =>
             router.push({
@@ -51,10 +59,16 @@ function OrderCard({ order }: { order: Order }) {
             Ver factura →
           </Text>
         </Pressable>
+      ) : (
+        order.status !== 'cancelled' && (
+          <Text className="mt-3 font-sans text-[13px] uppercase tracking-label text-brand">
+            Seguir pedido →
+          </Text>
+        )
       )}
 
       <Hairline className="mt-5" />
-    </View>
+    </Pressable>
   )
 }
 
