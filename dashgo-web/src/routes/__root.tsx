@@ -114,6 +114,9 @@ function RoleNavLinks({
         <Link to="/super/rentals" className={linkClass} onClick={onNavigate}>
           Alquileres
         </Link>
+        <Link to="/super/notifications" className={linkClass} onClick={onNavigate}>
+          Notificar
+        </Link>
         <Link to="/cuenta" className={linkClass} onClick={onNavigate}>
           Mi cuenta
         </Link>

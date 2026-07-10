@@ -30,6 +30,7 @@ import { Route as SuperRentalsRouteImport } from './routes/super.rentals'
 import { Route as SuperPromotersRouteImport } from './routes/super.promoters'
 import { Route as SuperProductsRouteImport } from './routes/super.products'
 import { Route as SuperOrdersRouteImport } from './routes/super.orders'
+import { Route as SuperNotificationsRouteImport } from './routes/super.notifications'
 import { Route as SuperCreditRouteImport } from './routes/super.credit'
 import { Route as SuperCategoriesRouteImport } from './routes/super.categories'
 import { Route as RCodeRouteImport } from './routes/r.$code'
@@ -149,6 +150,11 @@ const SuperOrdersRoute = SuperOrdersRouteImport.update({
   path: '/super/orders',
   getParentRoute: () => rootRouteImport,
 } as any)
+const SuperNotificationsRoute = SuperNotificationsRouteImport.update({
+  id: '/super/notifications',
+  path: '/super/notifications',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const SuperCreditRoute = SuperCreditRouteImport.update({
   id: '/super/credit',
   path: '/super/credit',
@@ -236,6 +242,7 @@ export interface FileRoutesByFullPath {
   '/r/$code': typeof RCodeRoute
   '/super/categories': typeof SuperCategoriesRoute
   '/super/credit': typeof SuperCreditRouteWithChildren
+  '/super/notifications': typeof SuperNotificationsRoute
   '/super/orders': typeof SuperOrdersRoute
   '/super/products': typeof SuperProductsRoute
   '/super/promoters': typeof SuperPromotersRouteWithChildren
@@ -269,6 +276,7 @@ export interface FileRoutesByTo {
   '/promoter/payouts': typeof PromoterPayoutsRoute
   '/r/$code': typeof RCodeRoute
   '/super/categories': typeof SuperCategoriesRoute
+  '/super/notifications': typeof SuperNotificationsRoute
   '/super/orders': typeof SuperOrdersRoute
   '/super/products': typeof SuperProductsRoute
   '/super/rentals': typeof SuperRentalsRoute
@@ -305,6 +313,7 @@ export interface FileRoutesById {
   '/r/$code': typeof RCodeRoute
   '/super/categories': typeof SuperCategoriesRoute
   '/super/credit': typeof SuperCreditRouteWithChildren
+  '/super/notifications': typeof SuperNotificationsRoute
   '/super/orders': typeof SuperOrdersRoute
   '/super/products': typeof SuperProductsRoute
   '/super/promoters': typeof SuperPromotersRouteWithChildren
@@ -343,6 +352,7 @@ export interface FileRouteTypes {
     | '/r/$code'
     | '/super/categories'
     | '/super/credit'
+    | '/super/notifications'
     | '/super/orders'
     | '/super/products'
     | '/super/promoters'
@@ -376,6 +386,7 @@ export interface FileRouteTypes {
     | '/promoter/payouts'
     | '/r/$code'
     | '/super/categories'
+    | '/super/notifications'
     | '/super/orders'
     | '/super/products'
     | '/super/rentals'
@@ -411,6 +422,7 @@ export interface FileRouteTypes {
     | '/r/$code'
     | '/super/categories'
     | '/super/credit'
+    | '/super/notifications'
     | '/super/orders'
     | '/super/products'
     | '/super/promoters'
@@ -446,6 +458,7 @@ export interface RootRouteChildren {
   RCodeRoute: typeof RCodeRoute
   SuperCategoriesRoute: typeof SuperCategoriesRoute
   SuperCreditRoute: typeof SuperCreditRouteWithChildren
+  SuperNotificationsRoute: typeof SuperNotificationsRoute
   SuperOrdersRoute: typeof SuperOrdersRoute
   SuperProductsRoute: typeof SuperProductsRoute
   SuperPromotersRoute: typeof SuperPromotersRouteWithChildren
@@ -602,6 +615,13 @@ declare module '@tanstack/react-router' {
       path: '/super/orders'
       fullPath: '/super/orders'
       preLoaderRoute: typeof SuperOrdersRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/super/notifications': {
+      id: '/super/notifications'
+      path: '/super/notifications'
+      fullPath: '/super/notifications'
+      preLoaderRoute: typeof SuperNotificationsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/super/credit': {
@@ -783,6 +803,7 @@ const rootRouteChildren: RootRouteChildren = {
   RCodeRoute: RCodeRoute,
   SuperCategoriesRoute: SuperCategoriesRoute,
   SuperCreditRoute: SuperCreditRouteWithChildren,
+  SuperNotificationsRoute: SuperNotificationsRoute,
   SuperOrdersRoute: SuperOrdersRoute,
   SuperProductsRoute: SuperProductsRoute,
   SuperPromotersRoute: SuperPromotersRouteWithChildren,

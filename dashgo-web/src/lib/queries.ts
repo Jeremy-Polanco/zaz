@@ -1269,3 +1269,44 @@ export function useRetryRentalSetup() {
     },
   })
 }
+
+// ── Push broadcast (super admin → Notificar) ─────────────────────────────────
+
+export type BroadcastAudience = 'all' | 'active' | 'lapsed'
+
+export interface BroadcastPreview {
+  users: number
+  devices: number
+}
+
+/** Super-admin: reach counts for the selected audience (UI preview). */
+export function useBroadcastPreview(audience: BroadcastAudience) {
+  return useQuery<BroadcastPreview>({
+    queryKey: ['admin', 'broadcast-preview', audience],
+    queryFn: async () =>
+      (
+        await api.get<BroadcastPreview>(
+          `/admin/notifications/broadcast/preview`,
+          { params: { audience } },
+        )
+      ).data,
+    staleTime: 30_000,
+  })
+}
+
+/** Super-admin: POST /admin/notifications/broadcast — send push to audience. */
+export function useSendBroadcast() {
+  return useMutation({
+    mutationFn: async (input: {
+      title: string
+      body: string
+      audience: BroadcastAudience
+    }) => {
+      const { data } = await api.post<{ users: number; accepted: number }>(
+        '/admin/notifications/broadcast',
+        input,
+      )
+      return data
+    },
+  })
+}
