@@ -419,28 +419,44 @@ function CategoryChip({
   active,
   onPress,
   label,
+  icon,
 }: {
   active: boolean
   onPress: () => void
   label: string
+  icon?: string | null
 }) {
   // Always render a 1px border so active and inactive chips share the same total
   // height. Active uses an accent border (invisible against the yellow fill)
   // while inactive uses ink-faint visible border.
+  //
+  // The emoji icon lives in its own Text: emoji glyphs are taller than the
+  // ascent/descent of 11px uppercase text, so sharing one tightly-clamped
+  // lineHeight clips them. Each Text gets a line height that fits its glyphs.
   return (
     <Pressable
       onPress={onPress}
-      className={`h-9 items-center justify-center rounded-xs border px-3.5 ${
+      className={`h-9 flex-row items-center justify-center rounded-xs border px-3.5 ${
         active
           ? 'border-accent bg-accent'
           : 'border-ink/15 bg-transparent'
       }`}
     >
+      {icon ? (
+        <Text
+          className="mr-1.5"
+          style={{ fontSize: 13, lineHeight: 18 }}
+          numberOfLines={1}
+        >
+          {icon}
+        </Text>
+      ) : null}
       <Text
         className={`font-sans-semibold text-[11px] uppercase tracking-label ${
           active ? 'text-brand-dark' : 'text-ink-muted'
         }`}
-        style={{ lineHeight: 11, includeFontPadding: false } as object}
+        style={{ lineHeight: 14, includeFontPadding: false } as object}
+        numberOfLines={1}
       >
         {label}
       </Text>
@@ -604,7 +620,8 @@ export default function CatalogTab() {
               key={c.id}
               active={activeSlug === c.slug}
               onPress={() => setActiveSlug(c.slug)}
-              label={`${c.iconEmoji ?? ''} ${c.name}`.trim()}
+              icon={c.iconEmoji}
+              label={c.name}
             />
           ))}
         </ScrollView>
