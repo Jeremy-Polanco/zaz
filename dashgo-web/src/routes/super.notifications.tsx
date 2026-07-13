@@ -165,7 +165,7 @@ function SuperNotificationsPage() {
           </Label>
           <Input
             id="title"
-            placeholder="Ej: Hoy 2x1 en bebederos 🔥"
+            placeholder="Ej: 2x1 en botellones de agua 💧"
             {...register('title')}
           />
           <FieldError message={formState.errors.title?.message} />
@@ -179,7 +179,7 @@ function SuperNotificationsPage() {
           <Textarea
             id="body"
             rows={3}
-            placeholder="Ej: Solo por hoy, llevate el segundo bebedero gratis. Pedí en la app 🛒"
+            placeholder="Ej: El segundo botellón va gratis en tu próxima orden 💧 Pedí en la app"
             {...register('body')}
           />
           <FieldError message={formState.errors.body?.message} />
