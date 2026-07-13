@@ -83,7 +83,7 @@ function resolveIosBuildNumber(): string {
   // Apple rejects a duplicate buildNumber on the same version (1.0).
   const fromEas = process.env.EAS_BUILD_NUMBER
   if (fromEas && fromEas.length > 0) return fromEas
-  return '8'
+  return '9'
 }
 
 function resolveAndroidVersionCode(): number {
@@ -108,7 +108,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     // EAS Update + App Store both require strict semver here. Apple closes a
     // version train once it's approved (error 90186), so every App Store
     // upload after a release MUST carry a higher version than the live one.
-    version: '1.0.1',
+    version: '1.0.2',
     orientation: 'portrait',
     icon: './assets/images/icon.png',
     scheme: 'dashgo',
