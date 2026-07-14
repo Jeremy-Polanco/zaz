@@ -527,16 +527,6 @@ export default function CatalogTab() {
     return list
   }, [products, activeSlug, q])
 
-  // Suggested = products outside current view, offers first, max 4
-  const suggested = useMemo(() => {
-    if (!products || q !== '') return []
-    const inFilter = new Set(filtered.map((p) => p.id))
-    return products
-      .filter((p) => !inFilter.has(p.id) && p.isAvailable)
-      .sort((a, b) => Number(b.offerActive) - Number(a.offerActive))
-      .slice(0, 4)
-  }, [products, filtered, q])
-
   // In grid mode, pad odd-count lists so the last row still has 2 columns —
   // otherwise a lone product card stretches to full width and the aspect-square
   // image becomes huge. The spacer renders as an invisible flex-1 view.
@@ -671,46 +661,25 @@ export default function CatalogTab() {
           </Text>
         </View>
       ) : (
-        <View className="mt-3 flex-row flex-wrap" style={{ gap: 8 }}>
+        // Full-width single column: CategoryCard is aspect-square, so each
+        // card is ~screen-width tall — about two fill the viewport, the rest
+        // scroll. (Was a 2-col grid of small tiles.)
+        <View className="mt-3" style={{ gap: 10 }}>
           {(categories ?? []).map((c, i) => (
-            <View key={c.id} style={{ width: '48.5%' }}>
-              <CategoryCard
-                category={c}
-                productCount={productCountBySlug.get(c.slug) ?? 0}
-                variant="category"
-                dark={i === 0}
-                onPress={() => setActiveSlug(c.slug)}
-              />
-            </View>
+            <CategoryCard
+              key={c.id}
+              category={c}
+              productCount={productCountBySlug.get(c.slug) ?? 0}
+              variant="category"
+              dark={i === 0}
+              large
+              onPress={() => setActiveSlug(c.slug)}
+            />
           ))}
         </View>
       )}
     </ScrollView>
   )
-
-  const renderFooter = () => {
-    if (viewMode !== 'grid' || q !== '' || suggested.length === 0) return null
-    return (
-      <View className="mt-4 px-2">
-        <Text className="mb-2.5 px-2 font-sans-semibold text-[16px] tracking-tight text-ink">
-          Ítems que te pueden interesar
-        </Text>
-        <View className="flex-row flex-wrap" style={{ gap: 8 }}>
-          {suggested.map((p) => (
-            <View
-              key={p.id}
-              style={{ width: '48.5%' }}
-            >
-              <ProductCard
-                product={p}
-                qty={cartState.items[p.id] ?? 0}
-              />
-            </View>
-          ))}
-        </View>
-      </View>
-    )
-  }
 
   return (
     <SafeAreaView edges={['top']} className="flex-1 bg-paper">
@@ -755,7 +724,6 @@ export default function CatalogTab() {
             </Text>
           </View>
         }
-          ListFooterComponent={renderFooter}
           refreshing={isRefetching}
           onRefresh={refetch}
           keyboardShouldPersistTaps="handled"

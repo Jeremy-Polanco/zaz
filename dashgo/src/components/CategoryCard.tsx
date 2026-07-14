@@ -9,10 +9,12 @@ type Props = {
   productCount: number
   variant?: 'category' | 'all'
   dark?: boolean
+  /** Full-width hero size (catalog picker) — scales type/emoji up to match. */
+  large?: boolean
   onPress?: () => void
 }
 
-export function CategoryCard({ category, productCount, variant = 'category', dark = false, onPress }: Props) {
+export function CategoryCard({ category, productCount, variant = 'category', dark = false, large = false, onPress }: Props) {
   const [showImage, setShowImage] = useState(true)
   const imageUri =
     variant === 'category' && category.imageUrl && showImage
@@ -48,7 +50,7 @@ export function CategoryCard({ category, productCount, variant = 'category', dar
       {/* Emoji centered (shown when no image) */}
       {!imageUri ? (
         <View className="flex-1 items-center justify-center">
-          <Text className="text-5xl">
+          <Text className={large ? 'text-8xl' : 'text-5xl'}>
             {isAll ? '🛍️' : (category.iconEmoji ?? '📦')}
           </Text>
         </View>
@@ -56,13 +58,13 @@ export function CategoryCard({ category, productCount, variant = 'category', dar
 
       {/* Bottom overlay */}
       <View
-        className="absolute bottom-0 left-0 right-0 px-2 pb-2 pt-4"
+        className={`absolute bottom-0 left-0 right-0 ${large ? 'px-4 pb-4 pt-8' : 'px-2 pb-2 pt-4'}`}
         style={imageUri ? {
           experimental_backgroundImage: 'linear-gradient(to top, rgba(0,0,0,0.6) 0%, transparent 100%)',
         } : undefined}
       >
         <Text
-          className={`font-sans text-[9px] uppercase tracking-eyebrow ${
+          className={`font-sans uppercase tracking-eyebrow ${large ? 'text-[12px]' : 'text-[9px]'} ${
             isAll
               ? 'text-brand-dark/70'
               : imageUri
@@ -76,7 +78,7 @@ export function CategoryCard({ category, productCount, variant = 'category', dar
           {productCount} productos
         </Text>
         <Text
-          className={`font-sans-semibold text-[13px] leading-[16px] ${
+          className={`font-sans-semibold ${large ? 'text-[24px] leading-[28px]' : 'text-[13px] leading-[16px]'} ${
             isAll
               ? 'text-brand-dark'
               : imageUri
