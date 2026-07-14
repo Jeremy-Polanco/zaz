@@ -17,6 +17,12 @@ export const loginSchema = z.object({
     .length(8, 'El código tiene 8 caracteres')
     .or(z.literal(''))
     .optional(),
+  // Optional at signup — birthday greetings/gifts. Native date input → ISO.
+  dateOfBirth: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, 'Formato AAAA-MM-DD')
+    .or(z.literal(''))
+    .optional(),
 })
 export type LoginInput = z.infer<typeof loginSchema>
 

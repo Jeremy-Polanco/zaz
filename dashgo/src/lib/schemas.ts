@@ -44,12 +44,38 @@ export const phoneSchema = z
   .regex(/^\+1\d{10}$/, 'Son 10 dígitos')
 export const sendOtpSchema = z.object({ phone: phoneSchema })
 
+// Optional birthday captured at signup as DD/MM/AAAA in the UI; transformed
+// to ISO (YYYY-MM-DD) before hitting the API. Empty string = not provided.
+export const dobSchema = z
+  .string()
+  .regex(/^\d{2}\/\d{2}\/\d{4}$/, 'Formato DD/MM/AAAA')
+  .refine((v) => {
+    const [d, m, y] = v.split('/').map(Number)
+    const date = new Date(y, m - 1, d)
+    return (
+      date.getFullYear() === y &&
+      date.getMonth() === m - 1 &&
+      date.getDate() === d &&
+      y >= 1900 &&
+      date.getTime() < Date.now()
+    )
+  }, 'Fecha inválida')
+  .optional()
+  .or(z.literal(''))
+
+export function dobToIso(v: string | undefined): string | undefined {
+  if (!v) return undefined
+  const [d, m, y] = v.split('/')
+  return `${y}-${m}-${d}`
+}
+
 // Phone-only login is the default — no code is collected. A name is requested
 // only on first login (revealed in-place), mirroring the web flow.
 export const loginSchema = z.object({
   phone: phoneSchema,
   fullName: z.string().min(2, 'Tu nombre').optional(),
   referralCode: z.string().length(8, 'El código tiene 8 caracteres').optional(),
+  dateOfBirth: dobSchema,
 })
 
 export const verifyOtpSchema = z.object({

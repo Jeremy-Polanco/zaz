@@ -36,6 +36,8 @@ export interface AuthUser {
   activeLocationId: string | null
   referralCode: string | null
   creditLocked: boolean
+  /** Optional birthday (YYYY-MM-DD) — drives the birthday greeting. */
+  dateOfBirth?: string | null
 }
 
 export interface Promoter {

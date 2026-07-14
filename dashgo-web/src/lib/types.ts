@@ -36,6 +36,8 @@ export interface AuthUser {
   activeLocationId: string | null
   referralCode: string | null
   creditLocked: boolean
+  /** Optional birthday (YYYY-MM-DD) — drives the birthday greeting. */
+  dateOfBirth?: string | null
 }
 
 export interface Promoter {
@@ -470,6 +472,8 @@ export interface AdminUser {
   createdAt: string
   hasActiveSubscription: boolean
   subscriptionStatus: string | null
+  /** Optional birthday (YYYY-MM-DD). */
+  dateOfBirth?: string | null
 }
 
 /** Filter for GET /users?subscription=... — omit for all users. */

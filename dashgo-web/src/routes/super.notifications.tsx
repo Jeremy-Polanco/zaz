@@ -10,7 +10,9 @@ import { z } from 'zod'
 import { TOKEN_KEY, api } from '../lib/api'
 import type { AuthUser } from '../lib/types'
 import {
+  useBirthdayMessage,
   useBroadcastPreview,
+  useSaveBirthdayMessage,
   useSendBroadcast,
   type BroadcastAudience,
 } from '../lib/queries'
@@ -227,6 +229,98 @@ function SuperNotificationsPage() {
           </p>
         )}
       </form>
+
+      <BirthdayMessageSection />
+    </div>
+  )
+}
+
+// ── Birthday greeting config ───────────────────────────────────────────────────
+//
+// The daily 09:00 cron greets every customer whose birthday is today with this
+// copy. `{nombre}` is replaced with the customer's first name at send time.
+
+function BirthdayMessageSection() {
+  const { data: saved, isPending } = useBirthdayMessage()
+  const save = useSaveBirthdayMessage()
+  const [title, setTitle] = useState<string | null>(null)
+  const [body, setBody] = useState<string | null>(null)
+  const [savedFlash, setSavedFlash] = useState(false)
+
+  if (isPending || !saved) {
+    return (
+      <div className="mt-16 border-t border-ink/10 pt-10">
+        <span className="eyebrow">Cargando mensaje de cumpleaños…</span>
+      </div>
+    )
+  }
+
+  const titleValue = title ?? saved.title
+  const bodyValue = body ?? saved.body
+  const dirty = titleValue !== saved.title || bodyValue !== saved.body
+  const previewName = 'Ana'
+
+  const onSave = async () => {
+    if (!titleValue.trim() || !bodyValue.trim()) return
+    await save.mutateAsync({ title: titleValue.trim(), body: bodyValue.trim() })
+    setTitle(null)
+    setBody(null)
+    setSavedFlash(true)
+    setTimeout(() => setSavedFlash(false), 3000)
+  }
+
+  return (
+    <div className="mt-16 border-t border-ink/10 pt-10">
+      <SectionHeading
+        eyebrow="Automático · Diario 9:00"
+        title="Mensaje de cumpleaños."
+        subtitle="Cada cliente recibe este push el día de su cumpleaños, solo. Usa {nombre} donde quieras su nombre."
+      />
+
+      <div className="mt-8 space-y-6">
+        <div>
+          <Label htmlFor="bdayTitle">Título · {titleValue.length}/60</Label>
+          <Input
+            id="bdayTitle"
+            value={titleValue}
+            maxLength={60}
+            onChange={(e) => setTitle(e.target.value)}
+          />
+        </div>
+        <div>
+          <Label htmlFor="bdayBody">Mensaje · {bodyValue.length}/220</Label>
+          <Textarea
+            id="bdayBody"
+            rows={3}
+            value={bodyValue}
+            maxLength={220}
+            onChange={(e) => setBody(e.target.value)}
+          />
+        </div>
+
+        <div className="border border-ink/15 bg-paper-deep/40 p-4">
+          <span className="eyebrow">Así lo recibe {previewName}</span>
+          <p className="mt-2 text-sm font-semibold text-ink">
+            {titleValue.replaceAll('{nombre}', previewName) || 'Título'}
+          </p>
+          <p className="mt-0.5 text-sm text-ink-soft">
+            {bodyValue.replaceAll('{nombre}', previewName) || 'Mensaje'}
+          </p>
+        </div>
+
+        <div className="flex items-center gap-4">
+          <Button
+            onClick={onSave}
+            disabled={save.isPending || !dirty || !titleValue.trim() || !bodyValue.trim()}
+          >
+            {save.isPending ? 'Guardando…' : 'Guardar mensaje'}
+          </Button>
+          {savedFlash && <span className="text-sm text-ok">Guardado ✓</span>}
+          {save.isError && (
+            <span className="text-sm text-bad">No se pudo guardar.</span>
+          )}
+        </div>
+      </div>
     </div>
   )
 }

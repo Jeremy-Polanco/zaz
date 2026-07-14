@@ -656,6 +656,7 @@ export function useUpdateMe() {
       fullName?: string
       phone?: string
       addressDefault?: GeoAddress
+      dateOfBirth?: string | null
     }) => {
       const { data } = await api.patch<AuthUser>('/users/me', patch)
       return data
@@ -1307,6 +1308,38 @@ export function useSendBroadcast() {
         input,
       )
       return data
+    },
+  })
+}
+
+// ── Birthday push message (super admin → Notificar) ──────────────────────────
+
+export interface BirthdayMessage {
+  title: string
+  body: string
+}
+
+export function useBirthdayMessage() {
+  return useQuery<BirthdayMessage>({
+    queryKey: ['admin', 'birthday-message'],
+    queryFn: async () =>
+      (await api.get<BirthdayMessage>('/admin/notifications/birthday-message'))
+        .data,
+  })
+}
+
+export function useSaveBirthdayMessage() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (input: BirthdayMessage) => {
+      const { data } = await api.put<BirthdayMessage>(
+        '/admin/notifications/birthday-message',
+        input,
+      )
+      return data
+    },
+    onSuccess: (data) => {
+      qc.setQueryData(['admin', 'birthday-message'], data)
     },
   })
 }

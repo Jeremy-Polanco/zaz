@@ -30,4 +30,12 @@ export class VerifyOtpDto {
   @IsString()
   @Length(8, 8, { message: 'El código de referido debe tener 8 caracteres' })
   referralCode?: string;
+
+  // Optional at signup (birthday greetings/gifts). ISO date, e.g. 1990-07-14.
+  @IsOptional()
+  @IsString()
+  @Matches(/^\d{4}-\d{2}-\d{2}$/, {
+    message: 'La fecha de nacimiento debe tener formato YYYY-MM-DD',
+  })
+  dateOfBirth?: string;
 }

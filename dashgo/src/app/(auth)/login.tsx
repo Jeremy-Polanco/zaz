@@ -5,6 +5,7 @@ import { useForm, Controller } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import {
+  dobToIso,
   loginSchema,
   sendOtpSchema,
   verifyOtpSchema,
@@ -513,7 +514,12 @@ export function PhoneOnlyStep({
     formState: { errors },
   } = useForm<LoginInput>({
     resolver: zodResolver(loginSchema),
-    defaultValues: { phone: '', fullName: undefined, referralCode },
+    defaultValues: {
+      phone: '',
+      fullName: undefined,
+      referralCode,
+      dateOfBirth: '',
+    },
   })
 
   const onSubmit = handleSubmit(async (values) => {
@@ -531,6 +537,8 @@ export function PhoneOnlyStep({
         phone: values.phone,
         fullName: trimmedName ? trimmedName : undefined,
         referralCode: referralCode ?? undefined,
+        // UI collects DD/MM/AAAA; the API wants ISO.
+        dateOfBirth: dobToIso(values.dateOfBirth || undefined),
       })
       onVerified(res.user.role)
     } catch (err) {
@@ -592,6 +600,42 @@ export function PhoneOnlyStep({
             )}
           />
           <FieldError message={errors.fullName?.message} />
+
+          <View className="mt-6">
+            <FieldLabel>Fecha de nacimiento · opcional</FieldLabel>
+            <Controller
+              control={control}
+              name="dateOfBirth"
+              render={({ field: { onChange, onBlur, value, ref } }) => (
+                <TextInput
+                  testID="login-dob-input"
+                  ref={ref}
+                  className="h-11 border-b border-ink/25 pb-1 font-sans text-[16px] text-ink"
+                  keyboardType="number-pad"
+                  placeholder="DD/MM/AAAA"
+                  placeholderTextColor="#6B6488"
+                  maxLength={10}
+                  value={value ?? ''}
+                  onChangeText={(raw) => {
+                    // Auto-insert slashes as the user types digits.
+                    const digits = raw.replace(/\D/g, '').slice(0, 8)
+                    let out = digits
+                    if (digits.length > 4) {
+                      out = `${digits.slice(0, 2)}/${digits.slice(2, 4)}/${digits.slice(4)}`
+                    } else if (digits.length > 2) {
+                      out = `${digits.slice(0, 2)}/${digits.slice(2)}`
+                    }
+                    onChange(out)
+                  }}
+                  onBlur={onBlur}
+                />
+              )}
+            />
+            <Text className="mt-1.5 font-sans text-[12px] text-ink-muted">
+              Para saludarte en tu cumpleaños 🎂
+            </Text>
+            <FieldError message={errors.dateOfBirth?.message} />
+          </View>
         </View>
       )}
 

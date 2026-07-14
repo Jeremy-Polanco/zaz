@@ -55,6 +55,8 @@ import type {
 export type UpdateMeInput = {
   fullName?: string
   addressDefault?: GeoAddress
+  /** ISO YYYY-MM-DD; null clears the birthday. */
+  dateOfBirth?: string | null
 }
 
 /**

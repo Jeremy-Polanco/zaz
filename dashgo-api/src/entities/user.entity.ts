@@ -86,6 +86,14 @@ export class User {
   maintenanceTimerDisabled!: boolean;
 
   /**
+   * Optional birthday (YYYY-MM-DD, captured at signup or in the profile).
+   * Month/day drive the BirthdayCron greeting; the year is stored but never
+   * shown to other users.
+   */
+  @Column({ name: 'date_of_birth', type: 'date', nullable: true })
+  dateOfBirth!: string | null;
+
+  /**
    * When the win-back WhatsApp reminder was last sent (WinBackCron). One
    * reminder per lapse: the cron only sends again once this predates the
    * user's most recent order. NULL = never reminded.

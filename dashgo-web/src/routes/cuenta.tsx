@@ -42,6 +42,7 @@ function AccountPage() {
 
   const [editingName, setEditingName] = useState(false)
   const [name, setName] = useState('')
+  const [dob, setDob] = useState('')
   const [showDelete, setShowDelete] = useState(false)
 
   if (isPending) {
@@ -70,13 +71,18 @@ function AccountPage() {
 
   const startEdit = () => {
     setName(user.fullName)
+    setDob(user.dateOfBirth ?? '')
     setEditingName(true)
   }
 
   const saveName = async () => {
     const trimmed = name.trim()
     if (trimmed.length < 2) return
-    await updateMe.mutateAsync({ fullName: trimmed })
+    await updateMe.mutateAsync({
+      fullName: trimmed,
+      // Empty input clears the birthday (explicit null); unchanged sends same value.
+      dateOfBirth: dob ? dob : null,
+    })
     setEditingName(false)
   }
 
@@ -118,6 +124,22 @@ function AccountPage() {
                     autoComplete="name"
                     onChange={(e) => setName(e.target.value)}
                   />
+                </div>
+                <div>
+                  <Label htmlFor="dateOfBirth">
+                    Fecha de nacimiento{' '}
+                    <span className="text-ink-muted">(opcional)</span>
+                  </Label>
+                  <Input
+                    id="dateOfBirth"
+                    type="date"
+                    value={dob}
+                    autoComplete="bday"
+                    onChange={(e) => setDob(e.target.value)}
+                  />
+                  <p className="mt-1 text-xs text-ink-muted">
+                    Para saludarte en tu cumpleaños 🎂
+                  </p>
                 </div>
                 {updateMe.isError && (
                   <p className="text-sm font-medium text-bad">

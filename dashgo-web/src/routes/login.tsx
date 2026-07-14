@@ -191,6 +191,7 @@ export function PhoneOnlyLogin({
         phone: values.phone,
         fullName: trimmedName ? trimmedName : undefined,
         referralCode: referralCode ?? values.referralCode ?? undefined,
+        dateOfBirth: values.dateOfBirth ? values.dateOfBirth : undefined,
       })
       onAuthenticated(res.user.role)
     } catch (err) {
@@ -245,6 +246,24 @@ export function PhoneOnlyLogin({
               {...form.register('fullName')}
             />
             <FieldError message={form.formState.errors.fullName?.message} />
+            <div className="mt-4">
+              <Label htmlFor="dateOfBirth">
+                Fecha de nacimiento{' '}
+                <span className="text-ink-muted">(opcional)</span>
+              </Label>
+              <Input
+                id="dateOfBirth"
+                type="date"
+                autoComplete="bday"
+                {...form.register('dateOfBirth')}
+              />
+              <p className="mt-1 text-xs text-ink-muted">
+                Para saludarte en tu cumpleaños 🎂
+              </p>
+              <FieldError
+                message={form.formState.errors.dateOfBirth?.message}
+              />
+            </div>
           </div>
         )}
         {login.isError && !isFirstLoginError(login.error) && (

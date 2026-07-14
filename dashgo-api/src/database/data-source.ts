@@ -2,6 +2,7 @@ import 'reflect-metadata';
 import { DataSource } from 'typeorm';
 import {
   AccountDeletion,
+  AppSetting,
   Category,
   Counter,
   CreditAccount,
@@ -72,6 +73,7 @@ export const AppDataSource = new DataSource({
     AccountDeletion,
     StripeWebhookEvent,
     PushToken,
+    AppSetting,
   ],
   synchronize: false,
   migrationsRun: true,

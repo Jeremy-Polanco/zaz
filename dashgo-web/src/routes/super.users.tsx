@@ -40,6 +40,32 @@ function SubscriptionBadge({ user }: { user: AdminUser }) {
   )
 }
 
+// ── Birthday helpers ────────────────────────────────────────────────────────────
+
+/** dob is YYYY-MM-DD; compare month/day against today in the local (NJ) TZ. */
+function isBirthdayToday(dob: string | null | undefined): boolean {
+  if (!dob) return false
+  const [, m, d] = dob.split('-').map(Number)
+  const now = new Date()
+  return m === now.getMonth() + 1 && d === now.getDate()
+}
+
+function isBirthdayThisMonth(dob: string | null | undefined): boolean {
+  if (!dob) return false
+  const [, m] = dob.split('-').map(Number)
+  return m === new Date().getMonth() + 1
+}
+
+const MONTHS_ES = [
+  'ene', 'feb', 'mar', 'abr', 'may', 'jun',
+  'jul', 'ago', 'sep', 'oct', 'nov', 'dic',
+]
+
+function formatBirthday(dob: string): string {
+  const [, m, d] = dob.split('-').map(Number)
+  return `${d} ${MONTHS_ES[m - 1] ?? ''}`
+}
+
 // ── Filter options ──────────────────────────────────────────────────────────────
 
 const FILTER_OPTIONS: {
@@ -127,6 +153,7 @@ function SuperUsersPage() {
   const [searchText, setSearchText] = useState('')
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [pendingDelete, setPendingDelete] = useState<AdminUser | null>(null)
+  const [birthdayMonthOnly, setBirthdayMonthOnly] = useState(false)
 
   const { data: users, isPending } = useAdminUsers(subscription)
   const { data: me } = useCurrentUser()
@@ -135,13 +162,24 @@ function SuperUsersPage() {
   const filtered = useMemo(() => {
     if (!users) return []
     const q = searchText.trim().toLowerCase()
-    if (!q) return users
-    return users.filter(
-      (u) =>
-        u.fullName.toLowerCase().includes(q) ||
-        (u.phone?.toLowerCase().includes(q) ?? false),
-    )
-  }, [users, searchText])
+    let list = users
+    if (q) {
+      list = list.filter(
+        (u) =>
+          u.fullName.toLowerCase().includes(q) ||
+          (u.phone?.toLowerCase().includes(q) ?? false),
+      )
+    }
+    if (birthdayMonthOnly) {
+      list = list.filter((u) => isBirthdayThisMonth(u.dateOfBirth))
+    }
+    return list
+  }, [users, searchText, birthdayMonthOnly])
+
+  const birthdaysToday = useMemo(
+    () => (users ?? []).filter((u) => isBirthdayToday(u.dateOfBirth)),
+    [users],
+  )
 
   return (
     <div className="page-rise mx-auto max-w-6xl px-6 py-12">
@@ -179,7 +217,30 @@ function SuperUsersPage() {
             {opt.label}
           </button>
         ))}
+        <button
+          onClick={() => setBirthdayMonthOnly((v) => !v)}
+          className={`rounded-full px-3 py-1 text-[11px] uppercase tracking-wide transition-colors ${
+            birthdayMonthOnly
+              ? 'bg-accent text-brand-dark'
+              : 'border border-ink/20 text-ink-muted hover:border-accent hover:text-accent'
+          }`}
+        >
+          🎂 Cumpleaños este mes
+        </button>
       </div>
+
+      {birthdaysToday.length > 0 && (
+        <div className="mb-6 border-l-4 border-accent bg-accent/10 p-4">
+          <p className="text-sm font-semibold text-ink">
+            🎂 Hoy cumple{birthdaysToday.length === 1 ? '' : 'n'} años:{' '}
+            {birthdaysToday.map((u) => u.fullName).join(', ')}
+          </p>
+          <p className="mt-1 text-xs text-ink-muted">
+            Ya les llegó el saludo automático. Si querés mandarles un regalo,
+            coordinalo con su próximo pedido.
+          </p>
+        </div>
+      )}
 
       {isPending ? (
         <div className="py-20 text-center">
@@ -204,6 +265,9 @@ function SuperUsersPage() {
                   Rol
                 </th>
                 <th className="p-4 text-left text-[10px] font-medium uppercase tracking-wide text-ink-muted">
+                  Cumpleaños
+                </th>
+                <th className="p-4 text-left text-[10px] font-medium uppercase tracking-wide text-ink-muted">
                   Suscripción
                 </th>
                 <th className="p-4 text-right text-[10px] font-medium uppercase tracking-wide text-ink-muted">
@@ -217,7 +281,7 @@ function SuperUsersPage() {
             <tbody>
               {filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="py-12 text-center text-ink-muted">
+                  <td colSpan={8} className="py-12 text-center text-ink-muted">
                     Sin usuarios que coincidan
                   </td>
                 </tr>
@@ -232,6 +296,21 @@ function SuperUsersPage() {
                         <td className="hidden p-4 text-ink-muted md:table-cell">{u.email ?? '—'}</td>
                         <td className="hidden p-4 text-[11px] uppercase tracking-wide text-ink-muted sm:table-cell">
                           {u.role}
+                        </td>
+                        <td className="p-4 whitespace-nowrap">
+                          {u.dateOfBirth ? (
+                            isBirthdayToday(u.dateOfBirth) ? (
+                              <span className="inline-flex items-center gap-1 border border-accent bg-accent/15 px-1.5 py-0.5 text-[0.65rem] font-semibold uppercase tracking-widest text-accent-dark">
+                                🎂 ¡Hoy!
+                              </span>
+                            ) : (
+                              <span className="text-ink-muted">
+                                {formatBirthday(u.dateOfBirth)}
+                              </span>
+                            )
+                          ) : (
+                            <span className="text-ink-muted/50">—</span>
+                          )}
                         </td>
                         <td className="p-4">
                           <SubscriptionBadge user={u} />
@@ -266,7 +345,7 @@ function SuperUsersPage() {
                       </tr>
                       {expanded && (
                         <tr className="border-b border-ink/10 bg-ink/3">
-                          <td colSpan={7} className="p-4">
+                          <td colSpan={8} className="p-4">
                             <UserAddressesPanel userId={u.id} />
                           </td>
                         </tr>

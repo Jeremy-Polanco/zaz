@@ -339,6 +339,7 @@ export class AuthService implements OnModuleInit {
             ? UserRole.SUPER_ADMIN_DELIVERY
             : UserRole.CLIENT,
           referredById,
+          dateOfBirth: dto.dateOfBirth ?? null,
         }),
       );
       isNewUser = true;
@@ -382,6 +383,7 @@ export class AuthService implements OnModuleInit {
         role: user.role,
         addressDefault: user.addressDefault,
         referralCode: user.referralCode,
+        dateOfBirth: user.dateOfBirth,
       },
     };
   }

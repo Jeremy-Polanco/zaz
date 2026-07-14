@@ -1,12 +1,106 @@
 import { useState } from 'react'
-import { View, Text, ActivityIndicator, ScrollView, Pressable } from 'react-native'
+import {
+  View,
+  Text,
+  ActivityIndicator,
+  ScrollView,
+  Pressable,
+  TextInput,
+} from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { router } from 'expo-router'
 import { SymbolView, type AndroidSymbol } from 'expo-symbols'
 import type { SFSymbol } from 'sf-symbols-typescript'
-import { useCurrentUser, useDeleteAccount, useLogout } from '../../lib/queries'
+import {
+  useCurrentUser,
+  useDeleteAccount,
+  useLogout,
+  useUpdateMe,
+} from '../../lib/queries'
+import { dobToIso, dobSchema } from '../../lib/schemas'
 import { Button, Eyebrow, Hairline } from '../../components/ui'
 import { DeleteAccountModal } from '../../components/DeleteAccountModal'
+
+/**
+ * Birthday row — clients without a saved birthday get an inline DD/MM/AAAA
+ * input (drives the birthday greeting + gift); once saved it renders
+ * read-only. Kept inline: it's one field, a full edit screen would be noise.
+ */
+function BirthdayRow({ dateOfBirth }: { dateOfBirth: string | null | undefined }) {
+  const updateMe = useUpdateMe()
+  const [value, setValue] = useState('')
+  const [error, setError] = useState<string | null>(null)
+
+  if (dateOfBirth) {
+    const [y, m, d] = dateOfBirth.split('-')
+    return (
+      <View className="mt-6">
+        <Eyebrow>Cumpleaños</Eyebrow>
+        <Text
+          className="mt-1.5 font-sans-medium text-[16px] text-ink"
+          style={{ fontVariant: ['tabular-nums'] }}
+        >
+          {d}/{m}/{y} 🎂
+        </Text>
+      </View>
+    )
+  }
+
+  const save = async () => {
+    const parsed = dobSchema.safeParse(value)
+    if (!parsed.success || !value) {
+      setError('Formato DD/MM/AAAA')
+      return
+    }
+    setError(null)
+    try {
+      await updateMe.mutateAsync({ dateOfBirth: dobToIso(value) })
+    } catch {
+      setError('No pudimos guardar. Intenta de nuevo.')
+    }
+  }
+
+  return (
+    <View className="mt-6">
+      <Eyebrow>Cumpleaños</Eyebrow>
+      <View className="mt-1.5 flex-row items-end gap-3">
+        <TextInput
+          className="h-11 flex-1 border-b border-ink/25 pb-1 font-sans text-[16px] text-ink"
+          keyboardType="number-pad"
+          placeholder="DD/MM/AAAA"
+          placeholderTextColor="#6B6488"
+          maxLength={10}
+          value={value}
+          onChangeText={(raw) => {
+            const digits = raw.replace(/\D/g, '').slice(0, 8)
+            let out = digits
+            if (digits.length > 4) {
+              out = `${digits.slice(0, 2)}/${digits.slice(2, 4)}/${digits.slice(4)}`
+            } else if (digits.length > 2) {
+              out = `${digits.slice(0, 2)}/${digits.slice(2)}`
+            }
+            setValue(out)
+          }}
+        />
+        <Button
+          size="md"
+          variant="outline"
+          onPress={save}
+          loading={updateMe.isPending}
+          disabled={value.length < 10}
+        >
+          Guardar
+        </Button>
+      </View>
+      <Text className="mt-1.5 font-sans text-[12px] text-ink-muted">
+        Para saludarte en tu cumpleaños 🎂
+      </Text>
+      {error && (
+        <Text className="mt-1 font-sans text-[12px] text-bad">{error}</Text>
+      )}
+    </View>
+  )
+}
 
 type AccountLinkProps = {
   label: string
@@ -132,6 +226,8 @@ export default function ProfileTab() {
             </Text>
           </View>
         )}
+
+        {isClient && <BirthdayRow dateOfBirth={user?.dateOfBirth} />}
 
         {isClient && (
           <>

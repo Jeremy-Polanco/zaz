@@ -15,6 +15,10 @@ jest.mock('../../lib/queries', () => ({
   useCurrentUser: jest.fn(),
   useLogout: jest.fn(),
   useDeleteAccount: jest.fn(),
+  useUpdateMe: jest.fn(() => ({
+    mutateAsync: jest.fn(),
+    isPending: false,
+  })),
 }))
 
 jest.mock('expo-router', () => {
