@@ -527,15 +527,6 @@ export default function CatalogTab() {
     return list
   }, [products, activeSlug, q])
 
-  // In grid mode, pad odd-count lists so the last row still has 2 columns —
-  // otherwise a lone product card stretches to full width and the aspect-square
-  // image becomes huge. The spacer renders as an invisible flex-1 view.
-  const SPACER_ID = '__spacer__'
-  const gridData = useMemo(() => {
-    if (viewMode !== 'grid') return filtered
-    if (filtered.length % 2 === 0) return filtered
-    return [...filtered, { id: SPACER_ID } as Product]
-  }, [filtered, viewMode])
 
   if (isPending) {
     return (
@@ -689,27 +680,25 @@ export default function CatalogTab() {
       ) : (
         <FlatList
           key={viewMode}
-          data={viewMode === 'grid' ? gridData : filtered}
+          data={filtered}
           keyExtractor={(p) => p.id}
-          numColumns={viewMode === 'grid' ? 2 : 1}
-          columnWrapperStyle={
-            viewMode === 'grid'
-              ? { gap: 8, paddingHorizontal: 8, marginBottom: 8 }
-              : undefined
-          }
-          contentContainerClassName={viewMode === 'grid' ? 'pb-40' : 'px-5 pb-40'}
+          // One product per row in both modes — grid renders full-width hero
+          // cards (aspect-square image ≈ screen-width tall), list stays compact.
+          numColumns={1}
+          contentContainerClassName={viewMode === 'grid' ? 'px-4 pb-40' : 'px-5 pb-40'}
           ItemSeparatorComponent={
-            viewMode === 'list' ? () => <View className="h-px bg-ink/10" /> : undefined
+            viewMode === 'list'
+              ? () => <View className="h-px bg-ink/10" />
+              : () => <View className="h-4" />
           }
           ListHeaderComponent={renderListHeader}
-          renderItem={({ item }) => {
-          if (item.id === SPACER_ID) return <View style={{ flex: 1 }} />
-          return viewMode === 'list' ? (
-            <ProductRow product={item} qty={cartState.items[item.id] ?? 0} />
-          ) : (
-            <ProductCard product={item} qty={cartState.items[item.id] ?? 0} />
-          )
-        }}
+          renderItem={({ item }) =>
+            viewMode === 'list' ? (
+              <ProductRow product={item} qty={cartState.items[item.id] ?? 0} />
+            ) : (
+              <ProductCard product={item} qty={cartState.items[item.id] ?? 0} />
+            )
+          }
         ListEmptyComponent={
           <View className="items-center px-8 py-16">
             <Text className="font-sans text-[12px] uppercase tracking-eyebrow text-ink-muted">
