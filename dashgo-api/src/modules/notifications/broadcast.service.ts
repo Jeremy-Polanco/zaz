@@ -2,11 +2,22 @@ import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { PushToken } from '../../entities/push-token.entity';
-import { PushService } from './push.service';
+import { PushService, type PushTicketRef } from './push.service';
 import type { BroadcastAudience } from './dto/broadcast.dto';
 
 /** Same lapse window as WinBackCron — keep the two audiences consistent. */
 const LAPSED_DAYS = 8;
+
+export interface BroadcastResult {
+  users: number;
+  /** Tickets Expo accepted — says nothing about delivery. */
+  accepted: number;
+  /** Receipt verdicts, polled once after RECEIPT_DELAY_MS. */
+  delivered: number;
+  failed: number;
+  pending: number;
+  errors: string[];
+}
 
 /**
  * Admin broadcast over push. Audience is resolved against the push_tokens
@@ -38,20 +49,45 @@ export class BroadcastService {
     return { users: userIds.length, devices };
   }
 
+  /**
+   * How long to wait before asking Expo for receipts. An accepted ticket is
+   * only "queued" — APNs/FCM rejections surface in the receipt a few seconds
+   * later. One poll after this delay catches the common failures
+   * (InvalidCredentials, DeviceNotRegistered) while keeping the admin
+   * request tolerably slow. Overridden to 0 in tests.
+   */
+  protected receiptDelayMs = 10_000;
+
   async broadcast(
     audience: BroadcastAudience,
     title: string,
     body: string,
-  ): Promise<{ users: number; accepted: number }> {
+  ): Promise<BroadcastResult> {
     const userIds = await this.resolveAudience(audience);
     let accepted = 0;
+    const tickets: PushTicketRef[] = [];
     for (const userId of userIds) {
-      accepted += await this.push.sendToUser(userId, title, body);
+      const result = await this.push.sendToUserTracked(userId, title, body);
+      accepted += result.accepted;
+      tickets.push(...result.tickets);
     }
+
+    // Poll receipts once so the panel reports delivery truthfully instead of
+    // Expo's accept count. Tickets Expo hasn't settled yet stay `pending`.
+    let receipts = { delivered: 0, failed: 0, pending: 0, errors: [] as string[] };
+    if (tickets.length > 0) {
+      await new Promise((r) => setTimeout(r, this.receiptDelayMs));
+      receipts = await this.push.checkReceipts(tickets);
+    }
+
     this.logger.log(
-      `broadcast (${audience}): ${userIds.length} user(s), ${accepted} message(s) accepted — "${title}"`,
+      `broadcast (${audience}): ${userIds.length} user(s), ${accepted} accepted, ` +
+        `${receipts.delivered} delivered, ${receipts.failed} failed, ` +
+        `${receipts.pending} pending${
+          receipts.errors.length ? ` [${receipts.errors.join(', ')}]` : ''
+        } — "${title}"`,
     );
-    return { users: userIds.length, accepted };
+    return { users: userIds.length, accepted, ...receipts };
   }
 
   private async resolveAudience(

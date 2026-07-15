@@ -15,6 +15,7 @@ import {
   useSaveBirthdayMessage,
   useSendBroadcast,
   type BroadcastAudience,
+  type BroadcastResult,
 } from '../lib/queries'
 import {
   Button,
@@ -86,10 +87,7 @@ function SuperNotificationsPage() {
   const [audience, setAudience] = useState<BroadcastAudience>('all')
   const { data: preview } = useBroadcastPreview(audience)
   const send = useSendBroadcast()
-  const [lastResult, setLastResult] = useState<{
-    users: number
-    accepted: number
-  } | null>(null)
+  const [lastResult, setLastResult] = useState<BroadcastResult | null>(null)
 
   const { register, handleSubmit, formState, watch, reset } =
     useForm<FormValues>({
@@ -205,7 +203,7 @@ function SuperNotificationsPage() {
           disabled={send.isPending || (preview?.users ?? 0) === 0}
         >
           {send.isPending
-            ? 'Enviando…'
+            ? 'Enviando y verificando entrega…'
             : `Enviar a ${preview?.users ?? 0} usuario(s) →`}
         </Button>
 
@@ -223,10 +221,35 @@ function SuperNotificationsPage() {
           </p>
         )}
         {lastResult && (
-          <p className="text-sm text-ok">
-            Enviada ✓ — {lastResult.accepted} notificación(es) aceptada(s) para{' '}
-            {lastResult.users} usuario(s).
-          </p>
+          <div className="space-y-1 text-sm">
+            {lastResult.delivered > 0 && (
+              <p className="text-ok">
+                Entregada ✓ — {lastResult.delivered} de {lastResult.accepted}{' '}
+                notificación(es) llegaron al dispositivo ({lastResult.users}{' '}
+                usuario(s)).
+              </p>
+            )}
+            {lastResult.failed > 0 && (
+              <p className="text-bad">
+                ✗ {lastResult.failed} fallida(s)
+                {lastResult.errors.length > 0
+                  ? ` — ${lastResult.errors.join(', ')}`
+                  : ''}
+                . Apple/Google rechazó la entrega; revisa los códigos.
+              </p>
+            )}
+            {lastResult.pending > 0 && (
+              <p className="text-ink-muted">
+                {lastResult.pending} aún en proceso — Expo no publicó su
+                recibo todavía; suele resolverse en minutos.
+              </p>
+            )}
+            {lastResult.accepted === 0 && (
+              <p className="text-bad">
+                Expo no aceptó ningún envío — no hay dispositivos alcanzables.
+              </p>
+            )}
+          </div>
         )}
       </form>
 

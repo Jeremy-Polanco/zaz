@@ -89,4 +89,82 @@ describe('PushService', () => {
     fetchMock.mockRejectedValue(new Error('ECONNRESET'));
     await expect(service.sendToUser('u1', 'Hola', 'cuerpo')).resolves.toBe(0);
   });
+
+  it('sendToUserTracked returns the ticket id + token of each accepted message', async () => {
+    tokensRepo.find.mockResolvedValue([
+      { token: 'ExponentPushToken[aaa]' },
+      { token: 'ExponentPushToken[bbb]' },
+    ]);
+    mockExpoResponse([
+      { status: 'ok', id: 't-1' },
+      { status: 'error', details: { error: 'DeviceNotRegistered' } },
+    ]);
+
+    const result = await service.sendToUserTracked('u1', 'Hola', 'cuerpo');
+
+    expect(result.accepted).toBe(1);
+    expect(result.tickets).toEqual([
+      { id: 't-1', token: 'ExponentPushToken[aaa]' },
+    ]);
+  });
+
+  describe('checkReceipts', () => {
+    function mockReceiptsResponse(receipts: Record<string, unknown>) {
+      fetchMock.mockResolvedValue({
+        ok: true,
+        json: async () => ({ data: receipts }),
+      } as unknown as Response);
+    }
+
+    it('counts delivered, failed and pending receipts and collects error codes', async () => {
+      mockReceiptsResponse({
+        't-ok': { status: 'ok' },
+        't-bad': { status: 'error', details: { error: 'InvalidCredentials' } },
+        // t-later intentionally absent → still pending on Expo's side
+      });
+
+      const summary = await service.checkReceipts([
+        { id: 't-ok', token: 'ExponentPushToken[aaa]' },
+        { id: 't-bad', token: 'ExponentPushToken[bbb]' },
+        { id: 't-later', token: 'ExponentPushToken[ccc]' },
+      ]);
+
+      expect(summary).toEqual({
+        delivered: 1,
+        failed: 1,
+        pending: 1,
+        errors: ['InvalidCredentials'],
+      });
+    });
+
+    it('prunes tokens whose receipt reports DeviceNotRegistered', async () => {
+      mockReceiptsResponse({
+        't-dead': { status: 'error', details: { error: 'DeviceNotRegistered' } },
+      });
+
+      await service.checkReceipts([
+        { id: 't-dead', token: 'ExponentPushToken[dead]' },
+      ]);
+
+      expect(tokensRepo.delete).toHaveBeenCalledWith({
+        token: 'ExponentPushToken[dead]',
+      });
+    });
+
+    it('treats every ticket as pending when the receipts request fails', async () => {
+      fetchMock.mockRejectedValue(new Error('ECONNRESET'));
+
+      const summary = await service.checkReceipts([
+        { id: 't-1', token: 'ExponentPushToken[aaa]' },
+        { id: 't-2', token: 'ExponentPushToken[bbb]' },
+      ]);
+
+      expect(summary).toEqual({
+        delivered: 0,
+        failed: 0,
+        pending: 2,
+        errors: [],
+      });
+    });
+  });
 });

@@ -10,7 +10,7 @@ describe('BroadcastService', () => {
     query: jest.Mock;
     createQueryBuilder: jest.Mock;
   };
-  let push: { sendToUser: jest.Mock };
+  let push: { sendToUserTracked: jest.Mock; checkReceipts: jest.Mock };
 
   beforeEach(async () => {
     tokensRepo = {
@@ -20,7 +20,14 @@ describe('BroadcastService', () => {
         getCount: jest.fn().mockResolvedValue(0),
       }),
     };
-    push = { sendToUser: jest.fn().mockResolvedValue(1) };
+    push = {
+      sendToUserTracked: jest
+        .fn()
+        .mockResolvedValue({ accepted: 1, tickets: [] }),
+      checkReceipts: jest
+        .fn()
+        .mockResolvedValue({ delivered: 0, failed: 0, pending: 0, errors: [] }),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -30,24 +37,70 @@ describe('BroadcastService', () => {
       ],
     }).compile();
     service = module.get(BroadcastService);
+    // Skip the real-world receipt settling delay in tests.
+    (service as unknown as { receiptDelayMs: number }).receiptDelayMs = 0;
   });
 
-  it('sends the message to every user in the audience and sums accepted counts', async () => {
+  it('sends to every user, sums accepted counts and reports receipt verdicts', async () => {
     tokensRepo.query.mockResolvedValue([
       { user_id: 'u1' },
       { user_id: 'u2' },
       { user_id: 'u3' },
     ]);
-    push.sendToUser
-      .mockResolvedValueOnce(2) // two devices
-      .mockResolvedValueOnce(1)
-      .mockResolvedValueOnce(0); // permission revoked / dead tokens
+    push.sendToUserTracked
+      .mockResolvedValueOnce({
+        accepted: 2, // two devices
+        tickets: [
+          { id: 't-1', token: 'tok-1' },
+          { id: 't-2', token: 'tok-2' },
+        ],
+      })
+      .mockResolvedValueOnce({
+        accepted: 1,
+        tickets: [{ id: 't-3', token: 'tok-3' }],
+      })
+      .mockResolvedValueOnce({ accepted: 0, tickets: [] }); // dead tokens
+    push.checkReceipts.mockResolvedValue({
+      delivered: 2,
+      failed: 1,
+      pending: 0,
+      errors: ['InvalidCredentials'],
+    });
 
     const result = await service.broadcast('all', 'Oferta', '2x1 hoy');
 
-    expect(push.sendToUser).toHaveBeenCalledTimes(3);
-    expect(push.sendToUser).toHaveBeenCalledWith('u1', 'Oferta', '2x1 hoy');
-    expect(result).toEqual({ users: 3, accepted: 3 });
+    expect(push.sendToUserTracked).toHaveBeenCalledTimes(3);
+    expect(push.sendToUserTracked).toHaveBeenCalledWith('u1', 'Oferta', '2x1 hoy');
+    expect(push.checkReceipts).toHaveBeenCalledWith([
+      { id: 't-1', token: 'tok-1' },
+      { id: 't-2', token: 'tok-2' },
+      { id: 't-3', token: 'tok-3' },
+    ]);
+    expect(result).toEqual({
+      users: 3,
+      accepted: 3,
+      delivered: 2,
+      failed: 1,
+      pending: 0,
+      errors: ['InvalidCredentials'],
+    });
+  });
+
+  it('skips the receipt check entirely when no ticket was accepted', async () => {
+    tokensRepo.query.mockResolvedValue([{ user_id: 'u1' }]);
+    push.sendToUserTracked.mockResolvedValue({ accepted: 0, tickets: [] });
+
+    const result = await service.broadcast('all', 'Oferta', '2x1 hoy');
+
+    expect(push.checkReceipts).not.toHaveBeenCalled();
+    expect(result).toEqual({
+      users: 1,
+      accepted: 0,
+      delivered: 0,
+      failed: 0,
+      pending: 0,
+      errors: [],
+    });
   });
 
   it('uses the lapsed-audience SQL (8-day HAVING) for audience=lapsed', async () => {

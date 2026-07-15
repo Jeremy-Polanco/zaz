@@ -1295,6 +1295,17 @@ export function useBroadcastPreview(audience: BroadcastAudience) {
   })
 }
 
+export interface BroadcastResult {
+  users: number
+  /** Tickets Expo accepted — says nothing about delivery. */
+  accepted: number
+  /** Receipt verdicts from Expo (APNs/FCM), polled once after sending. */
+  delivered: number
+  failed: number
+  pending: number
+  errors: string[]
+}
+
 /** Super-admin: POST /admin/notifications/broadcast — send push to audience. */
 export function useSendBroadcast() {
   return useMutation({
@@ -1303,7 +1314,7 @@ export function useSendBroadcast() {
       body: string
       audience: BroadcastAudience
     }) => {
-      const { data } = await api.post<{ users: number; accepted: number }>(
+      const { data } = await api.post<BroadcastResult>(
         '/admin/notifications/broadcast',
         input,
       )
