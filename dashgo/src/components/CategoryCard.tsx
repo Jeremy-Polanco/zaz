@@ -22,72 +22,72 @@ export function CategoryCard({ category, productCount, variant = 'category', dar
       : null
 
   const isAll = variant === 'all'
-  const onLight = !dark && !imageUri && !isAll
-  const onDark = dark && !imageUri && !isAll
 
   // Surface
   let surface = 'border-ink/15 bg-paper-deep'
   if (isAll) surface = 'border-accent bg-accent'
   else if (dark) surface = 'border-transparent bg-ink'
 
+  // Label bar colors follow the card surface, never the image — the label
+  // lives below the artwork so it stays legible on any category image.
+  const eyebrowColor = isAll
+    ? 'text-brand-dark/70'
+    : dark
+      ? 'text-paper/55'
+      : 'text-ink-muted'
+  const nameColor = isAll ? 'text-brand-dark' : dark ? 'text-paper' : 'text-ink'
+  const divider = isAll
+    ? 'border-brand-dark/15'
+    : dark
+      ? 'border-paper/15'
+      : 'border-ink/10'
+
   return (
     <Pressable
       onPress={onPress}
       android_ripple={{ color: 'rgba(0,0,0,0.08)' }}
-      className={`aspect-square overflow-hidden border ${surface}`}
+      className={`overflow-hidden border ${surface}`}
       style={{ activeOpacity: 0.8 } as object}
     >
-      {/* Background image */}
-      {imageUri ? (
-        <Image
-          source={{ uri: imageUri }}
-          style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }}
-          contentFit="cover"
-          onError={() => setShowImage(false)}
-        />
-      ) : null}
+      {/* Media canvas — square, artwork only. The label never overlaps it. */}
+      <View className="relative aspect-square w-full">
+        {imageUri ? (
+          <Image
+            source={{ uri: imageUri }}
+            style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }}
+            contentFit="cover"
+            onError={() => setShowImage(false)}
+          />
+        ) : (
+          <View className="flex-1 items-center justify-center">
+            {/* Emoji glyphs render taller than their nominal font size — give
+                the line box ~1.3× headroom or the icon gets clipped. */}
+            <Text
+              style={
+                large
+                  ? { fontSize: 84, lineHeight: 112 }
+                  : { fontSize: 44, lineHeight: 60 }
+              }
+            >
+              {isAll ? '🛍️' : (category.iconEmoji ?? '📦')}
+            </Text>
+          </View>
+        )}
+      </View>
 
-      {/* Emoji centered (shown when no image) */}
-      {!imageUri ? (
-        <View className="flex-1 items-center justify-center">
-          <Text className={large ? 'text-8xl' : 'text-5xl'}>
-            {isAll ? '🛍️' : (category.iconEmoji ?? '📦')}
-          </Text>
-        </View>
-      ) : null}
-
-      {/* Bottom overlay */}
-      <View
-        className={`absolute bottom-0 left-0 right-0 ${large ? 'px-4 pb-4 pt-8' : 'px-2 pb-2 pt-4'}`}
-        style={imageUri ? {
-          experimental_backgroundImage: 'linear-gradient(to top, rgba(0,0,0,0.6) 0%, transparent 100%)',
-        } : undefined}
-      >
+      {/* Label bar — own row below the artwork */}
+      <View className={`border-t ${divider} ${large ? 'px-4 py-3.5' : 'px-2.5 py-2'}`}>
         <Text
-          className={`font-sans uppercase tracking-eyebrow ${large ? 'text-[12px]' : 'text-[9px]'} ${
-            isAll
-              ? 'text-brand-dark/70'
-              : imageUri
-                ? 'text-paper/80'
-                : onDark
-                  ? 'text-paper/55'
-                  : 'text-ink-muted'
-          }`}
+          className={`font-sans uppercase tracking-eyebrow ${large ? 'text-[12px]' : 'text-[9px]'} ${eyebrowColor}`}
           numberOfLines={1}
         >
           {productCount} productos
         </Text>
         <Text
-          className={`font-sans-semibold ${large ? 'text-[24px] leading-[28px]' : 'text-[13px] leading-[16px]'} ${
-            isAll
-              ? 'text-brand-dark'
-              : imageUri
-                ? 'text-paper'
-                : onDark
-                  ? 'text-paper'
-                  : 'text-ink'
-          }`}
-          numberOfLines={2}
+          className={`font-sans-semibold ${large ? 'mt-0.5 text-[22px] leading-[26px]' : 'text-[13px] leading-[17px]'} ${nameColor}`}
+          numberOfLines={1}
+          adjustsFontSizeToFit
+          minimumFontScale={0.75}
         >
           {isAll ? 'Ver todo el catálogo' : category.name}
         </Text>

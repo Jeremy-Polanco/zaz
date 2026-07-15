@@ -652,9 +652,9 @@ export default function CatalogTab() {
           </Text>
         </View>
       ) : (
-        // Full-width single column: CategoryCard is aspect-square, so each
-        // card is ~screen-width tall — about two fill the viewport, the rest
-        // scroll. (Was a 2-col grid of small tiles.)
+        // Full-width single column: CategoryCard is a square media canvas
+        // plus a label bar, so each card is ~screen-width tall — about two
+        // fill the viewport, the rest scroll. (Was a 2-col grid of small tiles.)
         <View className="mt-3" style={{ gap: 10 }}>
           {(categories ?? []).map((c, i) => (
             <CategoryCard

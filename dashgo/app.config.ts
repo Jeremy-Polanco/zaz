@@ -83,7 +83,7 @@ function resolveIosBuildNumber(): string {
   // Apple rejects a duplicate buildNumber on the same version (1.0).
   const fromEas = process.env.EAS_BUILD_NUMBER
   if (fromEas && fromEas.length > 0) return fromEas
-  return '10'
+  return '11'
 }
 
 function resolveAndroidVersionCode(): number {
@@ -94,7 +94,9 @@ function resolveAndroidVersionCode(): number {
     const parsed = Number.parseInt(fromEas, 10)
     if (Number.isFinite(parsed) && parsed > 0) return parsed
   }
-  return 1
+  // appVersionSource is 'local' — BUMP THIS by 1 before each Play upload,
+  // same ritual as the iOS buildNumber above.
+  return 2
 }
 
 export default ({ config }: ConfigContext): ExpoConfig => {
