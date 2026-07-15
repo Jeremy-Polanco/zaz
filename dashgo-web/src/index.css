@@ -84,13 +84,14 @@ body {
 }
 
 /* Page enter animation.
-   The resting keyframe MUST be `transform: none` (not translateY(0)): with
-   fill-mode `both` the final transform stays applied forever, and ANY
-   non-none transform turns the page container into a containing block for
+   fill-mode MUST be `backwards`, never `both`/`forwards`: a retained fill
+   keeps a transform applied forever (browsers hold the final keyframe as an
+   identity MATRIX even when the keyframe says `transform: none`), and any
+   transform turns the page container into a containing block for
    position:fixed descendants — every modal/drawer inside then centers on the
    tall page instead of the viewport (invisible off-screen dialog on long
-   lists, e.g. Usuarios → Eliminar). `none` is visually identical and drops
-   the containing block once the animation ends. */
+   lists, e.g. Usuarios → Eliminar). `backwards` covers the pre-animation
+   frame and releases all styles on finish. */
 @keyframes page-rise {
   from {
     opacity: 0;
@@ -103,7 +104,7 @@ body {
 }
 
 .page-rise {
-  animation: page-rise 400ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
+  animation: page-rise 400ms cubic-bezier(0.2, 0.7, 0.2, 1) backwards;
 }
 
 @keyframes page-rise-delayed {
@@ -119,7 +120,7 @@ body {
 }
 
 .page-rise-2 {
-  animation: page-rise-delayed 700ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
+  animation: page-rise-delayed 700ms cubic-bezier(0.2, 0.7, 0.2, 1) backwards;
 }
 
 /* Marquee (landing banner) */
