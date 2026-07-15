@@ -83,7 +83,14 @@ body {
   opacity: 0.12;
 }
 
-/* Page enter animation */
+/* Page enter animation.
+   The resting keyframe MUST be `transform: none` (not translateY(0)): with
+   fill-mode `both` the final transform stays applied forever, and ANY
+   non-none transform turns the page container into a containing block for
+   position:fixed descendants — every modal/drawer inside then centers on the
+   tall page instead of the viewport (invisible off-screen dialog on long
+   lists, e.g. Usuarios → Eliminar). `none` is visually identical and drops
+   the containing block once the animation ends. */
 @keyframes page-rise {
   from {
     opacity: 0;
@@ -91,7 +98,7 @@ body {
   }
   to {
     opacity: 1;
-    transform: translateY(0);
+    transform: none;
   }
 }
 
@@ -107,7 +114,7 @@ body {
   }
   100% {
     opacity: 1;
-    transform: translateY(0);
+    transform: none;
   }
 }
 
