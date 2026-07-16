@@ -81,6 +81,29 @@ describe('SubscriberBebederoListener', () => {
     ).resolves.toBeUndefined();
   });
 
+  it('defers (without throwing) on ACTIVE_ORDER_EXISTS so the hourly reconcile can retry', async () => {
+    products.findOne.mockResolvedValue({ id: 'prod-beb' });
+    orders.create.mockRejectedValue(
+      new ConflictException({ code: 'ACTIVE_ORDER_EXISTS' }),
+    );
+
+    await expect(
+      listener.handleSubscriptionActivated({ userId: 'user-9' }),
+    ).resolves.toBeUndefined();
+    expect(orders.create).toHaveBeenCalledTimes(1);
+  });
+
+  it('reconcileHourly re-runs the idempotent backfill', async () => {
+    products.findOne.mockResolvedValue({ id: 'prod-beb' });
+    subscriptions.listActiveSubscriberUserIds.mockResolvedValue(['u1']);
+    rentals.findActiveByUserAndProduct.mockResolvedValue(null);
+
+    await listener.reconcileHourly();
+
+    expect(subscriptions.listActiveSubscriberUserIds).toHaveBeenCalled();
+    expect(orders.create).toHaveBeenCalledTimes(1);
+  });
+
   describe('backfillMissingBebederos', () => {
     it('provisions the bebedero for active subscribers who do not have one yet', async () => {
       products.findOne.mockResolvedValue({ id: 'prod-beb', isDefaultSubscriberBebedero: true });

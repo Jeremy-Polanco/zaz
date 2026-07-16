@@ -5,6 +5,7 @@ import {
   OnApplicationBootstrap,
 } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
+import { Cron } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Product } from '../../entities';
@@ -86,6 +87,17 @@ export class SubscriberBebederoListener implements OnApplicationBootstrap {
   }
 
   /**
+   * Hourly reconcile: re-runs the idempotent backfill so a provisioning that
+   * was deferred at activation time (e.g. ACTIVE_ORDER_EXISTS because the
+   * subscriber had an order in flight when they subscribed) heals within the
+   * hour instead of waiting for the next deploy's bootstrap pass.
+   */
+  @Cron('20 * * * *')
+  async reconcileHourly(): Promise<void> {
+    await this.backfillMissingBebederos();
+  }
+
+  /**
    * Create the $0 default-bebedero order for one subscriber, unless they
    * already have a bebedero rental (idempotent) or no default is configured.
    * Never throws — errors are logged so a single bad user can't abort a backfill.
@@ -131,7 +143,25 @@ export class SubscriberBebederoListener implements OnApplicationBootstrap {
       return 'created';
     } catch (err) {
       if (err instanceof ConflictException) {
-        // RENTAL_ALREADY_ACTIVE race — another path created it concurrently. Fine.
+        const response = err.getResponse();
+        const code =
+          typeof response === 'object' && response !== null
+            ? (response as { code?: string }).code
+            : undefined;
+        if (code === 'RENTAL_ALREADY_ACTIVE') {
+          // Race — another path created the rental concurrently. Fine.
+          this.logger.log(
+            `User ${userId} bebedero rental appeared concurrently — skipping`,
+          );
+          return 'skipped';
+        }
+        // Any OTHER business conflict is NOT equivalent to "already provisioned".
+        // ACTIVE_ORDER_EXISTS (subscriber had an order in flight when they
+        // subscribed) used to be swallowed here silently, losing the bebedero
+        // until the next deploy. Log it and let the hourly reconcile retry.
+        this.logger.warn(
+          `Auto bebedero order deferred for user ${userId}: ${code ?? 'CONFLICT'} — hourly reconcile will retry`,
+        );
         return 'skipped';
       }
       this.logger.error(
