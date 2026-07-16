@@ -5,7 +5,7 @@ export const Route = createFileRoute('/privacidad')({
 })
 
 const LAST_UPDATED = '1 de junio de 2026'
-const LEGAL_NAME = 'Urban Dash LLC'
+const LEGAL_NAME = 'UrbanDash LLC'
 const CONTACT_EMAIL = 'urban@dashgo.dev'
 const PHYSICAL_ADDRESS = '45 Cypress Ave, Bogota, NJ 07603'
 

@@ -4,7 +4,7 @@ export const Route = createFileRoute('/soporte')({
   component: Support,
 })
 
-const LEGAL_NAME = 'Urban Dash LLC'
+const LEGAL_NAME = 'UrbanDash LLC'
 const CONTACT_EMAIL = 'urban@dashgo.dev'
 const PHYSICAL_ADDRESS = '45 Cypress Ave, Bogota, NJ 07603'
 

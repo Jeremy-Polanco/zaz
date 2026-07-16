@@ -446,7 +446,7 @@ function RootLayout() {
       </main>
       <footer className="border-t border-ink/10 bg-paper/60 py-6">
         <div className="mx-auto flex max-w-7xl flex-col items-start justify-between gap-2 px-6 sm:flex-row sm:items-center">
-          <span className="eyebrow">© Udash · El colmado, al timbre</span>
+          <span className="eyebrow">© 2026 UrbanDash LLC · Udash — El colmado, al timbre</span>
           <div className="flex items-center gap-4">
             <Link to="/privacidad" className="eyebrow underline">
               Privacidad
