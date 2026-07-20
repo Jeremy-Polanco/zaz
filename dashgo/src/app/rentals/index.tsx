@@ -2,6 +2,7 @@ import { View, Text, FlatList, ActivityIndicator } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { Stack } from 'expo-router'
 import { Image } from 'expo-image'
+import { useTranslation } from 'react-i18next'
 import { useMyRentals } from '../../lib/queries'
 import { formatCents, formatDate } from '../../lib/format'
 import { productImageUrl } from '../../lib/api'
@@ -11,44 +12,43 @@ import { ScreenHeader } from '../../components/ScreenHeader'
 // ─── Status badge config ──────────────────────────────────────────────────────
 
 type BadgeConfig = {
-  label: string
+  labelKey: string
   bgClass: string
   textClass: string
 }
 
 const STATUS_BADGE: Record<RentalStatus, BadgeConfig> = {
   active: {
-    label: 'Activo',
+    labelKey: 'status.active',
     bgClass: 'bg-green-100',
     textClass: 'text-green-800',
   },
   past_due: {
-    label: 'Atrasado',
+    labelKey: 'status.pastDue',
     bgClass: 'bg-orange-100',
     textClass: 'text-orange-800',
   },
   unpaid: {
-    label: 'Sin pagar',
+    labelKey: 'status.unpaid',
     bgClass: 'bg-red-100',
     textClass: 'text-red-800',
   },
   canceled: {
-    label: 'Cancelado',
+    labelKey: 'status.canceled',
     bgClass: 'bg-stone-100',
     textClass: 'text-stone-500',
   },
   pending_setup: {
-    label: 'Pendiente',
+    labelKey: 'status.pendingSetup',
     bgClass: 'bg-amber-100',
     textClass: 'text-amber-800',
   },
 }
 
-const PENDING_SETUP_COPY = 'Estamos terminando de configurar tu alquiler. Te avisamos cuando esté activo.'
-
 // ─── Rental card ─────────────────────────────────────────────────────────────
 
 function RentalCard({ rental }: { rental: Rental }) {
+  const { t } = useTranslation('rentals')
   const badge = STATUS_BADGE[rental.status]
   const hasImage = !!rental.productImageUrl
 
@@ -84,7 +84,7 @@ function RentalCard({ rental }: { rental: Rental }) {
             {/* Status badge */}
             <View className={`rounded-sm px-2 py-0.5 ${badge.bgClass}`}>
               <Text className={`font-sans-medium text-[11px] ${badge.textClass}`}>
-                {badge.label}
+                {t(badge.labelKey)}
               </Text>
             </View>
           </View>
@@ -93,17 +93,18 @@ function RentalCard({ rental }: { rental: Rental }) {
             className="mt-1 font-sans-semibold text-[15px] text-brand"
             style={{ fontVariant: ['tabular-nums'] }}
           >
-            {formatCents(rental.monthlyRentCents)}/mes
+            {formatCents(rental.monthlyRentCents)}
+            {t('perMonth')}
           </Text>
 
           {rental.nextChargeAt && (
             <Text className="mt-1 font-sans text-[14px] text-ink-soft">
-              Próximo cargo: {formatDate(rental.nextChargeAt)}
+              {t('nextCharge', { date: formatDate(rental.nextChargeAt) })}
             </Text>
           )}
           {rental.status === 'pending_setup' && (
             <Text className="mt-2 font-sans text-[14px] text-amber-800">
-              {PENDING_SETUP_COPY}
+              {t('pendingSetupCopy')}
             </Text>
           )}
         </View>
@@ -115,12 +116,13 @@ function RentalCard({ rental }: { rental: Rental }) {
 // ─── Main screen ──────────────────────────────────────────────────────────────
 
 export default function RentalsIndex() {
+  const { t } = useTranslation('rentals')
   const { data: rentals, isPending } = useMyRentals()
 
   if (isPending) {
     return (
       <SafeAreaView className="flex-1 items-center justify-center bg-paper">
-        <Stack.Screen options={{ title: 'Mis alquileres' }} />
+        <Stack.Screen options={{ title: t('screenTitle') }} />
         <ActivityIndicator color="#1A1530" size="small" />
       </SafeAreaView>
     )
@@ -130,19 +132,19 @@ export default function RentalsIndex() {
 
   return (
     <SafeAreaView edges={['bottom']} className="flex-1 bg-paper">
-      <Stack.Screen options={{ title: 'Mis alquileres' }} />
-      <ScreenHeader title="Alquileres" />
+      <Stack.Screen options={{ title: t('screenTitle') }} />
+      <ScreenHeader title={t('title')} />
 
       {list.length === 0 ? (
         <View className="flex-1 items-center justify-center px-8">
           <Text className="font-sans text-[12px] uppercase tracking-eyebrow text-ink-muted">
-            Sin alquileres
+            {t('empty.eyebrow')}
           </Text>
           <Text className="mt-3 text-center text-[17px] text-ink-soft">
-            No tienes alquileres activos.
+            {t('empty.title')}
           </Text>
           <Text className="mt-1 text-center text-[15px] text-ink-muted">
-            Cuando alquiles un producto, lo verás aquí.
+            {t('empty.subtitle')}
           </Text>
         </View>
       ) : (

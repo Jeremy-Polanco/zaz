@@ -1,5 +1,6 @@
 import { type ReactNode } from 'react'
 import { View, Text, Pressable } from 'react-native'
+import { useTranslation } from 'react-i18next'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { router } from 'expo-router'
 import { SymbolView } from 'expo-symbols'
@@ -28,7 +29,7 @@ export function ScreenHeader({
   title,
   subtitle,
   onBack,
-  backLabel = 'Atrás',
+  backLabel,
   right,
   showBack = true,
 }: {
@@ -41,6 +42,7 @@ export function ScreenHeader({
   right?: ReactNode
   showBack?: boolean
 }) {
+  const { t } = useTranslation('common')
   const insets = useSafeAreaInsets()
 
   const handleBack = () => {
@@ -59,7 +61,7 @@ export function ScreenHeader({
             onPress={handleBack}
             hitSlop={12}
             accessibilityRole="button"
-            accessibilityLabel="Volver atrás"
+            accessibilityLabel={t('goBack')}
             className="h-12 flex-row items-center gap-0.5 rounded-full pl-1 pr-4 active:bg-ink/5"
           >
             <SymbolView
@@ -69,7 +71,7 @@ export function ScreenHeader({
               resizeMode="scaleAspectFit"
               fallback={<Text className="text-[24px] text-ink">‹</Text>}
             />
-            <Text className="font-sans-medium text-[17px] text-ink">{backLabel}</Text>
+            <Text className="font-sans-medium text-[17px] text-ink">{backLabel ?? t('back')}</Text>
           </Pressable>
         ) : (
           <View className="h-12" />

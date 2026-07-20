@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import { Modal, Pressable, ScrollView, Text, View } from 'react-native'
+import { useTranslation } from 'react-i18next'
 import { Eyebrow } from './ui'
 import { useCurrentUser, useMyAddresses, useSetActiveLocation } from '../lib/queries'
 
@@ -15,6 +16,7 @@ import { useCurrentUser, useMyAddresses, useSetActiveLocation } from '../lib/que
  * backend resolution order (active → default → first).
  */
 export function LocationSelector() {
+  const { t } = useTranslation('addresses')
   const { data: user } = useCurrentUser()
   const { data: addresses } = useMyAddresses()
   const setActive = useSetActiveLocation()
@@ -45,12 +47,14 @@ export function LocationSelector() {
         disabled={setActive.isPending}
         className="mt-4 flex-row items-center justify-between border border-ink/15 px-4 py-3"
         accessibilityRole="button"
-        accessibilityLabel="Cambiar ubicación de despacho"
+        accessibilityLabel={t('dispatch.changeA11y')}
       >
         <View className="flex-1">
-          <Eyebrow>Despacho desde</Eyebrow>
+          <Eyebrow>{t('dispatch.from')}</Eyebrow>
           <Text className="mt-1 font-sans-semibold text-[15px] text-ink" numberOfLines={1}>
-            {setActive.isPending ? 'Cambiando…' : current?.label ?? 'Elegir ubicación'}
+            {setActive.isPending
+              ? t('dispatch.changing')
+              : current?.label ?? t('dispatch.choose')}
           </Text>
         </View>
         <Text className="ml-3 font-sans text-[18px] text-ink-soft">⌄</Text>
@@ -71,9 +75,9 @@ export function LocationSelector() {
           style={{ shadowOpacity: 0.2, shadowRadius: 20 }}
         >
           <View className="mx-auto mb-5 h-1 w-12 rounded-full bg-ink/20" />
-          <Eyebrow>Ubicación de despacho</Eyebrow>
+          <Eyebrow>{t('dispatch.sheetTitle')}</Eyebrow>
           <Text className="mt-2 font-sans text-[13px] text-ink-soft">
-            La ubicación activa define desde dónde se calcula el envío.
+            {t('dispatch.hint')}
           </Text>
 
           <ScrollView className="mt-4" showsVerticalScrollIndicator={false}>

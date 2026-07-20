@@ -3,6 +3,7 @@ import { View, Text, TextInput, ScrollView, Pressable, Linking } from 'react-nat
 import { router, useLocalSearchParams } from 'expo-router'
 import { useForm, Controller } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
+import { useTranslation } from 'react-i18next'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import {
   dobToIso,
@@ -102,10 +103,12 @@ export function isWhatsAppSendFailure(err: unknown): boolean {
  *     rate-limited code uses a longer cooldown so we don't immediately
  *     bounce off Meta's rate limit.
  */
+// Copy lives in the `auth` i18n namespace — this map only stores the KEYS
+// (resolved with t() at render time) plus the per-code behavior flags.
 type WhatsAppFailureCopy = {
-  eyebrow: string
-  message: string
-  bullets: string[]
+  eyebrowKey: string
+  messageKey: string
+  bulletKeys: string[]
   allowRetry: boolean
   showCallSupport: boolean
   retryCooldownSeconds: number
@@ -115,29 +118,28 @@ export const WHATSAPP_RATE_LIMITED_COOLDOWN_SECONDS = 30
 
 const WHATSAPP_FAILURE_COPY: Record<WhatsAppErrorCode, WhatsAppFailureCopy> = {
   [WHATSAPP_ERROR_CODES.WHATSAPP_SEND_FAILED]: {
-    eyebrow: 'WhatsApp no disponible',
-    message:
-      'No pudimos enviarte el código por WhatsApp ahora mismo. Por favor:',
-    bullets: [
-      'Verificá que tenés WhatsApp instalado',
-      'Probá de nuevo en unos minutos',
+    eyebrowKey: 'whatsappFailure.sendFailed.eyebrow',
+    messageKey: 'whatsappFailure.sendFailed.message',
+    bulletKeys: [
+      'whatsappFailure.sendFailed.bullets.installed',
+      'whatsappFailure.sendFailed.bullets.retryLater',
     ],
     allowRetry: true,
     showCallSupport: false,
     retryCooldownSeconds: 5,
   },
   [WHATSAPP_ERROR_CODES.WHATSAPP_RATE_LIMITED]: {
-    eyebrow: 'Mucho tráfico',
-    message: 'Hay alto tráfico ahora. Probá en 30 segundos.',
-    bullets: [],
+    eyebrowKey: 'whatsappFailure.rateLimited.eyebrow',
+    messageKey: 'whatsappFailure.rateLimited.message',
+    bulletKeys: [],
     allowRetry: true,
     showCallSupport: false,
     retryCooldownSeconds: WHATSAPP_RATE_LIMITED_COOLDOWN_SECONDS,
   },
   [WHATSAPP_ERROR_CODES.WHATSAPP_RECIPIENT_INVALID]: {
-    eyebrow: 'Número inválido',
-    message: 'El número no parece válido. Revisalo y probá de nuevo.',
-    bullets: [],
+    eyebrowKey: 'whatsappFailure.recipientInvalid.eyebrow',
+    messageKey: 'whatsappFailure.recipientInvalid.message',
+    bulletKeys: [],
     // No retry button — the user must edit the phone field and submit again.
     // Re-pinging Meta with the same bad number will just fail identically.
     allowRetry: false,
@@ -145,9 +147,9 @@ const WHATSAPP_FAILURE_COPY: Record<WhatsAppErrorCode, WhatsAppFailureCopy> = {
     retryCooldownSeconds: 0,
   },
   [WHATSAPP_ERROR_CODES.WHATSAPP_RECIPIENT_NOT_REACHABLE]: {
-    eyebrow: 'Sin WhatsApp',
-    message: 'No detectamos WhatsApp en este número. ¿Querés que te llamemos?',
-    bullets: [],
+    eyebrowKey: 'whatsappFailure.notReachable.eyebrow',
+    messageKey: 'whatsappFailure.notReachable.message',
+    bulletKeys: [],
     // Hard "no" on retry — the recipient does not have WhatsApp. The
     // actionable path is a voice call to support.
     allowRetry: false,
@@ -157,10 +159,9 @@ const WHATSAPP_FAILURE_COPY: Record<WhatsAppErrorCode, WhatsAppFailureCopy> = {
 }
 
 const ESCALATED_COPY: WhatsAppFailureCopy = {
-  eyebrow: 'WhatsApp no disponible',
-  message:
-    'Seguimos teniendo problemas para llegar a WhatsApp. Probá de nuevo más tarde o escribinos a soporte.',
-  bullets: [],
+  eyebrowKey: 'whatsappFailure.escalated.eyebrow',
+  messageKey: 'whatsappFailure.escalated.message',
+  bulletKeys: [],
   allowRetry: true,
   showCallSupport: false,
   retryCooldownSeconds: 5,
@@ -177,6 +178,7 @@ function computeSecondsLeft(expiresAt: string | null): number {
 }
 
 export default function LoginScreen() {
+  const { t } = useTranslation('auth')
   const params = useLocalSearchParams<{ ref?: string; next?: string }>()
   const referralCode =
     typeof params.ref === 'string' && params.ref.length === 8
@@ -214,20 +216,20 @@ export default function LoginScreen() {
                 className="font-sans-medium text-[11px] uppercase tracking-eyebrow"
                 style={{ color: 'rgba(245,228,71,0.9)' }}
               >
-                {step === 'phone' ? 'Ingresar · Agua · NY' : 'Código'}
+                {step === 'phone' ? t('header.eyebrowPhone') : t('header.eyebrowCode')}
               </Text>
               <View className="mt-3">
                 {step === 'phone' ? (
                   <>
                     <Text className="font-sans-semibold text-[44px] leading-[44px] text-paper">
-                      Bienvenido
+                      {t('header.heroPhone.line1')}
                     </Text>
                     <View className="flex-row items-baseline">
                       <Text className="font-sans-semibold text-[44px] leading-[44px] text-paper">
-                        de{' '}
+                        {t('header.heroPhone.line2')}
                       </Text>
                       <Text className="font-sans-italic text-[44px] leading-[44px] text-accent">
-                        vuelta
+                        {t('header.heroPhone.line2Accent')}
                       </Text>
                       <Text className="font-sans-semibold text-[44px] leading-[44px] text-paper">
                         .
@@ -237,14 +239,14 @@ export default function LoginScreen() {
                 ) : (
                   <>
                     <Text className="font-sans-semibold text-[44px] leading-[44px] text-paper">
-                      Mandamos
+                      {t('header.heroCode.line1')}
                     </Text>
                     <View className="flex-row items-baseline">
                       <Text className="font-sans-semibold text-[44px] leading-[44px] text-paper">
-                        tu{' '}
+                        {t('header.heroCode.line2')}
                       </Text>
                       <Text className="font-sans-italic text-[44px] leading-[44px] text-accent">
-                        código
+                        {t('header.heroCode.line2Accent')}
                       </Text>
                       <Text className="font-sans-semibold text-[44px] leading-[44px] text-paper">
                         .
@@ -269,8 +271,10 @@ export default function LoginScreen() {
             style={{ color: 'rgba(255,255,255,0.7)', maxWidth: 280 }}
           >
             {step === 'phone'
-              ? 'Entrega ultrarrápida, directo a tu puerta. Empieza con tu número de teléfono.'
-              : `Mandamos un código de 6 dígitos a ${phone || 'tu teléfono'}. Dímelo cuando llegue.`}
+              ? t('header.subtitlePhone')
+              : t('header.subtitleCode', {
+                  phone: phone || t('header.yourPhoneFallback'),
+                })}
           </Text>
         </View>
 
@@ -308,7 +312,7 @@ export default function LoginScreen() {
             className="mt-8 min-h-[44px] items-center justify-center self-center px-4"
           >
             <Text className="font-sans text-[13px] uppercase tracking-label text-ink-muted underline">
-              Explorar sin cuenta →
+              {t('guest.browse')}
             </Text>
           </Pressable>
         </View>
@@ -344,6 +348,7 @@ function WhatsAppFailureBlock({
   onRetry: () => void
   isPending: boolean
 }) {
+  const { t } = useTranslation('auth')
   const [cooldownLeft, setCooldownLeft] = useState(0)
   const cooldownAnchorRef = useRef<number | null>(null)
 
@@ -420,29 +425,29 @@ function WhatsAppFailureBlock({
         testID="whatsapp-failure-eyebrow"
         className="mb-2 font-sans-medium text-[13px] uppercase tracking-label text-bad"
       >
-        {copy.eyebrow}
+        {t(copy.eyebrowKey)}
       </Text>
       <Text
         testID="whatsapp-failure-message"
         className="mb-3 font-sans text-[15px] leading-[22px] text-ink"
       >
-        {copy.message}
+        {t(copy.messageKey)}
       </Text>
-      {copy.bullets.map((bullet, i) => (
+      {copy.bulletKeys.map((bulletKey) => (
         <Text
-          key={i}
+          key={bulletKey}
           className="mb-1 font-sans text-[15px] leading-[20px] text-ink-soft"
         >
-          • {bullet}
+          • {t(bulletKey)}
         </Text>
       ))}
       {/* Generic catch-all keeps the "escribinos a soporte" hint that the
           old single-code copy used to render. */}
       {!escalated &&
         code === WHATSAPP_ERROR_CODES.WHATSAPP_SEND_FAILED &&
-        copy.bullets.length > 0 && (
+        copy.bulletKeys.length > 0 && (
           <Text className="mb-3 font-sans text-[15px] leading-[20px] text-ink-soft">
-            • O escribinos a soporte: {SUPPORT_EMAIL}
+            • {t('whatsappFailure.supportBullet', { email: SUPPORT_EMAIL })}
           </Text>
         )}
 
@@ -458,10 +463,10 @@ function WhatsAppFailureBlock({
           >
             <Text className="font-sans-medium text-[14px] uppercase tracking-label text-ink">
               {isPending
-                ? 'Reintentando…'
+                ? t('whatsappFailure.retrying')
                 : cooldownLeft > 0
-                  ? `Reintentar en ${cooldownLeft}s`
-                  : 'Reintentar'}
+                  ? t('whatsappFailure.retryIn', { seconds: cooldownLeft })
+                  : t('whatsappFailure.retry')}
             </Text>
           </Pressable>
         )}
@@ -472,7 +477,7 @@ function WhatsAppFailureBlock({
             className="border border-ink px-4 py-3"
           >
             <Text className="font-sans-medium text-[14px] uppercase tracking-label text-ink">
-              Llamar a soporte
+              {t('whatsappFailure.callSupport')}
             </Text>
           </Pressable>
         )}
@@ -482,7 +487,7 @@ function WhatsAppFailureBlock({
           className="px-2 py-3"
         >
           <Text className="font-sans text-[13px] uppercase tracking-label text-ink-muted underline">
-            Contactar soporte
+            {t('whatsappFailure.contactSupport')}
           </Text>
         </Pressable>
       </View>
@@ -504,6 +509,7 @@ export function PhoneOnlyStep({
   referralCode: string | undefined
   onVerified: (role: UserRole) => void
 }) {
+  const { t } = useTranslation('auth')
   const login = useLogin()
   const [needsName, setNeedsName] = useState(false)
   const {
@@ -527,7 +533,7 @@ export function PhoneOnlyStep({
     if (needsName && !trimmedName) {
       setError('fullName', {
         type: 'required',
-        message: 'Poné tu nombre para crear tu cuenta',
+        message: t('firstLogin.nameRequired'),
       })
       setFocus('fullName')
       return
@@ -553,13 +559,13 @@ export function PhoneOnlyStep({
 
   return (
     <>
-      <Eyebrow className="mb-6">Ingresar</Eyebrow>
+      <Eyebrow className="mb-6">{t('form.eyebrowSignIn')}</Eyebrow>
 
       {referralCode ? (
         <View className="mb-6 flex-row items-center gap-2 self-start bg-brand-light px-2.5 py-1.5">
           <BoltIcon size={11} color="#1A1530" />
           <Text className="font-sans-medium text-[13px] uppercase tracking-label text-brand">
-            Registrándote con:{' '}
+            {t('referralBadge')}{' '}
             <Text className="text-brand">{referralCode}</Text>
           </Text>
         </View>
@@ -577,10 +583,9 @@ export function PhoneOnlyStep({
       {needsName && (
         <View className="mb-8">
           <Text className="mb-3 border-l-2 border-accent pl-3 font-sans text-[15px] leading-[21px] text-ink">
-            Primer ingreso detectado — dinos cómo te llamas para crear tu
-            cuenta.
+            {t('firstLogin.detected')}
           </Text>
-          <FieldLabel>Tu nombre</FieldLabel>
+          <FieldLabel>{t('firstLogin.nameLabel')}</FieldLabel>
           <Controller
             control={control}
             name="fullName"
@@ -591,7 +596,7 @@ export function PhoneOnlyStep({
                 className="h-11 border-b border-ink/25 pb-1 font-sans text-[16px] text-ink"
                 autoComplete="name"
                 textContentType="name"
-                placeholder="Juan Pérez"
+                placeholder={t('firstLogin.namePlaceholder')}
                 placeholderTextColor="#6B6488"
                 value={value ?? ''}
                 onChangeText={onChange}
@@ -602,7 +607,7 @@ export function PhoneOnlyStep({
           <FieldError message={errors.fullName?.message} />
 
           <View className="mt-6">
-            <FieldLabel>Fecha de nacimiento · opcional</FieldLabel>
+            <FieldLabel>{t('firstLogin.dobLabel')}</FieldLabel>
             <Controller
               control={control}
               name="dateOfBirth"
@@ -612,7 +617,7 @@ export function PhoneOnlyStep({
                   ref={ref}
                   className="h-11 border-b border-ink/25 pb-1 font-sans text-[16px] text-ink"
                   keyboardType="number-pad"
-                  placeholder="DD/MM/AAAA"
+                  placeholder={t('firstLogin.dobPlaceholder')}
                   placeholderTextColor="#6B6488"
                   maxLength={10}
                   value={value ?? ''}
@@ -632,7 +637,7 @@ export function PhoneOnlyStep({
               )}
             />
             <Text className="mt-1.5 font-sans text-[12px] text-ink-muted">
-              Para saludarte en tu cumpleaños 🎂
+              {t('firstLogin.dobHint')}
             </Text>
             <FieldError message={errors.dateOfBirth?.message} />
           </View>
@@ -641,7 +646,7 @@ export function PhoneOnlyStep({
 
       {login.isError && !isFirstLoginError(login.error) && (
         <Text className="mb-4 font-sans text-[13px] uppercase tracking-label text-bad">
-          {serverMessage(login.error, 'No pudimos iniciar sesión')}
+          {serverMessage(login.error, t('errors.loginFailed'))}
         </Text>
       )}
 
@@ -652,7 +657,7 @@ export function PhoneOnlyStep({
         loading={login.isPending}
         onPress={onSubmit}
       >
-        Entrar →
+        {t('actions.signIn')}
       </Button>
     </>
   )
@@ -663,6 +668,7 @@ function PhoneStep({
 }: {
   onSent: (phone: string, expiresAt: string) => void
 }) {
+  const { t } = useTranslation('auth')
   const sendOtp = useSendOtp()
   // FIX MOBILE-G1 — count CONSECUTIVE WhatsApp failures (reset on success).
   // Drives both the escalated copy and the "contact support" emphasis.
@@ -712,7 +718,7 @@ function PhoneStep({
 
   return (
     <>
-      <Eyebrow className="mb-6">Ingresar</Eyebrow>
+      <Eyebrow className="mb-6">{t('form.eyebrowSignIn')}</Eyebrow>
 
       <View className="mb-8">
         <PhoneField
@@ -732,7 +738,7 @@ function PhoneStep({
         />
       ) : sendOtp.isError ? (
         <Text className="mb-4 font-sans text-[13px] uppercase tracking-label text-bad">
-          {serverMessage(sendOtp.error, 'No pudimos mandar el código')}
+          {serverMessage(sendOtp.error, t('errors.sendCodeFailed'))}
         </Text>
       ) : null}
 
@@ -743,7 +749,7 @@ function PhoneStep({
         loading={sendOtp.isPending}
         onPress={onSubmit}
       >
-        Enviar código →
+        {t('actions.sendCode')}
       </Button>
     </>
   )
@@ -764,6 +770,7 @@ function CodeStep({
   onResent: (expiresAt: string) => void
   onVerified: (role: UserRole) => void
 }) {
+  const { t } = useTranslation('auth')
   const verifyOtp = useVerifyOtp()
   const sendOtp = useSendOtp()
   const [needsName, setNeedsName] = useState(false)
@@ -794,7 +801,7 @@ function CodeStep({
     if (needsName && !trimmedName) {
       setError('fullName', {
         type: 'required',
-        message: 'Poné tu nombre para crear la cuenta',
+        message: t('firstLogin.nameRequiredCode'),
       })
       setFocus('fullName')
       return
@@ -849,14 +856,14 @@ function CodeStep({
 
   return (
     <>
-      <Eyebrow className="mb-3">Código</Eyebrow>
+      <Eyebrow className="mb-3">{t('form.eyebrowCode')}</Eyebrow>
       <Text className="mb-1 font-sans text-[14px] text-ink-soft">
-        Mandamos un código a{' '}
+        {t('codeStep.sentTo')}{' '}
         <Text className="font-sans text-ink">{phone}</Text>.
       </Text>
       <Pressable onPress={onBack} className="mb-6 py-1">
         <Text className="font-sans text-[13px] uppercase tracking-label text-ink-muted">
-          ← Usar otro número
+          {t('codeStep.useAnotherNumber')}
         </Text>
       </Pressable>
 
@@ -864,14 +871,14 @@ function CodeStep({
         <View className="mb-6 flex-row items-center gap-2 self-start bg-brand-light px-2.5 py-1.5">
           <BoltIcon size={11} color="#1A1530" />
           <Text className="font-sans-medium text-[13px] uppercase tracking-label text-brand">
-            Registrándote con:{' '}
+            {t('referralBadge')}{' '}
             <Text className="text-brand">{referralCode}</Text>
           </Text>
         </View>
       ) : null}
 
       <View className="mb-6">
-        <FieldLabel>Código (6 dígitos)</FieldLabel>
+        <FieldLabel>{t('codeStep.codeLabel')}</FieldLabel>
         <Controller
           control={control}
           name="code"
@@ -896,10 +903,9 @@ function CodeStep({
       {needsName && (
         <View className="mb-8">
           <Text className="mb-3 border-l-2 border-accent pl-3 font-sans text-[15px] leading-[21px] text-ink">
-            Primer ingreso detectado — dinos cómo te llamas para crear tu
-            cuenta.
+            {t('firstLogin.detected')}
           </Text>
-          <FieldLabel>Tu nombre</FieldLabel>
+          <FieldLabel>{t('firstLogin.nameLabel')}</FieldLabel>
           <Controller
             control={control}
             name="fullName"
@@ -909,7 +915,7 @@ function CodeStep({
                 className="h-11 border-b border-ink/25 pb-1 font-sans text-[16px] text-ink"
                 autoComplete="name"
                 textContentType="name"
-                placeholder="Juan Pérez"
+                placeholder={t('firstLogin.namePlaceholder')}
                 placeholderTextColor="#6B6488"
                 value={value ?? ''}
                 onChangeText={onChange}
@@ -923,7 +929,7 @@ function CodeStep({
 
       {verifyOtp.isError && !isFirstLoginError(verifyOtp.error) && (
         <Text className="mb-4 font-sans text-[13px] uppercase tracking-label text-bad">
-          {serverMessage(verifyOtp.error, 'Código inválido')}
+          {serverMessage(verifyOtp.error, t('errors.invalidCode'))}
         </Text>
       )}
 
@@ -934,7 +940,7 @@ function CodeStep({
         loading={verifyOtp.isPending}
         onPress={onSubmit}
       >
-        Verificar →
+        {t('actions.verify')}
       </Button>
 
       <Pressable
@@ -944,10 +950,10 @@ function CodeStep({
       >
         <Text className="font-sans text-[13px] uppercase tracking-label text-ink-muted">
           {secondsLeft > 0
-            ? `Reenviar en ${secondsLeft}s`
+            ? t('codeStep.resendIn', { seconds: secondsLeft })
             : sendOtp.isPending
-              ? 'Reenviando…'
-              : 'Reenviar código'}
+              ? t('codeStep.resending')
+              : t('codeStep.resend')}
         </Text>
       </Pressable>
 

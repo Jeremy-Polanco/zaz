@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { View, Text, Pressable, ScrollView } from 'react-native'
+import { useTranslation } from 'react-i18next'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { router } from 'expo-router'
 import { useCart, cart } from '../lib/cart'
@@ -26,6 +27,7 @@ import { Button, Eyebrow, Hairline } from '../components/ui'
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export default function CheckoutScreen() {
+  const { t } = useTranslation('checkout')
   const cartState = useCart()
   const { data: user, isPending: userPending } = useCurrentUser()
 
@@ -61,6 +63,8 @@ export default function CheckoutScreen() {
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('cash')
   const [usePoints, setUsePoints] = useState(false)
   const [useCredit, setUseCredit] = useState(false)
+  // Propina — solo pago digital (en efectivo se da en mano). null = sin propina.
+  const [tipPercent, setTipPercent] = useState<15 | 18 | 25 | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   // ── Delivery address state ─────────────────────────────────────────────────
@@ -159,6 +163,13 @@ export default function CheckoutScreen() {
 
   const previewTotalCents = Math.max(0, subtotalCents - redeemCents - creditAppliedCents)
 
+  // Propina — % del subtotal de productos, sin impuestos. Mirrors the server
+  // math in orders.service.create: the tip rides on the total AFTER tax.
+  const tipCents =
+    paymentMethod === 'digital' && tipPercent
+      ? Math.round((subtotalCents * tipPercent) / 100)
+      : 0
+
   // Skip-cotización: when EVERY cart item has requiresQuote=false (e.g. water),
   // the order is auto-quoted at creation — shipping $0, tax computed now. Show
   // the real numbers instead of the "a cotizar" placeholders.
@@ -172,7 +183,11 @@ export default function CheckoutScreen() {
         pointsRedeemedCents: redeemCents,
       }).taxCents
     : 0
-  const skipQuoteTotalCents = previewTotalCents + skipQuoteTaxCents
+  const skipQuoteTotalCents = previewTotalCents + skipQuoteTaxCents + tipCents
+
+  // Section numbering: Propina appears only for digital, shifting later sections.
+  const pagoNo = hasAddresses ? 3 : 2
+  const fmtNo = (n: number) => String(n).padStart(2, '0')
 
   const itemCount = useMemo(
     () => lineItems.reduce((sum, li) => sum + li.quantity, 0),
@@ -219,6 +234,8 @@ export default function CheckoutScreen() {
         paymentMethod,
         usePoints,
         useCredit,
+        // Propina: digital-only — the server rejects it on cash orders.
+        ...(paymentMethod === 'digital' && tipPercent ? { tipPercent } : {}),
         ...(selectedAddress
           ? { deliveryAddress: userAddressToGeoAddress(selectedAddress) }
           : {}),
@@ -253,11 +270,7 @@ export default function CheckoutScreen() {
           }
           // Preserve a real failure reason (e.g. card declined) if payWithSheet
           // set one; otherwise show the friendly "cart still here" note.
-          setError(
-            (prev) =>
-              prev ??
-              'No completaste el pago. Tu carrito sigue acá cuando quieras pagar.',
-          )
+          setError((prev) => prev ?? t('errors.paymentIncomplete'))
           return // keep the cart, stay on checkout — no order created
         }
         // Authorized → the order is real now.
@@ -289,7 +302,7 @@ export default function CheckoutScreen() {
     } catch (e) {
       setError(
         (e as { response?: { data?: { message?: string } } })?.response?.data
-          ?.message ?? 'No se pudo crear el pedido',
+          ?.message ?? t('errors.createFailed'),
       )
     } finally {
       setPlacing(false)
@@ -301,7 +314,7 @@ export default function CheckoutScreen() {
 
     // Mixed-cart guard — mirrors server enforcement (Batch C T6.4)
     if (hasMixedCart) {
-      setError('No podés combinar productos de alquiler con productos de compra única.')
+      setError(t('mixedCart.error'))
       return
     }
 
@@ -315,14 +328,14 @@ export default function CheckoutScreen() {
     return (
       <SafeAreaView className="flex-1 bg-paper">
         <View className="flex-1 items-center justify-center px-6">
-          <Eyebrow>Carrito</Eyebrow>
-          <Text className="mt-4 font-sans-semibold text-3xl text-ink">Está vacío.</Text>
+          <Eyebrow>{t('emptyCart.eyebrow')}</Eyebrow>
+          <Text className="mt-4 font-sans-semibold text-3xl text-ink">{t('emptyCart.title')}</Text>
           <Text className="mt-2 text-center text-[14px] text-ink-soft">
-            Agrega productos desde el catálogo para continuar.
+            {t('emptyCart.subtitle')}
           </Text>
           <View className="mt-8 w-full max-w-[240px]">
             <Button variant="ink" size="lg" onPress={() => router.back()}>
-              Volver →
+              {t('emptyCart.back')}
             </Button>
           </View>
         </View>
@@ -334,12 +347,12 @@ export default function CheckoutScreen() {
     return (
       <SafeAreaView className="flex-1 bg-paper">
         <View className="flex-1 items-center justify-center px-6">
-          <Eyebrow>Pedido en curso</Eyebrow>
+          <Eyebrow>{t('activeOrder.eyebrow')}</Eyebrow>
           <Text className="mt-4 font-sans-semibold text-3xl text-ink">
-            Ya tenés uno en camino.
+            {t('activeOrder.title')}
           </Text>
           <Text className="mt-2 text-center text-[14px] text-ink-soft">
-            Esperá a que se complete para hacer otro. Te avisamos cuando llegue.
+            {t('activeOrder.subtitle')}
           </Text>
           <View className="mt-8 w-full max-w-[240px]">
             <Button
@@ -352,7 +365,7 @@ export default function CheckoutScreen() {
                 })
               }
             >
-              Ver mi pedido →
+              {t('activeOrder.viewOrder')}
             </Button>
           </View>
         </View>
@@ -365,12 +378,12 @@ export default function CheckoutScreen() {
   return (
     <SafeAreaView edges={['bottom']} className="flex-1 bg-paper">
       <ScrollView contentContainerClassName="px-5 pt-2 pb-8">
-        <Eyebrow className="mb-3">Checkout</Eyebrow>
+        <Eyebrow className="mb-3">{t('header.eyebrow')}</Eyebrow>
         <Text className="font-sans-semibold text-[36px] leading-[40px] text-ink">
-          Casi listo.
+          {t('header.title')}
         </Text>
         <Text className="mt-2 text-[14px] leading-[20px] text-ink-soft">
-          {itemCount} {itemCount === 1 ? 'producto' : 'productos'} para entregar hoy.
+          {t('header.itemCount', { count: itemCount })}
         </Text>
 
         <Hairline className="my-8" />
@@ -380,7 +393,7 @@ export default function CheckoutScreen() {
           <View className="mb-4 flex-row items-baseline gap-3">
             <Text className="font-sans-italic text-2xl text-brand">01</Text>
             <Text className="font-sans text-[13px] uppercase tracking-eyebrow text-ink-muted">
-              Resumen
+              {t('summary.title')}
             </Text>
           </View>
           {lineItems.map((li) =>
@@ -423,10 +436,14 @@ export default function CheckoutScreen() {
                         className="font-sans text-[11px] uppercase tracking-label text-ink-muted"
                         style={{ fontVariant: ['tabular-nums'] }}
                       >
-                        {formatCents(li.product.monthlyRentCents)} (primer mes)
+                        {t('summary.firstMonth', {
+                          amount: formatCents(li.product.monthlyRentCents),
+                        })}
                       </Text>
                       <Text className="font-sans text-[12px] text-ink-muted">
-                        luego {formatCents(li.product.monthlyRentCents)}/mes
+                        {t('summary.thenPerMonth', {
+                          amount: formatCents(li.product.monthlyRentCents),
+                        })}
                       </Text>
                     </View>
                   ) : (
@@ -455,7 +472,7 @@ export default function CheckoutScreen() {
             <View className="mb-4 flex-row items-baseline gap-3">
               <Text className="font-sans-italic text-2xl text-brand">02</Text>
               <Text className="font-sans text-[13px] uppercase tracking-eyebrow text-ink-muted">
-                Entrega
+                {t('delivery.title')}
               </Text>
             </View>
             <View className="gap-2">
@@ -474,7 +491,8 @@ export default function CheckoutScreen() {
                         {addr.label}
                         {addr.isDefault ? (
                           <Text className="font-sans text-[10px] uppercase tracking-label text-ink-muted">
-                            {'  '}Predeterminada
+                            {'  '}
+                            {t('delivery.default')}
                           </Text>
                         ) : null}
                       </Text>
@@ -498,10 +516,10 @@ export default function CheckoutScreen() {
         <View className="mb-8">
           <View className="mb-4 flex-row items-baseline gap-3">
             <Text className="font-sans-italic text-2xl text-brand">
-              {hasAddresses ? '03' : '02'}
+              {fmtNo(pagoNo)}
             </Text>
             <Text className="font-sans text-[13px] uppercase tracking-eyebrow text-ink-muted">
-              Pago
+              {t('payment.title')}
             </Text>
           </View>
           <View className="flex-row gap-3">
@@ -516,14 +534,14 @@ export default function CheckoutScreen() {
                   paymentMethod === 'cash' ? 'text-paper/70' : 'text-ink-muted'
                 }`}
               >
-                Al recibir
+                {t('payment.cashLabel')}
               </Text>
               <Text
                 className={`mt-1 font-sans-semibold text-[18px] ${
                   paymentMethod === 'cash' ? 'text-paper' : 'text-ink'
                 }`}
               >
-                Efectivo
+                {t('payment.cash')}
               </Text>
             </Pressable>
             <Pressable
@@ -537,28 +555,77 @@ export default function CheckoutScreen() {
                   paymentMethod === 'digital' ? 'text-paper/70' : 'text-ink-muted'
                 }`}
               >
-                Online
+                {t('payment.digitalLabel')}
               </Text>
               <Text
                 className={`mt-1 font-sans-semibold text-[18px] ${
                   paymentMethod === 'digital' ? 'text-paper' : 'text-ink'
                 }`}
               >
-                Digital
+                {t('payment.digital')}
               </Text>
             </Pressable>
           </View>
         </View>
+
+        {/* Propina — solo pago digital (en efectivo se da en mano) */}
+        {paymentMethod === 'digital' && (
+          <View className="mb-8">
+            <View className="mb-4 flex-row items-baseline gap-3">
+              <Text className="font-sans-italic text-2xl text-brand">
+                {fmtNo(pagoNo + 1)}
+              </Text>
+              <Text className="font-sans text-[13px] uppercase tracking-eyebrow text-ink-muted">
+                {t('tip.title')}
+              </Text>
+            </View>
+            <View className="flex-row gap-3">
+              {([null, 15, 18, 25] as const).map((pct) => {
+                const selected = tipPercent === pct
+                return (
+                  <Pressable
+                    key={pct ?? 'none'}
+                    onPress={() => setTipPercent(pct)}
+                    className={`flex-1 border px-2 py-3 ${
+                      selected ? 'border-ink bg-ink' : 'border-ink/20 bg-paper'
+                    }`}
+                  >
+                    <Text
+                      className={`text-center font-sans-semibold text-[16px] ${
+                        selected ? 'text-paper' : 'text-ink'
+                      }`}
+                    >
+                      {pct ? `${pct}%` : t('tip.none')}
+                    </Text>
+                    <Text
+                      className={`mt-0.5 text-center font-sans text-[11px] ${
+                        selected ? 'text-paper/70' : 'text-ink-muted'
+                      }`}
+                      style={{ fontVariant: ['tabular-nums'] }}
+                    >
+                      {pct
+                        ? formatCents(Math.round((subtotalCents * pct) / 100))
+                        : t('tip.noneSubtitle')}
+                    </Text>
+                  </Pressable>
+                )
+              })}
+            </View>
+            <Text className="mt-2 font-sans text-[12px] text-ink-muted">
+              {t('tip.note')}
+            </Text>
+          </View>
+        )}
 
         {/* Mi crédito */}
         {creditUsable && availableCreditCents > 0 && (
           <View className="mb-8">
             <View className="mb-4 flex-row items-baseline gap-3">
               <Text className="font-sans-italic text-2xl text-brand">
-                {hasAddresses ? '04' : '03'}
+                {fmtNo(pagoNo + (paymentMethod === 'digital' ? 2 : 1))}
               </Text>
               <Text className="font-sans text-[13px] uppercase tracking-eyebrow text-ink-muted">
-                Mi crédito
+                {t('credit.title')}
               </Text>
             </View>
             <Pressable
@@ -574,14 +641,14 @@ export default function CheckoutScreen() {
                       useCredit ? 'text-paper/70' : 'text-ink-muted'
                     }`}
                   >
-                    Disponible
+                    {t('credit.available')}
                   </Text>
                   <Text
                     className={`mt-1 font-sans-semibold text-[18px] ${
                       useCredit ? 'text-paper' : 'text-ink'
                     }`}
                   >
-                    Usar {formatCents(availableCreditCents)} en crédito
+                    {t('credit.use', { amount: formatCents(availableCreditCents) })}
                   </Text>
                 </View>
                 <View
@@ -603,10 +670,10 @@ export default function CheckoutScreen() {
           <View className="mb-8">
             <View className="mb-4 flex-row items-baseline gap-3">
               <Text className="font-sans-italic text-2xl text-brand">
-                {hasAddresses ? '05' : '04'}
+                {fmtNo(pagoNo + (paymentMethod === 'digital' ? 3 : 2))}
               </Text>
               <Text className="font-sans text-[13px] uppercase tracking-eyebrow text-ink-muted">
-                Mis puntos
+                {t('points.title')}
               </Text>
             </View>
             <Pressable
@@ -622,14 +689,14 @@ export default function CheckoutScreen() {
                       usePoints ? 'text-paper/70' : 'text-ink-muted'
                     }`}
                   >
-                    Canje total
+                    {t('points.fullRedeem')}
                   </Text>
                   <Text
                     className={`mt-1 font-sans-semibold text-[18px] ${
                       usePoints ? 'text-paper' : 'text-ink'
                     }`}
                   >
-                    Usar {formatCents(claimableCents)} en puntos
+                    {t('points.use', { amount: formatCents(claimableCents) })}
                   </Text>
                 </View>
                 <View
@@ -650,7 +717,7 @@ export default function CheckoutScreen() {
         <View className="border-t-2 border-ink pt-4">
           <View className="mb-2 flex-row items-baseline justify-between">
             <Text className="font-sans text-[13px] uppercase tracking-label text-ink-muted">
-              Subtotal
+              {t('totals.subtotal')}
             </Text>
             <Text
               className="font-sans text-[14px] text-ink"
@@ -662,7 +729,7 @@ export default function CheckoutScreen() {
           {hasRentalItems && (
             <View className="mb-2 flex-row items-baseline justify-between">
               <Text className="font-sans text-[13px] uppercase tracking-label text-brand">
-                Primer mes alquiler
+                {t('totals.rentalFirstMonth')}
               </Text>
               <Text
                 className="font-sans text-[14px] text-brand"
@@ -675,7 +742,7 @@ export default function CheckoutScreen() {
           {redeemCents > 0 && (
             <View className="mb-2 flex-row items-baseline justify-between">
               <Text className="font-sans text-[13px] uppercase tracking-label text-brand">
-                Descuento por puntos
+                {t('totals.pointsDiscount')}
               </Text>
               <Text
                 className="font-sans text-[14px] text-brand"
@@ -688,7 +755,7 @@ export default function CheckoutScreen() {
           {creditAppliedCents > 0 && (
             <View className="mb-2 flex-row items-baseline justify-between">
               <Text className="font-sans text-[13px] uppercase tracking-label text-brand">
-                Crédito aplicado
+                {t('totals.creditApplied')}
               </Text>
               <Text
                 className="font-sans text-[14px] text-brand"
@@ -700,26 +767,26 @@ export default function CheckoutScreen() {
           )}
           <View className="mb-2 flex-row items-baseline justify-between">
             <Text className="font-sans text-[13px] uppercase tracking-label text-ink-muted">
-              Envío
+              {t('totals.shipping')}
             </Text>
             {allSkipQuote ? (
-              <Text className="font-sans text-[14px] text-green-700">Gratis</Text>
+              <Text className="font-sans text-[14px] text-green-700">{t('totals.free')}</Text>
             ) : isActiveSubscriber ? (
               <Text className="font-sans text-[14px] text-green-700">
-                Gratis con tu suscripción
+                {t('totals.freeWithSubscription')}
               </Text>
             ) : (
               <Text
                 className="font-sans text-[14px] italic text-ink-muted"
                 style={{ fontVariant: ['tabular-nums'] }}
               >
-                A cotizar
+                {t('totals.toQuote')}
               </Text>
             )}
           </View>
           <View className="mb-3 flex-row items-baseline justify-between">
             <Text className="font-sans text-[13px] uppercase tracking-label text-ink-muted">
-              Impuestos
+              {t('totals.taxes')}
             </Text>
             {allSkipQuote ? (
               <Text
@@ -733,23 +800,42 @@ export default function CheckoutScreen() {
                 className="font-sans text-[14px] italic text-ink-muted"
                 style={{ fontVariant: ['tabular-nums'] }}
               >
-                Al cotizar
+                {t('totals.atQuote')}
               </Text>
             )}
           </View>
+          {tipCents > 0 && (
+            <View className="mb-3 flex-row items-baseline justify-between">
+              <Text className="font-sans text-[13px] uppercase tracking-label text-ink-muted">
+                {t('totals.tipLine', { percent: tipPercent })}
+              </Text>
+              <Text
+                className="font-sans text-[14px] text-ink"
+                style={{ fontVariant: ['tabular-nums'] }}
+              >
+                {formatCents(tipCents)}
+              </Text>
+            </View>
+          )}
           <View className="flex-row items-baseline justify-between border-t border-ink pt-3">
-            <Eyebrow tone="ink">{allSkipQuote ? 'Total' : 'Subtotal'}</Eyebrow>
+            <Eyebrow tone="ink">
+              {allSkipQuote
+                ? t('totals.total')
+                : tipCents > 0
+                  ? t('totals.partialTotal')
+                  : t('totals.subtotal')}
+            </Eyebrow>
             <Text
               className="font-sans-semibold text-[36px] text-brand"
               style={{ fontVariant: ['tabular-nums'] }}
             >
-              {formatCents(allSkipQuote ? skipQuoteTotalCents : previewTotalCents)}
+              {formatCents(
+                allSkipQuote ? skipQuoteTotalCents : previewTotalCents + tipCents,
+              )}
             </Text>
           </View>
           <Text className="mt-3 font-sans text-[13px] text-ink-muted">
-            {allSkipQuote
-              ? 'Sin cotización — este es el total final. Confirmás y pagás.'
-              : 'El repartidor cotiza el envío y te avisamos para confirmar el total.'}
+            {allSkipQuote ? t('totals.finalNote') : t('totals.quoteNote')}
           </Text>
         </View>
 
@@ -757,16 +843,18 @@ export default function CheckoutScreen() {
         {monthlyRecurringCents > 0 && !hasMixedCart && (
           <View className="mt-4 border border-brand/30 bg-brand-light/20 px-4 py-3">
             <Text className="font-sans text-[13px] uppercase tracking-label text-brand">
-              Cargo recurrente mensual
+              {t('monthly.title')}
             </Text>
             <Text
               className="mt-1 font-sans-semibold text-[18px] text-brand"
               style={{ fontVariant: ['tabular-nums'] }}
             >
-              {formatCents(monthlyRecurringCents)}/mes
+              {t('monthly.amountPerMonth', {
+                amount: formatCents(monthlyRecurringCents),
+              })}
             </Text>
             <Text className="mt-1 font-sans text-[13px] text-ink-muted">
-              A partir del segundo mes, el cargo mensual se aplicará automáticamente.
+              {t('monthly.note')}
             </Text>
           </View>
         )}
@@ -775,10 +863,10 @@ export default function CheckoutScreen() {
         {hasMixedCart && (
           <View className="mt-4 border border-bad/30 bg-bad/5 px-4 py-3">
             <Text className="font-sans text-[13px] text-bad">
-              No podés combinar productos de alquiler con productos de compra única.
+              {t('mixedCart.error')}
             </Text>
             <Text className="mt-1 font-sans text-[13px] text-ink-muted">
-              Hacé pedidos separados: uno para alquileres y otro para compras únicas.
+              {t('mixedCart.hint')}
             </Text>
           </View>
         )}
@@ -797,7 +885,7 @@ export default function CheckoutScreen() {
             disabled={hasMixedCart}
             onPress={onSubmit}
           >
-            Confirmar pedido →
+            {t('submit')}
           </Button>
         </View>
       </ScrollView>

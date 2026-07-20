@@ -15,6 +15,7 @@
  */
 import { useEffect, useRef, useState } from 'react'
 import { StyleSheet, Text, View } from 'react-native'
+import { useTranslation } from 'react-i18next'
 import NetInfo, {
   type NetInfoState,
 } from '@react-native-community/netinfo'
@@ -46,6 +47,7 @@ type BannerState =
   | { kind: 'network-error' }
 
 export function NetworkBanner() {
+  const { t } = useTranslation('banners')
   const [state, setState] = useState<BannerState>({ kind: 'idle' })
   // Track previous connectivity so we only show "restored" after a real drop.
   const wasOfflineRef = useRef(false)
@@ -123,12 +125,10 @@ export function NetworkBanner() {
         testID="network-banner-offline"
         accessibilityRole="alert"
         accessibilityLiveRegion="assertive"
-        accessibilityLabel="Sin conexión a internet. Revisá tu red."
+        accessibilityLabel={t('network.offline')}
       >
         <View style={styles.dot} />
-        <Text style={styles.offlineText}>
-          Sin conexión a internet. Revisá tu red.
-        </Text>
+        <Text style={styles.offlineText}>{t('network.offline')}</Text>
       </View>
     )
   }
@@ -140,10 +140,10 @@ export function NetworkBanner() {
         testID="network-banner-error"
         accessibilityRole="alert"
         accessibilityLiveRegion="assertive"
-        accessibilityLabel="Sin conexión"
+        accessibilityLabel={t('network.noConnection')}
       >
         <View style={styles.dot} />
-        <Text style={styles.offlineText}>Sin conexión</Text>
+        <Text style={styles.offlineText}>{t('network.noConnection')}</Text>
       </View>
     )
   }
@@ -155,9 +155,9 @@ export function NetworkBanner() {
       testID="network-banner-restored"
       accessibilityRole="alert"
       accessibilityLiveRegion="polite"
-      accessibilityLabel="Conexión restaurada"
+      accessibilityLabel={t('network.restored')}
     >
-      <Text style={styles.restoredText}>Conexión restaurada</Text>
+      <Text style={styles.restoredText}>{t('network.restored')}</Text>
     </View>
   )
 }

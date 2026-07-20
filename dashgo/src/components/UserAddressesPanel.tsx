@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { View, Text, TextInput, Pressable, ActivityIndicator } from 'react-native'
+import { useTranslation } from 'react-i18next'
 import type { UserAddress } from '../lib/types'
 import {
   useSuperUserAddresses,
@@ -37,6 +38,7 @@ const inputCls =
  * auto-saves here. Mirrors the web UserAddressesPanel.
  */
 export function UserAddressesPanel({ userId }: { userId: string }) {
+  const { t } = useTranslation('addresses')
   const { data: addresses, isPending } = useSuperUserAddresses(userId)
   const setDefault = useSetDefaultAddressForUser(userId)
   const del = useDeleteAddressForUser(userId)
@@ -56,8 +58,7 @@ export function UserAddressesPanel({ userId }: { userId: string }) {
   if (!addresses || addresses.length === 0) {
     return (
       <Text className="py-2 font-sans text-[13px] text-ink-muted">
-        Sin direcciones guardadas. La primera se guarda automáticamente al fijar
-        la ubicación de un pedido.
+        {t('panel.empty')}
       </Text>
     )
   }
@@ -88,14 +89,14 @@ export function UserAddressesPanel({ userId }: { userId: string }) {
       {addresses.map((a) =>
         editingId === a.id && form ? (
           <View key={a.id} className="border border-ink/15 p-3" testID={`edit-${a.id}`}>
-            <FieldLabel>Etiqueta</FieldLabel>
+            <FieldLabel>{t('panel.label')}</FieldLabel>
             <TextInput
               className={inputCls}
               value={form.label}
               onChangeText={(v) => setForm({ ...form, label: v })}
             />
             <View className="mt-3">
-              <FieldLabel>Dirección</FieldLabel>
+              <FieldLabel>{t('panel.address')}</FieldLabel>
               <TextInput
                 className={inputCls}
                 value={form.line1}
@@ -104,7 +105,7 @@ export function UserAddressesPanel({ userId }: { userId: string }) {
             </View>
             <View className="mt-3 flex-row gap-3">
               <View className="flex-1">
-                <FieldLabel>Apto / Piso</FieldLabel>
+                <FieldLabel>{t('panel.unit')}</FieldLabel>
                 <TextInput
                   className={inputCls}
                   value={form.line2}
@@ -112,7 +113,7 @@ export function UserAddressesPanel({ userId }: { userId: string }) {
                 />
               </View>
               <View className="flex-1">
-                <FieldLabel>Edificio</FieldLabel>
+                <FieldLabel>{t('panel.building')}</FieldLabel>
                 <TextInput
                   className={inputCls}
                   value={form.building}
@@ -121,7 +122,7 @@ export function UserAddressesPanel({ userId }: { userId: string }) {
               </View>
             </View>
             <View className="mt-3">
-              <FieldLabel>Referencia</FieldLabel>
+              <FieldLabel>{t('panel.reference')}</FieldLabel>
               <TextInput
                 className={inputCls}
                 value={form.instructions}
@@ -135,7 +136,7 @@ export function UserAddressesPanel({ userId }: { userId: string }) {
                 className="flex-1 items-center justify-center bg-accent py-2.5 active:opacity-80"
               >
                 <Text className="font-sans-medium text-[11px] uppercase tracking-label text-brand-dark">
-                  {update.isPending ? 'Guardando…' : 'Guardar'}
+                  {update.isPending ? t('panel.saving') : t('panel.save')}
                 </Text>
               </Pressable>
               <Pressable
@@ -143,7 +144,7 @@ export function UserAddressesPanel({ userId }: { userId: string }) {
                 className="flex-1 items-center justify-center border border-ink/25 py-2.5 active:bg-paper-deep"
               >
                 <Text className="font-sans-medium text-[11px] uppercase tracking-label text-ink">
-                  Cancelar
+                  {t('panel.cancel')}
                 </Text>
               </Pressable>
             </View>
@@ -156,7 +157,7 @@ export function UserAddressesPanel({ userId }: { userId: string }) {
               </Text>
               {a.isDefault && (
                 <Text className="font-sans text-[10px] uppercase tracking-label text-brand">
-                  Predeterminada
+                  {t('panel.defaultBadge')}
                 </Text>
               )}
             </View>
@@ -181,18 +182,18 @@ export function UserAddressesPanel({ userId }: { userId: string }) {
                   disabled={setDefault.isPending}
                 >
                   <Text className="font-sans text-[11px] uppercase tracking-label text-brand">
-                    Hacer predeterminada
+                    {t('panel.makeDefault')}
                   </Text>
                 </Pressable>
               )}
               <Pressable onPress={() => startEdit(a)}>
                 <Text className="font-sans text-[11px] uppercase tracking-label text-ink-muted">
-                  Editar
+                  {t('panel.edit')}
                 </Text>
               </Pressable>
               <Pressable onPress={() => del.mutate(a.id)} disabled={del.isPending}>
                 <Text className="font-sans text-[11px] uppercase tracking-label text-bad">
-                  Eliminar
+                  {t('panel.delete')}
                 </Text>
               </Pressable>
             </View>

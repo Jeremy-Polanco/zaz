@@ -191,6 +191,8 @@ export interface Order {
   tax: string
   taxRate: string
   totalAmount: string
+  /** Propina (digital-only, sin impuestos) — ya incluida en totalAmount. */
+  tip?: string
   paymentMethod: PaymentMethod
   stripePaymentIntentId: string | null
   paidAt: string | null
@@ -209,6 +211,25 @@ export interface Order {
   skipQuote?: boolean
   items: OrderItem[]
   createdAt: string
+}
+
+/** Admin dashboard — customer activity buckets (hoy / 7d / 30d). */
+export interface CustomerActivityCustomer {
+  id: string
+  fullName: string
+  phone: string | null
+  lastOrderAt: string | null
+}
+
+export interface CustomerActivityBucket {
+  count: number
+  customers: CustomerActivityCustomer[]
+}
+
+export interface CustomerActivity {
+  orderedToday: CustomerActivityBucket
+  inactive7d: CustomerActivityBucket
+  inactive30d: CustomerActivityBucket
 }
 
 export interface AuthorizedIntent {
@@ -277,6 +298,8 @@ export interface Invoice {
   shipping: string
   tax: string
   taxRate: string
+  /** Propina snapshot — ya incluida en total. */
+  tip?: string
   total: string
   createdAt: string
   customer: InvoiceCustomer

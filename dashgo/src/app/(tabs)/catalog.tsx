@@ -10,6 +10,7 @@ import {
   Modal,
 } from 'react-native'
 import { Image } from 'expo-image'
+import { useTranslation } from 'react-i18next'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { router } from 'expo-router'
 import { SymbolView } from 'expo-symbols'
@@ -40,6 +41,7 @@ function QtyControl({
   small?: boolean
   disabled?: boolean
 }) {
+  const { t } = useTranslation('catalog')
   const heightClass = small ? 'h-8' : 'h-9'
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState('')
@@ -76,7 +78,7 @@ function QtyControl({
             </Text>
           ) : null}
           <Text className="mb-3 font-sans text-[13px] uppercase tracking-label text-ink-muted">
-            Cantidad
+            {t('qty.quantity')}
           </Text>
           <TextInput
             value={draft}
@@ -96,14 +98,14 @@ function QtyControl({
               className="flex-1 items-center justify-center border border-ink/20 py-3 active:bg-ink/5"
             >
               <Text className="font-sans-medium text-[15px] text-ink">
-                Cancelar
+                {t('qty.cancel')}
               </Text>
             </Pressable>
             <Pressable
               onPress={confirm}
               className="flex-1 items-center justify-center bg-ink py-3 active:opacity-80"
             >
-              <Text className="font-sans-medium text-[15px] text-paper">OK</Text>
+              <Text className="font-sans-medium text-[15px] text-paper">{t('qty.ok')}</Text>
             </Pressable>
           </View>
         </Pressable>
@@ -126,7 +128,7 @@ function QtyControl({
               disabled ? 'text-ink-muted' : 'text-ink'
             }`}
           >
-            Agregar +
+            {t('qty.add')}
           </Text>
         </Pressable>
         {editor}
@@ -217,14 +219,17 @@ function TypographicPrice({
 }
 
 function ProductCard({ product, qty }: { product: Product; qty: number }) {
+  const { t } = useTranslation('catalog')
   const hasImage = !!product.imageContentType
   const unavailable = !product.isAvailable
   const placeholder = product.name.slice(0, 3).toUpperCase()
   return (
     <View
-      className={`flex-1 border border-ink/15 bg-paper ${unavailable ? 'opacity-60' : ''}`}
+      className={`w-full border border-ink/15 bg-paper ${unavailable ? 'opacity-60' : ''}`}
     >
-      {/* Contained image on a uniform white canvas */}
+      {/* Full-width square canvas. The catalog renders one card per row, so the
+          card has a definite (full) width and `aspect-square` resolves cleanly —
+          none of the 0-flex-basis collapse the old 2-column grid suffered. */}
       <View className="relative aspect-square w-full bg-white">
         {hasImage ? (
           <Image
@@ -252,7 +257,7 @@ function ProductCard({ product, qty }: { product: Product; qty: number }) {
         {product.offerActive && (
           <View className="absolute left-1.5 top-1.5 bg-accent px-1.5 py-0.5">
             <Text className="font-sans-semibold text-[8px] uppercase tracking-label text-brand-dark">
-              Oferta
+              {t('product.offer')}
             </Text>
           </View>
         )}
@@ -294,7 +299,7 @@ function ProductCard({ product, qty }: { product: Product; qty: number }) {
           <View className="mt-1.5 flex-row items-center">
             <View className="bg-brand/10 px-1.5 py-0.5">
               <Text className="font-sans-medium text-[9px] uppercase tracking-label text-brand">
-                Alquiler {formatCents(product.monthlyRentCents)}/mes
+                {t('product.rentalBadge', { price: formatCents(product.monthlyRentCents) })}
               </Text>
             </View>
           </View>
@@ -302,15 +307,14 @@ function ProductCard({ product, qty }: { product: Product; qty: number }) {
 
         {product.pricingMode === 'rental' && (product.theftFeeCents ?? 0) > 0 ? (
           <Text className="mt-1 font-sans text-[9px] leading-snug text-ink-muted">
-            ⚠️ Equipo en alquiler. Si dejás de pagar y te quedás con él, se cobra
-            una multa por robo de {formatCents(product.theftFeeCents ?? 0)}.
+            {t('product.theftWarning', { fee: formatCents(product.theftFeeCents ?? 0) })}
           </Text>
         ) : null}
 
         <View className="mt-2.5">
           {unavailable ? (
             <Text className="font-sans text-[12px] uppercase tracking-label text-ink-muted">
-              Sin stock
+              {t('product.outOfStock')}
             </Text>
           ) : (
             <QtyControl
@@ -329,6 +333,7 @@ function ProductCard({ product, qty }: { product: Product; qty: number }) {
 }
 
 function ProductRow({ product, qty }: { product: Product; qty: number }) {
+  const { t } = useTranslation('catalog')
   const hasImage = !!product.imageContentType
   const unavailable = !product.isAvailable
   return (
@@ -352,7 +357,7 @@ function ProductRow({ product, qty }: { product: Product; qty: number }) {
         {product.offerActive && (
           <View className="absolute left-0 top-0 bg-accent px-1.5 py-0.5">
             <Text className="font-sans-semibold text-[9px] uppercase tracking-label text-brand-dark">
-              Oferta
+              {t('product.offer')}
             </Text>
           </View>
         )}
@@ -371,15 +376,14 @@ function ProductRow({ product, qty }: { product: Product; qty: number }) {
           <View className="mt-1 flex-row items-center">
             <View className="bg-brand/10 px-1.5 py-0.5">
               <Text className="font-sans-medium text-[9px] uppercase tracking-label text-brand">
-                Alquiler {formatCents(product.monthlyRentCents)}/mes
+                {t('product.rentalBadge', { price: formatCents(product.monthlyRentCents) })}
               </Text>
             </View>
           </View>
         ) : null}
         {product.pricingMode === 'rental' && (product.theftFeeCents ?? 0) > 0 ? (
           <Text className="mt-1 font-sans text-[10px] leading-snug text-ink-muted">
-            ⚠️ Equipo en alquiler. Si dejás de pagar y te quedás con él, se cobra
-            una multa por robo de {formatCents(product.theftFeeCents ?? 0)}.
+            {t('product.theftWarning', { fee: formatCents(product.theftFeeCents ?? 0) })}
           </Text>
         ) : null}
         <View className="mt-2 flex-row items-end justify-between">
@@ -396,7 +400,7 @@ function ProductRow({ product, qty }: { product: Product; qty: number }) {
           </View>
           {unavailable ? (
             <Text className="font-sans text-[13px] uppercase tracking-label text-ink-muted">
-              Sin stock
+              {t('product.outOfStock')}
             </Text>
           ) : (
             <View style={{ minWidth: 110 }}>
@@ -465,6 +469,7 @@ function CategoryChip({
 }
 
 export default function CatalogTab() {
+  const { t } = useTranslation('catalog')
   const { data: user } = useCurrentUser()
   const { data: products, isPending, refetch, isRefetching } = useProducts()
   const { data: categories } = useCategories()
@@ -527,16 +532,6 @@ export default function CatalogTab() {
     return list
   }, [products, activeSlug, q])
 
-  // In grid mode, pad odd-count lists so the last row still has 2 columns —
-  // otherwise a lone product card stretches to full width and the aspect-square
-  // image becomes huge. The spacer renders as an invisible flex-1 view.
-  const SPACER_ID = '__spacer__'
-  const gridData = useMemo(() => {
-    if (viewMode !== 'grid') return filtered
-    if (filtered.length % 2 === 0) return filtered
-    return [...filtered, { id: SPACER_ID } as Product]
-  }, [filtered, viewMode])
-
   if (isPending) {
     return (
       <SafeAreaView className="flex-1 items-center justify-center bg-paper">
@@ -558,7 +553,7 @@ export default function CatalogTab() {
         <TextInput
           value={query}
           onChangeText={setQuery}
-          placeholder="Buscar productos…"
+          placeholder={t('search.placeholder')}
           placeholderTextColor="#6B6488"
           className="flex-1 font-sans text-[15px] text-ink"
           autoCapitalize="none"
@@ -569,7 +564,7 @@ export default function CatalogTab() {
         <Pressable
           onPress={() => setViewMode((v) => (v === 'list' ? 'grid' : 'list'))}
           className="h-10 w-10 items-center justify-center border border-ink/15 bg-paper-deep"
-          accessibilityLabel={viewMode === 'list' ? 'Cambiar a grilla' : 'Cambiar a lista'}
+          accessibilityLabel={viewMode === 'list' ? t('search.switchToGrid') : t('search.switchToList')}
         >
           <SymbolView
             name={
@@ -603,7 +598,7 @@ export default function CatalogTab() {
               setActiveSlug(null)
               setQuery('')
             }}
-            label="‹ Categorías"
+            label={t('chips.backToCategories')}
           />
           {(categories ?? []).map((c) => (
             <CategoryChip
@@ -625,17 +620,17 @@ export default function CatalogTab() {
             numberOfLines={1}
           >
             {q
-              ? `${filtered.length} resultado${filtered.length === 1 ? '' : 's'} para "${query}"`
+              ? t('results.forQuery', { count: filtered.length, query })
               : firstName
-                ? `Hola, ${firstName}.`
-                : 'Hola.'}
+                ? t('greeting.withName', { name: firstName })
+                : t('greeting.noName')}
           </Text>
         </View>
         <Text
           className="font-sans text-[11px] text-ink-muted"
           style={{ fontVariant: ['tabular-nums'] }}
         >
-          {filtered.length} ítems
+          {t('results.itemCount', { total: filtered.length })}
         </Text>
       </View>
     </View>
@@ -645,19 +640,19 @@ export default function CatalogTab() {
     <ScrollView contentContainerClassName="px-4 pb-40" keyboardShouldPersistTaps="handled">
       <View className="pb-1 pt-2">
         <Text className="font-sans-semibold text-[15px] tracking-tight text-ink">
-          {firstName ? `Hola, ${firstName}.` : 'Hola.'}
+          {firstName ? t('greeting.withName', { name: firstName }) : t('greeting.noName')}
         </Text>
         <Text className="mt-3 font-sans-semibold text-[20px] tracking-tight text-ink">
-          Elegí una categoría
+          {t('picker.title')}
         </Text>
       </View>
       {(categories?.length ?? 0) === 0 ? (
         <View className="items-center px-8 py-16">
           <Text className="font-sans text-[12px] uppercase tracking-eyebrow text-ink-muted">
-            Sin categorías
+            {t('picker.emptyEyebrow')}
           </Text>
           <Text className="mt-3 text-center text-[14px] text-ink-soft">
-            Aún no hay categorías disponibles.
+            {t('picker.emptyBody')}
           </Text>
         </View>
       ) : (
@@ -689,40 +684,39 @@ export default function CatalogTab() {
       ) : (
         <FlatList
           key={viewMode}
-          data={viewMode === 'grid' ? gridData : filtered}
+          data={filtered}
           keyExtractor={(p) => p.id}
-          numColumns={viewMode === 'grid' ? 2 : 1}
-          // Slightly tighter outer padding/gap than the classic 8/8 so each
-          // card runs a touch wider without leaving the 2-col layout.
-          columnWrapperStyle={
-            viewMode === 'grid'
-              ? { gap: 6, paddingHorizontal: 6, marginBottom: 8 }
-              : undefined
-          }
+          // One card per row in both modes. Grid = big full-width product cards
+          // (the client asked for products as large as the categories); list =
+          // the compact horizontal rows. Single column also sidesteps the
+          // 2-col flex-basis collapse the small grid used to hit on some phones.
           contentContainerClassName={viewMode === 'grid' ? 'pb-40' : 'px-5 pb-40'}
           ItemSeparatorComponent={
-            viewMode === 'list' ? () => <View className="h-px bg-ink/10" /> : undefined
+            viewMode === 'list'
+              ? () => <View className="h-px bg-ink/10" />
+              : () => <View className="h-3" />
           }
           ListHeaderComponent={renderListHeader}
-          renderItem={({ item }) => {
-            if (item.id === SPACER_ID) return <View style={{ flex: 1 }} />
-            return viewMode === 'list' ? (
+          renderItem={({ item }) =>
+            viewMode === 'list' ? (
               <ProductRow product={item} qty={cartState.items[item.id] ?? 0} />
             ) : (
-              <ProductCard product={item} qty={cartState.items[item.id] ?? 0} />
+              <View className="px-4">
+                <ProductCard product={item} qty={cartState.items[item.id] ?? 0} />
+              </View>
             )
-          }}
+          }
         ListEmptyComponent={
           <View className="items-center px-8 py-16">
             <Text className="font-sans text-[12px] uppercase tracking-eyebrow text-ink-muted">
-              {q ? 'Sin resultados' : 'Catálogo vacío'}
+              {q ? t('empty.searchEyebrow') : t('empty.catalogEyebrow')}
             </Text>
             <Text className="mt-3 text-center text-[14px] text-ink-soft">
               {q
-                ? 'Sin resultados. Prueba con otra palabra.'
+                ? t('empty.searchBody')
                 : activeSlug
-                  ? 'No hay productos en esta categoría.'
-                  : 'No hay productos disponibles ahora mismo.'}
+                  ? t('empty.categoryBody')
+                  : t('empty.catalogBody')}
             </Text>
           </View>
         }
@@ -744,7 +738,7 @@ export default function CatalogTab() {
           </View>
           <View className="flex-1">
             <Text className="font-sans text-[9px] uppercase tracking-label text-paper/55">
-              En carrito
+              {t('cartBar.inCart')}
             </Text>
             <Text
               className="mt-0.5 font-sans-semibold text-[18px] text-paper"
@@ -765,7 +759,7 @@ export default function CatalogTab() {
             }
           >
             <Text className="font-sans-semibold text-[13px] uppercase tracking-label text-brand-dark">
-              Checkout →
+              {t('cartBar.checkout')}
             </Text>
           </Pressable>
         </View>

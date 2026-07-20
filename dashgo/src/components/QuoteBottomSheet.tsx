@@ -60,6 +60,8 @@ export function QuoteBottomSheet({
     shippingCents,
     pointsRedeemedCents,
   })
+  // Propina elegida en checkout (solo digital) — sin impuestos, va sobre el total.
+  const tipCents = Math.round(parseFloat(order.tip ?? '0') * 100)
 
   const submit = async () => {
     setFormError(null)
@@ -178,13 +180,26 @@ export function QuoteBottomSheet({
               {formatCents(preview.taxCents)}
             </Text>
           </View>
+          {tipCents > 0 && (
+            <View className="flex-row justify-between">
+              <Text className="font-sans text-[12px] uppercase tracking-label text-ink-muted">
+                Propina
+              </Text>
+              <Text
+                className="font-sans text-[13px] text-ink"
+                style={{ fontVariant: ['tabular-nums'] }}
+              >
+                {formatCents(tipCents)}
+              </Text>
+            </View>
+          )}
           <View className="mt-3 flex-row items-baseline justify-between border-t-2 border-ink pt-3">
             <Eyebrow tone="ink">Total</Eyebrow>
             <Text
               className="font-sans-semibold text-[24px] text-brand"
               style={{ fontVariant: ['tabular-nums'] }}
             >
-              {formatCents(preview.totalCents)}
+              {formatCents(preview.totalCents + tipCents)}
             </Text>
           </View>
         </View>

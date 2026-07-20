@@ -493,3 +493,68 @@ describe('Skip-cotización — checkout preview shows real tax and final total',
     expect(queryByText('Total')).toBeNull()
   })
 })
+
+// ── Propina — solo pago digital ───────────────────────────────────────────────
+
+describe('Propina — solo pago digital', () => {
+  it('oculta la sección Propina con pago en efectivo (default)', async () => {
+    setupCheckoutMocks([SINGLE_PRODUCT as unknown as typeof MOCK_PRODUCT], { 'product-single': 1 })
+
+    const { getByText, queryByText } = renderWithProviders(<CheckoutScreen />)
+
+    await waitFor(() => {
+      expect(getByText('Pago digital')).toBeTruthy()
+    })
+    expect(queryByText('Propina')).toBeNull()
+  })
+
+  it('muestra la sección al elegir Pago digital y manda tipPercent en el payload', async () => {
+    setupCheckoutMocks([SINGLE_PRODUCT as unknown as typeof MOCK_PRODUCT], { 'product-single': 1 })
+
+    const { getByText } = renderWithProviders(<CheckoutScreen />)
+
+    await waitFor(() => {
+      expect(getByText('Pago digital')).toBeTruthy()
+    })
+
+    fireEvent.press(getByText('Pago digital'))
+    await waitFor(() => {
+      expect(getByText('Propina')).toBeTruthy()
+    })
+    fireEvent.press(getByText('18%'))
+
+    await act(async () => {
+      fireEvent.press(getByText(/Confirmar pedido/i))
+    })
+
+    await waitFor(() => {
+      expect(mockCreateOrderMutateAsync).toHaveBeenCalled()
+    })
+    expect(mockCreateOrderMutateAsync.mock.calls[0][0]).toMatchObject({
+      paymentMethod: 'digital',
+      tipPercent: 18,
+    })
+  })
+
+  it('no manda tipPercent cuando queda "Sin propina"', async () => {
+    setupCheckoutMocks([SINGLE_PRODUCT as unknown as typeof MOCK_PRODUCT], { 'product-single': 1 })
+
+    const { getByText } = renderWithProviders(<CheckoutScreen />)
+
+    await waitFor(() => {
+      expect(getByText('Pago digital')).toBeTruthy()
+    })
+    fireEvent.press(getByText('Pago digital'))
+
+    await act(async () => {
+      fireEvent.press(getByText(/Confirmar pedido/i))
+    })
+
+    await waitFor(() => {
+      expect(mockCreateOrderMutateAsync).toHaveBeenCalled()
+    })
+    expect(mockCreateOrderMutateAsync.mock.calls[0][0]).not.toHaveProperty(
+      'tipPercent',
+    )
+  })
+})

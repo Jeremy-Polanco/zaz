@@ -33,6 +33,10 @@ export const checkoutSchema = z.object({
   stripePaymentIntentId: z.string().optional(),
   usePoints: z.boolean().optional(),
   useCredit: z.boolean().optional(),
+  // Propina — solo pago digital; el server calcula el monto sobre SU subtotal.
+  tipPercent: z
+    .union([z.literal(15), z.literal(18), z.literal(25)])
+    .optional(),
   // Optional: when the customer has saved addresses they pick which one this
   // order goes to. Absent → colmado pins the location at delivery time (legacy).
   deliveryAddress: deliveryAddressSchema.optional(),

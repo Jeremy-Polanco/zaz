@@ -3,6 +3,7 @@ import { ActivityIndicator, Alert, ScrollView, Text, View } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useFocusEffect, useLocalSearchParams } from 'expo-router'
 import * as WebBrowser from 'expo-web-browser'
+import { useTranslation } from 'react-i18next'
 import {
   useMySubscription,
   useSubscriptionPlan,
@@ -22,11 +23,15 @@ const CANCEL_URL = 'dashgo://subscription?cancel=1'
  * dashgo-web/src/routes/subscription.tsx). The free bebedero is a real benefit:
  * the API auto-provisions a $0 order for the product flagged
  * isDefaultSubscriberBebedero when a subscription activates, so we advertise it.
+ *
+ * i18n: the screen renders t('subscription:perks'); the `es` locale value MUST
+ * stay identical to this constant (tests assert both).
  */
 export const SUBSCRIPTION_PERKS =
   'Bebedero gratis, envío gratis y mantenimiento sin costo.'
 
 export default function SubscriptionTab() {
+  const { t } = useTranslation('subscription')
   const params = useLocalSearchParams<{ success?: string; cancel?: string }>()
   const { data: sub, isPending: subPending, refetch } = useMySubscription()
   const { data: plan, isPending: planPending } = useSubscriptionPlan()
@@ -68,12 +73,12 @@ export default function SubscriptionTab() {
 
   const handleCancel = async () => {
     Alert.alert(
-      'Cancelar suscripción',
-      'Tu suscripción seguirá activa hasta el final del período. ¿Quieres cancelar?',
+      t('cancelAlert.title'),
+      t('cancelAlert.message'),
       [
-        { text: 'No', style: 'cancel' },
+        { text: t('cancelAlert.no'), style: 'cancel' },
         {
-          text: 'Sí, cancelar',
+          text: t('cancelAlert.confirm'),
           style: 'destructive',
           onPress: () => cancel.mutate(),
         },
@@ -92,23 +97,23 @@ export default function SubscriptionTab() {
   return (
     <SafeAreaView edges={['top']} className="flex-1 bg-paper">
       <ScrollView contentContainerClassName="px-5 pb-8 pt-6">
-        <Eyebrow className="mb-3">Mi plan</Eyebrow>
+        <Eyebrow className="mb-3">{t('eyebrow')}</Eyebrow>
         <View className="flex-row flex-wrap items-baseline">
           <Text className="font-sans-semibold text-[40px] leading-[44px] text-ink">
-            Mi{' '}
+            {t('title.lead')}{' '}
           </Text>
           <Text className="font-sans-italic text-[40px] leading-[44px] text-brand">
-            suscripción.
+            {t('title.accent')}
           </Text>
         </View>
         <Text className="mt-2 text-[15px] text-ink-soft">
-          {SUBSCRIPTION_PERKS}
+          {t('perks')}
         </Text>
 
         {toastVisible && (
           <View className="mt-4 border border-green-200 bg-green-50 px-4 py-3">
             <Text className="font-sans text-[14px] text-green-800">
-              {`¡Suscripción activada! ${SUBSCRIPTION_PERKS}`}
+              {t('toast.activated', { perks: t('perks') })}
             </Text>
           </View>
         )}
@@ -119,17 +124,19 @@ export default function SubscriptionTab() {
           /* No subscription */
           <View className="border border-ink/15 bg-paper p-6">
             <Text className="font-sans-semibold text-[26px] text-ink">
-              {plan ? formatCents(plan.priceCents) : '$10.00'} / mes
+              {t('none.pricePerMonth', {
+                price: plan ? formatCents(plan.priceCents) : '$10.00',
+              })}
             </Text>
             <Text className="mt-2 text-[14px] text-ink-soft">
-              {`Impuestos incluidos · ${SUBSCRIPTION_PERKS} Cancela cuando quieras.`}
+              {t('none.details', { perks: t('perks') })}
             </Text>
             <View className="mt-5">
               <Button
                 onPress={openCheckout}
                 disabled={checkout.isPending}
               >
-                {checkout.isPending ? 'Redirigiendo…' : 'Suscribirme'}
+                {checkout.isPending ? t('redirecting') : t('none.subscribe')}
               </Button>
             </View>
           </View>
@@ -139,23 +146,23 @@ export default function SubscriptionTab() {
             <View className="mb-3 flex-row">
               <View className="rounded-full bg-green-100 px-3 py-1">
                 <Text className="font-sans text-[12px] uppercase tracking-label text-green-700">
-                  Activa
+                  {t('active.badge')}
                 </Text>
               </View>
             </View>
             <Text className="text-[14px] text-ink-soft">
-              Suscripto al plan · Renueva el {formatDate(sub.currentPeriodEnd)}
+              {t('active.renewsOn', { date: formatDate(sub.currentPeriodEnd) })}
             </Text>
             <View className="mt-5 gap-3">
               <Button onPress={openPortal} disabled={portal.isPending}>
-                {portal.isPending ? 'Redirigiendo…' : 'Gestionar suscripción'}
+                {portal.isPending ? t('redirecting') : t('managePortal')}
               </Button>
               <Button
                 variant="outline"
                 onPress={handleCancel}
                 disabled={cancel.isPending}
               >
-                {cancel.isPending ? 'Cancelando…' : 'Cancelar'}
+                {cancel.isPending ? t('active.canceling') : t('active.cancel')}
               </Button>
             </View>
           </View>
@@ -163,20 +170,20 @@ export default function SubscriptionTab() {
           /* Active, cancel scheduled */
           <View className="border border-yellow-200 bg-yellow-50 p-6">
             <Text className="font-sans-semibold text-[15px] text-yellow-800">
-              Activo hasta {formatDate(sub.currentPeriodEnd)}, no se renovará.
+              {t('cancelPending.title', { date: formatDate(sub.currentPeriodEnd) })}
             </Text>
             <Text className="mt-1 text-[15px] text-yellow-700">
-              Aún tienes envío gratis y mantenimiento sin costo hasta esa fecha.
+              {t('cancelPending.body')}
             </Text>
             <View className="mt-5 gap-3">
               <Button
                 onPress={() => reactivate.mutate()}
                 disabled={reactivate.isPending}
               >
-                {reactivate.isPending ? 'Reactivando…' : 'Reactivar'}
+                {reactivate.isPending ? t('cancelPending.reactivating') : t('cancelPending.reactivate')}
               </Button>
               <Button variant="outline" onPress={openPortal} disabled={portal.isPending}>
-                Gestionar suscripción
+                {t('managePortal')}
               </Button>
             </View>
           </View>
@@ -184,15 +191,14 @@ export default function SubscriptionTab() {
           /* Past due */
           <View className="border border-red-200 bg-red-50 p-6">
             <Text className="font-sans-semibold text-[15px] text-red-800">
-              Tu pago está pendiente.
+              {t('pastDue.title')}
             </Text>
             <Text className="mt-1 text-[15px] text-red-700">
-              Actualizá tu medio de pago para seguir con el envío gratis y el
-              mantenimiento sin costo.
+              {t('pastDue.body')}
             </Text>
             <View className="mt-5">
               <Button onPress={openPortal} disabled={portal.isPending}>
-                {portal.isPending ? 'Redirigiendo…' : 'Gestionar suscripción'}
+                {portal.isPending ? t('redirecting') : t('managePortal')}
               </Button>
             </View>
           </View>
@@ -200,11 +206,11 @@ export default function SubscriptionTab() {
           /* Canceled */
           <View className="border border-ink/15 bg-paper p-6">
             <Text className="text-[14px] text-ink-soft">
-              Tu suscripción terminó.
+              {t('canceled.title')}
             </Text>
             <View className="mt-5">
               <Button onPress={openCheckout} disabled={checkout.isPending}>
-                {checkout.isPending ? 'Redirigiendo…' : 'Suscribirme de nuevo'}
+                {checkout.isPending ? t('redirecting') : t('canceled.resubscribe')}
               </Button>
             </View>
           </View>
@@ -212,11 +218,11 @@ export default function SubscriptionTab() {
           /* incomplete / incomplete_expired / unpaid */
           <View className="border border-ink/15 bg-paper p-6">
             <Text className="text-[14px] text-ink-soft">
-              Tu suscripción no está activa.
+              {t('inactive.title')}
             </Text>
             <View className="mt-5">
               <Button variant="outline" onPress={openPortal} disabled={portal.isPending}>
-                {portal.isPending ? 'Redirigiendo…' : 'Gestionar suscripción'}
+                {portal.isPending ? t('redirecting') : t('managePortal')}
               </Button>
             </View>
           </View>

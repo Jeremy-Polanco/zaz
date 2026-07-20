@@ -2,6 +2,7 @@ import { ActivityIndicator, FlatList, Text, View } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { Image } from 'expo-image'
 import { router } from 'expo-router'
+import { useTranslation } from 'react-i18next'
 import { useMyRentals } from '../../lib/queries'
 import { formatCents, formatDate } from '../../lib/format'
 import { API_URL } from '../../lib/api'
@@ -10,13 +11,13 @@ import { Button, Eyebrow, SectionHead } from '../../components/ui'
 
 const STATUS_META: Record<
   RentalStatus,
-  { label: string; box: string; text: string }
+  { labelKey: string; box: string; text: string }
 > = {
-  active: { label: 'Activo', box: 'border-ok/40 bg-ok/10', text: 'text-ok' },
-  past_due: { label: 'Atrasado', box: 'border-warn/40 bg-warn/10', text: 'text-warn' },
-  unpaid: { label: 'Sin pagar', box: 'border-bad/40 bg-bad/10', text: 'text-bad' },
-  canceled: { label: 'Cancelado', box: 'border-ink/15 bg-paper-deep', text: 'text-ink-muted' },
-  pending_setup: { label: 'Pendiente', box: 'border-ink/20 bg-ink/5', text: 'text-ink-muted' },
+  active: { labelKey: 'status.active', box: 'border-ok/40 bg-ok/10', text: 'text-ok' },
+  past_due: { labelKey: 'status.pastDue', box: 'border-warn/40 bg-warn/10', text: 'text-warn' },
+  unpaid: { labelKey: 'status.unpaid', box: 'border-bad/40 bg-bad/10', text: 'text-bad' },
+  canceled: { labelKey: 'status.canceled', box: 'border-ink/15 bg-paper-deep', text: 'text-ink-muted' },
+  pending_setup: { labelKey: 'status.pendingSetup', box: 'border-ink/20 bg-ink/5', text: 'text-ink-muted' },
 }
 
 function resolveImageUri(url: string | null): string | null {
@@ -25,6 +26,7 @@ function resolveImageUri(url: string | null): string | null {
 }
 
 function RentalCard({ rental }: { rental: Rental }) {
+  const { t } = useTranslation('rentals')
   const meta = STATUS_META[rental.status]
   const imageUri = resolveImageUri(rental.productImageUrl)
   return (
@@ -54,7 +56,7 @@ function RentalCard({ rental }: { rental: Rental }) {
           </Text>
           <View className={`shrink-0 border px-2 py-1 ${meta.box}`}>
             <Text className={`font-sans text-[12px] uppercase tracking-label ${meta.text}`}>
-              {meta.label}
+              {t(meta.labelKey)}
             </Text>
           </View>
         </View>
@@ -63,17 +65,16 @@ function RentalCard({ rental }: { rental: Rental }) {
           style={{ fontVariant: ['tabular-nums'] }}
         >
           {formatCents(rental.monthlyRentCents)}
-          <Text className="font-sans text-[13px] text-ink-muted">/mes</Text>
+          <Text className="font-sans text-[13px] text-ink-muted">{t('perMonth')}</Text>
         </Text>
         {rental.nextChargeAt ? (
           <Text className="mt-1 font-sans text-[12px] uppercase tracking-label text-ink-muted">
-            Próximo cargo: {formatDate(rental.nextChargeAt)}
+            {t('nextCharge', { date: formatDate(rental.nextChargeAt) })}
           </Text>
         ) : null}
         {rental.status === 'pending_setup' ? (
           <Text className="mt-2 border-l-2 border-accent pl-3 font-sans text-[15px] text-ink-soft">
-            Estamos terminando de configurar tu alquiler. Te avisamos cuando esté
-            activo.
+            {t('pendingSetupCopy')}
           </Text>
         ) : null}
       </View>
@@ -82,6 +83,7 @@ function RentalCard({ rental }: { rental: Rental }) {
 }
 
 export default function RentalsTab() {
+  const { t } = useTranslation('rentals')
   const { data: rentals, isPending, refetch, isRefetching } = useMyRentals()
 
   if (isPending) {
@@ -106,24 +108,25 @@ export default function RentalsTab() {
         ListHeaderComponent={
           <View className="pb-4 pt-6">
             <SectionHead
-              eyebrow="Mi cuenta"
-              title="Mis"
-              italicTail="alquileres."
-              subtitle="Equipos que alquilás mes a mes."
+              eyebrow={t('header.eyebrow')}
+              title={t('header.title')}
+              italicTail={t('header.italicTail')}
+              subtitle={t('header.subtitle')}
             />
           </View>
         }
         renderItem={({ item }) => <RentalCard rental={item} />}
         ListEmptyComponent={
           <View className="items-center py-16">
-            <Eyebrow>Sin alquileres</Eyebrow>
+            <Eyebrow>{t('empty.eyebrow')}</Eyebrow>
             <Text className="mt-3 text-center text-[15px] text-ink-soft">
-              No tienes alquileres activos.{'\n'}Cuando alquiles un producto, lo
-              verás aquí.
+              {t('empty.title')}
+              {'\n'}
+              {t('empty.subtitle')}
             </Text>
             <View className="mt-6">
               <Button variant="outline" size="md" onPress={() => router.push('/(tabs)/catalog')}>
-                Ver catálogo →
+                {t('empty.viewCatalog')}
               </Button>
             </View>
           </View>

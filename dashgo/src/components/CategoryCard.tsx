@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { Pressable, Text, View } from 'react-native'
+import { useTranslation } from 'react-i18next'
 import { Image } from 'expo-image'
 import { API_URL } from '../lib/api'
 import type { Category } from '../lib/types'
@@ -15,6 +16,7 @@ type Props = {
 }
 
 export function CategoryCard({ category, productCount, variant = 'category', dark = false, large = false, onPress }: Props) {
+  const { t } = useTranslation('catalog')
   const [showImage, setShowImage] = useState(true)
   const imageUri =
     variant === 'category' && category.imageUrl && showImage
@@ -81,7 +83,7 @@ export function CategoryCard({ category, productCount, variant = 'category', dar
           className={`font-sans uppercase tracking-eyebrow ${large ? 'text-[12px]' : 'text-[9px]'} ${eyebrowColor}`}
           numberOfLines={1}
         >
-          {productCount} productos
+          {t('categoryCard.productCount', { count: productCount })}
         </Text>
         <Text
           className={`font-sans-semibold ${large ? 'mt-0.5 text-[22px] leading-[26px]' : 'text-[13px] leading-[17px]'} ${nameColor}`}
@@ -89,7 +91,7 @@ export function CategoryCard({ category, productCount, variant = 'category', dar
           adjustsFontSizeToFit
           minimumFontScale={0.75}
         >
-          {isAll ? 'Ver todo el catálogo' : category.name}
+          {isAll ? t('categoryCard.viewAll') : category.name}
         </Text>
       </View>
     </Pressable>

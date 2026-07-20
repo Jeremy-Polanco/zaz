@@ -1,5 +1,6 @@
 import { Modal, Pressable, ScrollView, Text, View } from 'react-native'
 import { router } from 'expo-router'
+import { useTranslation } from 'react-i18next'
 import { SymbolView, type AndroidSymbol } from 'expo-symbols'
 import type { SFSymbol } from 'sf-symbols-typescript'
 import Constants from 'expo-constants'
@@ -28,6 +29,7 @@ export function MoreSheet({
   onClose: () => void
   items: MoreSheetItem[]
 }) {
+  const { t } = useTranslation('nav')
   if (!visible) return null
 
   // Runtime version/build — baked per binary, so this is a reliable way to
@@ -62,7 +64,7 @@ export function MoreSheet({
       >
         <View className="mx-auto mb-5 h-1 w-12 rounded-full bg-ink/20" />
         <ScrollView showsVerticalScrollIndicator={false}>
-          <Eyebrow className="mb-4">Más opciones</Eyebrow>
+          <Eyebrow className="mb-4">{t('sheet.title')}</Eyebrow>
           {items.map((item, i) => (
             <Pressable
               key={item.route}
@@ -95,7 +97,7 @@ export function MoreSheet({
           ))}
         </ScrollView>
         <Text className="mt-4 text-center font-sans text-[12px] text-ink-muted">
-          Udash v{appVersion} ({buildNumber})
+          {t('sheet.version', { version: appVersion, build: buildNumber })}
         </Text>
       </View>
     </Modal>

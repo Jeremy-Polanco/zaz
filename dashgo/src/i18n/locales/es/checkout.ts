@@ -1,0 +1,83 @@
+export default {
+  emptyCart: {
+    eyebrow: 'Carrito',
+    title: 'Está vacío.',
+    subtitle: 'Agrega productos desde el catálogo para continuar.',
+    back: 'Volver →',
+  },
+  activeOrder: {
+    eyebrow: 'Pedido en curso',
+    title: 'Ya tenés uno en camino.',
+    subtitle: 'Esperá a que se complete para hacer otro. Te avisamos cuando llegue.',
+    viewOrder: 'Ver mi pedido →',
+  },
+  header: {
+    eyebrow: 'Checkout',
+    title: 'Casi listo.',
+    itemCount_one: '{{count}} producto para entregar hoy.',
+    itemCount_other: '{{count}} productos para entregar hoy.',
+  },
+  summary: {
+    title: 'Resumen',
+    firstMonth: '{{amount}} (primer mes)',
+    thenPerMonth: 'luego {{amount}}/mes',
+  },
+  delivery: {
+    title: 'Entrega',
+    default: 'Predeterminada',
+  },
+  payment: {
+    title: 'Pago',
+    cashLabel: 'Al recibir',
+    cash: 'Efectivo',
+    digitalLabel: 'Con tarjeta',
+    digital: 'Pago digital',
+  },
+  tip: {
+    title: 'Propina',
+    none: 'Sin',
+    noneSubtitle: 'propina',
+    note: 'Sobre el subtotal de productos. Se suma al total del pedido.',
+  },
+  credit: {
+    title: 'Mi crédito',
+    available: 'Disponible',
+    use: 'Usar {{amount}} en crédito',
+  },
+  points: {
+    title: 'Mis puntos',
+    fullRedeem: 'Canje total',
+    use: 'Usar {{amount}} en puntos',
+  },
+  totals: {
+    subtotal: 'Subtotal',
+    rentalFirstMonth: 'Primer mes alquiler',
+    pointsDiscount: 'Descuento por puntos',
+    creditApplied: 'Crédito aplicado',
+    shipping: 'Envío',
+    free: 'Gratis',
+    freeWithSubscription: 'Gratis con tu suscripción',
+    toQuote: 'A cotizar',
+    taxes: 'Impuestos',
+    atQuote: 'Al cotizar',
+    tipLine: 'Propina ({{percent}}%)',
+    total: 'Total',
+    partialTotal: 'Total parcial',
+    finalNote: 'Sin cotización — este es el total final. Confirmás y pagás.',
+    quoteNote: 'El repartidor cotiza el envío y te avisamos para confirmar el total.',
+  },
+  monthly: {
+    title: 'Cargo recurrente mensual',
+    amountPerMonth: '{{amount}}/mes',
+    note: 'A partir del segundo mes, el cargo mensual se aplicará automáticamente.',
+  },
+  mixedCart: {
+    error: 'No podés combinar productos de alquiler con productos de compra única.',
+    hint: 'Hacé pedidos separados: uno para alquileres y otro para compras únicas.',
+  },
+  errors: {
+    paymentIncomplete: 'No completaste el pago. Tu carrito sigue acá cuando quieras pagar.',
+    createFailed: 'No se pudo crear el pedido',
+  },
+  submit: 'Confirmar pedido →',
+}

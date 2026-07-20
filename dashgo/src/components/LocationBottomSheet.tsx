@@ -7,6 +7,7 @@ import {
   Pressable,
   ScrollView,
 } from 'react-native'
+import { useTranslation } from 'react-i18next'
 import type { Order } from '../lib/types'
 import {
   useCreateAddressForUser,
@@ -31,6 +32,7 @@ export function LocationBottomSheet({
   order: Order
   onClose: () => void
 }) {
+  const { t } = useTranslation('addresses')
   const setOrderLocation = useSetOrderDeliveryAddress()
   const createForUser = useCreateAddressForUser(order.customerId)
 
@@ -73,7 +75,7 @@ export function LocationBottomSheet({
       }
     } catch (e) {
       setError(
-        (e as Error)?.message ?? 'No pudimos obtener tu ubicación',
+        (e as Error)?.message ?? t('pin.errorLocate'),
       )
     } finally {
       setLocating(false)
@@ -83,11 +85,11 @@ export function LocationBottomSheet({
   const save = async () => {
     setError(null)
     if (pin.lat === undefined || pin.lng === undefined) {
-      setError('Marcá la ubicación (usá tu ubicación o el mapa)')
+      setError(t('pin.errorNoPin'))
       return
     }
     if (saveToUser && !saveLabel.trim()) {
-      setError('Ponle un nombre a la dirección para guardarla')
+      setError(t('pin.errorNoLabel'))
       return
     }
     try {
@@ -118,7 +120,7 @@ export function LocationBottomSheet({
     } catch (err) {
       setError(
         (err as Error & { response?: { data?: { message?: string } } })
-          ?.response?.data?.message ?? 'No pudimos fijar la ubicación',
+          ?.response?.data?.message ?? t('pin.errorSave'),
       )
     }
   }
@@ -143,21 +145,23 @@ export function LocationBottomSheet({
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
         >
-          <Eyebrow>Fijar ubicación</Eyebrow>
+          <Eyebrow>{t('pin.eyebrow')}</Eyebrow>
           <Text className="mt-2 font-sans-semibold text-[22px] text-ink">
-            {order.customer?.fullName ?? 'Cliente'}
+            {order.customer?.fullName ?? t('pin.customerFallback')}
           </Text>
           <Text className="mt-1 font-sans text-[13px] text-ink-soft">
             {order.deliveryAddress
-              ? `Actual: ${formatAddressShort(order.deliveryAddress)}`
-              : 'Sin ubicación — fijala al llegar.'}
+              ? t('pin.current', {
+                  address: formatAddressShort(order.deliveryAddress),
+                })
+              : t('pin.noLocation')}
           </Text>
 
           <View className="mt-5">
-            <FieldLabel>Dirección</FieldLabel>
+            <FieldLabel>{t('pin.address')}</FieldLabel>
             <TextInput
               className="h-11 border-b border-ink/25 pb-1 font-sans text-[16px] text-ink"
-              placeholder="Calle, número, referencia…"
+              placeholder={t('pin.addressPlaceholder')}
               placeholderTextColor="#6B6488"
               value={text}
               onChangeText={setText}
@@ -166,20 +170,20 @@ export function LocationBottomSheet({
 
           <View className="mt-4 flex-row gap-3">
             <View className="flex-1">
-              <FieldLabel>N° de casa</FieldLabel>
+              <FieldLabel>{t('pin.houseNumber')}</FieldLabel>
               <TextInput
                 className="h-11 border-b border-ink/25 pb-1 font-sans text-[16px] text-ink"
-                placeholder="Ej. 24"
+                placeholder={t('pin.houseNumberPlaceholder')}
                 placeholderTextColor="#6B6488"
                 value={houseNumber}
                 onChangeText={setHouseNumber}
               />
             </View>
             <View className="flex-1">
-              <FieldLabel>Apto / Piso</FieldLabel>
+              <FieldLabel>{t('pin.unit')}</FieldLabel>
               <TextInput
                 className="h-11 border-b border-ink/25 pb-1 font-sans text-[16px] text-ink"
-                placeholder="Ej. Apto 3B"
+                placeholder={t('pin.unitPlaceholder')}
                 placeholderTextColor="#6B6488"
                 value={unit}
                 onChangeText={setUnit}
@@ -188,10 +192,10 @@ export function LocationBottomSheet({
           </View>
 
           <View className="mt-4">
-            <FieldLabel>Edificio</FieldLabel>
+            <FieldLabel>{t('pin.building')}</FieldLabel>
             <TextInput
               className="h-11 border-b border-ink/25 pb-1 font-sans text-[16px] text-ink"
-              placeholder="Ej. Edif. 4, Torre B"
+              placeholder={t('pin.buildingPlaceholder')}
               placeholderTextColor="#6B6488"
               value={building}
               onChangeText={setBuilding}
@@ -199,10 +203,10 @@ export function LocationBottomSheet({
           </View>
 
           <View className="mt-4">
-            <FieldLabel>Referencia / punto</FieldLabel>
+            <FieldLabel>{t('pin.reference')}</FieldLabel>
             <TextInput
               className="h-11 border-b border-ink/25 pb-1 font-sans text-[16px] text-ink"
-              placeholder="Ej. frente al colmado, casa amarilla"
+              placeholder={t('pin.referencePlaceholder')}
               placeholderTextColor="#6B6488"
               value={reference}
               onChangeText={setReference}
@@ -216,7 +220,7 @@ export function LocationBottomSheet({
               className="flex-row items-center border border-ink/20 bg-paper px-3 py-2 active:bg-paper-deep"
             >
               <Text className="font-sans text-[11px] uppercase tracking-label text-ink">
-                {locating ? 'Ubicando…' : '📍 Usar mi ubicación'}
+                {locating ? t('pin.locating') : t('pin.useMyLocation')}
               </Text>
             </Pressable>
             {hasCoords ? (
@@ -228,13 +232,13 @@ export function LocationBottomSheet({
               </Text>
             ) : (
               <Text className="font-sans text-[11px] uppercase tracking-label text-bad">
-                Marcá la ubicación
+                {t('pin.markLocation')}
               </Text>
             )}
           </View>
 
           <Text className="mb-2 mt-5 font-sans text-[11px] uppercase tracking-label text-ink-muted">
-            Ajustá el pin en el mapa
+            {t('pin.adjustPin')}
           </Text>
           <MapPicker
             value={pin}
@@ -264,15 +268,15 @@ export function LocationBottomSheet({
                 )}
               </View>
               <Text className="font-sans-medium text-[14px] text-ink">
-                Guardar esta dirección al cliente
+                {t('pin.saveToCustomer')}
               </Text>
             </Pressable>
             {saveToUser && (
               <View className="mt-3">
-                <FieldLabel>Nombre de la dirección</FieldLabel>
+                <FieldLabel>{t('pin.saveLabelField')}</FieldLabel>
                 <TextInput
                   className="h-11 border-b border-ink/25 pb-1 font-sans text-[16px] text-ink"
-                  placeholder="Ej. Casa, Trabajo"
+                  placeholder={t('pin.saveLabelPlaceholder')}
                   placeholderTextColor="#6B6488"
                   value={saveLabel}
                   onChangeText={setSaveLabel}
@@ -295,7 +299,7 @@ export function LocationBottomSheet({
                 onPress={onClose}
                 loading={setOrderLocation.isPending}
               >
-                Cancelar
+                {t('pin.cancel')}
               </Button>
             </View>
             <View className="flex-1">
@@ -306,7 +310,7 @@ export function LocationBottomSheet({
                 loading={setOrderLocation.isPending}
                 disabled={!hasCoords}
               >
-                Guardar →
+                {t('pin.save')}
               </Button>
             </View>
           </View>

@@ -12,10 +12,15 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { router } from 'expo-router'
 import { SymbolView } from 'expo-symbols'
-import { useOrders, useUpdateOrderStatus } from '../../lib/queries'
+import { useCustomerActivity, useOrders, useUpdateOrderStatus } from '../../lib/queries'
 import { formatDate, formatMoney } from '../../lib/format'
 import { formatAddressLine } from '../../lib/address'
-import type { GeoAddress, Order, OrderStatus } from '../../lib/types'
+import type {
+  CustomerActivityCustomer,
+  GeoAddress,
+  Order,
+  OrderStatus,
+} from '../../lib/types'
 import { Button, Eyebrow, Hairline, KpiCard, StatusBadge } from '../../components/ui'
 import { SuscriptorBadge } from '../../components/SuscriptorBadge'
 import { QuoteBottomSheet } from '../../components/QuoteBottomSheet'
@@ -259,6 +264,11 @@ export default function SuperOrdersScreen() {
   const updateStatus = useUpdateOrderStatus()
   const [quotingOrder, setQuotingOrder] = useState<Order | null>(null)
   const [filter, setFilter] = useState<RouteFilter>('all')
+  // Clientes — actividad: qué bucket está expandido bajo los KPIs (o ninguno).
+  const [activityBucket, setActivityBucket] = useState<
+    'today' | '7d' | '30d' | null
+  >(null)
+  const { data: activity } = useCustomerActivity()
 
   const stats = useMemo(() => {
     const list = orders ?? []
@@ -365,6 +375,96 @@ export default function SuperOrdersScreen() {
               <KpiCard label="En ruta" value={stats.inRoute + stats.readyToGo} tone="attn" />
               <KpiCard label="Entregados" value={stats.delivered} tone="ok" />
             </View>
+
+            {/* Clientes — actividad: pidieron hoy / fríos hace 7 y 30 días.
+                Tocar un KPI despliega la lista para contactarlos (win-back). */}
+            {activity && (
+              <View className="mt-6">
+                <Eyebrow className="mb-2">Clientes</Eyebrow>
+                <View className="flex-row gap-2">
+                  {(
+                    [
+                      { id: 'today', label: 'Pidieron hoy', bucket: activity.orderedToday, tone: 'ok' },
+                      { id: '7d', label: 'Sin pedir 7d+', bucket: activity.inactive7d, tone: 'warn' },
+                      { id: '30d', label: 'Sin pedir 30d+', bucket: activity.inactive30d, tone: 'attn' },
+                    ] as const
+                  ).map((k) => (
+                    <Pressable
+                      key={k.id}
+                      className="flex-1"
+                      onPress={() =>
+                        setActivityBucket((prev) => (prev === k.id ? null : k.id))
+                      }
+                    >
+                      <View
+                        className={
+                          activityBucket === k.id
+                            ? 'border border-ink'
+                            : 'border border-transparent'
+                        }
+                      >
+                        <KpiCard label={k.label} value={k.bucket.count} tone={k.tone} />
+                      </View>
+                    </Pressable>
+                  ))}
+                </View>
+                {activityBucket && (
+                  <View className="mt-2 border border-ink/15 bg-paper-deep/30">
+                    {(activityBucket === 'today'
+                      ? activity.orderedToday.customers
+                      : activityBucket === '7d'
+                        ? activity.inactive7d.customers
+                        : activity.inactive30d.customers
+                    ).map((c: CustomerActivityCustomer, idx: number, arr) => (
+                      <View
+                        key={c.id}
+                        className={`flex-row items-center justify-between px-3 py-2.5 ${
+                          idx < arr.length - 1 ? 'border-b border-ink/10' : ''
+                        }`}
+                      >
+                        <View className="flex-1 pr-3">
+                          <Text
+                            className="font-sans-medium text-[14px] text-ink"
+                            numberOfLines={1}
+                          >
+                            {c.fullName}
+                          </Text>
+                          <Text className="font-sans text-[11px] uppercase tracking-label text-ink-muted">
+                            {c.lastOrderAt
+                              ? `Último: ${formatDate(c.lastOrderAt)}`
+                              : 'Nunca pidió'}
+                          </Text>
+                        </View>
+                        {c.phone && (
+                          <Pressable
+                            onPress={() =>
+                              Linking.openURL(
+                                `https://wa.me/${c.phone!.replace(/\D/g, '')}`,
+                              ).catch(() => Alert.alert('No se pudo abrir WhatsApp'))
+                            }
+                            className="min-h-[40px] items-center justify-center border border-ink/30 px-3"
+                          >
+                            <Text className="font-sans-medium text-[11px] uppercase tracking-label text-ink">
+                              WhatsApp
+                            </Text>
+                          </Pressable>
+                        )}
+                      </View>
+                    ))}
+                    {(activityBucket === 'today'
+                      ? activity.orderedToday.customers
+                      : activityBucket === '7d'
+                        ? activity.inactive7d.customers
+                        : activity.inactive30d.customers
+                    ).length === 0 && (
+                      <Text className="px-3 py-3 font-sans text-[13px] text-ink-muted">
+                        Nadie en esta lista.
+                      </Text>
+                    )}
+                  </View>
+                )}
+              </View>
+            )}
 
             <View className="mt-5">
               <ScrollView

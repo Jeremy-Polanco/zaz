@@ -10,6 +10,7 @@ import {
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { router, Stack } from 'expo-router'
+import { useTranslation } from 'react-i18next'
 import { useForm, Controller } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { savedAddressSchema, type SavedAddressInput } from '../../lib/schemas'
@@ -21,6 +22,7 @@ const FALLBACK_LAT = 18.4861
 const FALLBACK_LNG = -69.9312
 
 export default function NewAddress() {
+  const { t } = useTranslation('addresses')
   const createAddress = useCreateAddress()
 
   const {
@@ -51,8 +53,8 @@ export default function NewAddress() {
 
   return (
     <SafeAreaView edges={['bottom']} className="flex-1 bg-paper">
-      <Stack.Screen options={{ title: 'Nueva dirección' }} />
-      <ScreenHeader title="Nueva dirección" />
+      <Stack.Screen options={{ title: t('new.title') }} />
+      <ScreenHeader title={t('new.title')} />
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         className="flex-1"
@@ -64,7 +66,7 @@ export default function NewAddress() {
           {/* Label */}
           <View className="gap-1.5">
             <Text className="font-sans-medium text-[15px] uppercase tracking-wide text-ink-soft">
-              Nombre
+              {t('form.name')}
             </Text>
             <Controller
               control={control}
@@ -72,7 +74,7 @@ export default function NewAddress() {
               render={({ field }) => (
                 <TextInput
                   className="rounded-lg border border-ink/20 bg-paper px-4 py-3 text-[16px] text-ink"
-                  placeholder="Ej: Casa, Oficina"
+                  placeholder={t('form.namePlaceholder')}
                   placeholderTextColor="#9ca3af"
                   value={field.value}
                   onChangeText={field.onChange}
@@ -89,7 +91,7 @@ export default function NewAddress() {
           {/* Line 1 */}
           <View className="gap-1.5">
             <Text className="font-sans-medium text-[15px] uppercase tracking-wide text-ink-soft">
-              Dirección
+              {t('form.address')}
             </Text>
             <Controller
               control={control}
@@ -97,7 +99,7 @@ export default function NewAddress() {
               render={({ field }) => (
                 <TextInput
                   className="rounded-lg border border-ink/20 bg-paper px-4 py-3 text-[16px] text-ink"
-                  placeholder="Av. 27 de Febrero 123"
+                  placeholder={t('form.addressPlaceholder')}
                   placeholderTextColor="#9ca3af"
                   value={field.value}
                   onChangeText={field.onChange}
@@ -114,8 +116,8 @@ export default function NewAddress() {
           {/* Line 2 (optional) */}
           <View className="gap-1.5">
             <Text className="font-sans-medium text-[15px] uppercase tracking-wide text-ink-soft">
-              Apto / Piso{' '}
-              <Text className="normal-case font-sans text-[13px]">(opcional)</Text>
+              {t('form.unit')}{' '}
+              <Text className="normal-case font-sans text-[13px]">{t('form.optional')}</Text>
             </Text>
             <Controller
               control={control}
@@ -123,7 +125,7 @@ export default function NewAddress() {
               render={({ field }) => (
                 <TextInput
                   className="rounded-lg border border-ink/20 bg-paper px-4 py-3 text-[16px] text-ink"
-                  placeholder="Apto 3B, Piso 5"
+                  placeholder={t('form.unitPlaceholder')}
                   placeholderTextColor="#9ca3af"
                   value={field.value ?? ''}
                   onChangeText={(v) => field.onChange(v || undefined)}
@@ -137,7 +139,7 @@ export default function NewAddress() {
           {/* Map Picker */}
           <View className="gap-1.5">
             <Text className="font-sans-medium text-[15px] uppercase tracking-wide text-ink-soft">
-              Ubica el pin
+              {t('form.pinLabel')}
             </Text>
             <MapPicker
               value={{ lat, lng }}
@@ -151,8 +153,8 @@ export default function NewAddress() {
           {/* Instructions (optional) */}
           <View className="gap-1.5">
             <Text className="font-sans-medium text-[15px] uppercase tracking-wide text-ink-soft">
-              Instrucciones{' '}
-              <Text className="normal-case font-sans text-[13px]">(opcional)</Text>
+              {t('form.instructions')}{' '}
+              <Text className="normal-case font-sans text-[13px]">{t('form.optional')}</Text>
             </Text>
             <Controller
               control={control}
@@ -160,7 +162,7 @@ export default function NewAddress() {
               render={({ field }) => (
                 <TextInput
                   className="rounded-lg border border-ink/20 bg-paper px-4 py-3 text-[16px] text-ink"
-                  placeholder="Toca el portón, apartamento en el fondo"
+                  placeholder={t('form.instructionsPlaceholder')}
                   placeholderTextColor="#9ca3af"
                   value={field.value ?? ''}
                   onChangeText={(v) => field.onChange(v || undefined)}
@@ -183,7 +185,7 @@ export default function NewAddress() {
               <ActivityIndicator color="#ffffff" size="small" />
             ) : (
               <Text className="font-sans-semibold text-[16px] text-paper">
-                Guardar dirección
+                {t('new.submit')}
               </Text>
             )}
           </Pressable>

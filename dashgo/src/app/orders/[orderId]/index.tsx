@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { View, Text, ScrollView, Alert } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useLocalSearchParams, router } from 'expo-router'
+import { useTranslation } from 'react-i18next'
 import { useQuery } from '@tanstack/react-query'
 import { useStripe } from '@stripe/stripe-react-native'
 import { api } from '../../../lib/api'
@@ -47,24 +48,25 @@ function StatusLabel({
   status: Order['status']
   paymentMethod?: Order['paymentMethod']
 }) {
+  const { t } = useTranslation('orders')
   const label =
     status === 'pending_quote'
-      ? 'Por cotizar'
+      ? t('status.pendingQuote')
       : status === 'quoted'
         ? // Customer-facing: a quoted order just needs payment/confirmation —
           // skip the internal "Cotizado" wording.
           paymentMethod === 'digital'
-          ? 'Por pagar'
-          : 'Por confirmar'
+          ? t('status.toPay')
+          : t('status.toConfirm')
         : status === 'pending_validation'
-          ? 'Pendiente'
+          ? t('status.pending')
           : status === 'confirmed_by_colmado'
-            ? 'Confirmado'
+            ? t('status.confirmed')
             : status === 'in_delivery_route'
-              ? 'En ruta'
+              ? t('status.inRoute')
               : status === 'delivered'
-                ? 'Entregado'
-                : 'Cancelado'
+                ? t('status.delivered')
+                : t('status.cancelled')
   return (
     <View className="self-start border border-ink/20 bg-paper-deep/40 px-3 py-1">
       <Text className="font-sans text-[11px] uppercase tracking-label text-ink">
@@ -75,6 +77,7 @@ function StatusLabel({
 }
 
 export default function OrderDetailScreen() {
+  const { t } = useTranslation('orders')
   const { orderId, paid } = useLocalSearchParams<{
     orderId: string
     paid?: string
@@ -95,7 +98,7 @@ export default function OrderDetailScreen() {
       <SafeAreaView className="flex-1 bg-paper">
         <View className="flex-1 items-center justify-center">
           <Text className="font-sans text-[13px] uppercase tracking-label text-ink-muted">
-            Cargando pedido…
+            {t('detail.loading')}
           </Text>
         </View>
       </SafeAreaView>
@@ -106,7 +109,7 @@ export default function OrderDetailScreen() {
       <SafeAreaView className="flex-1 bg-paper">
         <View className="flex-1 items-center justify-center px-6">
           <Text className="font-sans text-[14px] text-bad">
-            No pudimos cargar el pedido.
+            {t('detail.loadError')}
           </Text>
           <Button
             variant="outline"
@@ -114,7 +117,7 @@ export default function OrderDetailScreen() {
             onPress={() => router.replace('/(tabs)/orders')}
             className="mt-4"
           >
-            Ver mis pedidos
+            {t('detail.viewMyOrders')}
           </Button>
         </View>
       </SafeAreaView>
@@ -124,6 +127,7 @@ export default function OrderDetailScreen() {
   const subtotalCents = Math.round(parseFloat(order.subtotal) * 100)
   const shippingCents = Math.round(parseFloat(order.shipping) * 100)
   const taxCents = Math.round(parseFloat(order.tax) * 100)
+  const tipCents = Math.round(parseFloat(order.tip ?? '0') * 100)
   const pointsCents = Math.round(parseFloat(order.pointsRedeemed) * 100)
   const totalCents = Math.round(parseFloat(order.totalAmount) * 100)
   const creditAppliedCents = Math.round(
@@ -140,9 +144,9 @@ export default function OrderDetailScreen() {
       await confirmCash.mutateAsync(order.id)
     } catch (e) {
       Alert.alert(
-        'Error',
+        t('alerts.errorTitle'),
         (e as { response?: { data?: { message?: string } } })?.response?.data
-          ?.message ?? 'No pudimos confirmar',
+          ?.message ?? t('alerts.confirmFailed'),
       )
     }
   }
@@ -152,9 +156,9 @@ export default function OrderDetailScreen() {
       await confirmNonStripe.mutateAsync(order.id)
     } catch (e) {
       Alert.alert(
-        'Error',
+        t('alerts.errorTitle'),
         (e as { response?: { data?: { message?: string } } })?.response?.data
-          ?.message ?? 'No pudimos confirmar',
+          ?.message ?? t('alerts.confirmFailed'),
       )
     }
   }
@@ -171,14 +175,14 @@ export default function OrderDetailScreen() {
       })
       if (initResult.error) {
         setPaying(false)
-        Alert.alert('Error', initResult.error.message)
+        Alert.alert(t('alerts.errorTitle'), initResult.error.message)
         return
       }
       const sheetResult = await presentPaymentSheet()
       setPaying(false)
       if (sheetResult.error) {
         if (sheetResult.error.code !== 'Canceled') {
-          Alert.alert('Error', sheetResult.error.message)
+          Alert.alert(t('alerts.errorTitle'), sheetResult.error.message)
         }
         return
       }
@@ -188,19 +192,19 @@ export default function OrderDetailScreen() {
     } catch (e) {
       setPaying(false)
       Alert.alert(
-        'Error',
+        t('alerts.errorTitle'),
         (e as { response?: { data?: { message?: string } } })?.response?.data
-          ?.message ?? 'No pudimos iniciar el pago',
+          ?.message ?? t('alerts.paymentStartFailed'),
       )
     }
   }
 
   return (
     <View className="flex-1 bg-paper">
-      <ScreenHeader title="Pedido" />
+      <ScreenHeader title={t('detail.headerTitle')} />
       <ScrollView contentContainerClassName="grow">
         <View className="px-6 pt-2">
-          <Eyebrow>Pedido · {order.id.slice(0, 8)}</Eyebrow>
+          <Eyebrow>{t('detail.eyebrow', { id: order.id.slice(0, 8) })}</Eyebrow>
           <View className="mt-3">
             <StatusLabel
               status={order.status}
@@ -216,11 +220,10 @@ export default function OrderDetailScreen() {
           {order.status === 'pending_quote' && (
             <View className="mb-6 border-l-4 border-accent bg-accent/10 p-4">
               <Text className="font-sans-semibold text-[18px] text-ink">
-                Esperando cotización
+                {t('banner.awaitingQuote.title')}
               </Text>
               <Text className="mt-2 font-sans text-[15px] text-ink-soft">
-                En breve el repartidor te manda el costo del envío. Esta
-                pantalla se actualiza sola.
+                {t('banner.awaitingQuote.body')}
               </Text>
             </View>
           )}
@@ -228,11 +231,10 @@ export default function OrderDetailScreen() {
           {order.status === 'quoted' && order.paymentMethod === 'cash' && (
             <View className="mb-6 border-l-4 border-accent bg-accent/10 p-4">
               <Text className="font-sans-semibold text-[18px] text-ink">
-                Total {formatCents(totalCents)}
+                {t('banner.totalTitle', { amount: formatCents(totalCents) })}
               </Text>
               <Text className="mt-2 font-sans text-[15px] text-ink-soft">
-                Confirma para que salga a entregar. Pagas en efectivo al
-                recibir.
+                {t('banner.cashQuoted.body')}
               </Text>
               <Button
                 variant="accent"
@@ -241,7 +243,7 @@ export default function OrderDetailScreen() {
                 loading={confirmCash.isPending}
                 className="mt-4"
               >
-                Confirmar · {formatCents(totalCents)} →
+                {t('banner.confirmCta', { amount: formatCents(totalCents) })}
               </Button>
             </View>
           )}
@@ -251,12 +253,12 @@ export default function OrderDetailScreen() {
             isFullCredit && (
               <View className="mb-6 border-l-4 border-accent bg-accent/10 p-4">
                 <Text className="font-sans-semibold text-[18px] text-ink">
-                  Total {formatCents(totalCents)}
+                  {t('banner.totalTitle', { amount: formatCents(totalCents) })}
                 </Text>
                 <Text className="mt-2 font-sans text-[15px] text-ink-soft">
-                  Este pedido se cubre 100% con tu crédito —{' '}
-                  {formatCents(creditAppliedCents)}. No requiere pago con
-                  tarjeta.
+                  {t('banner.fullCredit.body', {
+                    amount: formatCents(creditAppliedCents),
+                  })}
                 </Text>
                 <Button
                   variant="accent"
@@ -265,7 +267,7 @@ export default function OrderDetailScreen() {
                   loading={confirmNonStripe.isPending}
                   className="mt-4"
                 >
-                  Confirmar · {formatCents(totalCents)} →
+                  {t('banner.confirmCta', { amount: formatCents(totalCents) })}
                 </Button>
               </View>
             )}
@@ -287,11 +289,10 @@ export default function OrderDetailScreen() {
             (order.authorizedAt || justPaid) && (
               <View className="mb-6 border-l-4 border-accent bg-accent/10 p-4">
                 <Text className="font-sans-semibold text-[18px] text-ink">
-                  Procesando tu pago…
+                  {t('banner.processing.title')}
                 </Text>
                 <Text className="mt-2 font-sans text-[15px] text-ink-soft">
-                  Ya autorizamos el cobro en tu tarjeta. Estamos confirmando tu
-                  pedido — esta pantalla se actualiza sola.
+                  {t('banner.processing.body')}
                 </Text>
               </View>
             )}
@@ -311,17 +312,20 @@ export default function OrderDetailScreen() {
             !justPaid && (
               <View className="mb-6 border-l-4 border-accent bg-accent/10 p-4">
                 <Text className="font-sans-semibold text-[18px] text-ink">
-                  Completá tu pago — {formatCents(totalCents)}
+                  {t('banner.completePayment.title', {
+                    amount: formatCents(totalCents),
+                  })}
                 </Text>
                 {creditAppliedCents > 0 && (
                   <Text className="mt-2 font-sans text-[15px] text-brand">
-                    Crédito aplicado: −{formatCents(creditAppliedCents)} · Pago
-                    con tarjeta: {formatCents(stripeAmountCents)}
+                    {t('banner.creditApplied', {
+                      credit: formatCents(creditAppliedCents),
+                      card: formatCents(stripeAmountCents),
+                    })}
                   </Text>
                 )}
                 <Text className="mt-2 font-sans text-[15px] text-ink-soft">
-                  Quedó un paso pendiente. Autorizá el cobro — retenemos el monto
-                  y lo cobramos solo cuando te entreguemos.
+                  {t('banner.retryAuthorize.body')}
                 </Text>
                 <Button
                   variant="accent"
@@ -330,7 +334,7 @@ export default function OrderDetailScreen() {
                   loading={paying || authorize.isPending}
                   className="mt-4"
                 >
-                  Pagar · {formatCents(stripeAmountCents)} →
+                  {t('banner.payCta', { amount: formatCents(stripeAmountCents) })}
                 </Button>
               </View>
             )}
@@ -346,17 +350,18 @@ export default function OrderDetailScreen() {
             !order.skipQuote && (
               <View className="mb-6 border-l-4 border-accent bg-accent/10 p-4">
                 <Text className="font-sans-semibold text-[18px] text-ink">
-                  Total {formatCents(totalCents)}
+                  {t('banner.totalTitle', { amount: formatCents(totalCents) })}
                 </Text>
                 {creditAppliedCents > 0 && (
                   <Text className="mt-2 font-sans text-[15px] text-brand">
-                    Crédito aplicado: −{formatCents(creditAppliedCents)} · Pago
-                    con tarjeta: {formatCents(stripeAmountCents)}
+                    {t('banner.creditApplied', {
+                      credit: formatCents(creditAppliedCents),
+                      card: formatCents(stripeAmountCents),
+                    })}
                   </Text>
                 )}
                 <Text className="mt-2 font-sans text-[15px] text-ink-soft">
-                  Autorizá el cobro. Retenemos el monto y lo cobramos solo cuando
-                  te entreguemos.
+                  {t('banner.authorize.body')}
                 </Text>
                 <Button
                   variant="accent"
@@ -365,7 +370,7 @@ export default function OrderDetailScreen() {
                   loading={paying || authorize.isPending}
                   className="mt-4"
                 >
-                  Pagar · {formatCents(stripeAmountCents)} →
+                  {t('banner.payCta', { amount: formatCents(stripeAmountCents) })}
                 </Button>
               </View>
             )}
@@ -375,18 +380,17 @@ export default function OrderDetailScreen() {
             <View className="mb-6 border-l-4 border-ink bg-paper-deep/40 p-4">
               <Text className="font-sans-semibold text-[16px] text-ink">
                 {order.status === 'confirmed_by_colmado' &&
-                  'Listo para salir a entregar.'}
-                {order.status === 'in_delivery_route' && 'En camino a tu puerta.'}
+                  t('banner.readyToDeliver')}
+                {order.status === 'in_delivery_route' && t('banner.onTheWay')}
               </Text>
             </View>
           )}
 
           {/* Lista de compra */}
           <View className="mb-2 flex-row items-baseline justify-between">
-            <Eyebrow>Lista de compra</Eyebrow>
+            <Eyebrow>{t('detail.itemsEyebrow')}</Eyebrow>
             <Text className="font-sans text-[11px] uppercase tracking-label text-ink-muted">
-              {order.items.length}{' '}
-              {order.items.length === 1 ? 'producto' : 'productos'}
+              {t('items', { count: order.items.length })}
             </Text>
           </View>
           {order.items.map((it) => {
@@ -413,7 +417,7 @@ export default function OrderDetailScreen() {
                     className="mt-0.5 font-sans text-[11px] text-ink-muted"
                     style={{ fontVariant: ['tabular-nums'] }}
                   >
-                    {formatCents(unitCents)} c/u
+                    {t('detail.unitPrice', { price: formatCents(unitCents) })}
                   </Text>
                 </View>
                 <Text
@@ -428,18 +432,21 @@ export default function OrderDetailScreen() {
 
           {/* Resumen */}
           <View className="mt-6">
-            <Eyebrow className="mb-2">Resumen</Eyebrow>
-            <BreakdownRow label="Subtotal" value={formatCents(subtotalCents)} />
+            <Eyebrow className="mb-2">{t('summary.eyebrow')}</Eyebrow>
+            <BreakdownRow
+              label={t('summary.subtotal')}
+              value={formatCents(subtotalCents)}
+            />
             {pointsCents > 0 && (
               <BreakdownRow
-                label="Puntos"
+                label={t('summary.points')}
                 value={`−${formatCents(pointsCents)}`}
                 emphasis="positive"
               />
             )}
             {creditAppliedCents > 0 && (
               <BreakdownRow
-                label="Crédito"
+                label={t('summary.credit')}
                 value={`−${formatCents(creditAppliedCents)}`}
                 emphasis="positive"
               />
@@ -448,21 +455,21 @@ export default function OrderDetailScreen() {
               <View className="my-1 flex-row items-center gap-2">
                 <SuscriptorBadge wasSubscriber />
                 <Text className="font-sans text-[11px] text-ink-muted">
-                  Envío gratis aplicado
+                  {t('summary.freeShippingApplied')}
                 </Text>
               </View>
             )}
             {order.status === 'pending_quote' ? (
               <>
                 <BreakdownRow
-                  label="Envío"
-                  value="A cotizar"
+                  label={t('summary.shipping')}
+                  value={t('summary.toQuote')}
                   emphasis="muted"
                   italic
                 />
                 <BreakdownRow
-                  label="Impuestos"
-                  value="Al cotizar"
+                  label={t('summary.taxes')}
+                  value={t('summary.uponQuote')}
                   emphasis="muted"
                   italic
                 />
@@ -470,36 +477,44 @@ export default function OrderDetailScreen() {
             ) : (
               <>
                 <BreakdownRow
-                  label="Envío"
+                  label={t('summary.shipping')}
                   value={formatCents(shippingCents)}
                 />
                 <BreakdownRow
-                  label={`Impuestos (${(Number(order.taxRate) * 100).toFixed(3)}%)`}
+                  label={t('summary.taxesWithRate', {
+                    rate: (Number(order.taxRate) * 100).toFixed(3),
+                  })}
                   value={formatCents(taxCents)}
                 />
               </>
+            )}
+            {tipCents > 0 && (
+              <BreakdownRow
+                label={t('summary.tip')}
+                value={formatCents(tipCents)}
+              />
             )}
             <Hairline className="my-3" />
             <View className="flex-row items-baseline justify-between">
               <View>
                 <Text className="font-sans text-[10px] uppercase tracking-label text-ink-muted">
                   {order.paymentMethod === 'cash'
-                    ? 'A pagar · Efectivo'
-                    : 'Total · Digital'}
+                    ? t('summary.cashTotalLabel')
+                    : t('summary.digitalTotalLabel')}
                 </Text>
                 <Text
                   className="mt-1 font-sans-semibold text-[32px] leading-[36px] text-brand"
                   style={{ fontVariant: ['tabular-nums'] }}
                 >
                   {order.status === 'pending_quote'
-                    ? 'A cotizar'
+                    ? t('summary.toQuote')
                     : formatCents(totalCents)}
                 </Text>
               </View>
               {order.paidAt && (
                 <View className="items-end">
                   <Text className="font-sans text-[10px] uppercase tracking-label text-ok">
-                    Pagado
+                    {t('summary.paid')}
                   </Text>
                   <Text className="font-sans text-[11px] text-ink-muted">
                     {new Date(order.paidAt).toLocaleDateString('es-AR')}
@@ -511,8 +526,9 @@ export default function OrderDetailScreen() {
               order.status !== 'pending_quote' &&
               !isFullCredit && (
                 <Text className="mt-2 font-sans text-[11px] text-ink-muted">
-                  Crédito aplicado · pago con tarjeta:{' '}
-                  {formatCents(stripeAmountCents)}
+                  {t('summary.creditCardNote', {
+                    amount: formatCents(stripeAmountCents),
+                  })}
                 </Text>
               )}
           </View>

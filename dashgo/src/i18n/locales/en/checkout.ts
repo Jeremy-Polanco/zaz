@@ -1,0 +1,83 @@
+export default {
+  emptyCart: {
+    eyebrow: 'Cart',
+    title: "It's empty.",
+    subtitle: 'Add products from the catalog to continue.',
+    back: 'Go back →',
+  },
+  activeOrder: {
+    eyebrow: 'Order in progress',
+    title: 'You already have one on the way.',
+    subtitle: "Wait for it to complete before placing another. We'll let you know when it arrives.",
+    viewOrder: 'View my order →',
+  },
+  header: {
+    eyebrow: 'Checkout',
+    title: 'Almost there.',
+    itemCount_one: '{{count}} product for delivery today.',
+    itemCount_other: '{{count}} products for delivery today.',
+  },
+  summary: {
+    title: 'Summary',
+    firstMonth: '{{amount}} (first month)',
+    thenPerMonth: 'then {{amount}}/mo',
+  },
+  delivery: {
+    title: 'Delivery',
+    default: 'Default',
+  },
+  payment: {
+    title: 'Payment',
+    cashLabel: 'On delivery',
+    cash: 'Cash',
+    digitalLabel: 'With card',
+    digital: 'Digital payment',
+  },
+  tip: {
+    title: 'Tip',
+    none: 'No',
+    noneSubtitle: 'tip',
+    note: "Based on the product subtotal. It's added to the order total.",
+  },
+  credit: {
+    title: 'My credit',
+    available: 'Available',
+    use: 'Use {{amount}} in credit',
+  },
+  points: {
+    title: 'My points',
+    fullRedeem: 'Full redemption',
+    use: 'Use {{amount}} in points',
+  },
+  totals: {
+    subtotal: 'Subtotal',
+    rentalFirstMonth: 'First month rent',
+    pointsDiscount: 'Points discount',
+    creditApplied: 'Credit applied',
+    shipping: 'Shipping',
+    free: 'Free',
+    freeWithSubscription: 'Free with your subscription',
+    toQuote: 'To be quoted',
+    taxes: 'Taxes',
+    atQuote: 'When quoted',
+    tipLine: 'Tip ({{percent}}%)',
+    total: 'Total',
+    partialTotal: 'Partial total',
+    finalNote: 'No quote needed — this is the final total. Confirm and pay.',
+    quoteNote: "The courier quotes the delivery fee and we'll let you know to confirm the total.",
+  },
+  monthly: {
+    title: 'Monthly recurring charge',
+    amountPerMonth: '{{amount}}/mo',
+    note: 'Starting with the second month, the monthly charge is applied automatically.',
+  },
+  mixedCart: {
+    error: "You can't combine rental products with one-time purchase products.",
+    hint: 'Place separate orders: one for rentals and another for one-time purchases.',
+  },
+  errors: {
+    paymentIncomplete: "You didn't complete the payment. Your cart is still here whenever you want to pay.",
+    createFailed: "Couldn't create the order",
+  },
+  submit: 'Confirm order →',
+}

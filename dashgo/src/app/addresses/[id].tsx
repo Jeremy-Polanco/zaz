@@ -11,6 +11,7 @@ import {
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { router, Stack, useLocalSearchParams } from 'expo-router'
+import { useTranslation } from 'react-i18next'
 import { useForm, Controller } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { savedAddressSchema, type SavedAddressInput } from '../../lib/schemas'
@@ -24,6 +25,7 @@ import { MapPicker } from '../../components/MapPicker'
 import { ScreenHeader } from '../../components/ScreenHeader'
 
 export default function EditAddress() {
+  const { t } = useTranslation('addresses')
   const { id } = useLocalSearchParams<{ id: string }>()
   const { data: addresses, isPending: isLoading } = useMyAddresses()
   const updateAddress = useUpdateAddress()
@@ -58,7 +60,7 @@ export default function EditAddress() {
   if (isLoading) {
     return (
       <SafeAreaView className="flex-1 items-center justify-center bg-paper">
-        <Stack.Screen options={{ title: 'Editar dirección' }} />
+        <Stack.Screen options={{ title: t('edit.title') }} />
         <ActivityIndicator color="#1A1530" size="small" />
       </SafeAreaView>
     )
@@ -67,8 +69,8 @@ export default function EditAddress() {
   if (!address) {
     return (
       <SafeAreaView className="flex-1 items-center justify-center bg-paper">
-        <Stack.Screen options={{ title: 'Dirección' }} />
-        <Text className="text-[16px] text-ink-soft">Dirección no encontrada</Text>
+        <Stack.Screen options={{ title: t('edit.fallbackTitle') }} />
+        <Text className="text-[16px] text-ink-soft">{t('edit.notFound')}</Text>
       </SafeAreaView>
     )
   }
@@ -80,12 +82,12 @@ export default function EditAddress() {
 
   const handleDelete = () => {
     Alert.alert(
-      'Eliminar dirección',
-      `¿Estás seguro de que quieres eliminar "${address.label}"?`,
+      t('edit.delete'),
+      t('edit.deleteConfirm', { label: address.label }),
       [
-        { text: 'Cancelar', style: 'cancel' },
+        { text: t('edit.deleteCancel'), style: 'cancel' },
         {
-          text: 'Eliminar',
+          text: t('edit.deleteOk'),
           style: 'destructive',
           onPress: async () => {
             await deleteAddress.mutateAsync(id)
@@ -102,8 +104,8 @@ export default function EditAddress() {
 
   return (
     <SafeAreaView edges={['bottom']} className="flex-1 bg-paper">
-      <Stack.Screen options={{ title: 'Editar dirección' }} />
-      <ScreenHeader title="Editar dirección" />
+      <Stack.Screen options={{ title: t('edit.title') }} />
+      <ScreenHeader title={t('edit.title')} />
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         className="flex-1"
@@ -115,7 +117,7 @@ export default function EditAddress() {
           {/* Label */}
           <View className="gap-1.5">
             <Text className="font-sans-medium text-[15px] uppercase tracking-wide text-ink-soft">
-              Nombre
+              {t('form.name')}
             </Text>
             <Controller
               control={control}
@@ -123,7 +125,7 @@ export default function EditAddress() {
               render={({ field }) => (
                 <TextInput
                   className="rounded-lg border border-ink/20 bg-paper px-4 py-3 text-[16px] text-ink"
-                  placeholder="Ej: Casa, Oficina"
+                  placeholder={t('form.namePlaceholder')}
                   placeholderTextColor="#9ca3af"
                   value={field.value}
                   onChangeText={field.onChange}
@@ -140,7 +142,7 @@ export default function EditAddress() {
           {/* Line 1 */}
           <View className="gap-1.5">
             <Text className="font-sans-medium text-[15px] uppercase tracking-wide text-ink-soft">
-              Dirección
+              {t('form.address')}
             </Text>
             <Controller
               control={control}
@@ -148,7 +150,7 @@ export default function EditAddress() {
               render={({ field }) => (
                 <TextInput
                   className="rounded-lg border border-ink/20 bg-paper px-4 py-3 text-[16px] text-ink"
-                  placeholder="Av. 27 de Febrero 123"
+                  placeholder={t('form.addressPlaceholder')}
                   placeholderTextColor="#9ca3af"
                   value={field.value}
                   onChangeText={field.onChange}
@@ -165,8 +167,8 @@ export default function EditAddress() {
           {/* Line 2 */}
           <View className="gap-1.5">
             <Text className="font-sans-medium text-[15px] uppercase tracking-wide text-ink-soft">
-              Apto / Piso{' '}
-              <Text className="normal-case font-sans text-[13px]">(opcional)</Text>
+              {t('form.unit')}{' '}
+              <Text className="normal-case font-sans text-[13px]">{t('form.optional')}</Text>
             </Text>
             <Controller
               control={control}
@@ -174,7 +176,7 @@ export default function EditAddress() {
               render={({ field }) => (
                 <TextInput
                   className="rounded-lg border border-ink/20 bg-paper px-4 py-3 text-[16px] text-ink"
-                  placeholder="Apto 3B, Piso 5"
+                  placeholder={t('form.unitPlaceholder')}
                   placeholderTextColor="#9ca3af"
                   value={field.value ?? ''}
                   onChangeText={(v) => field.onChange(v || undefined)}
@@ -188,7 +190,7 @@ export default function EditAddress() {
           {/* Map Picker */}
           <View className="gap-1.5">
             <Text className="font-sans-medium text-[15px] uppercase tracking-wide text-ink-soft">
-              Ubica el pin
+              {t('form.pinLabel')}
             </Text>
             <MapPicker
               value={{ lat, lng }}
@@ -202,8 +204,8 @@ export default function EditAddress() {
           {/* Instructions */}
           <View className="gap-1.5">
             <Text className="font-sans-medium text-[15px] uppercase tracking-wide text-ink-soft">
-              Instrucciones{' '}
-              <Text className="normal-case font-sans text-[13px]">(opcional)</Text>
+              {t('form.instructions')}{' '}
+              <Text className="normal-case font-sans text-[13px]">{t('form.optional')}</Text>
             </Text>
             <Controller
               control={control}
@@ -211,7 +213,7 @@ export default function EditAddress() {
               render={({ field }) => (
                 <TextInput
                   className="rounded-lg border border-ink/20 bg-paper px-4 py-3 text-[16px] text-ink"
-                  placeholder="Toca el portón, apartamento en el fondo"
+                  placeholder={t('form.instructionsPlaceholder')}
                   placeholderTextColor="#9ca3af"
                   value={field.value ?? ''}
                   onChangeText={(v) => field.onChange(v || undefined)}
@@ -234,7 +236,7 @@ export default function EditAddress() {
               <ActivityIndicator color="#ffffff" size="small" />
             ) : (
               <Text className="font-sans-semibold text-[16px] text-paper">
-                Guardar cambios
+                {t('edit.save')}
               </Text>
             )}
           </Pressable>
@@ -246,7 +248,7 @@ export default function EditAddress() {
             className="items-center rounded-xl border border-brand py-4 active:opacity-70 disabled:opacity-40"
           >
             <Text className="font-sans-semibold text-[16px] text-brand">
-              {address.isDefault ? 'Es la principal' : 'Hacer principal'}
+              {address.isDefault ? t('edit.isDefault') : t('edit.makeDefault')}
             </Text>
           </Pressable>
 
@@ -257,7 +259,7 @@ export default function EditAddress() {
             className="items-center py-4 active:opacity-60"
           >
             <Text className="font-sans-medium text-[15px] text-red-500">
-              Eliminar dirección
+              {t('edit.delete')}
             </Text>
           </Pressable>
         </ScrollView>

@@ -15,6 +15,7 @@ import type {
   CreateAddressInput,
   CreditAccountsPage,
   CreditMovementsPage,
+  CustomerActivity,
   GeoAddress,
   Invoice,
   LoginResponse,
@@ -217,6 +218,29 @@ export function useOrders() {
     queryKey: ['orders'],
     queryFn: async () => (await api.get<Order[]>('/orders')).data,
     enabled: !!user,
+  })
+}
+
+/** Admin: hard-delete de un pedido — el server solo acepta cancelados. */
+export function useDeleteOrder() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (id: string) =>
+      (await api.delete<{ deleted: true }>(`/orders/${id}`)).data,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['orders'] })
+      qc.invalidateQueries({ queryKey: ['admin', 'customer-activity'] })
+    },
+  })
+}
+
+/** Admin dashboard: who ordered today / who's been quiet 7d and 30d. */
+export function useCustomerActivity() {
+  return useQuery<CustomerActivity>({
+    queryKey: ['admin', 'customer-activity'],
+    queryFn: async () =>
+      (await api.get<CustomerActivity>('/orders/admin/customer-activity')).data,
+    staleTime: 60_000,
   })
 }
 

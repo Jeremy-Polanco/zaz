@@ -146,3 +146,17 @@ jest.mock('expo-image', () => {
   const { Image } = jest.requireActual('react-native')
   return { Image }
 })
+
+// ---------------------------------------------------------------------------
+// expo-localization — tests always run in Spanish (the source language every
+// test asserts on). The real device detection is exercised only at runtime.
+// ---------------------------------------------------------------------------
+jest.mock('expo-localization', () => ({
+  getLocales: jest.fn(() => [{ languageCode: 'es' }]),
+}))
+
+// ---------------------------------------------------------------------------
+// i18n — initialize with the real ES/EN resources so screens render their
+// actual Spanish copy under test (assertions match production strings).
+// ---------------------------------------------------------------------------
+import '../i18n'

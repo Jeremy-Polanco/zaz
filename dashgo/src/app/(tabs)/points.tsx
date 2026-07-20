@@ -1,5 +1,6 @@
 import { View, Text, FlatList, ActivityIndicator } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
+import { useTranslation } from 'react-i18next'
 import { usePointsBalance, usePointsHistory } from '../../lib/queries'
 import { formatCents, formatDate } from '../../lib/format'
 import type { PointsEntry } from '../../lib/types'
@@ -30,21 +31,22 @@ function SummaryCard({
 }
 
 function EntryRow({ entry }: { entry: PointsEntry }) {
+  const { t } = useTranslation('points')
   const sign = entry.amountCents >= 0 ? '+' : '−'
   const abs = Math.abs(entry.amountCents)
   const statusLabel = (() => {
-    if (entry.status === 'claimable') return 'Disponible'
-    if (entry.status === 'pending') return 'Pendiente'
-    if (entry.status === 'redeemed') return 'Canjeado'
-    if (entry.status === 'expired') return 'Vencido'
+    if (entry.status === 'claimable') return t('status.claimable')
+    if (entry.status === 'pending') return t('status.pending')
+    if (entry.status === 'redeemed') return t('status.redeemed')
+    if (entry.status === 'expired') return t('status.expired')
     return entry.status
   })()
   const typeLabel =
     entry.type === 'earned'
-      ? 'Ganado'
+      ? t('type.earned')
       : entry.type === 'redeemed'
-      ? 'Canje'
-      : 'Vencido'
+      ? t('type.redeemed')
+      : t('type.expired')
   const amountColor =
     entry.status === 'expired'
       ? 'text-ink-muted'
@@ -57,19 +59,19 @@ function EntryRow({ entry }: { entry: PointsEntry }) {
       <View className="flex-row items-start justify-between">
         <View className="flex-1 pr-3">
           <Text className="font-sans text-[12px] uppercase tracking-label text-ink-muted">
-            {formatDate(entry.createdAt)} · {typeLabel}
+            {t('entry.meta', { date: formatDate(entry.createdAt), type: typeLabel })}
           </Text>
           <Text className="mt-1 font-sans-semibold text-[15px] text-ink">
             {statusLabel}
           </Text>
           {entry.status === 'pending' && entry.claimableAt && (
             <Text className="mt-1 font-sans text-[12px] uppercase tracking-label text-ink-muted">
-              Disponible el {formatDate(entry.claimableAt)}
+              {t('entry.claimableOn', { date: formatDate(entry.claimableAt) })}
             </Text>
           )}
           {entry.status === 'claimable' && entry.expiresAt && (
             <Text className="mt-1 font-sans text-[12px] uppercase tracking-label text-ink-muted">
-              Vence el {formatDate(entry.expiresAt)}
+              {t('entry.expiresOn', { date: formatDate(entry.expiresAt) })}
             </Text>
           )}
         </View>
@@ -87,6 +89,7 @@ function EntryRow({ entry }: { entry: PointsEntry }) {
 }
 
 export default function PointsTab() {
+  const { t } = useTranslation('points')
   const { data: balance, isPending: balancePending } = usePointsBalance()
   const { data: history, isPending: historyPending, refetch, isRefetching } =
     usePointsHistory()
@@ -107,52 +110,51 @@ export default function PointsTab() {
         contentContainerClassName="px-5 pb-8"
         ListHeaderComponent={
           <View className="pb-2 pt-6">
-            <Eyebrow className="mb-3">Mis puntos</Eyebrow>
+            <Eyebrow className="mb-3">{t('eyebrow')}</Eyebrow>
             <View className="flex-row flex-wrap items-baseline">
               <Text className="font-sans-semibold text-[40px] leading-[44px] text-ink">
-                Puntos y{' '}
+                {t('title.lead')}{' '}
               </Text>
               <Text className="font-sans-italic text-[40px] leading-[44px] text-brand">
-                canjes.
+                {t('title.accent')}
               </Text>
             </View>
             <Text className="mt-2 text-[13px] text-ink-soft">
-              Ganas puntos en cada pedido entregado. Se activan a los 90 días y
-              expiran a los 180.
+              {t('subtitle')}
             </Text>
 
             <View className="mt-6 flex-row gap-3">
               <SummaryCard
-                label="Disponibles"
+                label={t('summary.claimable')}
                 cents={balance?.claimableCents ?? 0}
                 accent={(balance?.claimableCents ?? 0) > 0}
               />
               <SummaryCard
-                label="Pendientes"
+                label={t('summary.pending')}
                 cents={balance?.pendingCents ?? 0}
               />
             </View>
             <View className="mt-3 flex-row gap-3">
               <SummaryCard
-                label="Canjeados"
+                label={t('summary.redeemed')}
                 cents={balance?.redeemedCents ?? 0}
               />
               <SummaryCard
-                label="Vencidos"
+                label={t('summary.expired')}
                 cents={balance?.expiredCents ?? 0}
               />
             </View>
 
             <Hairline className="mt-6" />
-            <Eyebrow className="mt-6 mb-2">Historial</Eyebrow>
+            <Eyebrow className="mt-6 mb-2">{t('history')}</Eyebrow>
           </View>
         }
         renderItem={({ item }) => <EntryRow entry={item} />}
         ListEmptyComponent={
           <View className="items-center py-20">
-            <Eyebrow>Sin movimientos</Eyebrow>
+            <Eyebrow>{t('empty.title')}</Eyebrow>
             <Text className="mt-3 text-center text-[15px] text-ink-soft">
-              Cuando completes un pedido{'\n'}vas a ver tus puntos acá.
+              {t('empty.body')}
             </Text>
           </View>
         }

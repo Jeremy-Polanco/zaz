@@ -1,12 +1,14 @@
 import { View, Text, ScrollView, ActivityIndicator, Share } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useLocalSearchParams, router } from 'expo-router'
+import { useTranslation } from 'react-i18next'
 import { useInvoice } from '../../../lib/queries'
 import { formatDate, formatMoney } from '../../../lib/format'
 import { Button, Eyebrow, Hairline } from '../../../components/ui'
 import { ScreenHeader } from '../../../components/ScreenHeader'
 
 export default function InvoiceScreen() {
+  const { t } = useTranslation('orders')
   const params = useLocalSearchParams<{ orderId: string }>()
   const orderId = typeof params.orderId === 'string' ? params.orderId : ''
   const { data: invoice, isPending, isError, error } = useInvoice(orderId || undefined)
@@ -14,25 +16,33 @@ export default function InvoiceScreen() {
   const share = async () => {
     if (!invoice) return
     const lines = [
-      `Factura ${invoice.invoiceNumber}`,
-      `Udash · ${formatDate(invoice.createdAt)}`,
+      t('invoice.share.title', { number: invoice.invoiceNumber }),
+      t('invoice.share.brandDate', { date: formatDate(invoice.createdAt) }),
       '',
       ...invoice.items.map(
         (it) =>
           `${it.quantity}× ${it.productName} — ${formatMoney(it.lineTotal)}`,
       ),
       '',
-      `Subtotal: ${formatMoney(invoice.subtotal)}`,
+      t('invoice.share.subtotal', { amount: formatMoney(invoice.subtotal) }),
       ...(parseFloat(invoice.pointsRedeemed) > 0
-        ? [`Descuento por puntos: −${formatMoney(invoice.pointsRedeemed)}`]
+        ? [
+            t('invoice.share.pointsDiscount', {
+              amount: formatMoney(invoice.pointsRedeemed),
+            }),
+          ]
         : []),
-      `Envío: ${
-        parseFloat(invoice.shipping) > 0
-          ? formatMoney(invoice.shipping)
-          : 'Gratis'
-      }`,
-      `Impuestos: ${formatMoney(invoice.tax)}`,
-      `Total: ${formatMoney(invoice.total)}`,
+      t('invoice.share.shipping', {
+        amount:
+          parseFloat(invoice.shipping) > 0
+            ? formatMoney(invoice.shipping)
+            : t('invoice.free'),
+      }),
+      t('invoice.share.taxes', { amount: formatMoney(invoice.tax) }),
+      ...(parseFloat(invoice.tip ?? '0') > 0
+        ? [t('invoice.share.tip', { amount: formatMoney(invoice.tip!) })]
+        : []),
+      t('invoice.share.total', { amount: formatMoney(invoice.total) }),
     ]
     await Share.share({ message: lines.join('\n') })
   }
@@ -49,19 +59,18 @@ export default function InvoiceScreen() {
     return (
       <SafeAreaView edges={['top']} className="flex-1 bg-paper">
         <View className="flex-1 items-center justify-center px-6 py-20">
-          <Eyebrow className="mb-4">Factura</Eyebrow>
+          <Eyebrow className="mb-4">{t('invoice.title')}</Eyebrow>
           <Text className="text-center font-sans-semibold text-[28px] leading-[32px] text-ink">
-            No disponible
+            {t('invoice.notAvailable')}
           </Text>
           <Text className="mt-6 max-w-sm text-center text-[14px] leading-[20px] text-ink-muted">
             {(error as Error & {
               response?: { data?: { message?: string } }
-            })?.response?.data?.message ??
-              'La factura se genera cuando el pedido se marca como entregado.'}
+            })?.response?.data?.message ?? t('invoice.generatedOnDelivery')}
           </Text>
           <View className="mt-10 w-full max-w-xs">
             <Button variant="ink" size="lg" onPress={() => router.back()}>
-              Volver
+              {t('invoice.back')}
             </Button>
           </View>
         </View>
@@ -74,26 +83,26 @@ export default function InvoiceScreen() {
   return (
     <View className="flex-1 bg-paper">
       <ScreenHeader
-        title="Factura"
+        title={t('invoice.title')}
         right={
           <Button variant="accent" onPress={share}>
-            Compartir
+            {t('invoice.shareCta')}
           </Button>
         }
       />
       <ScrollView contentContainerClassName="px-5 pb-8">
         <View className="mt-2 border-b-2 border-ink pb-6">
-          <Eyebrow>Factura</Eyebrow>
+          <Eyebrow>{t('invoice.title')}</Eyebrow>
           <Text className="mt-3 font-sans-semibold text-[44px] leading-[48px] text-ink">
             DashGo
           </Text>
           <Text className="mt-1 font-sans text-[11px] uppercase tracking-label text-ink-muted">
-            Agua al timbre · New York
+            {t('invoice.tagline')}
           </Text>
 
           <View className="mt-4 flex-row items-end justify-between">
             <View>
-              <Eyebrow>Nº</Eyebrow>
+              <Eyebrow>{t('invoice.number')}</Eyebrow>
               <Text
                 className="mt-1 font-sans-semibold text-[22px] text-ink"
                 style={{ fontVariant: ['tabular-nums'] }}
@@ -109,7 +118,7 @@ export default function InvoiceScreen() {
 
         <View className="mt-6 flex-row gap-6 border-b border-ink/10 pb-6">
           <View className="flex-1">
-            <Eyebrow>Facturado a</Eyebrow>
+            <Eyebrow>{t('invoice.billedTo')}</Eyebrow>
             <Text className="mt-2 font-sans-semibold text-[18px] text-ink">
               {invoice.customer.fullName}
             </Text>
@@ -118,20 +127,20 @@ export default function InvoiceScreen() {
             </Text>
           </View>
           <View className="flex-1">
-            <Eyebrow>Entrega</Eyebrow>
+            <Eyebrow>{t('invoice.delivery')}</Eyebrow>
             <Text className="mt-2 text-[14px] text-ink">
-              {invoice.order.deliveryAddress?.text ?? 'A coordinar'}
+              {invoice.order.deliveryAddress?.text ?? t('toCoordinate')}
             </Text>
             <Text className="mt-1 font-sans text-[10px] uppercase tracking-label text-ink-muted">
               {invoice.order.paymentMethod === 'cash'
-                ? 'Pago en efectivo'
-                : 'Pago digital'}
+                ? t('invoice.cashPayment')
+                : t('invoice.digitalPayment')}
             </Text>
           </View>
         </View>
 
         <View className="mt-6">
-          <Eyebrow>Detalle</Eyebrow>
+          <Eyebrow>{t('invoice.detail')}</Eyebrow>
           <View className="mt-4">
             {invoice.items.map((item) => (
               <View
@@ -163,7 +172,7 @@ export default function InvoiceScreen() {
         <View className="mt-6 border-t-2 border-ink pt-4">
           <View className="mb-2 flex-row items-baseline justify-between">
             <Text className="font-sans text-[11px] uppercase tracking-label text-ink-muted">
-              Subtotal
+              {t('invoice.subtotal')}
             </Text>
             <Text
               className="font-sans text-[14px] text-ink"
@@ -175,7 +184,7 @@ export default function InvoiceScreen() {
           {parseFloat(invoice.pointsRedeemed) > 0 && (
             <View className="mb-2 flex-row items-baseline justify-between">
               <Text className="font-sans text-[11px] uppercase tracking-label text-brand">
-                Descuento por puntos
+                {t('invoice.pointsDiscount')}
               </Text>
               <Text
                 className="font-sans text-[14px] text-brand"
@@ -187,7 +196,7 @@ export default function InvoiceScreen() {
           )}
           <View className="mb-2 flex-row items-baseline justify-between">
             <Text className="font-sans text-[11px] uppercase tracking-label text-ink-muted">
-              Envío
+              {t('invoice.shipping')}
             </Text>
             <Text
               className="font-sans text-[14px] text-ink"
@@ -195,12 +204,12 @@ export default function InvoiceScreen() {
             >
               {parseFloat(invoice.shipping) > 0
                 ? formatMoney(invoice.shipping)
-                : 'Gratis'}
+                : t('invoice.free')}
             </Text>
           </View>
           <View className="mb-3 flex-row items-baseline justify-between">
             <Text className="font-sans text-[11px] uppercase tracking-label text-ink-muted">
-              Impuestos ({taxRatePct}%)
+              {t('invoice.taxesWithRate', { rate: taxRatePct })}
             </Text>
             <Text
               className="font-sans text-[14px] text-ink"
@@ -209,8 +218,21 @@ export default function InvoiceScreen() {
               {formatMoney(invoice.tax)}
             </Text>
           </View>
+          {parseFloat(invoice.tip ?? '0') > 0 && (
+            <View className="mb-3 flex-row items-baseline justify-between">
+              <Text className="font-sans text-[11px] uppercase tracking-label text-ink-muted">
+                {t('invoice.tip')}
+              </Text>
+              <Text
+                className="font-sans text-[14px] text-ink"
+                style={{ fontVariant: ['tabular-nums'] }}
+              >
+                {formatMoney(invoice.tip!)}
+              </Text>
+            </View>
+          )}
           <View className="flex-row items-baseline justify-between border-t border-ink pt-3">
-            <Eyebrow tone="ink">Total</Eyebrow>
+            <Eyebrow tone="ink">{t('invoice.total')}</Eyebrow>
             <Text
               className="font-sans-semibold text-[32px] text-brand"
               style={{ fontVariant: ['tabular-nums'] }}
@@ -222,7 +244,7 @@ export default function InvoiceScreen() {
 
         <Hairline className="mt-10" />
         <Text className="mt-6 text-center font-sans text-[10px] uppercase tracking-label text-ink-muted">
-          Gracias por tu pedido
+          {t('invoice.thanks')}
         </Text>
         <Text className="mt-1 text-center font-sans text-[10px] uppercase tracking-label text-ink-muted">
           DashGo · dashgo.dev

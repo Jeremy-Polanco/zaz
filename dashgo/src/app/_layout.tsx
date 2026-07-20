@@ -19,6 +19,9 @@
 import { Sentry } from '../lib/sentry'
 
 import '../global.css'
+// Side-effect init: registers ES/EN resources + device-language detection so
+// every screen's useTranslation() resolves before first render.
+import '../i18n'
 import { useEffect, useRef } from 'react'
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native'
 import { Stack, router, usePathname } from 'expo-router'

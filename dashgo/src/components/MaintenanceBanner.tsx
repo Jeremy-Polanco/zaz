@@ -1,5 +1,6 @@
 import { useMemo } from 'react'
 import { View, Text } from 'react-native'
+import { useTranslation } from 'react-i18next'
 import { router } from 'expo-router'
 import { useMyRentals, useProducts, useRequestMaintenance } from '../lib/queries'
 import { Button } from './ui'
@@ -18,6 +19,7 @@ function daysUntil(iso: string): number {
  * when the customer has no maintenance-tracked rental.
  */
 export function MaintenanceBanner() {
+  const { t } = useTranslation('banners')
   const { data: rentals } = useMyRentals()
   const { data: products } = useProducts()
   const requestMaintenance = useRequestMaintenance()
@@ -63,12 +65,12 @@ export function MaintenanceBanner() {
     return (
       <View className="mt-6 border-l-4 border-ink bg-paper-deep/40 p-4">
         <Text className="font-sans-semibold text-[16px] text-ink">
-          Mantenimiento del bebedero
+          {t('maintenance.title')}
         </Text>
         <Text className="mt-2 font-sans text-[13px] text-ink-soft">
-          Próximo mantenimiento en{' '}
+          {t('maintenance.upcomingPrefix')}{' '}
           <Text className="font-sans-semibold text-[15px] text-ink">{daysLeft}</Text>{' '}
-          {daysLeft === 1 ? 'día' : 'días'}.
+          {t('maintenance.days', { count: daysLeft })}.
         </Text>
       </View>
     )
@@ -81,24 +83,24 @@ export function MaintenanceBanner() {
         | { response?: { data?: { message?: string } } }
         | null
         | undefined
-    )?.response?.data?.message ?? 'No pudimos crear la orden. Intentá de nuevo.'
+    )?.response?.data?.message ?? t('maintenance.createOrderError')
 
   return (
     <View className="mt-6 border-l-4 border-bad bg-bad/10 p-4">
       <Text className="font-sans-semibold text-[18px] text-ink">
-        Mantenimiento del bebedero vencido
+        {t('maintenance.overdueTitle')}
       </Text>
       <Text className="mt-2 font-sans text-[13px] text-ink-soft">
         {overdueDays === 0 ? (
-          'El mantenimiento vence hoy. '
+          <>{t('maintenance.dueToday')} </>
         ) : (
           <>
-            Venció hace{' '}
+            {t('maintenance.overduePrefix')}{' '}
             <Text className="font-sans-semibold text-[15px] text-ink">{overdueDays}</Text>{' '}
-            {overdueDays === 1 ? 'día' : 'días'}.{' '}
+            {t('maintenance.days', { count: overdueDays })}.{' '}
           </>
         )}
-        Solicitá la visita de mantenimiento.
+        {t('maintenance.requestVisit')}
       </Text>
       {maintenanceProduct ? (
         <Button
@@ -108,11 +110,11 @@ export function MaintenanceBanner() {
           loading={requestMaintenance.isPending}
           className="mt-4"
         >
-          Solicitar mantenimiento →
+          {t('maintenance.requestCta')}
         </Button>
       ) : (
         <Text className="mt-3 font-sans text-[12px] text-ink-muted">
-          Contactá a soporte para agendar el mantenimiento.
+          {t('maintenance.contactSupport')}
         </Text>
       )}
       {requestMaintenance.isError ? (

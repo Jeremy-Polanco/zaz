@@ -1,5 +1,6 @@
 import { View, Text, TextInput, Pressable, ActivityIndicator, type PressableProps, type ViewProps, type TextProps } from 'react-native'
 import { SymbolView } from 'expo-symbols'
+import { useTranslation } from 'react-i18next'
 import type { ReactNode } from 'react'
 import { Controller, type Control, type FieldValues, type Path } from 'react-hook-form'
 import type { OrderStatus } from '../lib/types'
@@ -149,7 +150,7 @@ export function PhoneField<T extends FieldValues>({
   control,
   name,
   error,
-  label = 'Teléfono',
+  label,
   testID,
 }: {
   control: Control<T>
@@ -158,9 +159,10 @@ export function PhoneField<T extends FieldValues>({
   label?: ReactNode
   testID?: string
 }) {
+  const { t } = useTranslation('common')
   return (
     <>
-      <FieldLabel>{label}</FieldLabel>
+      <FieldLabel>{label ?? t('phoneLabel')}</FieldLabel>
       <Controller
         control={control}
         name={name}
@@ -262,20 +264,21 @@ const STEPPER_ORDER: OrderStatus[] = [
   'in_delivery_route',
   'delivered',
 ]
-const STEPPER_SHORT: Record<OrderStatus, string> = {
-  pending_quote: 'Cotizar',
-  quoted: 'Cotizado',
-  pending_validation: 'Validar',
-  confirmed_by_colmado: 'Confirmado',
-  in_delivery_route: 'En ruta',
-  delivered: 'Entregado',
-  cancelled: 'Cancelado',
+// i18n keys (ns 'common') — resolved with t() at render time inside StatusStepper.
+const STEPPER_SHORT_KEYS: Record<OrderStatus, string> = {
+  pending_quote: 'orderStatusShort.pendingQuote',
+  quoted: 'orderStatusShort.quoted',
+  pending_validation: 'orderStatusShort.pendingValidation',
+  confirmed_by_colmado: 'orderStatusShort.confirmedByColmado',
+  in_delivery_route: 'orderStatusShort.inDeliveryRoute',
+  delivered: 'orderStatusShort.delivered',
+  cancelled: 'orderStatusShort.cancelled',
 }
 
 // Customer-facing journey: the 6 internal ops states collapse into 3 plain
 // steps. The customer pays, then it's pending, then it's delivered — no
 // "cotizar/validar/confirmar" noise. The admin keeps the detailed stepper.
-const CUSTOMER_STEPS = ['Pagar', 'Pendiente', 'Entregado'] as const
+const CUSTOMER_STEP_KEYS = ['steps.pay', 'steps.pending', 'steps.delivered'] as const
 function customerStepIndex(status: OrderStatus): number {
   if (status === 'delivered') return 2
   if (
@@ -295,10 +298,11 @@ export function StatusStepper({
   /** 'customer' = 3 plain steps; 'detailed' = full 6-state ops view (admin). */
   variant?: 'customer' | 'detailed'
 }) {
+  const { t } = useTranslation('common')
   const isCustomer = variant === 'customer'
   const labels = isCustomer
-    ? [...CUSTOMER_STEPS]
-    : STEPPER_ORDER.map((s) => STEPPER_SHORT[s])
+    ? CUSTOMER_STEP_KEYS.map((k) => t(k))
+    : STEPPER_ORDER.map((s) => t(STEPPER_SHORT_KEYS[s]))
   const idx = isCustomer
     ? customerStepIndex(status)
     : STEPPER_ORDER.indexOf(status)

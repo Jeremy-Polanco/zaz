@@ -1,12 +1,14 @@
 import { View, Text, FlatList, ActivityIndicator, Pressable } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { router } from 'expo-router'
+import { useTranslation } from 'react-i18next'
 import { useCurrentUser, useOrders } from '../../lib/queries'
 import { formatDate, formatMoney } from '../../lib/format'
 import type { Order } from '../../lib/types'
 import { Button, Eyebrow, Hairline, StatusBadge } from '../../components/ui'
 
 function OrderCard({ order }: { order: Order }) {
+  const { t } = useTranslation('orders')
   const itemCount = order.items?.length ?? 0
   return (
     <Pressable
@@ -24,10 +26,10 @@ function OrderCard({ order }: { order: Order }) {
             {formatDate(order.createdAt)}
           </Text>
           <Text className="mt-1 font-sans-semibold text-[20px] leading-[24px] text-ink">
-            Pedido · {formatMoney(order.totalAmount)}
+            {t('card.title', { amount: formatMoney(order.totalAmount) })}
           </Text>
           <Text className="mt-0.5 text-[13px] text-ink-soft">
-            {order.deliveryAddress?.text ?? 'A coordinar'}
+            {order.deliveryAddress?.text ?? t('toCoordinate')}
           </Text>
         </View>
         <StatusBadge status={order.status} />
@@ -35,7 +37,7 @@ function OrderCard({ order }: { order: Order }) {
 
       <View className="flex-row items-center justify-between">
         <Text className="font-sans text-[13px] uppercase tracking-label text-ink-muted">
-          {itemCount} {itemCount === 1 ? 'producto' : 'productos'} · {order.paymentMethod === 'cash' ? 'Efectivo' : 'Digital'}
+          {t('items', { count: itemCount })} · {order.paymentMethod === 'cash' ? t('card.cash') : t('card.digital')}
         </Text>
         <Text
           className="font-sans-semibold text-[22px] text-brand"
@@ -56,13 +58,13 @@ function OrderCard({ order }: { order: Order }) {
           className="mt-3 min-h-[48px] justify-center"
         >
           <Text className="font-sans text-[13px] uppercase tracking-label text-brand">
-            Ver factura →
+            {t('card.viewInvoice')}
           </Text>
         </Pressable>
       ) : (
         order.status !== 'cancelled' && (
           <Text className="mt-3 font-sans text-[13px] uppercase tracking-label text-brand">
-            Seguir pedido →
+            {t('card.trackOrder')}
           </Text>
         )
       )}
@@ -73,6 +75,7 @@ function OrderCard({ order }: { order: Order }) {
 }
 
 export default function OrdersTab() {
+  const { t } = useTranslation('orders')
   const { data: user, isPending: userPending } = useCurrentUser()
   const { data: orders, isPending, refetch, isRefetching } = useOrders()
 
@@ -91,20 +94,20 @@ export default function OrdersTab() {
     return (
       <SafeAreaView edges={['top']} className="flex-1 bg-paper">
         <View className="px-5 pt-6">
-          <Eyebrow className="mb-3">Historial</Eyebrow>
+          <Eyebrow className="mb-3">{t('list.eyebrow')}</Eyebrow>
           <View className="flex-row flex-wrap items-baseline">
             <Text className="font-sans-semibold text-[40px] leading-[44px] text-ink">
-              Mis{' '}
+              {t('list.titleLead')}{' '}
             </Text>
             <Text className="font-sans-italic text-[40px] leading-[44px] text-brand">
-              pedidos.
+              {t('list.titleAccent')}
             </Text>
           </View>
           <Hairline className="mt-6" />
           <View className="items-center py-20">
-            <Eyebrow>Tu cuenta te espera</Eyebrow>
+            <Eyebrow>{t('guest.eyebrow')}</Eyebrow>
             <Text className="mt-3 text-center text-[15px] text-ink-soft">
-              Iniciá sesión para hacer pedidos{'\n'}y ver tu historial acá.
+              {t('guest.body')}
             </Text>
             <Button
               variant="accent"
@@ -112,7 +115,7 @@ export default function OrdersTab() {
               className="mt-6"
               onPress={() => router.push('/(auth)/login')}
             >
-              Iniciar sesión →
+              {t('guest.login')}
             </Button>
           </View>
         </View>
@@ -136,13 +139,13 @@ export default function OrdersTab() {
         contentContainerClassName="px-5 pb-8"
         ListHeaderComponent={
           <View className="pb-2 pt-6">
-            <Eyebrow className="mb-3">Historial</Eyebrow>
+            <Eyebrow className="mb-3">{t('list.eyebrow')}</Eyebrow>
             <View className="flex-row flex-wrap items-baseline">
               <Text className="font-sans-semibold text-[40px] leading-[44px] text-ink">
-                Mis{' '}
+                {t('list.titleLead')}{' '}
               </Text>
               <Text className="font-sans-italic text-[40px] leading-[44px] text-brand">
-                pedidos.
+                {t('list.titleAccent')}
               </Text>
             </View>
             <Hairline className="mt-6" />
@@ -151,9 +154,9 @@ export default function OrdersTab() {
         renderItem={({ item }) => <OrderCard order={item} />}
         ListEmptyComponent={
           <View className="items-center py-20">
-            <Eyebrow>Sin pedidos</Eyebrow>
+            <Eyebrow>{t('empty.eyebrow')}</Eyebrow>
             <Text className="mt-3 text-center text-[15px] text-ink-soft">
-              Cuando hagas tu primer pedido{'\n'}lo vas a ver acá.
+              {t('empty.body')}
             </Text>
           </View>
         }

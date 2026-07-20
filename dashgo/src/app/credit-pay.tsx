@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { ActivityIndicator, Alert, ScrollView, Text, View } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { router } from 'expo-router'
+import { useTranslation } from 'react-i18next'
 import { useStripe } from '@stripe/stripe-react-native'
 import { useQueryClient } from '@tanstack/react-query'
 import {
@@ -13,6 +14,7 @@ import { formatCents, formatDate } from '../lib/format'
 import { Button, Eyebrow, Hairline } from '../components/ui'
 
 export default function CreditPayScreen() {
+  const { t } = useTranslation('credit')
   const qc = useQueryClient()
   const { data: user } = useCurrentUser()
   const { data: credit, isPending } = useMyCredit()
@@ -47,14 +49,14 @@ export default function CreditPayScreen() {
       })
       if (initResult.error) {
         setPaying(false)
-        Alert.alert('Error', initResult.error.message)
+        Alert.alert(t('pay.errorTitle'), initResult.error.message)
         return
       }
       const sheetResult = await presentPaymentSheet()
       setPaying(false)
       if (sheetResult.error) {
         if (sheetResult.error.code !== 'Canceled') {
-          Alert.alert('Error', sheetResult.error.message)
+          Alert.alert(t('pay.errorTitle'), sheetResult.error.message)
         }
         return
       }
@@ -64,9 +66,9 @@ export default function CreditPayScreen() {
     } catch (e) {
       setPaying(false)
       Alert.alert(
-        'Error',
+        t('pay.errorTitle'),
         (e as { response?: { data?: { message?: string } } })?.response?.data
-          ?.message ?? 'No pudimos iniciar el pago',
+          ?.message ?? t('pay.startError'),
       )
     }
   }
@@ -83,16 +85,16 @@ export default function CreditPayScreen() {
     return (
       <SafeAreaView edges={['top']} className="flex-1 bg-paper">
         <View className="flex-1 items-center justify-center px-6">
-          <Eyebrow>Sin saldo pendiente</Eyebrow>
+          <Eyebrow>{t('pay.noDebt.eyebrow')}</Eyebrow>
           <Text className="mt-4 text-center font-sans-semibold text-[28px] leading-[34px] text-ink">
-            No tienes deuda{'\n'}para pagar.
+            {t('pay.noDebt.title')}
           </Text>
           <Text className="mt-3 text-center text-[14px] text-ink-soft">
-            Tu cuenta de crédito está al día.
+            {t('pay.noDebt.body')}
           </Text>
           <View className="mt-8 w-full max-w-[260px]">
             <Button variant="ink" size="lg" onPress={() => router.replace('/(tabs)/credit')}>
-              Volver al crédito →
+              {t('pay.noDebt.back')}
             </Button>
           </View>
         </View>
@@ -103,26 +105,26 @@ export default function CreditPayScreen() {
   return (
     <SafeAreaView edges={['top']} className="flex-1 bg-paper">
       <ScrollView contentContainerClassName="px-5 pt-6 pb-8">
-        <Eyebrow className="mb-3">Pago de crédito</Eyebrow>
+        <Eyebrow className="mb-3">{t('pay.eyebrow')}</Eyebrow>
         <View className="flex-row flex-wrap items-baseline">
           <Text className="font-sans-semibold text-[40px] leading-[44px] text-ink">
-            Saldar mi{' '}
+            {t('pay.title.lead')}{' '}
           </Text>
           <Text className="font-sans-italic text-[40px] leading-[44px] text-brand">
-            deuda.
+            {t('pay.title.accent')}
           </Text>
         </View>
         <Text className="mt-2 text-[15px] text-ink-soft">
-          Paga tu balance pendiente con tarjeta. Una vez confirmado, tu crédito se libera al instante.
+          {t('pay.subtitle')}
         </Text>
 
         {locked && (
           <View className="mt-6 border border-red-200 bg-red-50 px-4 py-3">
             <Text className="font-sans text-[12px] uppercase tracking-label text-red-700">
-              Cuenta bloqueada
+              {t('pay.locked.title')}
             </Text>
             <Text className="mt-1 font-sans text-[15px] text-red-700">
-              Tu cuenta está vencida. Salda tu deuda para volver a usar la app.
+              {t('pay.locked.body')}
             </Text>
           </View>
         )}
@@ -131,7 +133,7 @@ export default function CreditPayScreen() {
 
         <View className="border border-ink/15 bg-paper p-5">
           <Text className="font-sans text-[12px] uppercase tracking-label text-ink-muted">
-            Monto a pagar
+            {t('pay.amountLabel')}
           </Text>
           <Text
             className="mt-2 font-sans-semibold text-[40px] leading-[44px] text-ink"
@@ -141,7 +143,7 @@ export default function CreditPayScreen() {
           </Text>
           {credit?.dueDate ? (
             <Text className="mt-2 font-sans text-[14px] text-ink-soft">
-              Vencimiento: {formatDate(credit.dueDate)}
+              {t('pay.dueDate', { date: formatDate(credit.dueDate) })}
             </Text>
           ) : null}
         </View>
@@ -149,10 +151,10 @@ export default function CreditPayScreen() {
         {done ? (
           <View className="mt-8 border border-green-300 bg-green-50 px-4 py-4">
             <Text className="font-sans text-[12px] uppercase tracking-label text-green-700">
-              Pago recibido
+              {t('pay.success.title')}
             </Text>
             <Text className="mt-1 font-sans-semibold text-[16px] text-green-800">
-              Gracias. Te llevamos al crédito…
+              {t('pay.success.body')}
             </Text>
           </View>
         ) : (
@@ -163,10 +165,10 @@ export default function CreditPayScreen() {
               loading={paying || createIntent.isPending}
               onPress={onPay}
             >
-              Pagar {formatCents(amountOwedCents)} →
+              {t('pay.payButton', { amount: formatCents(amountOwedCents) })}
             </Button>
             <Text className="mt-3 text-center font-sans text-[13px] text-ink-muted">
-              Procesado por Stripe. Tus datos no se guardan en nuestros servidores.
+              {t('pay.stripeNote')}
             </Text>
           </View>
         )}

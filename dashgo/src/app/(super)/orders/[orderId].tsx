@@ -13,7 +13,7 @@ import { router, useLocalSearchParams } from 'expo-router'
 import { useQuery } from '@tanstack/react-query'
 import { ScreenHeader } from '../../../components/ScreenHeader'
 import { api } from '../../../lib/api'
-import { useUpdateOrderStatus } from '../../../lib/queries'
+import { useDeleteOrder, useUpdateOrderStatus } from '../../../lib/queries'
 import { formatDate, formatMoney } from '../../../lib/format'
 import type { GeoAddress, Order, OrderStatus } from '../../../lib/types'
 import { formatAddressShort, addressDetailParts } from '../../../lib/address'
@@ -93,6 +93,7 @@ export default function SuperOrderDetailScreen() {
   const { orderId } = useLocalSearchParams<{ orderId: string }>()
   const { data: order, isPending, error } = useOrder(orderId)
   const updateStatus = useUpdateOrderStatus()
+  const deleteOrder = useDeleteOrder()
   const [quoting, setQuoting] = useState(false)
   const [pinningLocation, setPinningLocation] = useState(false)
 
@@ -160,6 +161,31 @@ export default function SuperOrderDetailScreen() {
         onPress: () => handleAdvance('cancelled'),
       },
     ])
+  }
+
+  // Hard-delete — only offered on CANCELLED orders (server enforces the same).
+  const handleDelete = () => {
+    Alert.alert(
+      'Eliminar pedido',
+      'Se borra definitivamente y desaparece del historial. ¿Seguro?',
+      [
+        { text: 'Volver', style: 'cancel' },
+        {
+          text: 'Eliminar',
+          style: 'destructive',
+          onPress: () =>
+            deleteOrder.mutate(order.id, {
+              onSuccess: () => router.back(),
+              onError: (e) => {
+                const msg =
+                  (e as { response?: { data?: { message?: string } } })
+                    ?.response?.data?.message ?? 'No se pudo eliminar el pedido'
+                Alert.alert('Error', msg)
+              },
+            }),
+        },
+      ],
+    )
   }
 
   return (
@@ -411,6 +437,13 @@ export default function SuperOrderDetailScreen() {
               />
             </>
           )}
+          {Number(order.tip ?? 0) > 0 && (
+            <BreakdownRow
+              label="Propina"
+              value={formatMoney(order.tip!)}
+              emphasis="positive"
+            />
+          )}
           <Hairline className="my-3" />
           <View className="flex-row items-baseline justify-between">
             <View>
@@ -513,6 +546,22 @@ export default function SuperOrderDetailScreen() {
               )}
             </View>
           )}
+        </View>
+      )}
+
+      {/* Cancelled orders are terminal — the only remaining action is delete. */}
+      {order.status === 'cancelled' && (
+        <View
+          className="border-t border-ink/10 bg-paper px-5 pb-6 pt-3"
+          style={{ position: 'absolute', bottom: 0, left: 0, right: 0 }}
+        >
+          <Button
+            variant="outline"
+            onPress={handleDelete}
+            loading={deleteOrder.isPending}
+          >
+            Eliminar pedido
+          </Button>
         </View>
       )}
 

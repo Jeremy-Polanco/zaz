@@ -1,5 +1,6 @@
 import { useMemo } from 'react'
 import { View, Text, ScrollView, ActivityIndicator, Pressable } from 'react-native'
+import { useTranslation } from 'react-i18next'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { router } from 'expo-router'
 import { useCategories, useCurrentUser, useOrders, useProducts } from '../../lib/queries'
@@ -10,6 +11,7 @@ import { MaintenanceBanner } from '../../components/MaintenanceBanner'
 import { formatMoney } from '../../lib/format'
 
 export default function HomeTab() {
+  const { t } = useTranslation('home')
   const { data: user } = useCurrentUser()
   const { data: categories, isPending: categoriesPending } = useCategories()
   const { data: products, isPending: productsPending } = useProducts()
@@ -53,11 +55,13 @@ export default function HomeTab() {
         {/* Header: greeting + brand tile */}
         <View className="flex-row items-start justify-between">
           <View className="flex-1 pr-4">
-            <Eyebrow className="mb-3">Inicio</Eyebrow>
+            <Eyebrow className="mb-3">{t('eyebrow')}</Eyebrow>
             <Text className="font-sans-semibold text-[36px] leading-[40px] tracking-tight text-ink">
-              ¿Qué{' '}
-              <Text className="font-sans-italic text-ink">necesitas</Text>
-              {firstName ? `,\n${firstName}?` : '?'}
+              {t('greeting.prefix')}{' '}
+              <Text className="font-sans-italic text-ink">{t('greeting.emphasis')}</Text>
+              {firstName
+                ? t('greeting.suffixWithName', { name: firstName })
+                : t('greeting.suffix')}
             </Text>
           </View>
           <View className="h-[38px] w-[38px] items-center justify-center bg-brand">
@@ -72,21 +76,24 @@ export default function HomeTab() {
 
         {/* Categories */}
         <View className="mt-7 flex-col gap-3">
-          <Eyebrow>Categorías</Eyebrow>
+          <Eyebrow>{t('categories.title')}</Eyebrow>
           {cats.length === 0 ? (
-            <Eyebrow className="mt-2">(no hay categorías cargadas)</Eyebrow>
+            <Eyebrow className="mt-2">{t('categories.empty')}</Eyebrow>
           ) : (
-            <View className="flex-row flex-wrap gap-2.5">
+            // Full-width hero cards — one per row, matching the catalog picker.
+            // The client asked for the home categories to read as big as the
+            // picker's, so they share the `large` CategoryCard.
+            <View style={{ gap: 10 }}>
               {cats.map((c, i) => (
-                <View key={c.id} style={{ width: '48.5%' }}>
-                  <CategoryCard
-                    category={c}
-                    productCount={productCountBySlug.get(c.slug) ?? 0}
-                    variant="category"
-                    dark={i === 0}
-                    onPress={() => handleCategoryPress(c.slug)}
-                  />
-                </View>
+                <CategoryCard
+                  key={c.id}
+                  category={c}
+                  productCount={productCountBySlug.get(c.slug) ?? 0}
+                  variant="category"
+                  dark={i === 0}
+                  large
+                  onPress={() => handleCategoryPress(c.slug)}
+                />
               ))}
             </View>
           )}
@@ -97,19 +104,19 @@ export default function HomeTab() {
           <>
             <Hairline className="mt-7" />
             <View className="mt-6">
-              <Eyebrow className="mb-3">Tu último pedido</Eyebrow>
+              <Eyebrow className="mb-3">{t('lastOrder.title')}</Eyebrow>
               <View className="flex-row items-center gap-3 border border-ink/15 p-3">
                 <PlaceholderImage
-                  label={lastDelivered.items?.[0]?.product?.name?.slice(0, 3)?.toUpperCase() ?? 'PED'}
+                  label={lastDelivered.items?.[0]?.product?.name?.slice(0, 3)?.toUpperCase() ?? t('lastOrder.placeholder')}
                   size={56}
                 />
                 <View className="flex-1">
                   <Text className="font-sans-semibold text-[14px] text-ink" numberOfLines={1}>
-                    {lastDelivered.items?.[0]?.product?.name ?? 'Pedido anterior'}
+                    {lastDelivered.items?.[0]?.product?.name ?? t('lastOrder.fallbackName')}
                     {(lastDelivered.items?.length ?? 0) > 1 ? ` +${(lastDelivered.items?.length ?? 0) - 1}` : ''}
                   </Text>
                   <Text className="font-sans text-[13px] text-ink-muted">
-                    Entregado · {formatMoney(lastDelivered.totalAmount ?? '0')}
+                    {t('lastOrder.delivered', { amount: formatMoney(lastDelivered.totalAmount ?? '0') })}
                   </Text>
                 </View>
                 <Pressable
@@ -117,7 +124,7 @@ export default function HomeTab() {
                   className="min-h-[48px] items-center justify-center border border-ink/40 px-3"
                 >
                   <Text className="font-sans-medium text-[12px] uppercase tracking-label text-ink">
-                    Repetir →
+                    {t('lastOrder.repeat')}
                   </Text>
                 </Pressable>
               </View>

@@ -110,7 +110,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     // EAS Update + App Store both require strict semver here. Apple closes a
     // version train once it's approved (error 90186), so every App Store
     // upload after a release MUST carry a higher version than the live one.
-    version: '1.0.4',
+    version: '1.0.5',
     orientation: 'portrait',
     icon: './assets/images/icon.png',
     scheme: 'dashgo',

@@ -22,6 +22,7 @@ import {
   View,
   ScrollView,
 } from 'react-native'
+import { Trans, useTranslation } from 'react-i18next'
 import { Button, Eyebrow } from './ui'
 
 const CONFIRM_WORD = 'BORRAR'
@@ -41,6 +42,7 @@ export function DeleteAccountModal({
   isPending = false,
   errorMessage = null,
 }: Props) {
+  const { t } = useTranslation('profile')
   const [confirmText, setConfirmText] = useState('')
   const isConfirmed = confirmText.trim().toUpperCase() === CONFIRM_WORD
 
@@ -73,7 +75,7 @@ export function DeleteAccountModal({
         className="flex-1 bg-ink/40"
         onPress={handleClose}
         accessibilityRole="button"
-        accessibilityLabel="Cerrar"
+        accessibilityLabel={t('deleteModal.close')}
       >
         <View className="flex-1" />
       </Pressable>
@@ -84,21 +86,25 @@ export function DeleteAccountModal({
         <ScrollView keyboardShouldPersistTaps="handled">
           <View className="mx-auto mb-5 h-1 w-12 rounded-full bg-ink/20" />
 
-          <Eyebrow tone="ink">Acción permanente</Eyebrow>
+          <Eyebrow tone="ink">{t('deleteModal.eyebrow')}</Eyebrow>
           <Text className="mt-2 font-sans-semibold text-[24px] text-ink">
-            ¿Eliminar tu cuenta?
+            {t('deleteModal.title')}
           </Text>
 
           <Text className="mt-4 font-sans text-[14px] leading-[20px] text-ink-soft">
-            Esto borrará tu nombre, teléfono y direcciones permanentemente. Tus
-            pedidos pasados quedan en nuestros registros por requisitos
-            fiscales pero ya no estarán asociados a tu identidad. Esta acción
-            no se puede deshacer.
+            {t('deleteModal.body')}
           </Text>
 
           <View className="mt-6">
             <Text className="mb-2 font-sans text-[11px] uppercase tracking-eyebrow text-ink-muted">
-              Escribe <Text className="font-sans-semibold text-bad">{CONFIRM_WORD}</Text> para confirmar
+              <Trans
+                t={t}
+                i18nKey="deleteModal.typeToConfirm"
+                values={{ word: CONFIRM_WORD }}
+                components={{
+                  bold: <Text className="font-sans-semibold text-bad" />,
+                }}
+              />
             </Text>
             <TextInput
               className="h-12 border-b border-ink/25 pb-1 font-sans-medium text-[18px] text-ink"
@@ -111,7 +117,7 @@ export function DeleteAccountModal({
               editable={!isPending}
               placeholder={CONFIRM_WORD}
               placeholderTextColor="#6B6488"
-              accessibilityLabel={`Escribe ${CONFIRM_WORD} para confirmar la eliminación`}
+              accessibilityLabel={t('deleteModal.inputA11y', { word: CONFIRM_WORD })}
               testID="delete-account-confirm-input"
             />
           </View>
@@ -130,7 +136,7 @@ export function DeleteAccountModal({
                 onPress={handleClose}
                 disabled={isPending}
               >
-                Cancelar
+                {t('deleteModal.cancel')}
               </Button>
             </View>
             <View className="flex-1">
@@ -139,7 +145,7 @@ export function DeleteAccountModal({
                 disabled={!isConfirmed || isPending}
                 accessibilityRole="button"
                 accessibilityState={{ disabled: !isConfirmed || isPending }}
-                accessibilityLabel="Eliminar mi cuenta permanentemente"
+                accessibilityLabel={t('deleteAccountA11y')}
                 testID="delete-account-confirm-button"
                 className={`h-14 flex-row items-center justify-center rounded-xs px-6 ${
                   !isConfirmed || isPending
@@ -148,7 +154,7 @@ export function DeleteAccountModal({
                 }`}
               >
                 <Text className="font-sans-medium text-[12px] uppercase tracking-label text-paper">
-                  {isPending ? 'Eliminando…' : 'Eliminar →'}
+                  {isPending ? t('deleteModal.deleting') : t('deleteModal.confirm')}
                 </Text>
               </Pressable>
             </View>
