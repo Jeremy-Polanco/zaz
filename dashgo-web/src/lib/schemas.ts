@@ -88,6 +88,10 @@ export type DeliveryAddressInput = z.infer<typeof deliveryAddressSchema>
 // at delivery time (legacy behavior).
 export const checkoutSchema = z.object({
   paymentMethod: z.enum(['cash', 'digital']),
+  // Propina — solo pago digital; el server calcula el monto sobre SU subtotal.
+  tipPercent: z
+    .union([z.literal(15), z.literal(18), z.literal(25)])
+    .optional(),
   items: z
     .array(
       z.object({

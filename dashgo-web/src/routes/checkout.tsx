@@ -20,7 +20,7 @@ import { useCurrentUser } from '../lib/auth'
 import { useCart, clearCart } from '../lib/cart'
 import { Button, SectionHeading } from '../components/ui'
 import { userAddressToGeoAddress } from '../lib/address'
-import { cn, formatCents, formatMoney } from '../lib/utils'
+import { cn, formatCents } from '../lib/utils'
 import { computeQuotePreviewCents } from '../lib/tax'
 import { TOKEN_KEY } from '../lib/api'
 
@@ -75,6 +75,8 @@ function CheckoutPage() {
 
   const [usePoints, setUsePoints] = useState(false)
   const [useCredit, setUseCredit] = useState(false)
+  // Propina — solo pago digital (en efectivo se da en mano). null = sin propina.
+  const [tipPercent, setTipPercent] = useState<15 | 18 | 25 | null>(null)
   const { data: myAddresses } = useMyAddresses()
   const { data: creditData } = useMyCredit()
 
@@ -147,11 +149,17 @@ function CheckoutPage() {
     ? Math.min(creditAvailable, subtotalCents)
     : 0
 
+  // Propina — % del subtotal de productos, sin impuestos. Mirrors the server
+  // math in orders.service.create: the tip rides on the total AFTER tax.
+  const tipCents =
+    paymentMethod === 'digital' && tipPercent
+      ? Math.round((subtotalCents * tipPercent) / 100)
+      : 0
+
   // Shipping + tax are quoted by the super admin AFTER the order is placed.
   // The subtotal (minus points/credit) is the initial total; the real total
   // shows on the order detail screen once it lands in "quoted".
   const previewTotalCents = Math.max(0, subtotalCents - pointsAppliedCents - creditAppliedCents)
-  const previewTotal = previewTotalCents / 100
 
   // Skip-cotización: when EVERY cart item has requiresQuote=false (e.g. water),
   // the order is auto-quoted at creation — shipping $0, tax computed now. Show
@@ -168,7 +176,7 @@ function CheckoutPage() {
         pointsRedeemedCents: pointsAppliedCents,
       }).taxCents
     : 0
-  const skipQuoteTotalCents = previewTotalCents + skipQuoteTaxCents
+  const skipQuoteTotalCents = previewTotalCents + skipQuoteTaxCents + tipCents
 
   if (totalItems === 0) {
     return (
@@ -211,6 +219,10 @@ function CheckoutPage() {
       ...values,
       usePoints,
       useCredit,
+      // Propina: digital-only — el server la rechaza en pedidos cash.
+      ...(values.paymentMethod === 'digital' && tipPercent
+        ? { tipPercent }
+        : {}),
       deliveryAddress: selectedAddress
         ? userAddressToGeoAddress(selectedAddress)
         : undefined,
@@ -431,6 +443,61 @@ function CheckoutPage() {
                   )
                 })}
               </div>
+
+              {/* Propina — solo pago digital (en efectivo se da en mano) */}
+              {paymentMethod === 'digital' && (
+                <div className="mt-4">
+                  <span
+                    id="tipLabel"
+                    className="mb-3 block text-sm font-medium text-ink"
+                  >
+                    Propina
+                  </span>
+                  <div
+                    role="radiogroup"
+                    aria-labelledby="tipLabel"
+                    className="grid grid-cols-4 gap-3"
+                  >
+                    {([null, 15, 18, 25] as const).map((pct) => {
+                      const selected = tipPercent === pct
+                      return (
+                        <button
+                          key={pct ?? 'none'}
+                          type="button"
+                          role="radio"
+                          aria-checked={selected}
+                          onClick={() => setTipPercent(pct)}
+                          className={cn(
+                            'flex flex-col items-center rounded-xs border px-2 py-3 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
+                            selected
+                              ? 'border-ink bg-ink text-paper'
+                              : 'border-ink/20 bg-paper text-ink hover:border-ink/50',
+                          )}
+                        >
+                          <span className="text-base font-semibold">
+                            {pct ? `${pct}%` : 'Sin'}
+                          </span>
+                          <span
+                            className={cn(
+                              'nums mt-0.5 text-[0.65rem] uppercase tracking-[0.12em]',
+                              selected ? 'text-paper/70' : 'text-ink-muted',
+                            )}
+                          >
+                            {pct
+                              ? formatCents(
+                                  Math.round((subtotalCents * pct) / 100),
+                                )
+                              : 'propina'}
+                          </span>
+                        </button>
+                      )
+                    })}
+                  </div>
+                  <p className="mt-2 text-[0.65rem] uppercase tracking-[0.12em] text-ink-muted">
+                    Sobre el subtotal de productos. Se suma al total del pedido.
+                  </p>
+                </div>
+              )}
             </section>
 
             <CheckoutCreditStep
@@ -499,7 +566,7 @@ function CheckoutPage() {
             >
               {createOrder.isPending || confirmOrder.isPending
                 ? 'Enviando…'
-                : `Confirmar pedido · ${allSkipQuote ? formatCents(skipQuoteTotalCents) : formatMoney(previewTotal)} →`}
+                : `Confirmar pedido · ${formatCents(allSkipQuote ? skipQuoteTotalCents : previewTotalCents + tipCents)} →`}
             </Button>
           </form>
         </div>
@@ -624,12 +691,26 @@ function CheckoutPage() {
                   </span>
                 )}
               </div>
+              {tipCents > 0 && (
+                <div className="flex items-baseline justify-between">
+                  <span className="text-[0.7rem] uppercase tracking-[0.15em] text-ink-muted">
+                    Propina ({tipPercent}%)
+                  </span>
+                  <span className="nums text-sm font-medium text-ink">
+                    {formatCents(tipCents)}
+                  </span>
+                </div>
+              )}
             </div>
 
             <div className="mt-2 flex items-baseline justify-between border-t-2 border-ink pt-4">
-              <span className="eyebrow">{allSkipQuote ? 'Total' : 'Subtotal'}</span>
+              <span className="eyebrow">
+                {allSkipQuote ? 'Total' : tipCents > 0 ? 'Total parcial' : 'Subtotal'}
+              </span>
               <span className="display nums text-3xl font-semibold text-brand">
-                {allSkipQuote ? formatCents(skipQuoteTotalCents) : formatMoney(previewTotal)}
+                {formatCents(
+                  allSkipQuote ? skipQuoteTotalCents : previewTotalCents + tipCents,
+                )}
               </span>
             </div>
 

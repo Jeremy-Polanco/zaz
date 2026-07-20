@@ -172,6 +172,16 @@ function InvoicePage() {
                 {formatMoney(invoice.tax)}
               </dd>
             </div>
+            {parseFloat(invoice.tip ?? '0') > 0 && (
+              <div className="flex justify-between border-b border-ink/10 pb-2">
+                <dt className="text-[0.7rem] uppercase tracking-[0.15em] text-ink-muted">
+                  Propina
+                </dt>
+                <dd className="nums text-sm text-ink">
+                  {formatMoney(invoice.tip!)}
+                </dd>
+              </div>
+            )}
             <div className="flex justify-between border-t-2 border-ink pt-3">
               <dt className="eyebrow">Total</dt>
               <dd className="display nums text-3xl font-semibold text-brand">

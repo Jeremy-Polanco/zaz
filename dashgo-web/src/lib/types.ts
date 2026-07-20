@@ -139,6 +139,8 @@ export interface Order {
   tax: string
   taxRate: string
   totalAmount: string
+  /** Propina (digital-only, sin impuestos) — ya incluida en totalAmount. */
+  tip?: string
   paymentMethod: PaymentMethod
   stripePaymentIntentId?: string | null
   paidAt?: string | null
@@ -229,6 +231,8 @@ export interface Invoice {
   shipping: string
   tax: string
   taxRate: string
+  /** Propina snapshot — ya incluida en total. */
+  tip?: string
   total: string
   createdAt: string
   order: InvoiceOrderRef

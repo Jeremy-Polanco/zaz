@@ -428,6 +428,14 @@ function OrderDetailPage() {
               )}
             </span>
           </div>
+          {parseFloat(order.tip ?? '0') > 0 && (
+            <div className="flex justify-between">
+              <span className="text-ink-muted">Propina</span>
+              <span className="nums">
+                {formatCents(Math.round(parseFloat(order.tip!) * 100))}
+              </span>
+            </div>
+          )}
           <div className="flex items-baseline justify-between border-t-2 border-ink pt-3 mt-3">
             <span className="eyebrow">Total</span>
             <span className="display nums text-2xl font-semibold text-brand">
