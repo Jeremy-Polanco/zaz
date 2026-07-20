@@ -19,7 +19,10 @@ import { cart, useCart } from '../../lib/cart'
 import { productImageUrl } from '../../lib/api'
 import { formatCents } from '../../lib/format'
 import type { Product } from '../../lib/types'
-import { categorySelection } from '../../lib/category-selection'
+import {
+  categorySelection,
+  usePendingCategorySlug,
+} from '../../lib/category-selection'
 import { CategoryCard } from '../../components/CategoryCard'
 
 function QtyControl({
@@ -478,13 +481,20 @@ export default function CatalogTab() {
   const [viewMode, setViewMode] = useState<'list' | 'grid'>('grid')
   const [query, setQuery] = useState('')
 
-  // Consume any pending category slug from the home tab handoff
+  // Consume the category handed off from the home tab. Keyed on the pending
+  // slug (reactive), NOT run only on mount: tab screens stay mounted, so after
+  // the first visit a mount-only effect never fires again and every later
+  // home tap left the selection unconsumed — catalog showed the picker instead
+  // of the chosen category. consume() resets the store to null, which re-runs
+  // this effect once more as a harmless no-op.
+  const pendingSlug = usePendingCategorySlug()
   useEffect(() => {
     const slug = categorySelection.consume()
     if (slug !== null) {
       setActiveSlug(slug)
+      setQuery('')
     }
-  }, [])
+  }, [pendingSlug])
 
   const firstName = user?.fullName?.split(' ')[0] ?? ''
 

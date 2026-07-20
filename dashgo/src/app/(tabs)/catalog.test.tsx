@@ -59,6 +59,7 @@ jest.mock('../../lib/format', () => ({
 
 jest.mock('../../lib/category-selection', () => ({
   categorySelection: { consume: jest.fn(() => null) },
+  usePendingCategorySlug: jest.fn(() => null),
 }))
 
 jest.mock('expo-image', () => ({
