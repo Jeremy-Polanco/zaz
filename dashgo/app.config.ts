@@ -83,7 +83,7 @@ function resolveIosBuildNumber(): string {
   // Apple rejects a duplicate buildNumber on the same version (1.0).
   const fromEas = process.env.EAS_BUILD_NUMBER
   if (fromEas && fromEas.length > 0) return fromEas
-  return '14'
+  return '15'
 }
 
 function resolveAndroidVersionCode(): number {
@@ -117,8 +117,9 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     userInterfaceStyle: 'light',
     ios: {
       bundleIdentifier: 'com.dashgo.app',
-      // Managed by EAS autoIncrement (see eas.json). The '1' here is a
-      // local-dev placeholder only — never trusted for App Store uploads.
+      // appVersionSource is 'local' (eas.json): the number in
+      // resolveIosBuildNumber() IS the shipped CFBundleVersion — bump it by
+      // hand before every App Store/TestFlight upload.
       buildNumber: resolveIosBuildNumber(),
       // Phone-only app — disabling tablet support keeps the App Store
       // review surface small and prevents iPad screenshot requirements.
