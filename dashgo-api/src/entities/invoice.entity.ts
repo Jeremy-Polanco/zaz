@@ -54,6 +54,10 @@ export class Invoice {
   })
   taxRate!: string;
 
+  // Propina — snapshotted from the order; untaxed, already inside `total`.
+  @Column({ type: 'numeric', precision: 10, scale: 2, default: 0 })
+  tip!: string;
+
   @Column({ type: 'numeric', precision: 10, scale: 2 })
   total!: string;
 

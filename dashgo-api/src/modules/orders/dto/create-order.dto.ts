@@ -4,6 +4,7 @@ import {
   IsArray,
   IsBoolean,
   IsEnum,
+  IsIn,
   IsInt,
   IsLatitude,
   IsLongitude,
@@ -85,4 +86,10 @@ export class CreateOrderDto {
   @IsOptional()
   @IsBoolean()
   useCredit?: boolean;
+
+  // Propina — only valid with paymentMethod=digital; the server computes the
+  // amount from its own subtotal (the client never sends money).
+  @IsOptional()
+  @IsIn([15, 18, 25])
+  tipPercent?: number;
 }

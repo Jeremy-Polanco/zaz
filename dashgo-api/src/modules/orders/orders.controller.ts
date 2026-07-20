@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   ParseUUIDPipe,
@@ -24,6 +25,21 @@ export class OrdersController {
   @Get()
   findAll(@CurrentUser() user: AuthenticatedUser) {
     return this.orders.findAll(user);
+  }
+
+  /** Admin dashboard: who ordered today / who's been quiet 7d and 30d. */
+  @Get('admin/customer-activity')
+  customerActivity(@CurrentUser() user: AuthenticatedUser) {
+    return this.orders.getCustomerActivity(user);
+  }
+
+  /** Admin hard-delete — only CANCELLED orders (cancel first reverses money). */
+  @Delete(':id')
+  deleteOrder(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.orders.deleteOrder(id, user);
   }
 
   @Get(':id')

@@ -17,6 +17,7 @@ export interface InvoiceView {
   shipping: string;
   tax: string;
   taxRate: string;
+  tip: string;
   total: string;
   createdAt: Date;
   order: {
@@ -103,6 +104,7 @@ export class InvoicesService {
         shipping: order.shipping,
         tax: order.tax,
         taxRate: order.taxRate,
+        tip: order.tip,
         total: order.totalAmount,
       });
       return invoiceRepo.save(invoice);
@@ -144,6 +146,7 @@ export class InvoicesService {
       shipping: invoice.shipping,
       tax: invoice.tax,
       taxRate: invoice.taxRate,
+      tip: invoice.tip,
       total: invoice.total,
       createdAt: invoice.createdAt,
       order: {

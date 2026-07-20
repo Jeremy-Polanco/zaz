@@ -58,6 +58,7 @@ function fakeOrder(overrides: Partial<Order> = {}): Order {
     tax: '0.00',
     taxRate: '0.08887',
     totalAmount: '10.00',
+    tip: '0.00',
     creditApplied: '5.00',
     paymentMethod: PaymentMethod.DIGITAL,
     stripePaymentIntentId: 'pi_test_1',

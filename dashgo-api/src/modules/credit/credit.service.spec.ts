@@ -74,6 +74,7 @@ function fakeOrder(
     tax: '0.00',
     taxRate: '0.08887',
     totalAmount: '10.00',
+    tip: '0.00',
     creditApplied: '1.00',
     paymentMethod: 'cash' as never,
     stripePaymentIntentId: null,

@@ -117,6 +117,16 @@ export class Order {
   })
   totalAmount!: string;
 
+  // Propina — digital-only, % of product subtotal, untaxed (added after tax).
+  // Included in totalAmount, so the Stripe charge picks it up unchanged.
+  @Column({
+    type: 'numeric',
+    precision: 10,
+    scale: 2,
+    default: 0,
+  })
+  tip!: string;
+
   @Column({
     name: 'credit_applied',
     type: 'numeric',

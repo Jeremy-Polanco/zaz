@@ -46,6 +46,8 @@ function makeRepoMock<T>(): jest.Mocked<Repository<T>> {
     create: jest.fn((dto: Partial<T>) => dto as T),
     createQueryBuilder: jest.fn(),
     count: jest.fn(),
+    query: jest.fn(),
+    delete: jest.fn(),
   } as unknown as jest.Mocked<Repository<T>>;
 }
 
@@ -110,6 +112,7 @@ function fakeOrder(overrides: Partial<Order> = {}): Order {
     tax: '0.00',
     taxRate: '0.08887',
     totalAmount: '10.00',
+    tip: '0.00',
     creditApplied: '0.00',
     paymentMethod: PaymentMethod.CASH,
     stripePaymentIntentId: null,
@@ -1072,6 +1075,221 @@ describe('OrdersService', () => {
       await service.setQuote('order-1', 300, superUser);
 
       expect(autoSpy).not.toHaveBeenCalled();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // deleteOrder — admin hard-delete, restricted to CANCELLED orders
+  // -------------------------------------------------------------------------
+
+  describe('deleteOrder', () => {
+    const superUser = fakeUser(UserRole.SUPER_ADMIN_DELIVERY);
+
+    it('rejects non-admin callers', async () => {
+      await expect(
+        service.deleteOrder('order-1', fakeUser(UserRole.CLIENT)),
+      ).rejects.toThrow(ForbiddenException);
+      expect(ordersRepo.delete).not.toHaveBeenCalled();
+    });
+
+    it('404 when the order does not exist', async () => {
+      ordersRepo.findOne.mockResolvedValue(null);
+      await expect(service.deleteOrder('nope', superUser)).rejects.toThrow(
+        NotFoundException,
+      );
+    });
+
+    it('refuses to delete a non-cancelled order (cancellation reverses credit/points/stock first)', async () => {
+      ordersRepo.findOne.mockResolvedValue(
+        fakeOrder({ status: OrderStatus.QUOTED }),
+      );
+      await expect(
+        service.deleteOrder('order-1', superUser),
+      ).rejects.toMatchObject({ response: { code: 'ORDER_NOT_CANCELLED' } });
+      expect(ordersRepo.delete).not.toHaveBeenCalled();
+    });
+
+    it('deletes a CANCELLED order', async () => {
+      ordersRepo.findOne.mockResolvedValue(
+        fakeOrder({ status: OrderStatus.CANCELLED }),
+      );
+      ordersRepo.delete.mockResolvedValue({ affected: 1 } as never);
+
+      await expect(service.deleteOrder('order-1', superUser)).resolves.toEqual({
+        deleted: true,
+      });
+      expect(ordersRepo.delete).toHaveBeenCalledWith('order-1');
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // getCustomerActivity — admin dashboard: ordered today / inactive 7d / 30d
+  // -------------------------------------------------------------------------
+
+  describe('getCustomerActivity', () => {
+    const superUser = fakeUser(UserRole.SUPER_ADMIN_DELIVERY);
+
+    it('rejects non-admin callers', async () => {
+      await expect(
+        service.getCustomerActivity(fakeUser(UserRole.CLIENT)),
+      ).rejects.toThrow(ForbiddenException);
+      expect(ordersRepo.query).not.toHaveBeenCalled();
+    });
+
+    it('returns today / 7d-inactive / 30d-inactive buckets with counts', async () => {
+      const today = [
+        { id: 'u1', fullName: 'Ana', phone: '+15550001', lastOrderAt: new Date() },
+      ];
+      const inactive7 = [
+        { id: 'u2', fullName: 'Beto', phone: '+15550002', lastOrderAt: new Date('2026-07-10') },
+        { id: 'u3', fullName: 'Caro', phone: null, lastOrderAt: null },
+      ];
+      const inactive30 = [
+        { id: 'u3', fullName: 'Caro', phone: null, lastOrderAt: null },
+      ];
+      (ordersRepo.query as jest.Mock)
+        .mockResolvedValueOnce(today)
+        .mockResolvedValueOnce(inactive7)
+        .mockResolvedValueOnce(inactive30);
+
+      const result = await service.getCustomerActivity(superUser);
+
+      expect(result.orderedToday.count).toBe(1);
+      expect(result.orderedToday.customers).toEqual(today);
+      expect(result.inactive7d.count).toBe(2);
+      expect(result.inactive30d.count).toBe(1);
+      // Inactivity windows parametrized: 7 then 30 days.
+      const calls = (ordersRepo.query as jest.Mock).mock.calls;
+      expect(calls[1][1]).toEqual([7]);
+      expect(calls[2][1]).toEqual([30]);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Propina (tip) — digital-only, % of product subtotal, untaxed, after tax
+  // -------------------------------------------------------------------------
+
+  describe('propina (tip)', () => {
+    const baseDto = {
+      items: [{ productId: 'prod-1', quantity: 1 }],
+      deliveryAddress: { text: '123 Test', lat: 18.4861, lng: -69.9312 },
+      usePoints: false,
+      useCredit: false,
+    };
+
+    // Runs create() with the TX mocked, capturing what orderRepo.create gets.
+    const runCreate = async (
+      dto: import('./dto/create-order.dto').CreateOrderDto,
+    ): Promise<Partial<Order>> => {
+      let captured: Partial<Order> | undefined;
+      (dataSource.transaction as jest.Mock).mockImplementation(
+        async (cb: (mgr: EntityManager) => Promise<unknown>) => {
+          const orderRepo = makeRepoMock<Order>();
+          const itemRepo = makeRepoMock<OrderItem>();
+          orderRepo.create.mockImplementation((d) => {
+            captured = d as Partial<Order>;
+            return { ...d, id: 'order-1' } as Order;
+          });
+          orderRepo.save.mockImplementation(async (o) => o as Order);
+          orderRepo.update.mockResolvedValue({ affected: 1 } as never);
+          itemRepo.save.mockResolvedValue({} as never);
+          itemRepo.create.mockImplementation((d) => d as OrderItem);
+          const mgr = {
+            getRepository: (entity: unknown) => {
+              if (entity === Order) return orderRepo;
+              if (entity === OrderItem) return itemRepo;
+              return makeRepoMock();
+            },
+          };
+          return cb(mgr as unknown as EntityManager);
+        },
+      );
+      ordersRepo.findOne.mockResolvedValue(
+        fakeOrder({ customer: fakeUser() as never, items: [] }),
+      );
+      await service.create(fakeUser(UserRole.CLIENT), dto);
+      return captured!;
+    };
+
+    it('digital skip-quote: tip = % of subtotal, added AFTER tax (untaxed)', async () => {
+      // subtotal 500 → tip 18% = 90; taxable 500, tax = round(500*0.08887) = 44
+      productsRepo.find.mockResolvedValue([fakeProduct({ requiresQuote: false })]);
+
+      const captured = await runCreate({
+        ...baseDto,
+        paymentMethod: PaymentMethod.DIGITAL,
+        tipPercent: 18,
+      } as never);
+
+      expect(captured.tip).toBe('0.90');
+      expect(captured.tax).toBe('0.44');
+      expect(captured.totalAmount).toBe('6.34'); // 500 + 44 + 90
+    });
+
+    it('digital quote-required: tip stored at creation, total = subtotal + tip (tax pending)', async () => {
+      // Normal flow: tax=0 until setQuote; tip 15% of 500 = 75
+      productsRepo.find.mockResolvedValue([fakeProduct({ requiresQuote: true })]);
+
+      const captured = await runCreate({
+        ...baseDto,
+        paymentMethod: PaymentMethod.DIGITAL,
+        tipPercent: 15,
+      } as never);
+
+      expect(captured.tip).toBe('0.75');
+      expect(captured.totalAmount).toBe('5.75');
+      expect(captured.status).toBe(OrderStatus.PENDING_QUOTE);
+    });
+
+    it('rejects tipPercent on a CASH order (digital-only) before touching the DB', async () => {
+      await expect(
+        service.create(fakeUser(UserRole.CLIENT), {
+          ...baseDto,
+          paymentMethod: PaymentMethod.CASH,
+          tipPercent: 15,
+        } as never),
+      ).rejects.toMatchObject({ response: { code: 'TIP_DIGITAL_ONLY' } });
+
+      expect(productsRepo.find).not.toHaveBeenCalled();
+    });
+
+    it('no tipPercent → tip 0.00 and total unchanged', async () => {
+      productsRepo.find.mockResolvedValue([fakeProduct({ requiresQuote: false })]);
+
+      const captured = await runCreate({
+        ...baseDto,
+        paymentMethod: PaymentMethod.DIGITAL,
+      } as never);
+
+      expect(captured.tip).toBe('0.00');
+      expect(captured.totalAmount).toBe('5.44'); // 500 + 44 tax
+    });
+
+    it('setQuote preserves the stored tip in the recomputed total (untaxed)', async () => {
+      const superUser = fakeUser(UserRole.SUPER_ADMIN_DELIVERY);
+      const order = fakeOrder({
+        status: OrderStatus.PENDING_QUOTE,
+        customerId: 'user-1',
+        customer: fakeUser() as never,
+        subtotal: '10.00',
+        pointsRedeemed: '0.00',
+        tip: '0.90',
+        paymentMethod: PaymentMethod.DIGITAL,
+      });
+      ordersRepo.findOne
+        .mockResolvedValueOnce(order)
+        .mockResolvedValueOnce({ ...order, shipping: '3.00' } as never);
+      subscriptionService.isActiveSubscriber.mockResolvedValue(false);
+      ordersRepo.update.mockResolvedValue({ affected: 1 } as never);
+
+      await service.setQuote('order-1', 300, superUser);
+
+      // taxable = 1000 + 300 = 1300; tax = round(1300*0.08887) = 116
+      // total = 1300 + 116 + 90 tip = 1506
+      expect(ordersRepo.update).toHaveBeenCalledWith(
+        'order-1',
+        expect.objectContaining({ tax: '1.16', totalAmount: '15.06' }),
+      );
     });
   });
 

@@ -56,6 +56,14 @@ const ALLOWED_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
 // Re-exported for backward compatibility; canonical definition lives in common/tax.ts
 export { TAX_RATE };
 
+/** Row shape returned by the customer-activity dashboard queries. */
+export interface CustomerActivityRow {
+  id: string;
+  fullName: string;
+  phone: string | null;
+  lastOrderAt: Date | null;
+}
+
 @Injectable()
 export class OrdersService {
   private readonly logger = new Logger(OrdersService.name);
@@ -113,6 +121,15 @@ export class OrdersService {
   ) {
     if (user.role !== UserRole.CLIENT && user.role !== UserRole.PROMOTER) {
       throw new ForbiddenException('Solo clientes pueden crear pedidos');
+    }
+
+    // Propina: digital-only. Cash tips happen in person at delivery — a stored
+    // cash tip would inflate the amount the driver tries to collect.
+    if (dto.tipPercent != null && dto.paymentMethod !== PaymentMethod.DIGITAL) {
+      throw new BadRequestException({
+        code: 'TIP_DIGITAL_ONLY',
+        message: 'La propina solo aplica a pedidos con pago digital.',
+      });
     }
 
     // One active order at a time (clients only): block a new order while the
@@ -352,7 +369,12 @@ export class OrdersService {
       // QUOTED so the customer can pay immediately.
       const taxableCents = Math.max(0, subtotalCents - pointsRedeemedCents);
       const taxCents = skipQuote ? Math.round(taxableCents * TAX_RATE) : 0;
-      const totalCents = taxableCents + taxCents;
+      // Propina: % of the product subtotal (before points/credit), untaxed —
+      // it rides on top of the taxed total and flows into the Stripe charge.
+      const tipCents = dto.tipPercent
+        ? Math.round((subtotalCents * dto.tipPercent) / 100)
+        : 0;
+      const totalCents = taxableCents + taxCents + tipCents;
 
       // When no address is supplied, fall back to the customer's default saved
       // location so subsequent orders auto-inherit it (the colmado can still
@@ -376,6 +398,7 @@ export class OrdersService {
         shipping: '0.00',
         tax: (taxCents / 100).toFixed(2),
         taxRate: TAX_RATE.toFixed(5),
+        tip: (tipCents / 100).toFixed(2),
         totalAmount: (totalCents / 100).toFixed(2),
         quotedAt: skipQuote ? now : null,
         skipQuote,
@@ -469,6 +492,89 @@ export class OrdersService {
   }
 
   /**
+   * Admin hard-delete. Restricted to CANCELLED orders on purpose: the
+   * cancellation path is what reverses credit, points and stock — deleting an
+   * active order directly would skip those reversals. FK behavior on delete:
+   * order_items + invoice CASCADE; rentals/credit_movements SET NULL;
+   * points_ledger_entries.order_id has no FK constraint.
+   */
+  async deleteOrder(
+    id: string,
+    user: AuthenticatedUser,
+  ): Promise<{ deleted: true }> {
+    if (user.role !== UserRole.SUPER_ADMIN_DELIVERY) {
+      throw new ForbiddenException('Solo el super admin puede eliminar pedidos');
+    }
+    const order = await this.orders.findOne({ where: { id } });
+    if (!order) throw new NotFoundException('Pedido no encontrado');
+    if (order.status !== OrderStatus.CANCELLED) {
+      throw new BadRequestException({
+        code: 'ORDER_NOT_CANCELLED',
+        message:
+          'Solo se pueden eliminar pedidos cancelados. Cancelá el pedido primero.',
+      });
+    }
+    await this.orders.delete(id);
+    return { deleted: true };
+  }
+
+  /**
+   * Admin dashboard: customer activity buckets. "Today" follows the ops
+   * timezone (America/New_York — same as WinBackCron); inactivity windows are
+   * rolling and INCLUDE clients who never ordered (lastOrderAt null).
+   */
+  async getCustomerActivity(user: AuthenticatedUser): Promise<{
+    orderedToday: { count: number; customers: CustomerActivityRow[] };
+    inactive7d: { count: number; customers: CustomerActivityRow[] };
+    inactive30d: { count: number; customers: CustomerActivityRow[] };
+  }> {
+    if (user.role !== UserRole.SUPER_ADMIN_DELIVERY) {
+      throw new ForbiddenException(
+        'Solo el super admin puede ver la actividad de clientes',
+      );
+    }
+
+    const orderedToday: CustomerActivityRow[] = await this.orders.query(
+      `
+      SELECT u.id, u.full_name AS "fullName", u.phone,
+             MAX(o.created_at) AS "lastOrderAt"
+      FROM users u
+      JOIN orders o ON o.customer_id = u.id AND o.status != 'cancelled'
+      WHERE u.role = 'client'
+        AND (o.created_at AT TIME ZONE 'America/New_York')::date =
+            (now() AT TIME ZONE 'America/New_York')::date
+      GROUP BY u.id, u.full_name, u.phone
+      ORDER BY MAX(o.created_at) DESC
+      `,
+    );
+
+    const inactiveSince = (days: number): Promise<CustomerActivityRow[]> =>
+      this.orders.query(
+        `
+        SELECT u.id, u.full_name AS "fullName", u.phone,
+               MAX(o.created_at) AS "lastOrderAt"
+        FROM users u
+        LEFT JOIN orders o ON o.customer_id = u.id AND o.status != 'cancelled'
+        WHERE u.role = 'client'
+        GROUP BY u.id, u.full_name, u.phone
+        HAVING MAX(o.created_at) IS NULL
+            OR MAX(o.created_at) <= now() - ($1 || ' days')::interval
+        ORDER BY MAX(o.created_at) DESC NULLS LAST
+        `,
+        [days],
+      );
+
+    const inactive7d = await inactiveSince(7);
+    const inactive30d = await inactiveSince(30);
+
+    return {
+      orderedToday: { count: orderedToday.length, customers: orderedToday },
+      inactive7d: { count: inactive7d.length, customers: inactive7d },
+      inactive30d: { count: inactive30d.length, customers: inactive30d },
+    };
+  }
+
+  /**
    * Super admin sets the manually-quoted shipping amount for an order.
    * Recomputes tax and total on the backend (source of truth). Idempotent
    * when the amount is unchanged.
@@ -512,7 +618,9 @@ export class OrdersService {
       subtotalCents + effectiveShippingCents - pointsRedeemedCents,
     );
     const taxCents = Math.round(taxableCents * TAX_RATE);
-    const totalCents = taxableCents + taxCents;
+    // Preserve the propina chosen at checkout — untaxed, rides on the total.
+    const tipCents = Math.round(parseFloat(order.tip ?? '0') * 100);
+    const totalCents = taxableCents + taxCents + tipCents;
 
     await this.orders.update(id, {
       shipping: (effectiveShippingCents / 100).toFixed(2),
