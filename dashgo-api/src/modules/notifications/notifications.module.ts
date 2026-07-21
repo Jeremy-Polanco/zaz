@@ -9,9 +9,10 @@ import { AppSettingsService } from './app-settings.service';
 import { BirthdayCron } from './birthday.cron';
 import { MePushTokensController } from './me-push-tokens.controller';
 import { AdminNotificationsController } from './admin-notifications.controller';
+import { WhatsAppModule } from '../whatsapp/whatsapp.module';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([PushToken, AppSetting, User])],
+  imports: [TypeOrmModule.forFeature([PushToken, AppSetting, User]), WhatsAppModule],
   controllers: [MePushTokensController, AdminNotificationsController],
   providers: [PushService, BroadcastService, AppSettingsService, BirthdayCron],
   exports: [PushService],
