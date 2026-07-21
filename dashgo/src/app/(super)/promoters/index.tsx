@@ -195,6 +195,7 @@ export default function SuperPromotersScreen() {
   return (
     <SafeAreaView edges={['top']} className="flex-1 bg-paper">
       <FlatList
+        automaticallyAdjustKeyboardInsets
         data={creating ? [] : promoters ?? []}
         keyExtractor={(p) => p.id}
         contentContainerClassName="px-5 pb-12"

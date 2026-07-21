@@ -1207,6 +1207,7 @@ export default function SuperProductsScreen() {
   return (
     <SafeAreaView edges={['top']} className="flex-1 bg-paper">
       <FlatList
+        automaticallyAdjustKeyboardInsets
         data={editingOrCreating ? [] : products ?? []}
         keyExtractor={(p) => p.id}
         contentContainerClassName="px-5 pb-12"

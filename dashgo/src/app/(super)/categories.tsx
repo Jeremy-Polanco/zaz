@@ -292,6 +292,7 @@ export default function SuperCategoriesScreen() {
   return (
     <SafeAreaView edges={['top']} className="flex-1 bg-paper">
       <FlatList
+        automaticallyAdjustKeyboardInsets
         data={editingOrCreating ? [] : categories ?? []}
         keyExtractor={(c) => c.id}
         contentContainerClassName="px-5 pb-12"

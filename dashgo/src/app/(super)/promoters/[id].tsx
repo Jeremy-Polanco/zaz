@@ -311,7 +311,7 @@ export default function SuperPromoterDetailScreen() {
   return (
     <View className="flex-1 bg-paper">
       <ScreenHeader title="Promotor" />
-      <ScrollView contentContainerClassName="px-5 pb-12">
+      <ScrollView contentContainerClassName="px-5 pb-12" automaticallyAdjustKeyboardInsets>
         <View className="pt-2">
           <SectionHead
             eyebrow="Promotor · Detalle"

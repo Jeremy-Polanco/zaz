@@ -7,6 +7,8 @@ import {
   Pressable,
   Linking,
   Alert,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native'
 import type { Order } from '../lib/types'
 import { useSetOrderQuote } from '../lib/queries'
@@ -88,13 +90,21 @@ export function QuoteBottomSheet({
       onRequestClose={onClose}
       presentationStyle="overFullScreen"
     >
-      <Pressable className="flex-1 bg-ink/40" onPress={onClose}>
-        <View className="flex-1" />
-      </Pressable>
-      <View
-        className="absolute bottom-0 left-0 right-0 rounded-t-[20px] bg-paper px-6 pb-10 pt-6"
-        style={{ shadowOpacity: 0.2, shadowRadius: 20 }}
+      {/* The sheet lives INSIDE the KeyboardAvoidingView (justify-end keeps it
+          at the bottom) so the keyboard pushes it up instead of covering the
+          shipping input. The backdrop stays absolutely-positioned behind. */}
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        className="flex-1 justify-end"
       >
+        <Pressable
+          className="absolute bottom-0 left-0 right-0 top-0 bg-ink/40"
+          onPress={onClose}
+        />
+        <View
+          className="rounded-t-[20px] bg-paper px-6 pb-10 pt-6"
+          style={{ shadowOpacity: 0.2, shadowRadius: 20 }}
+        >
         <View className="mx-auto mb-5 h-1 w-12 rounded-full bg-ink/20" />
         <Eyebrow>Cotizar envío</Eyebrow>
         <Text className="mt-2 font-sans-semibold text-[22px] text-ink">
@@ -226,7 +236,8 @@ export function QuoteBottomSheet({
             </Button>
           </View>
         </View>
-      </View>
+        </View>
+      </KeyboardAvoidingView>
     </Modal>
   )
 }

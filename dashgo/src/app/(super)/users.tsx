@@ -112,6 +112,7 @@ export default function SuperUsersScreen() {
   return (
     <SafeAreaView edges={['top']} className="flex-1 bg-paper">
       <FlatList
+        automaticallyAdjustKeyboardInsets
         data={filtered}
         keyExtractor={(u) => u.id}
         contentContainerClassName="px-5 pb-12"

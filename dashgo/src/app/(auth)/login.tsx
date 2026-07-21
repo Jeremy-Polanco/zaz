@@ -204,7 +204,7 @@ export default function LoginScreen() {
 
   return (
     <SafeAreaView className="flex-1 bg-paper">
-      <ScrollView contentContainerClassName="grow" keyboardShouldPersistTaps="handled">
+      <ScrollView contentContainerClassName="grow" keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
         {/* Poster header */}
         <View className="relative bg-brand px-7 pb-10 pt-12">
           <View className="absolute right-7 top-6">

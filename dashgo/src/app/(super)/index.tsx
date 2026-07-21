@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import {
   View,
   Text,
@@ -264,6 +264,17 @@ export default function SuperOrdersScreen() {
   const updateStatus = useUpdateOrderStatus()
   const [quotingOrder, setQuotingOrder] = useState<Order | null>(null)
   const [filter, setFilter] = useState<RouteFilter>('all')
+  const listRef = useRef<FlatList<Order>>(null)
+
+  // Changing the filter swaps the FlatList data under the current scroll
+  // offset; iOS clamps the offset against the (often much shorter) new
+  // content and the list lands mid-air past the header — the "broken, stuck
+  // at the top of items" look on the first selection. Deliberately reset to
+  // the top: picking a filter means "show me those results from the start".
+  const selectFilter = (id: RouteFilter) => {
+    setFilter(id)
+    listRef.current?.scrollToOffset({ offset: 0, animated: false })
+  }
   // Clientes — actividad: qué bucket está expandido bajo los KPIs (o ninguno).
   const [activityBucket, setActivityBucket] = useState<
     'today' | '7d' | '30d' | null
@@ -347,6 +358,7 @@ export default function SuperOrdersScreen() {
   return (
     <SafeAreaView edges={['top']} className="flex-1 bg-paper">
       <FlatList
+        ref={listRef}
         data={visibleOrders}
         keyExtractor={(o) => o.id}
         contentContainerClassName="px-5 pb-8"
@@ -487,7 +499,7 @@ export default function SuperOrdersScreen() {
                   return (
                     <Pressable
                       key={f.id}
-                      onPress={() => setFilter(f.id)}
+                      onPress={() => selectFilter(f.id)}
                       className={`px-4 py-2.5 ${
                         sel ? 'bg-ink' : 'border border-ink/15 bg-transparent'
                       }`}

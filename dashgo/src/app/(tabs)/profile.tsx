@@ -198,7 +198,7 @@ export default function ProfileTab() {
 
   return (
     <SafeAreaView edges={['top']} className="flex-1 bg-paper">
-      <ScrollView contentContainerClassName="px-5 pb-8">
+      <ScrollView contentContainerClassName="px-5 pb-8" automaticallyAdjustKeyboardInsets>
         <View className="pb-2 pt-6">
           <Eyebrow className="mb-3">{t('eyebrow')}</Eyebrow>
           <Text className="font-sans-semibold text-[40px] leading-[44px] text-ink">{t('title')}</Text>

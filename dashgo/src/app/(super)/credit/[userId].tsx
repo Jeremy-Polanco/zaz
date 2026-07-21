@@ -285,6 +285,7 @@ export default function SuperCreditDetailScreen() {
         subtitle="Crédito fiado"
       />
       <FlatList
+        automaticallyAdjustKeyboardInsets
         data={movementsPage?.items ?? []}
         keyExtractor={(m) => m.id}
         contentContainerClassName="px-5 pb-12"
