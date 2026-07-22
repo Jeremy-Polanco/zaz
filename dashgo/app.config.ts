@@ -96,7 +96,7 @@ function resolveAndroidVersionCode(): number {
   }
   // appVersionSource is 'local' — BUMP THIS by 1 before each Play upload,
   // same ritual as the iOS buildNumber above.
-  return 2
+  return 3
 }
 
 export default ({ config }: ConfigContext): ExpoConfig => {
