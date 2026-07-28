@@ -51,7 +51,9 @@ type FormValues = z.infer<typeof priceSchema>
 
 // ── Page component ─────────────────────────────────────────────────────────────
 
-function SuperSubscriptionPage() {
+// Exported so super.subscription.test.tsx renders THIS component instead of a
+// test-local copy of its logic — a copy passes while production breaks.
+export function SuperSubscriptionPage() {
   const { data: plan, isPending } = useAdminSubscriptionPlan()
   const mutation = useUpdateSubscriptionPlan()
 
@@ -155,7 +157,16 @@ function SuperSubscriptionPage() {
           </div>
         )}
 
-        <form onSubmit={handleSubmit(onSubmit)} className="flex flex-col gap-5">
+        {/* noValidate — the input carries min/max/step for keyboard affordances
+            (steppers, numeric keypad), but the browser's native constraint
+            validation would block the submit before zod runs, replacing our
+            Spanish messages with the browser's own localized tooltip. zod owns
+            the rules; the attributes stay for the input UX. */}
+        <form
+          noValidate
+          onSubmit={handleSubmit(onSubmit)}
+          className="flex flex-col gap-5"
+        >
           <div>
             <Label htmlFor="priceDollars">Precio mensual (USD)</Label>
             <Input

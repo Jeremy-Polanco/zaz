@@ -79,7 +79,9 @@ function isToday(iso: string): boolean {
 
 type ListFilter = 'pending' | 'delivered' | 'all'
 
-function SuperOrdersPage() {
+// Exported so super.orders.test.tsx renders THIS component instead of a
+// test-local copy of its logic — a copy passes while production breaks.
+export function SuperOrdersPage() {
   const { data: orders, isPending } = useOrders()
   const updateStatus = useUpdateOrderStatus()
   const [quotingOrder, setQuotingOrder] = useState<Order | null>(null)

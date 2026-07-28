@@ -6,6 +6,16 @@ import type { Product } from '../lib/types'
 
 // ── Module mocks ───────────────────────────────────────────────────────────────
 
+vi.mock('@tanstack/react-router', async (importOriginal) => {
+  const original = await importOriginal<typeof import('@tanstack/react-router')>()
+  return {
+    ...original,
+    createFileRoute: () => () => ({}),
+    redirect: vi.fn(),
+    isRedirect: vi.fn(() => false),
+  }
+})
+
 vi.mock('../lib/queries', () => ({
   useAdminProducts: vi.fn(),
   useCategories: vi.fn(),
@@ -35,6 +45,7 @@ import {
   computeReorderItems,
   isStockValid,
   parseDisplayOrder,
+  ProductForm,
 } from './super.products'
 
 const mockUseUpdateProduct = vi.mocked(useUpdateProduct)
@@ -136,203 +147,64 @@ function setupMocks(opts: {
   return { updateMock, createMock }
 }
 
-// ── Test components ────────────────────────────────────────────────────────────
-// We test the ProductForm component's pricing mode UI directly by extracting
-// its logic into a driver component, mirroring the super.subscription.test.tsx pattern.
-
-import { useState } from 'react'
-import { Input, Label } from '../components/ui'
-import { useUpdateProduct as useUpdateProductFn } from '../lib/queries'
-
-// Pure validation function — extracted for testability (per strict-tdd pure-function preference)
-export function validateRentalFields(fields: {
-  monthlyRentText: string
-  lateFeeText: string
-  stripeProductId: string
-  stripePriceId: string
-}): { monthlyRentText?: string; lateFeeText?: string } {
-  const errors: { monthlyRentText?: string; lateFeeText?: string } = {}
-  const monthly = parseFloat(fields.monthlyRentText)
-  if (!Number.isFinite(monthly) || monthly <= 0) {
-    errors.monthlyRentText = 'Ingresa una renta mensual válida'
-  }
-  const lateFee = parseFloat(fields.lateFeeText)
-  if (!Number.isFinite(lateFee) || lateFee < 0) {
-    errors.lateFeeText = 'Ingresa una multa válida (0 o más)'
-  }
-  return errors
+/**
+ * Wires every hook ProductForm reaches for, including a category — the save
+ * button is `disabled={!allValid}` and `allValid` requires one, so without it
+ * nothing can be submitted.
+ */
+function setupProductFormMocks(opts: { updateAsync?: ReturnType<typeof vi.fn> } = {}) {
+  setupMocks({
+    updateMutation: createMutationMock(
+      opts.updateAsync ? { mutateAsync: opts.updateAsync } : {},
+    ),
+  })
+  mockUseCategories.mockReturnValue({
+    data: [{ id: 'cat-1', name: 'Agua', slug: 'agua', displayOrder: 0 }],
+    isPending: false,
+    isError: false,
+    error: null,
+  } as unknown as ReturnType<typeof useCategories>)
 }
 
-// Minimal driver that renders the pricing mode portion of ProductForm
-function PricingModeDriver({
-  initialProduct,
-}: {
-  initialProduct?: Product
-}) {
-  const update = useUpdateProductFn()
-
-  const [pricingMode, setPricingMode] = useState<'single_payment' | 'rental'>(
-    initialProduct?.pricingMode ?? 'single_payment',
-  )
-  const [monthlyRentText, setMonthlyRentText] = useState(
-    initialProduct?.monthlyRentCents ? String(initialProduct.monthlyRentCents / 100) : '',
-  )
-  const [lateFeeText, setLateFeeText] = useState(
-    initialProduct?.lateFeeCents ? String(initialProduct.lateFeeCents / 100) : '',
-  )
-  const [stripeProductId, setStripeProductId] = useState(initialProduct?.stripeProductId ?? '')
-  const [stripePriceId, setStripePriceId] = useState(initialProduct?.stripePriceId ?? '')
-  const [rentalErrors, setRentalErrors] = useState<{ monthlyRentText?: string; lateFeeText?: string }>({})
-
-  const handleSubmit = async () => {
-    if (pricingMode === 'rental') {
-      const errors = validateRentalFields({ monthlyRentText, lateFeeText, stripeProductId, stripePriceId })
-      if (Object.keys(errors).length > 0) {
-        setRentalErrors(errors)
-        return
-      }
-      setRentalErrors({})
-    }
-
-    const payload: Record<string, unknown> = { pricingMode }
-    if (pricingMode === 'rental') {
-      payload.monthlyRentCents = Math.round(parseFloat(monthlyRentText || '0') * 100)
-      payload.lateFeeCents = Math.round(parseFloat(lateFeeText || '0') * 100)
-      payload.stripeProductId = stripeProductId || null
-      payload.stripePriceId = stripePriceId || null
-    }
-    if (initialProduct) {
-      await update.mutateAsync({ id: initialProduct.id, ...payload } as Parameters<typeof update.mutateAsync>[0])
-    }
-  }
-
-  return (
-    <div>
-      {/* Pricing mode radio group */}
-      <fieldset>
-        <legend>Modo de precio</legend>
-        <label>
-          <input
-            type="radio"
-            name="pricingMode"
-            value="single_payment"
-            checked={pricingMode === 'single_payment'}
-            onChange={() => setPricingMode('single_payment')}
-            data-testid="pricing-mode-single"
-          />
-          Pago único
-        </label>
-        <label>
-          <input
-            type="radio"
-            name="pricingMode"
-            value="rental"
-            checked={pricingMode === 'rental'}
-            onChange={() => setPricingMode('rental')}
-            data-testid="pricing-mode-rental"
-          />
-          Alquiler mensual
-        </label>
-      </fieldset>
-
-      {/* Conditional rental fields */}
-      {pricingMode === 'rental' ? (
-        <div data-testid="rental-fields">
-          <div>
-            <Label htmlFor="monthlyRent">Renta mensual ($)</Label>
-            <Input
-              id="monthlyRent"
-              type="number"
-              step="0.01"
-              min="0"
-              value={monthlyRentText}
-              onChange={(e) => setMonthlyRentText(e.target.value)}
-              data-testid="monthly-rent-input"
-              placeholder="0.00"
-            />
-            {rentalErrors.monthlyRentText && (
-              <span data-testid="monthly-rent-error">{rentalErrors.monthlyRentText}</span>
-            )}
-          </div>
-          <div>
-            <Label htmlFor="lateFee">Multa por atraso ($)</Label>
-            <Input
-              id="lateFee"
-              type="number"
-              step="0.01"
-              min="0"
-              value={lateFeeText}
-              onChange={(e) => setLateFeeText(e.target.value)}
-              data-testid="late-fee-input"
-              placeholder="0.00"
-            />
-            {rentalErrors.lateFeeText && (
-              <span data-testid="late-fee-error">{rentalErrors.lateFeeText}</span>
-            )}
-          </div>
-          <div>
-            <Label htmlFor="stripeProductId">Stripe Product ID</Label>
-            <Input
-              id="stripeProductId"
-              type="text"
-              value={stripeProductId ?? ''}
-              onChange={(e) => setStripeProductId(e.target.value)}
-              data-testid="stripe-product-id-input"
-              placeholder="prod_xxx"
-            />
-          </div>
-          <div>
-            <Label htmlFor="stripePriceId">Stripe Price ID</Label>
-            <Input
-              id="stripePriceId"
-              type="text"
-              value={stripePriceId ?? ''}
-              onChange={(e) => setStripePriceId(e.target.value)}
-              data-testid="stripe-price-id-input"
-              placeholder="price_xxx"
-            />
-          </div>
-        </div>
-      ) : null}
-
-      <button
-        type="button"
-        onClick={handleSubmit}
-        data-testid="submit-btn"
-      >
-        Guardar
-      </button>
-    </div>
-  )
+/** A rental product that satisfies every "listo para guardar" check. */
+function makeSaveableRental() {
+  return makeRentalProduct({ categoryId: 'cat-1' })
 }
 
-// ── Tests ──────────────────────────────────────────────────────────────────────
+// ── Pricing mode: rendered from the REAL ProductForm ──────────────────────────
+// The previous version of this block rendered a `PricingModeDriver` that
+// re-implemented the form, and exported its own `validateRentalFields` whose
+// error copy exists nowhere in production. It proved a validator that does not
+// exist. These drive the real component through its "Precio" tab.
 
-describe('super.products — pricing mode radio group', () => {
+async function openPricingTab(product: Product | null = null) {
+  const onDone = vi.fn()
+  renderWithProviders(<ProductForm editing={product} onDone={onDone} />)
+  await userEvent.click(screen.getByRole('button', { name: /Precio/ }))
+  return { onDone }
+}
+
+describe('ProductForm — pricing mode', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    setupProductFormMocks()
   })
 
-  it('T76a: renders pricing mode radio with "Pago único" and "Alquiler mensual" options', () => {
-    setupMocks()
-    renderWithProviders(<PricingModeDriver initialProduct={makeSinglePaymentProduct()} />)
+  it('defaults a new product to single payment, with no rental fields', async () => {
+    await openPricingTab(null)
 
-    expect(screen.getByText('Pago único')).toBeInTheDocument()
-    expect(screen.getByText('Alquiler mensual')).toBeInTheDocument()
-    expect(screen.getByTestId('pricing-mode-single')).toBeChecked()
-    expect(screen.getByTestId('pricing-mode-rental')).not.toBeChecked()
+    expect(screen.queryByTestId('rental-fields')).not.toBeInTheDocument()
+    expect(screen.getByTestId('pricing-mode-single')).toBeInTheDocument()
   })
 
-  it('T76b: single_payment selected by default — rental fields NOT visible', () => {
-    setupMocks()
-    renderWithProviders(<PricingModeDriver initialProduct={makeSinglePaymentProduct()} />)
+  it('keeps a single-payment product on single payment', async () => {
+    await openPricingTab(makeSinglePaymentProduct())
 
     expect(screen.queryByTestId('rental-fields')).not.toBeInTheDocument()
   })
 
-  it('T76c: when "Alquiler mensual" selected, rental fields appear (monthlyRent + lateFee inputs)', async () => {
-    setupMocks()
-    renderWithProviders(<PricingModeDriver initialProduct={makeSinglePaymentProduct()} />)
+  it('reveals the rental fields when switching to rental', async () => {
+    await openPricingTab(makeSinglePaymentProduct())
 
     await userEvent.click(screen.getByTestId('pricing-mode-rental'))
 
@@ -341,159 +213,108 @@ describe('super.products — pricing mode radio group', () => {
     expect(screen.getByTestId('late-fee-input')).toBeInTheDocument()
   })
 
-  it('T76d: editing rental product pre-populates rental mode and fields', () => {
-    setupMocks()
-    renderWithProviders(<PricingModeDriver initialProduct={makeRentalProduct()} />)
-
-    expect(screen.getByTestId('pricing-mode-rental')).toBeChecked()
-    expect(screen.getByTestId('rental-fields')).toBeInTheDocument()
-    expect(screen.getByTestId('monthly-rent-input')).toHaveValue(20)
-    expect(screen.getByTestId('late-fee-input')).toHaveValue(5)
-  })
-
-  it('T76e: submit with rental mode → useUpdateProduct called with pricingMode + monthlyRentCents + lateFeeCents', async () => {
-    const mutateAsyncMock = vi.fn().mockResolvedValue({ id: 'prod-002', stock: 0, isAvailable: true })
-    setupMocks({
-      updateMutation: createMutationMock({ mutateAsync: mutateAsyncMock }),
-    })
-    renderWithProviders(<PricingModeDriver initialProduct={makeRentalProduct()} />)
-
-    // Change monthly rent to $25
-    await userEvent.clear(screen.getByTestId('monthly-rent-input'))
-    await userEvent.type(screen.getByTestId('monthly-rent-input'), '25')
-    await userEvent.click(screen.getByTestId('submit-btn'))
-
-    await waitFor(() => {
-      expect(mutateAsyncMock).toHaveBeenCalledWith(
-        expect.objectContaining({
-          id: 'prod-002',
-          pricingMode: 'rental',
-          monthlyRentCents: 2500,
-          lateFeeCents: 500,
-        }),
-      )
-    })
-  })
-
-  it('T76f: submit with single_payment → pricingMode=single_payment, no rental cents fields in payload', async () => {
-    const mutateAsyncMock = vi.fn().mockResolvedValue({ id: 'prod-001', stock: 10, isAvailable: true })
-    setupMocks({
-      updateMutation: createMutationMock({ mutateAsync: mutateAsyncMock }),
-    })
-    renderWithProviders(<PricingModeDriver initialProduct={makeSinglePaymentProduct()} />)
-
-    await userEvent.click(screen.getByTestId('submit-btn'))
-
-    await waitFor(() => {
-      expect(mutateAsyncMock).toHaveBeenCalledWith(
-        expect.objectContaining({
-          id: 'prod-001',
-          pricingMode: 'single_payment',
-        }),
-      )
-    })
-
-    // monthlyRentCents and lateFeeCents must NOT be in the payload for single_payment
-    const callArg = mutateAsyncMock.mock.calls[0][0]
-    expect(callArg).not.toHaveProperty('monthlyRentCents')
-    expect(callArg).not.toHaveProperty('lateFeeCents')
-  })
-
-  it('T76g: switching from rental back to single_payment hides rental fields', async () => {
-    setupMocks()
-    renderWithProviders(<PricingModeDriver initialProduct={makeRentalProduct()} />)
-
-    // Starts as rental
+  it('hides them again when switching back to single payment', async () => {
+    await openPricingTab(makeRentalProduct())
     expect(screen.getByTestId('rental-fields')).toBeInTheDocument()
 
-    // Switch to single payment
     await userEvent.click(screen.getByTestId('pricing-mode-single'))
 
     expect(screen.queryByTestId('rental-fields')).not.toBeInTheDocument()
   })
 
-  // T7.1 — Stripe ID fields visible in rental mode, hidden in single_payment
-  it('T7.1a: rental mode shows stripeProductId and stripePriceId inputs inside rental-fields', async () => {
-    setupMocks()
-    renderWithProviders(<PricingModeDriver initialProduct={makeSinglePaymentProduct()} />)
+  it('prefills a rental product\'s amounts, converting cents to dollars', async () => {
+    await openPricingTab(makeRentalProduct())
 
-    // Switch to rental
-    await userEvent.click(screen.getByTestId('pricing-mode-rental'))
-
-    expect(screen.getByTestId('rental-fields')).toBeInTheDocument()
-    expect(screen.getByTestId('stripe-product-id-input')).toBeInTheDocument()
-    expect(screen.getByTestId('stripe-price-id-input')).toBeInTheDocument()
-  })
-
-  // T7.2 — Stripe ID fields hidden when single_payment
-  it('T7.2a: single_payment mode does NOT show stripeProductId or stripePriceId inputs', () => {
-    setupMocks()
-    renderWithProviders(<PricingModeDriver initialProduct={makeSinglePaymentProduct()} />)
-
-    expect(screen.queryByTestId('stripe-product-id-input')).not.toBeInTheDocument()
-    expect(screen.queryByTestId('stripe-price-id-input')).not.toBeInTheDocument()
-  })
-
-  // T7.2 (triangulate) — rental product starts with stripe fields visible
-  it('T7.2b: editing rental product pre-populates stripeProductId and stripePriceId fields', () => {
-    setupMocks()
-    renderWithProviders(<PricingModeDriver initialProduct={makeRentalProduct()} />)
-
-    expect(screen.getByTestId('stripe-product-id-input')).toHaveValue('prod_stripe_001')
-    expect(screen.getByTestId('stripe-price-id-input')).toHaveValue('price_stripe_001')
-  })
-
-  // T7.3 — Submit with rental mode includes stripeProductId and stripePriceId in payload
-  it('T7.3a: submit with rental mode → payload includes stripeProductId and stripePriceId', async () => {
-    const mutateAsyncMock = vi.fn().mockResolvedValue({ id: 'prod-002', stock: 0, isAvailable: true })
-    setupMocks({
-      updateMutation: createMutationMock({ mutateAsync: mutateAsyncMock }),
-    })
-    renderWithProviders(<PricingModeDriver initialProduct={makeRentalProduct()} />)
-
-    // Change stripeProductId
-    await userEvent.clear(screen.getByTestId('stripe-product-id-input'))
-    await userEvent.type(screen.getByTestId('stripe-product-id-input'), 'prod_new_123')
-    await userEvent.click(screen.getByTestId('submit-btn'))
-
-    await waitFor(() => {
-      expect(mutateAsyncMock).toHaveBeenCalledWith(
-        expect.objectContaining({
-          id: 'prod-002',
-          pricingMode: 'rental',
-          stripeProductId: 'prod_new_123',
-          stripePriceId: 'price_stripe_001',
-        }),
-      )
-    })
-  })
-
-  // T7.3 (triangulate) — single_payment submit does NOT include stripe IDs
-  it('T7.3b: submit with single_payment mode → no stripeProductId or stripePriceId in payload', async () => {
-    const mutateAsyncMock = vi.fn().mockResolvedValue({ id: 'prod-001', stock: 10, isAvailable: true })
-    setupMocks({
-      updateMutation: createMutationMock({ mutateAsync: mutateAsyncMock }),
-    })
-    renderWithProviders(<PricingModeDriver initialProduct={makeSinglePaymentProduct()} />)
-
-    await userEvent.click(screen.getByTestId('submit-btn'))
-
-    await waitFor(() => {
-      expect(mutateAsyncMock).toHaveBeenCalledWith(
-        expect.objectContaining({
-          id: 'prod-001',
-          pricingMode: 'single_payment',
-        }),
-      )
-    })
-
-    const callArg = mutateAsyncMock.mock.calls[0][0]
-    expect(callArg).not.toHaveProperty('stripeProductId')
-    expect(callArg).not.toHaveProperty('stripePriceId')
+    expect(screen.getByTestId('monthly-rent-input')).toHaveValue(20)
+    expect(screen.getByTestId('late-fee-input')).toHaveValue(5)
   })
 })
 
-// ── isStockValid — save must not be blocked when stock tracking is OFF ───────────
+describe('ProductForm — saving a rental', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    setupProductFormMocks()
+  })
+
+  it('sends the rental amounts back in cents', async () => {
+    const update = vi.fn().mockResolvedValue({ id: 'prod-rental-001' })
+    setupProductFormMocks({ updateAsync: update })
+    await openPricingTab(makeSaveableRental())
+
+    await userEvent.clear(screen.getByTestId('monthly-rent-input'))
+    await userEvent.type(screen.getByTestId('monthly-rent-input'), '35.50')
+    await userEvent.click(screen.getByRole('button', { name: /Guardar/ }))
+
+    await waitFor(() =>
+      expect(update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: 'prod-002',
+          pricingMode: 'rental',
+          monthlyRentCents: 3550,
+        }),
+      ),
+    )
+  })
+
+  it.each([
+    ['', /Ingresa una renta válida/],
+    ['0', /Ingresa una renta válida/],
+  ] as const)(
+    'refuses to save a rental whose monthly rent is "%s"',
+    async (value, message) => {
+      const update = vi.fn().mockResolvedValue({ id: 'prod-002' })
+      setupProductFormMocks({ updateAsync: update })
+      await openPricingTab(makeSaveableRental())
+
+      await userEvent.clear(screen.getByTestId('monthly-rent-input'))
+      if (value) await userEvent.type(screen.getByTestId('monthly-rent-input'), value)
+      await userEvent.click(screen.getByRole('button', { name: /Guardar/ }))
+
+      expect(await screen.findByText(message)).toBeInTheDocument()
+      expect(update).not.toHaveBeenCalled()
+    },
+  )
+
+  it('refuses a negative late fee, but allows zero', async () => {
+    const update = vi.fn().mockResolvedValue({ id: 'prod-002' })
+    setupProductFormMocks({ updateAsync: update })
+    await openPricingTab(makeSaveableRental())
+
+    await userEvent.clear(screen.getByTestId('late-fee-input'))
+    await userEvent.type(screen.getByTestId('late-fee-input'), '-5')
+    await userEvent.click(screen.getByRole('button', { name: /Guardar/ }))
+
+    expect(await screen.findByText(/0 o más/)).toBeInTheDocument()
+    expect(update).not.toHaveBeenCalled()
+
+    // A rental with no late fee is legitimate — zero must pass.
+    await userEvent.clear(screen.getByTestId('late-fee-input'))
+    await userEvent.type(screen.getByTestId('late-fee-input'), '0')
+    await userEvent.click(screen.getByRole('button', { name: /Guardar/ }))
+
+    await waitFor(() =>
+      expect(update).toHaveBeenCalledWith(
+        expect.objectContaining({ lateFeeCents: 0 }),
+      ),
+    )
+  })
+
+  // The rental rules must not leak onto single-payment products, whose rent
+  // fields are empty by definition.
+  it('leaves single-payment products alone', async () => {
+    const update = vi.fn().mockResolvedValue({ id: 'prod-001' })
+    setupProductFormMocks({ updateAsync: update })
+    await openPricingTab(makeSinglePaymentProduct({ categoryId: 'cat-1' }))
+
+    await userEvent.click(screen.getByRole('button', { name: /Guardar/ }))
+
+    await waitFor(() =>
+      expect(update).toHaveBeenCalledWith(
+        expect.objectContaining({ pricingMode: 'single_payment' }),
+      ),
+    )
+  })
+})
 
 describe('super.products — isStockValid (pure function)', () => {
   // The bug: with "Manejar stock" OFF and an empty stock field, save was
@@ -579,95 +400,3 @@ describe('super.products — computeReorderItems (pure function)', () => {
   })
 })
 
-// ── T7.4 — validateRentalFields pure function tests ──────────────────────────────
-
-describe('super.products — validateRentalFields (pure function)', () => {
-  // T7.4a: empty monthlyRentText produces error
-  it('T7.4a: empty monthlyRentText returns monthlyRentText error', () => {
-    const result = validateRentalFields({
-      monthlyRentText: '',
-      lateFeeText: '5.00',
-      stripeProductId: '',
-      stripePriceId: '',
-    })
-    expect(result.monthlyRentText).toBeDefined()
-    expect(typeof result.monthlyRentText).toBe('string')
-    expect(result.lateFeeText).toBeUndefined()
-  })
-
-  // T7.4b (triangulate): zero monthly rent also produces error (must be > 0)
-  it('T7.4b: zero monthlyRentText returns monthlyRentText error', () => {
-    const result = validateRentalFields({
-      monthlyRentText: '0',
-      lateFeeText: '5.00',
-      stripeProductId: '',
-      stripePriceId: '',
-    })
-    expect(result.monthlyRentText).toBeDefined()
-  })
-
-  // T7.4c: valid monthly + negative late fee produces lateFeeText error
-  it('T7.4c: negative lateFeeText returns lateFeeText error', () => {
-    const result = validateRentalFields({
-      monthlyRentText: '20.00',
-      lateFeeText: '-1',
-      stripeProductId: '',
-      stripePriceId: '',
-    })
-    expect(result.lateFeeText).toBeDefined()
-    expect(result.monthlyRentText).toBeUndefined()
-  })
-
-  // T7.4d: valid monthly + zero late fee passes (late fee = 0 is allowed)
-  it('T7.4d: zero lateFeeText is valid (returns no lateFeeText error)', () => {
-    const result = validateRentalFields({
-      monthlyRentText: '20.00',
-      lateFeeText: '0',
-      stripeProductId: '',
-      stripePriceId: '',
-    })
-    expect(result.lateFeeText).toBeUndefined()
-    expect(result.monthlyRentText).toBeUndefined()
-  })
-
-  // T7.4e: form submit with rental + empty monthlyRent blocks mutation
-  it('T7.4e: form submit with empty monthlyRent shows error and does NOT call mutateAsync', async () => {
-    const mutateAsyncMock = vi.fn().mockResolvedValue({ id: 'prod-002', stock: 0, isAvailable: true })
-    setupMocks({
-      updateMutation: createMutationMock({ mutateAsync: mutateAsyncMock }),
-    })
-
-    // Start with rental mode but empty monthlyRentText
-    renderWithProviders(<PricingModeDriver initialProduct={makeSinglePaymentProduct({ pricingMode: 'rental', monthlyRentCents: 0 })} />)
-
-    // Click submit without filling monthlyRent
-    await userEvent.click(screen.getByTestId('submit-btn'))
-
-    await waitFor(() => {
-      expect(screen.getByTestId('monthly-rent-error')).toBeInTheDocument()
-    })
-
-    // mutation must NOT have been called
-    expect(mutateAsyncMock).not.toHaveBeenCalled()
-  })
-
-  // T7.4f (triangulate): valid rental form submits and mutation IS called
-  it('T7.4f: valid rental form (monthlyRent > 0, lateFee >= 0) calls mutateAsync', async () => {
-    const mutateAsyncMock = vi.fn().mockResolvedValue({ id: 'prod-002', stock: 0, isAvailable: true })
-    setupMocks({
-      updateMutation: createMutationMock({ mutateAsync: mutateAsyncMock }),
-    })
-    renderWithProviders(<PricingModeDriver initialProduct={makeRentalProduct()} />)
-
-    await userEvent.click(screen.getByTestId('submit-btn'))
-
-    await waitFor(() => {
-      expect(mutateAsyncMock).toHaveBeenCalledWith(
-        expect.objectContaining({
-          pricingMode: 'rental',
-          monthlyRentCents: 2000,
-        }),
-      )
-    })
-  })
-})

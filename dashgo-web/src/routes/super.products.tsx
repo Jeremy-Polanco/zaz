@@ -171,7 +171,9 @@ export function computeReorderItems(
   }))
 }
 
-function ProductForm({
+// Exported so super.products.test.tsx drives THIS form instead of a test-local
+// copy of its pricing logic — a copy passes while production breaks.
+export function ProductForm({
   editing,
   onDone,
 }: {
@@ -283,6 +285,23 @@ function ProductForm({
 
     const displayOrder = parseDisplayOrder(state.displayOrderText)
     if (displayOrder === null) errors.displayOrderText = '0 o más'
+
+    // Rental amounts. Without these the empty-string fallback below turns a
+    // blank field into 0 cents, silently saving a $0.00/month rental — and the
+    // FieldError slots beside these inputs could never fire.
+    if (state.pricingMode === 'rental') {
+      const monthlyRent = parseFloat(state.monthlyRentText)
+      if (!Number.isFinite(monthlyRent) || monthlyRent <= 0)
+        errors.monthlyRentText = 'Ingresa una renta válida'
+      // A rental with no late fee (or no theft fee) is legitimate — only
+      // negatives and garbage are rejected.
+      const lateFee = parseFloat(state.lateFeeText || '0')
+      if (!Number.isFinite(lateFee) || lateFee < 0)
+        errors.lateFeeText = '0 o más'
+      const theftFee = parseFloat(state.theftFeeText || '0')
+      if (!Number.isFinite(theftFee) || theftFee < 0)
+        errors.theftFeeText = '0 o más'
+    }
 
     let offerDiscount: number | null = null
     if (showOffer && state.offerDiscountText.trim() !== '') {

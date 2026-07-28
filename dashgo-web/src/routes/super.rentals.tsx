@@ -292,7 +292,9 @@ function RentalRow({
 
 // ── Main page ──────────────────────────────────────────────────────────────────
 
-function SuperRentalsPage() {
+// Exported so super.rentals.test.tsx renders THIS component instead of a
+// test-local copy of its logic — a copy passes while production breaks.
+export function SuperRentalsPage() {
   const [statusFilter, setStatusFilter] = useState<string>('')
   const [customerSearch, setCustomerSearch] = useState('')
   const [filters, setFilters] = useState<RentalFilter>({ page: 1, pageSize: 25 })

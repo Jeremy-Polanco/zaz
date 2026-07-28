@@ -70,7 +70,9 @@ function MovementRow({ mv }: { mv: CreditMovement }) {
   )
 }
 
-function CreditPage() {
+// Exported so credit.test.tsx renders THIS component instead of a test-local
+// copy of its logic — a copy passes while production breaks.
+export function CreditPage() {
   const { data, isPending } = useMyCredit()
 
   if (isPending) {

@@ -26,7 +26,9 @@ export const Route = createFileRoute('/home')({
   component: HomePage,
 })
 
-function HomePage() {
+// Exported so home.test.tsx renders THIS component instead of a test-local
+// copy of its logic — a copy passes while production breaks.
+export function HomePage() {
   const { data: categories, isPending: categoriesPending } = useCategories()
   const { data: products, isPending: productsPending } = useProducts()
   const navigate = useNavigate({ from: '/home' })

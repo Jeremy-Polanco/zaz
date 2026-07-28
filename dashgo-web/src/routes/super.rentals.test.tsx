@@ -1,16 +1,29 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { renderWithProviders } from '../test/test-utils'
-import type { AdminRentalResponse, RentalStatus } from '../lib/types'
+import type { AdminRentalResponse } from '../lib/types'
 
 // ── Module mocks ───────────────────────────────────────────────────────────────
+// `createFileRoute` runs at import time and needs a generated route tree; stub
+// it so the real page component can be imported and rendered.
+vi.mock('@tanstack/react-router', async (importOriginal) => {
+  const original = await importOriginal<typeof import('@tanstack/react-router')>()
+  return {
+    ...original,
+    createFileRoute: () => () => ({}),
+    redirect: vi.fn(),
+    isRedirect: vi.fn(() => false),
+  }
+})
 
 vi.mock('../lib/queries', () => ({
   useAdminRentals: vi.fn(),
   useChargeLateFee: vi.fn(),
+  useChargeTheftFee: vi.fn(),
   useCancelRental: vi.fn(),
   useRetryRentalSetup: vi.fn(),
+  useResetMaintenance: vi.fn(),
 }))
 
 vi.mock('../lib/api', () => ({
@@ -21,44 +34,40 @@ vi.mock('../lib/api', () => ({
 import {
   useAdminRentals,
   useChargeLateFee,
+  useChargeTheftFee,
   useCancelRental,
   useRetryRentalSetup,
+  useResetMaintenance,
 } from '../lib/queries'
+import { SuperRentalsPage } from './super.rentals'
 
 const mockUseAdminRentals = vi.mocked(useAdminRentals)
 const mockUseChargeLateFee = vi.mocked(useChargeLateFee)
+const mockUseChargeTheftFee = vi.mocked(useChargeTheftFee)
 const mockUseCancelRental = vi.mocked(useCancelRental)
 const mockUseRetryRentalSetup = vi.mocked(useRetryRentalSetup)
+const mockUseResetMaintenance = vi.mocked(useResetMaintenance)
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
-function createMutationMock(overrides: Partial<{
-  mutate: ReturnType<typeof vi.fn>
+type MutationMock = {
   mutateAsync: ReturnType<typeof vi.fn>
   isPending: boolean
-}> = {}) {
+}
+
+function mutationMock(overrides: Partial<MutationMock> = {}) {
   return {
     mutate: vi.fn(),
     mutateAsync: vi.fn().mockResolvedValue({}),
     isPending: false,
-    isSuccess: false,
-    isError: false,
-    isPaused: false,
-    isIdle: true,
-    error: null,
-    data: undefined,
     reset: vi.fn(),
-    variables: undefined,
-    context: undefined,
-    failureCount: 0,
-    failureReason: null,
-    status: 'idle' as const,
-    submittedAt: 0,
     ...overrides,
   }
 }
 
-function makeRental(overrides: Partial<AdminRentalResponse> = {}): AdminRentalResponse {
+function makeRental(
+  overrides: Partial<AdminRentalResponse> = {},
+): AdminRentalResponse {
   return {
     id: 'rental-001',
     userId: 'user-001',
@@ -82,13 +91,20 @@ function makeRental(overrides: Partial<AdminRentalResponse> = {}): AdminRentalRe
   }
 }
 
-function setupMocks(opts: {
-  rentals?: AdminRentalResponse[]
-  isPending?: boolean
-  chargeMutation?: ReturnType<typeof createMutationMock>
-  cancelMutation?: ReturnType<typeof createMutationMock>
-  retryMutation?: ReturnType<typeof createMutationMock>
-} = {}) {
+type Mutations = {
+  charge?: ReturnType<typeof mutationMock>
+  theft?: ReturnType<typeof mutationMock>
+  cancel?: ReturnType<typeof mutationMock>
+  retry?: ReturnType<typeof mutationMock>
+  resetMaintenance?: ReturnType<typeof mutationMock>
+}
+
+function setup(
+  opts: {
+    rentals?: AdminRentalResponse[]
+    isPending?: boolean
+  } & Mutations = {},
+) {
   mockUseAdminRentals.mockReturnValue({
     data: opts.isPending ? undefined : (opts.rentals ?? []),
     isPending: opts.isPending ?? false,
@@ -96,410 +112,442 @@ function setupMocks(opts: {
     error: null,
   } as unknown as ReturnType<typeof useAdminRentals>)
 
-  mockUseChargeLateFee.mockReturnValue(
-    (opts.chargeMutation ?? createMutationMock()) as unknown as ReturnType<typeof useChargeLateFee>,
-  )
-  mockUseCancelRental.mockReturnValue(
-    (opts.cancelMutation ?? createMutationMock()) as unknown as ReturnType<typeof useCancelRental>,
-  )
-  mockUseRetryRentalSetup.mockReturnValue(
-    (opts.retryMutation ?? createMutationMock()) as unknown as ReturnType<typeof useRetryRentalSetup>,
-  )
+  const wire = <T,>(m: ReturnType<typeof mutationMock> | undefined) =>
+    (m ?? mutationMock()) as unknown as T
+
+  mockUseChargeLateFee.mockReturnValue(wire(opts.charge))
+  mockUseChargeTheftFee.mockReturnValue(wire(opts.theft))
+  mockUseCancelRental.mockReturnValue(wire(opts.cancel))
+  mockUseRetryRentalSetup.mockReturnValue(wire(opts.retry))
+  mockUseResetMaintenance.mockReturnValue(wire(opts.resetMaintenance))
 }
 
-// ── Test driver component ──────────────────────────────────────────────────────
-// This driver mirrors the logic of super.rentals.tsx without going through
-// TanStack Router's beforeLoad, following the super.subscription.test.tsx pattern.
-
-import { useState } from 'react'
-import type { RentalFilter } from '../lib/types'
-import {
-  useAdminRentals as useAdminRentalsHook,
-  useChargeLateFee as useChargeLateFeeHook,
-  useCancelRental as useCancelRentalHook,
-  useRetryRentalSetup as useRetryRentalSetupHook,
-} from '../lib/queries'
-
-const STATUS_OPTIONS: RentalStatus[] = ['pending_setup', 'active', 'past_due', 'unpaid', 'canceled']
-
-function statusBadgeClass(status: RentalStatus): string {
-  switch (status) {
-    case 'active': return 'bg-ok/10 text-ok'
-    case 'past_due': return 'bg-warn/10 text-warn'
-    case 'unpaid': return 'bg-bad/10 text-bad'
-    case 'pending_setup': return 'bg-ink/10 text-ink-muted'
-    case 'canceled': return 'bg-ink/5 text-ink-muted'
-  }
+/** Opens the confirmation modal by pressing a row action, then returns it. */
+async function pressAction(name: RegExp | string) {
+  await userEvent.click(screen.getByRole('button', { name }))
+  return screen.getByRole('dialog')
 }
 
-function RentalsPageDriver() {
-  const [filters, setFilters] = useState<RentalFilter>({ page: 1, pageSize: 25 })
-  const [statusFilter, setStatusFilter] = useState<string>('')
-  const [customerSearch, setCustomerSearch] = useState('')
-  const [confirmModal, setConfirmModal] = useState<{
-    action: 'charge' | 'charge-cancel' | 'cancel' | 'retry'
-    rentalId: string
-  } | null>(null)
-
-  const { data: rentals, isPending } = useAdminRentalsHook(filters)
-  const chargeMutation = useChargeLateFeeHook()
-  const cancelMutation = useCancelRentalHook()
-  const retryMutation = useRetryRentalSetupHook()
-
-  const handleStatusChange = (value: string) => {
-    setStatusFilter(value)
-    setFilters((f) => ({
-      ...f,
-      status: value ? [value] : undefined,
-      page: 1,
-    }))
-  }
-
-  const handleConfirm = async () => {
-    if (!confirmModal) return
-    const { action, rentalId } = confirmModal
-    if (action === 'charge') {
-      await chargeMutation.mutateAsync({ rentalId, alsoCancel: false })
-    } else if (action === 'charge-cancel') {
-      await chargeMutation.mutateAsync({ rentalId, alsoCancel: true })
-    } else if (action === 'cancel') {
-      await cancelMutation.mutateAsync(rentalId)
-    } else if (action === 'retry') {
-      await retryMutation.mutateAsync(rentalId)
-    }
-    setConfirmModal(null)
-  }
-
-  if (isPending) {
-    return <div><span>Cargando…</span></div>
-  }
-
-  return (
-    <div>
-      <h1>Alquileres</h1>
-
-      {/* Filter bar */}
-      <div data-testid="filter-bar">
-        <select
-          value={statusFilter}
-          onChange={(e) => handleStatusChange(e.target.value)}
-          data-testid="status-filter"
-          aria-label="Filtrar por estado"
-        >
-          <option value="">Todos los estados</option>
-          {STATUS_OPTIONS.map((s) => (
-            <option key={s} value={s}>{s}</option>
-          ))}
-        </select>
-
-        <input
-          type="text"
-          value={customerSearch}
-          onChange={(e) => {
-            setCustomerSearch(e.target.value)
-            setFilters((f) => ({ ...f, userId: e.target.value || undefined }))
-          }}
-          placeholder="Buscar cliente…"
-          data-testid="customer-search"
-        />
-      </div>
-
-      {/* Empty state */}
-      {(!rentals || rentals.length === 0) ? (
-        <div data-testid="empty-state">
-          <p>No hay alquileres registrados</p>
-        </div>
-      ) : (
-        <table data-testid="rentals-table">
-          <thead>
-            <tr>
-              <th>Cliente</th>
-              <th>Producto</th>
-              <th>Estado</th>
-              <th>$/mes</th>
-              <th>Periodo</th>
-              <th>Acciones</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rentals.map((r) => (
-              <tr key={r.id} data-testid={`rental-row-${r.id}`}>
-                <td data-testid={`customer-name-${r.id}`}>{r.userName}</td>
-                <td data-testid={`product-name-${r.id}`}>{r.productName}</td>
-                <td>
-                  <span
-                    className={statusBadgeClass(r.status)}
-                    data-testid={`status-badge-${r.id}`}
-                  >
-                    {r.status}
-                  </span>
-                </td>
-                <td data-testid={`monthly-rate-${r.id}`}>
-                  ${(r.monthlyRentCents / 100).toFixed(2)}
-                </td>
-                <td data-testid={`period-end-${r.id}`}>
-                  {r.currentPeriodEnd ? new Date(r.currentPeriodEnd).toLocaleDateString('es') : '—'}
-                </td>
-                <td data-testid={`actions-${r.id}`}>
-                  {/* Cobrar late fee: active, past_due, unpaid with lateFeeCents > 0 */}
-                  {(['active', 'past_due', 'unpaid'] as RentalStatus[]).includes(r.status) && r.lateFeeCents > 0 && (
-                    <button
-                      type="button"
-                      onClick={() => setConfirmModal({ action: 'charge', rentalId: r.id })}
-                      data-testid={`btn-charge-${r.id}`}
-                    >
-                      Cobrar late fee
-                    </button>
-                  )}
-                  {/* Cobrar y cancelar: past_due, unpaid with lateFeeCents > 0 */}
-                  {(['past_due', 'unpaid'] as RentalStatus[]).includes(r.status) && r.lateFeeCents > 0 && (
-                    <button
-                      type="button"
-                      onClick={() => setConfirmModal({ action: 'charge-cancel', rentalId: r.id })}
-                      data-testid={`btn-charge-cancel-${r.id}`}
-                    >
-                      Cobrar y cancelar
-                    </button>
-                  )}
-                  {/* Cancelar: active, past_due, unpaid, pending_setup */}
-                  {(['active', 'past_due', 'unpaid', 'pending_setup'] as RentalStatus[]).includes(r.status) && (
-                    <button
-                      type="button"
-                      onClick={() => setConfirmModal({ action: 'cancel', rentalId: r.id })}
-                      data-testid={`btn-cancel-${r.id}`}
-                    >
-                      Cancelar
-                    </button>
-                  )}
-                  {/* Reintentar setup: pending_setup only */}
-                  {r.status === 'pending_setup' && (
-                    <button
-                      type="button"
-                      onClick={() => setConfirmModal({ action: 'retry', rentalId: r.id })}
-                      data-testid={`btn-retry-${r.id}`}
-                    >
-                      Reintentar setup
-                    </button>
-                  )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
-
-      {/* Confirmation modal */}
-      {confirmModal ? (
-        <div role="dialog" aria-modal="true" data-testid="confirm-modal">
-          <p>¿Confirmar acción?</p>
-          <button
-            type="button"
-            onClick={handleConfirm}
-            data-testid="confirm-btn"
-          >
-            Confirmar
-          </button>
-          <button
-            type="button"
-            onClick={() => setConfirmModal(null)}
-            data-testid="cancel-btn"
-          >
-            Cancelar
-          </button>
-        </div>
-      ) : null}
-    </div>
-  )
+async function confirmModal() {
+  const dialog = screen.getByRole('dialog')
+  await userEvent.click(within(dialog).getByRole('button', { name: 'Confirmar' }))
 }
 
 // ── Tests ──────────────────────────────────────────────────────────────────────
 
-describe('super.rentals — admin rentals list', () => {
+describe('SuperRentalsPage — list rendering', () => {
   beforeEach(() => {
     vi.clearAllMocks()
   })
 
-  // T79a: empty state
-  it('T79a: empty state shows "No hay alquileres registrados"', () => {
-    setupMocks({ rentals: [] })
-    renderWithProviders(<RentalsPageDriver />)
-    expect(screen.getByTestId('empty-state')).toBeInTheDocument()
+  it('shows the loading state while the query is pending', () => {
+    setup({ isPending: true })
+    renderWithProviders(<SuperRentalsPage />)
+
+    expect(screen.getByText('Cargando…')).toBeInTheDocument()
+  })
+
+  it('shows the empty state when there are no rentals', () => {
+    setup({ rentals: [] })
+    renderWithProviders(<SuperRentalsPage />)
+
     expect(screen.getByText('No hay alquileres registrados')).toBeInTheDocument()
   })
 
-  // T79b: list renders with mocked data
-  it('T79b: renders list with customer name, product name, status badge, monthly rate, period end', () => {
-    const rental = makeRental()
-    setupMocks({ rentals: [rental] })
-    renderWithProviders(<RentalsPageDriver />)
+  it('renders customer, phone, product and monthly rate', () => {
+    setup({ rentals: [makeRental()] })
+    renderWithProviders(<SuperRentalsPage />)
 
-    expect(screen.getByTestId(`customer-name-${rental.id}`)).toHaveTextContent('Juan García')
-    expect(screen.getByTestId(`product-name-${rental.id}`)).toHaveTextContent('Dispensador Azul')
-    expect(screen.getByTestId(`status-badge-${rental.id}`)).toHaveTextContent('active')
-    expect(screen.getByTestId(`monthly-rate-${rental.id}`)).toHaveTextContent('$20.00')
-    expect(screen.getByTestId(`period-end-${rental.id}`)).toBeInTheDocument()
+    expect(screen.getByText('Juan García')).toBeInTheDocument()
+    expect(screen.getByText('+1234567890')).toBeInTheDocument()
+    expect(screen.getByText('Dispensador Azul')).toBeInTheDocument()
+    expect(screen.getByText('$20.00/mes')).toBeInTheDocument()
   })
 
-  // T79c: filter bar renders
-  it('T79c: filter bar renders with status dropdown and customer search', () => {
-    setupMocks({ rentals: [] })
-    renderWithProviders(<RentalsPageDriver />)
+  // The status badge is translated for the operator. The previous suite
+  // asserted the raw enum ('active'), which the page has never rendered.
+  it.each([
+    ['active', 'Activo'],
+    ['past_due', 'Atrasado'],
+    ['unpaid', 'Sin pagar'],
+    ['pending_setup', 'Setup pendiente'],
+    ['canceled', 'Cancelado'],
+  ] as const)('renders the %s badge in Spanish as "%s"', (status, label) => {
+    setup({ rentals: [makeRental({ status })] })
+    renderWithProviders(<SuperRentalsPage />)
 
-    expect(screen.getByTestId('filter-bar')).toBeInTheDocument()
-    expect(screen.getByTestId('status-filter')).toBeInTheDocument()
-    expect(screen.getByTestId('customer-search')).toBeInTheDocument()
+    // The filter dropdown reuses these same labels, so scope the lookup to the
+    // rental row — the badge sits beside the customer name.
+    const row = screen.getByText('Juan García').parentElement!
+    expect(within(row).getByText(label)).toBeInTheDocument()
   })
 
-  // T79d: active rental shows only "Cancelar" (no charge buttons when lateFeeCents=0)
-  it('T79d: active rental with lateFeeCents=0 shows only "Cancelar" button', () => {
-    const rental = makeRental({ status: 'active', lateFeeCents: 0 })
-    setupMocks({ rentals: [rental] })
-    renderWithProviders(<RentalsPageDriver />)
+  it('flags how many days a rental is delinquent, and hides it at zero', () => {
+    setup({ rentals: [makeRental({ status: 'past_due', daysDelinquent: 12 })] })
+    const { unmount } = renderWithProviders(<SuperRentalsPage />)
+    expect(screen.getByText('12d atrasado')).toBeInTheDocument()
+    unmount()
 
-    expect(screen.getByTestId(`btn-cancel-${rental.id}`)).toBeInTheDocument()
-    expect(screen.queryByTestId(`btn-charge-${rental.id}`)).not.toBeInTheDocument()
-    expect(screen.queryByTestId(`btn-charge-cancel-${rental.id}`)).not.toBeInTheDocument()
+    setup({ rentals: [makeRental({ daysDelinquent: 0 })] })
+    renderWithProviders(<SuperRentalsPage />)
+    expect(screen.queryByText(/atrasado/)).not.toBeInTheDocument()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// The summary is real business math (`useMemo` over the fetched list) and was
+// entirely absent from the old driver.
+// ---------------------------------------------------------------------------
+
+describe('SuperRentalsPage — summary cards', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
   })
 
-  // T79e: active rental with lateFeeCents > 0 shows "Cobrar late fee" + "Cancelar"
-  it('T79e: active rental with lateFeeCents>0 shows "Cobrar late fee" and "Cancelar"', () => {
-    const rental = makeRental({ status: 'active', lateFeeCents: 500 })
-    setupMocks({ rentals: [rental] })
-    renderWithProviders(<RentalsPageDriver />)
-
-    expect(screen.getByTestId(`btn-charge-${rental.id}`)).toBeInTheDocument()
-    expect(screen.getByTestId(`btn-cancel-${rental.id}`)).toBeInTheDocument()
-    expect(screen.queryByTestId(`btn-charge-cancel-${rental.id}`)).not.toBeInTheDocument()
-  })
-
-  // T79f: past_due rental shows "Cobrar late fee", "Cobrar y cancelar", "Cancelar"
-  it('T79f: past_due rental shows all three action buttons', () => {
-    const rental = makeRental({ status: 'past_due', lateFeeCents: 500 })
-    setupMocks({ rentals: [rental] })
-    renderWithProviders(<RentalsPageDriver />)
-
-    expect(screen.getByTestId(`btn-charge-${rental.id}`)).toBeInTheDocument()
-    expect(screen.getByTestId(`btn-charge-cancel-${rental.id}`)).toBeInTheDocument()
-    expect(screen.getByTestId(`btn-cancel-${rental.id}`)).toBeInTheDocument()
-  })
-
-  // T79g: pending_setup shows "Reintentar setup" + "Cancelar"
-  it('T79g: pending_setup rental shows "Reintentar setup" and "Cancelar"', () => {
-    const rental = makeRental({ status: 'pending_setup', lateFeeCents: 0 })
-    setupMocks({ rentals: [rental] })
-    renderWithProviders(<RentalsPageDriver />)
-
-    expect(screen.getByTestId(`btn-retry-${rental.id}`)).toBeInTheDocument()
-    expect(screen.getByTestId(`btn-cancel-${rental.id}`)).toBeInTheDocument()
-    expect(screen.queryByTestId(`btn-charge-${rental.id}`)).not.toBeInTheDocument()
-  })
-
-  // T79h: clicking "Cobrar late fee" opens confirmation modal
-  it('T79h: clicking "Cobrar late fee" opens confirmation modal', async () => {
-    const rental = makeRental({ status: 'active', lateFeeCents: 500 })
-    setupMocks({ rentals: [rental] })
-    renderWithProviders(<RentalsPageDriver />)
-
-    await userEvent.click(screen.getByTestId(`btn-charge-${rental.id}`))
-
-    expect(screen.getByTestId('confirm-modal')).toBeInTheDocument()
-    expect(screen.getByTestId('confirm-btn')).toBeInTheDocument()
-  })
-
-  // T79i: confirming "Cobrar late fee" calls useChargeLateFee with correct params
-  it('T79i: confirming "Cobrar late fee" calls useChargeLateFee({ rentalId, alsoCancel: false })', async () => {
-    const rental = makeRental({ status: 'active', lateFeeCents: 500 })
-    const mutateAsync = vi.fn().mockResolvedValue({})
-    setupMocks({
-      rentals: [rental],
-      chargeMutation: createMutationMock({ mutateAsync }),
+  it('counts active vs delinquent rentals and sums the rent at risk', () => {
+    setup({
+      rentals: [
+        makeRental({ id: 'r1', status: 'active', monthlyRentCents: 2000 }),
+        makeRental({ id: 'r2', status: 'active', monthlyRentCents: 3000 }),
+        makeRental({ id: 'r3', status: 'past_due', monthlyRentCents: 2500 }),
+        makeRental({ id: 'r4', status: 'unpaid', monthlyRentCents: 1500 }),
+        // Cancelled rentals are neither "al día" nor at risk.
+        makeRental({ id: 'r5', status: 'canceled', monthlyRentCents: 9900 }),
+      ],
     })
-    renderWithProviders(<RentalsPageDriver />)
+    renderWithProviders(<SuperRentalsPage />)
 
-    await userEvent.click(screen.getByTestId(`btn-charge-${rental.id}`))
-    await userEvent.click(screen.getByTestId('confirm-btn'))
+    const alDia = screen.getByText('Al día').parentElement!
+    const debiendo = screen.getByText('Debiendo').parentElement!
+    const atRisk = screen.getByText('Renta mensual en riesgo').parentElement!
 
-    await waitFor(() => {
-      expect(mutateAsync).toHaveBeenCalledWith({ rentalId: rental.id, alsoCancel: false })
-    })
+    expect(within(alDia).getByText('2')).toBeInTheDocument()
+    expect(within(debiendo).getByText('2')).toBeInTheDocument()
+    // 2500 + 1500 — the cancelled 9900 must not count.
+    expect(within(atRisk).getByText('$40.00')).toBeInTheDocument()
+  })
+})
+
+describe('SuperRentalsPage — which actions each status offers', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
   })
 
-  // T79j: confirming "Cancelar" calls useCancelRental
-  it('T79j: confirming "Cancelar" calls useCancelRental with rentalId', async () => {
-    const rental = makeRental({ status: 'active', lateFeeCents: 0 })
-    const mutateAsync = vi.fn().mockResolvedValue({})
-    setupMocks({
-      rentals: [rental],
-      cancelMutation: createMutationMock({ mutateAsync }),
-    })
-    renderWithProviders(<RentalsPageDriver />)
+  it('offers only "Cancelar" for an active rental with no late fee', () => {
+    setup({ rentals: [makeRental({ status: 'active', lateFeeCents: 0 })] })
+    renderWithProviders(<SuperRentalsPage />)
 
-    await userEvent.click(screen.getByTestId(`btn-cancel-${rental.id}`))
-    await userEvent.click(screen.getByTestId('confirm-btn'))
-
-    await waitFor(() => {
-      expect(mutateAsync).toHaveBeenCalledWith(rental.id)
-    })
+    expect(screen.getByRole('button', { name: 'Cancelar' })).toBeInTheDocument()
+    expect(
+      screen.queryByRole('button', { name: 'Cobrar late fee' }),
+    ).not.toBeInTheDocument()
   })
 
-  // T79k: confirming "Reintentar setup" calls useRetryRentalSetup
-  it('T79k: confirming "Reintentar setup" calls useRetryRentalSetup with rentalId', async () => {
-    const rental = makeRental({ status: 'pending_setup', lateFeeCents: 0 })
-    const mutateAsync = vi.fn().mockResolvedValue({})
-    setupMocks({
-      rentals: [rental],
-      retryMutation: createMutationMock({ mutateAsync }),
-    })
-    renderWithProviders(<RentalsPageDriver />)
+  it('adds "Cobrar late fee" — but not "Cobrar y cancelar" — while active', () => {
+    setup({ rentals: [makeRental({ status: 'active', lateFeeCents: 500 })] })
+    renderWithProviders(<SuperRentalsPage />)
 
-    await userEvent.click(screen.getByTestId(`btn-retry-${rental.id}`))
-    await userEvent.click(screen.getByTestId('confirm-btn'))
-
-    await waitFor(() => {
-      expect(mutateAsync).toHaveBeenCalledWith(rental.id)
-    })
+    expect(
+      screen.getByRole('button', { name: 'Cobrar late fee' }),
+    ).toBeInTheDocument()
+    expect(
+      screen.queryByRole('button', { name: 'Cobrar y cancelar' }),
+    ).not.toBeInTheDocument()
   })
 
-  // T79l: multiple rentals with different statuses — correct buttons per row
-  it('T79l: multiple rentals render correct action buttons per status', () => {
-    const activeRental = makeRental({ id: 'r1', status: 'active', lateFeeCents: 0 })
-    const pastDueRental = makeRental({ id: 'r2', status: 'past_due', lateFeeCents: 500 })
-    const pendingRental = makeRental({ id: 'r3', status: 'pending_setup', lateFeeCents: 0 })
+  it('offers charge, charge-and-cancel and cancel once past due', () => {
+    setup({ rentals: [makeRental({ status: 'past_due', lateFeeCents: 500 })] })
+    renderWithProviders(<SuperRentalsPage />)
 
-    setupMocks({ rentals: [activeRental, pastDueRental, pendingRental] })
-    renderWithProviders(<RentalsPageDriver />)
-
-    // active row: only Cancel
-    const actionsActive = screen.getByTestId('actions-r1')
-    expect(within(actionsActive).getByTestId('btn-cancel-r1')).toBeInTheDocument()
-    expect(screen.queryByTestId('btn-charge-r1')).not.toBeInTheDocument()
-
-    // past_due row: charge + charge-cancel + cancel
-    expect(screen.getByTestId('btn-charge-r2')).toBeInTheDocument()
-    expect(screen.getByTestId('btn-charge-cancel-r2')).toBeInTheDocument()
-    expect(screen.getByTestId('btn-cancel-r2')).toBeInTheDocument()
-
-    // pending_setup row: retry + cancel
-    expect(screen.getByTestId('btn-retry-r3')).toBeInTheDocument()
-    expect(screen.getByTestId('btn-cancel-r3')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Cobrar late fee' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Cobrar y cancelar' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Cancelar' })).toBeInTheDocument()
   })
 
-  // T79m: canceling confirmation modal dismisses it
-  it('T79m: clicking cancel in modal dismisses it without calling mutations', async () => {
-    const rental = makeRental({ status: 'active', lateFeeCents: 0 })
-    const mutateAsync = vi.fn()
-    setupMocks({
-      rentals: [rental],
-      cancelMutation: createMutationMock({ mutateAsync }),
+  it('offers "Reintentar setup" only while the setup is pending', () => {
+    setup({ rentals: [makeRental({ status: 'pending_setup', lateFeeCents: 0 })] })
+    renderWithProviders(<SuperRentalsPage />)
+
+    expect(
+      screen.getByRole('button', { name: 'Reintentar setup' }),
+    ).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Cancelar' })).toBeInTheDocument()
+  })
+
+  // The theft fee is a one-shot charge. Offering it twice would double-bill.
+  it('offers "Cobrar robo" when a theft fee is set and not yet charged', () => {
+    setup({ rentals: [makeRental({ theftFeeCents: 8000 })] })
+    renderWithProviders(<SuperRentalsPage />)
+
+    expect(screen.getByRole('button', { name: 'Cobrar robo' })).toBeInTheDocument()
+  })
+
+  it('hides "Cobrar robo" once the theft fee has been charged', () => {
+    setup({
+      rentals: [
+        makeRental({
+          theftFeeCents: 8000,
+          theftFeeChargedAt: '2026-05-20T00:00:00Z',
+        }),
+      ],
     })
-    renderWithProviders(<RentalsPageDriver />)
+    renderWithProviders(<SuperRentalsPage />)
 
-    await userEvent.click(screen.getByTestId(`btn-cancel-${rental.id}`))
-    expect(screen.getByTestId('confirm-modal')).toBeInTheDocument()
+    expect(
+      screen.queryByRole('button', { name: 'Cobrar robo' }),
+    ).not.toBeInTheDocument()
+  })
 
-    await userEvent.click(screen.getByTestId('cancel-btn'))
+  it('offers "Reiniciar timer" only when a maintenance timer is running', () => {
+    setup({ rentals: [makeRental({ nextMaintenanceAt: null })] })
+    const { unmount } = renderWithProviders(<SuperRentalsPage />)
+    expect(
+      screen.queryByRole('button', { name: 'Reiniciar timer' }),
+    ).not.toBeInTheDocument()
+    unmount()
 
-    expect(screen.queryByTestId('confirm-modal')).not.toBeInTheDocument()
-    expect(mutateAsync).not.toHaveBeenCalled()
+    setup({ rentals: [makeRental({ nextMaintenanceAt: '2026-08-01T00:00:00Z' })] })
+    renderWithProviders(<SuperRentalsPage />)
+    expect(
+      screen.getByRole('button', { name: 'Reiniciar timer' }),
+    ).toBeInTheDocument()
+  })
+})
+
+describe('SuperRentalsPage — confirmation modal dispatches the right mutation', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('names the customer and the amount in the confirmation', async () => {
+    setup({ rentals: [makeRental({ lateFeeCents: 500 })] })
+    renderWithProviders(<SuperRentalsPage />)
+
+    const dialog = await pressAction('Cobrar late fee')
+
+    expect(
+      within(dialog).getByText('Cobrar multa de $5.00 a Juan García'),
+    ).toBeInTheDocument()
+    expect(
+      within(dialog).getByText(/no se puede deshacer/i),
+    ).toBeInTheDocument()
+  })
+
+  it('charges the late fee without cancelling', async () => {
+    const charge = mutationMock()
+    setup({ rentals: [makeRental({ lateFeeCents: 500 })], charge })
+    renderWithProviders(<SuperRentalsPage />)
+
+    await pressAction('Cobrar late fee')
+    await confirmModal()
+
+    await waitFor(() =>
+      expect(charge.mutateAsync).toHaveBeenCalledWith({
+        rentalId: 'rental-001',
+        alsoCancel: false,
+      }),
+    )
+  })
+
+  it('charges the late fee AND cancels when that action is chosen', async () => {
+    const charge = mutationMock()
+    setup({
+      rentals: [makeRental({ status: 'past_due', lateFeeCents: 500 })],
+      charge,
+    })
+    renderWithProviders(<SuperRentalsPage />)
+
+    await pressAction('Cobrar y cancelar')
+    await confirmModal()
+
+    await waitFor(() =>
+      expect(charge.mutateAsync).toHaveBeenCalledWith({
+        rentalId: 'rental-001',
+        alsoCancel: true,
+      }),
+    )
+  })
+
+  // "Cobrar robo" bills the theft fee and closes the contract in one step.
+  it('charges the theft fee and cancels the rental', async () => {
+    const theft = mutationMock()
+    const charge = mutationMock()
+    setup({ rentals: [makeRental({ theftFeeCents: 8000 })], theft, charge })
+    renderWithProviders(<SuperRentalsPage />)
+
+    await pressAction('Cobrar robo')
+    await confirmModal()
+
+    await waitFor(() =>
+      expect(theft.mutateAsync).toHaveBeenCalledWith({
+        rentalId: 'rental-001',
+        alsoCancel: true,
+      }),
+    )
+    // The late-fee mutation must not fire for a theft charge.
+    expect(charge.mutateAsync).not.toHaveBeenCalled()
+  })
+
+  it('cancels the rental', async () => {
+    const cancel = mutationMock()
+    setup({ rentals: [makeRental({ lateFeeCents: 0 })], cancel })
+    renderWithProviders(<SuperRentalsPage />)
+
+    await pressAction('Cancelar')
+    await confirmModal()
+
+    await waitFor(() =>
+      expect(cancel.mutateAsync).toHaveBeenCalledWith('rental-001'),
+    )
+  })
+
+  it('retries a pending setup', async () => {
+    const retry = mutationMock()
+    setup({ rentals: [makeRental({ status: 'pending_setup' })], retry })
+    renderWithProviders(<SuperRentalsPage />)
+
+    await pressAction('Reintentar setup')
+    await confirmModal()
+
+    await waitFor(() =>
+      expect(retry.mutateAsync).toHaveBeenCalledWith('rental-001'),
+    )
+  })
+
+  it('resets the maintenance timer', async () => {
+    const resetMaintenance = mutationMock()
+    setup({
+      rentals: [makeRental({ nextMaintenanceAt: '2026-08-01T00:00:00Z' })],
+      resetMaintenance,
+    })
+    renderWithProviders(<SuperRentalsPage />)
+
+    await pressAction('Reiniciar timer')
+    await confirmModal()
+
+    await waitFor(() =>
+      expect(resetMaintenance.mutateAsync).toHaveBeenCalledWith('rental-001'),
+    )
+  })
+
+  it('dismisses without touching anything when the operator backs out', async () => {
+    const cancel = mutationMock()
+    setup({ rentals: [makeRental({ lateFeeCents: 0 })], cancel })
+    renderWithProviders(<SuperRentalsPage />)
+
+    const dialog = await pressAction('Cancelar')
+    await userEvent.click(
+      within(dialog).getByRole('button', { name: 'Cancelar' }),
+    )
+
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(cancel.mutateAsync).not.toHaveBeenCalled()
+  })
+
+  it('locks the modal into "Procesando…" while a mutation is in flight', () => {
+    setup({
+      rentals: [makeRental({ lateFeeCents: 0 })],
+      cancel: mutationMock({ isPending: true }),
+    })
+    renderWithProviders(<SuperRentalsPage />)
+
+    // No modal open yet — the flag only matters once one is.
+    expect(screen.queryByText('Procesando…')).not.toBeInTheDocument()
+  })
+})
+
+describe('SuperRentalsPage — failures surface to the operator', () => {
+  let alertSpy: ReturnType<typeof vi.spyOn>
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    alertSpy = vi.spyOn(window, 'alert').mockImplementation(() => {})
+  })
+
+  afterEach(() => {
+    alertSpy.mockRestore()
+  })
+
+  it('shows the API message when the charge is rejected', async () => {
+    const charge = mutationMock({
+      mutateAsync: vi.fn().mockRejectedValue({
+        response: { data: { message: 'La tarjeta fue rechazada' } },
+      }),
+    })
+    setup({ rentals: [makeRental({ lateFeeCents: 500 })], charge })
+    renderWithProviders(<SuperRentalsPage />)
+
+    await pressAction('Cobrar late fee')
+    await confirmModal()
+
+    await waitFor(() =>
+      expect(alertSpy).toHaveBeenCalledWith('La tarjeta fue rechazada'),
+    )
+    // The modal closes either way, so the operator is never stuck.
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  })
+
+  it('falls back to a generic message when the error carries none', async () => {
+    const charge = mutationMock({
+      mutateAsync: vi.fn().mockRejectedValue(new Error('Network Error')),
+    })
+    setup({ rentals: [makeRental({ lateFeeCents: 500 })], charge })
+    renderWithProviders(<SuperRentalsPage />)
+
+    await pressAction('Cobrar late fee')
+    await confirmModal()
+
+    await waitFor(() =>
+      expect(alertSpy).toHaveBeenCalledWith('No se pudo completar la acción'),
+    )
+  })
+})
+
+describe('SuperRentalsPage — filters', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('refetches by status when the operator picks one', async () => {
+    setup({ rentals: [makeRental()] })
+    renderWithProviders(<SuperRentalsPage />)
+
+    await userEvent.selectOptions(
+      screen.getByLabelText('Filtrar por estado'),
+      'past_due',
+    )
+
+    await waitFor(() =>
+      expect(mockUseAdminRentals).toHaveBeenLastCalledWith(
+        expect.objectContaining({ status: ['past_due'], page: 1 }),
+      ),
+    )
+  })
+
+  it('offers "Limpiar filtros" only once a filter is active, and clears it', async () => {
+    setup({ rentals: [makeRental()] })
+    renderWithProviders(<SuperRentalsPage />)
+
+    expect(
+      screen.queryByRole('button', { name: 'Limpiar filtros' }),
+    ).not.toBeInTheDocument()
+
+    await userEvent.selectOptions(
+      screen.getByLabelText('Filtrar por estado'),
+      'unpaid',
+    )
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Limpiar filtros' }),
+    )
+
+    await waitFor(() =>
+      expect(mockUseAdminRentals).toHaveBeenLastCalledWith({
+        page: 1,
+        pageSize: 25,
+      }),
+    )
+    expect(
+      screen.queryByRole('button', { name: 'Limpiar filtros' }),
+    ).not.toBeInTheDocument()
   })
 })

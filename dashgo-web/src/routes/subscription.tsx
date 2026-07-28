@@ -35,7 +35,9 @@ export const Route = createFileRoute('/subscription')({
   component: SubscriptionPage,
 })
 
-function SubscriptionPage() {
+// Exported so subscription.test.tsx renders THIS component instead of a
+// test-local copy of its logic — a copy passes while production breaks.
+export function SubscriptionPage() {
   const { session } = Route.useSearch()
   const { data: sub, isPending: subPending, refetch } = useMySubscription()
   const { data: plan, isPending: planPending } = useSubscriptionPlan()
