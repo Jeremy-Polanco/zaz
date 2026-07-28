@@ -1,6 +1,7 @@
-import { useMemo, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import {
   ActivityIndicator,
+  Alert,
   FlatList,
   Pressable,
   Text,
@@ -8,7 +9,7 @@ import {
   View,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
-import { useAdminUsers } from '../../lib/queries'
+import { useAdminUsers, useCurrentUser, useDeleteUser } from '../../lib/queries'
 import type { AdminUser, AdminUsersSubscriptionFilter, UserRole } from '../../lib/types'
 import { Eyebrow, Hairline, SectionHead } from '../../components/ui'
 import { UserAddressesPanel } from '../../components/UserAddressesPanel'
@@ -46,7 +47,17 @@ function SubscriptionBadge({ active }: { active: boolean }) {
   )
 }
 
-function UserRow({ item }: { item: AdminUser }) {
+function UserRow({
+  item,
+  isSelf,
+  isDeleting,
+  onDelete,
+}: {
+  item: AdminUser
+  isSelf: boolean
+  isDeleting: boolean
+  onDelete: (user: AdminUser) => void
+}) {
   const [expanded, setExpanded] = useState(false)
   return (
     <View className="border-b border-ink/10 py-4">
@@ -71,6 +82,30 @@ function UserRow({ item }: { item: AdminUser }) {
               {expanded ? 'Ocultar' : 'Direcciones'}
             </Text>
           </Pressable>
+          {/* Self-deletion is a 403 on DELETE /users/:id — the admin's own
+              account is deleted from Perfil (DELETE /auth/me) instead. */}
+          {isSelf ? (
+            <Text className="font-sans text-[10px] uppercase tracking-label text-ink-muted/60">
+              Vos
+            </Text>
+          ) : (
+            <Pressable
+              onPress={() => onDelete(item)}
+              disabled={isDeleting}
+              hitSlop={8}
+              accessibilityRole="button"
+              accessibilityLabel={`Eliminar la cuenta de ${item.fullName}`}
+              accessibilityState={{ disabled: isDeleting }}
+            >
+              <Text
+                className={`font-sans text-[10px] uppercase tracking-label ${
+                  isDeleting ? 'text-bad/40' : 'text-bad'
+                }`}
+              >
+                {isDeleting ? 'Eliminando…' : 'Eliminar'}
+              </Text>
+            </Pressable>
+          )}
         </View>
       </View>
       {expanded ? (
@@ -89,6 +124,60 @@ export default function SuperUsersScreen() {
   const [search, setSearch] = useState('')
 
   const { data: users, isPending, refetch, isRefetching } = useAdminUsers(subFilter)
+  const { data: me } = useCurrentUser()
+  const deleteUser = useDeleteUser()
+  const [deletingId, setDeletingId] = useState<string | null>(null)
+
+  /**
+   * Two-step confirmation before an irreversible delete. The web panel puts
+   * the same friction behind a modal with an explicit "Eliminar
+   * definitivamente" button — on mobile a single tap is far easier to fire by
+   * accident, so the destructive action sits behind two taps.
+   */
+  const handleDelete = useCallback(
+    (user: AdminUser) => {
+      const run = async () => {
+        setDeletingId(user.id)
+        try {
+          await deleteUser.mutateAsync(user.id)
+        } catch (e) {
+          Alert.alert(
+            'Error',
+            (e as { response?: { data?: { message?: string } } })?.response?.data
+              ?.message ?? 'No se pudo eliminar el usuario.',
+          )
+        } finally {
+          setDeletingId(null)
+        }
+      }
+
+      Alert.alert(
+        'Eliminar usuario',
+        `Vas a eliminar a ${user.fullName}${user.phone ? ` (${user.phone})` : ''}. Se borran sus direcciones, suscripción, créditos y puntos. Sus pedidos se conservan anonimizados.`,
+        [
+          { text: 'Cancelar', style: 'cancel' },
+          {
+            text: 'Continuar',
+            style: 'destructive',
+            onPress: () =>
+              Alert.alert(
+                '¿Seguro?',
+                'Esta acción es irreversible.',
+                [
+                  { text: 'Cancelar', style: 'cancel' },
+                  {
+                    text: 'Eliminar definitivamente',
+                    style: 'destructive',
+                    onPress: () => void run(),
+                  },
+                ],
+              ),
+          },
+        ],
+      )
+    },
+    [deleteUser],
+  )
 
   const filtered = useMemo(() => {
     const list = users ?? []
@@ -163,7 +252,14 @@ export default function SuperUsersScreen() {
             <Hairline />
           </View>
         }
-        renderItem={({ item }) => <UserRow item={item} />}
+        renderItem={({ item }) => (
+          <UserRow
+            item={item}
+            isSelf={me?.id === item.id}
+            isDeleting={deletingId === item.id}
+            onDelete={handleDelete}
+          />
+        )}
         ListEmptyComponent={
           <View className="items-center py-16">
             <Eyebrow>Sin resultados</Eyebrow>

@@ -10,6 +10,7 @@ import { DeleteAccountModal } from '../components/DeleteAccountModal'
 import { useCurrentUser, useDeleteAccount, useLogout } from '../lib/auth'
 import { useUpdateMe } from '../lib/queries'
 import { TOKEN_KEY } from '../lib/api'
+import { serverMessage } from '../lib/utils'
 
 export const Route = createFileRoute('/cuenta')({
   beforeLoad: () => {
@@ -24,13 +25,6 @@ function roleLabel(role: string) {
   if (role === 'super_admin_delivery') return 'Reparto'
   if (role === 'promoter') return 'Promotor'
   return 'Cliente'
-}
-
-function serverMessage(err: unknown, fallback: string) {
-  return (
-    (err as Error & { response?: { data?: { message?: string } } })?.response
-      ?.data?.message ?? fallback
-  )
 }
 
 function AccountPage() {

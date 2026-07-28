@@ -541,6 +541,14 @@ export class AuthService implements OnModuleInit {
 
     // Stripe cleanup AFTER the DB transaction commits. If Stripe is down
     // we'd rather log an alert than roll back a successful deletion.
+    //
+    // NOTHING here may throw. By this point the transaction has committed —
+    // the user row and every PII table are gone, the deletion SUCCEEDED.
+    // Re-throwing rolls nothing back; it only turns a completed deletion into
+    // a 500, so mobile/web show "no se pudo eliminar" for an account that no
+    // longer exists, and the retry 404s. We log at ERROR instead: the audit
+    // row in account_deletions keeps stripe_customer_id, so ops can find and
+    // delete the orphaned Stripe customer by hand.
     if (stripeCustomerId && this.stripe) {
       try {
         await this.stripe.customers.del(stripeCustomerId);
@@ -551,10 +559,16 @@ export class AuthService implements OnModuleInit {
             `[ACCOUNT_DELETE] Stripe customer ${stripeCustomerId} was already deleted`,
           );
         } else {
-          // Re-throw so callers can see and alert. The DB rows are already
-          // gone — that's intentional, the user's PII deletion is the
-          // load-bearing part of this flow.
-          throw err;
+          const reason =
+            err instanceof Error
+              ? err.message
+              : (JSON.stringify(err) ?? 'unknown error');
+          this.logger.error(
+            `[ACCOUNT_DELETE][STRIPE_ORPHAN] user=${userId} stripeCustomerId=${stripeCustomerId} ` +
+              `could not be deleted in Stripe (code=${code ?? 'unknown'}): ${reason}. ` +
+              'The account IS deleted in our DB — delete this Stripe customer manually.',
+            err instanceof Error ? err.stack : undefined,
+          );
         }
       }
     }

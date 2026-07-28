@@ -16,7 +16,7 @@ import {
 } from '../lib/schemas'
 import type { AuthUser } from '../lib/types'
 import { TOKEN_KEY, api } from '../lib/api'
-import { formatCents } from '../lib/utils'
+import { formatCents, serverMessage } from '../lib/utils'
 
 export const Route = createFileRoute('/super/promoters/')({
   beforeLoad: async () => {
@@ -31,13 +31,6 @@ export const Route = createFileRoute('/super/promoters/')({
   },
   component: SuperPromotersPage,
 })
-
-function serverMessage(err: unknown, fallback: string) {
-  return (
-    (err as Error & { response?: { data?: { message?: string } } })?.response
-      ?.data?.message ?? fallback
-  )
-}
 
 function InviteForm({ onDone }: { onDone: () => void }) {
   const invite = useInvitePromoter()

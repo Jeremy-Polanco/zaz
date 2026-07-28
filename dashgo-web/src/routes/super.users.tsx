@@ -4,6 +4,7 @@ import { SectionHeading } from '../components/ui'
 import { UserAddressesPanel } from '../components/UserAddressesPanel'
 import { useAdminUsers, useCurrentUser, useDeleteUser } from '../lib/queries'
 import { TOKEN_KEY, api } from '../lib/api'
+import { serverMessage } from '../lib/utils'
 import type { AdminUser, AdminUsersSubscriptionFilter, AuthUser } from '../lib/types'
 
 // ── Route definition ───────────────────────────────────────────────────────────
@@ -369,7 +370,10 @@ function SuperUsersPage() {
           isDeleting={deleteUser.isPending}
           error={
             deleteUser.isError
-              ? 'No se pudo eliminar el usuario. Intentá de nuevo.'
+              ? serverMessage(
+                  deleteUser.error,
+                  'No se pudo eliminar el usuario. Intentá de nuevo.',
+                )
               : null
           }
           onCancel={() => {

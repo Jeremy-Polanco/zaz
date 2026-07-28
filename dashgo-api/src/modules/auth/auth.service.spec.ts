@@ -343,17 +343,49 @@ describe('AuthService.deleteAccount (FIX C2)', () => {
     expect(repos.users.delete).toHaveBeenCalledWith('user-1');
   });
 
-  it('does NOT swallow non-"resource_missing" Stripe errors', async () => {
+  // ---------------------------------------------------------------------------
+  // Stripe cleanup runs AFTER the DB transaction commits. By then the user row
+  // and every PII table are already gone — the deletion SUCCEEDED. Re-throwing
+  // a Stripe error at that point rolls nothing back; it only turns a completed
+  // deletion into a 500, so mobile/web report "no se pudo eliminar" for an
+  // account that no longer exists (and a retry then 404s).
+  //
+  // We log at ERROR level instead, tagged for ops reconciliation: the audit row
+  // in account_deletions keeps the stripe_customer_id, so an orphaned Stripe
+  // customer can be found and deleted by hand.
+  // ---------------------------------------------------------------------------
+  it('does not fail the deletion when Stripe rejects after the DB commit', async () => {
     const user = fakeUser({ stripeCustomerId: 'cus_bad' });
     repos.users.findOne.mockResolvedValue(user);
     repos.orders.count.mockResolvedValue(0);
+    repos.users.delete.mockResolvedValue({ affected: 1 } as never);
     mockStripeInstance.customers.del.mockRejectedValueOnce(
       Object.assign(new Error('rate limited'), { code: 'rate_limit' }),
     );
 
-    await expect(service.deleteAccount('user-1')).rejects.toThrow(
-      'rate limited',
+    await expect(service.deleteAccount('user-1')).resolves.toBeUndefined();
+    // The DB deletion still happened — that's the load-bearing half.
+    expect(repos.users.delete).toHaveBeenCalledWith('user-1');
+  });
+
+  it('logs the orphaned Stripe customer id when Stripe cleanup fails', async () => {
+    const user = fakeUser({ stripeCustomerId: 'cus_orphan' });
+    repos.users.findOne.mockResolvedValue(user);
+    repos.orders.count.mockResolvedValue(0);
+    repos.users.delete.mockResolvedValue({ affected: 1 } as never);
+    mockStripeInstance.customers.del.mockRejectedValueOnce(
+      Object.assign(new Error('rate limited'), { code: 'rate_limit' }),
     );
+    const logger = (service as unknown as { logger: { error: jest.Mock } })
+      .logger;
+    const errorSpy = jest.spyOn(logger, 'error').mockImplementation();
+
+    await service.deleteAccount('user-1');
+
+    expect(errorSpy).toHaveBeenCalledTimes(1);
+    // The message must carry the customer id — that's what ops reconciles with.
+    expect(String(errorSpy.mock.calls[0][0])).toContain('cus_orphan');
+    errorSpy.mockRestore();
   });
 
   it('runs the entire DB operation inside a single transaction', async () => {

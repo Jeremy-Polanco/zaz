@@ -1003,6 +1003,27 @@ export function useAdminUsers(subscription?: AdminUsersSubscriptionFilter) {
   })
 }
 
+/**
+ * Super-admin: DELETE /users/:id — irreversibly deletes a user account.
+ * Runs the full server-side deletion flow (anonymizes orders, cascades the
+ * related rows, writes a durable audit row). Mirrors the web panel.
+ *
+ * The server 403s an admin deleting their own account through this endpoint,
+ * so callers hide the action on their own row (self-deletion lives in Perfil →
+ * DELETE /auth/me).
+ */
+export function useDeleteUser() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (id: string) => {
+      await api.delete(`/users/${id}`)
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['users'] })
+    },
+  })
+}
+
 // ── Subscription hooks ────────────────────────────────────────────────────────
 
 /** Client: GET /me/subscription — current subscription or null */
