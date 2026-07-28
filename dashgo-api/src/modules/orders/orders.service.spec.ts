@@ -149,6 +149,7 @@ describe('OrdersService', () => {
   let subscriptionService: jest.Mocked<SubscriptionService>;
   let twilioService: jest.Mocked<TwilioService>;
   let rentalsService: jest.Mocked<RentalsService>;
+  let orderNotifications: { notifyStatus: jest.Mock };
 
   beforeEach(async () => {
     ordersRepo = makeRepoMock<Order>();
@@ -219,6 +220,8 @@ describe('OrdersService', () => {
       query: jest.fn(),
     } as unknown as jest.Mocked<DataSource>;
 
+    orderNotifications = { notifyStatus: jest.fn() };
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         OrdersService,
@@ -238,7 +241,7 @@ describe('OrdersService', () => {
         { provide: RentalsService, useValue: rentalsService },
         {
           provide: OrderNotificationsService,
-          useValue: { notifyStatus: jest.fn() },
+          useValue: orderNotifications,
         },
       ],
     }).compile();
@@ -3152,6 +3155,52 @@ describe('OrdersService', () => {
   // ─────────────────────────────────────────────────────────────────────────
 
   describe('updateStatus — transition guards', () => {
+    // The driver app has two "advance" buttons (route list + order detail) and
+    // runs on mobile data, so the same PATCH lands twice: once for real, once
+    // because the response was lost or the screen still showed the old status.
+    // A no-op must be a no-op — not a "Transición inválida: X → X" alert, and
+    // above all not a second run of the delivery side effects.
+    it('is idempotent when the order is already in the requested status', async () => {
+      const inRoute = fakeOrder({
+        status: OrderStatus.IN_DELIVERY_ROUTE,
+        customer: fakeUser() as never,
+      });
+      ordersRepo.findOne.mockResolvedValue(inRoute);
+
+      const result = await service.updateStatus(
+        'order-1',
+        { status: OrderStatus.IN_DELIVERY_ROUTE },
+        fakeUser(UserRole.SUPER_ADMIN_DELIVERY),
+      );
+
+      expect(result).toBe(inRoute);
+      expect(ordersRepo.update).not.toHaveBeenCalled();
+      expect(dataSource.transaction).not.toHaveBeenCalled();
+      expect(orderNotifications.notifyStatus).not.toHaveBeenCalled();
+    });
+
+    it('does not re-run delivery side effects when DELIVERED is re-sent', async () => {
+      const delivered = fakeOrder({
+        status: OrderStatus.DELIVERED,
+        paymentMethod: PaymentMethod.DIGITAL,
+        stripePaymentIntentId: 'pi_test',
+        customer: fakeUser() as never,
+      });
+      ordersRepo.findOne.mockResolvedValue(delivered);
+
+      const result = await service.updateStatus(
+        'order-1',
+        { status: OrderStatus.DELIVERED },
+        fakeUser(UserRole.SUPER_ADMIN_DELIVERY),
+      );
+
+      expect(result).toBe(delivered);
+      expect(paymentsService.captureIntent).not.toHaveBeenCalled();
+      expect(pointsService.creditForOrder).not.toHaveBeenCalled();
+      expect(invoicesService.createForOrder).not.toHaveBeenCalled();
+      expect(promotersService.creditCommissionsForOrder).not.toHaveBeenCalled();
+    });
+
     it('throws BadRequest for a disallowed status transition', async () => {
       // DELIVERED has no allowed transitions
       ordersRepo.findOne.mockResolvedValue(

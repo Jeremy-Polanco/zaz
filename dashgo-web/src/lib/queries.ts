@@ -135,7 +135,14 @@ export function useUpdateOrderStatus() {
       const { data } = await api.patch<Order>(`/orders/${id}/status`, { status })
       return data
     },
-    onSuccess: () => {
+    // The PATCH already answers with the updated order — write it straight into
+    // the detail cache so the page reflects the new status immediately. Without
+    // this, ['order', id] stayed stale, the advance button kept offering the
+    // transition that just happened, and a second click hit
+    // "Transición inválida: X → X".
+    onSuccess: (order, { id }) => {
+      qc.setQueryData(['order', id], order)
+      qc.invalidateQueries({ queryKey: ['order', id] })
       qc.invalidateQueries({ queryKey: ['orders'] })
     },
   })

@@ -316,7 +316,14 @@ export function useUpdateOrderStatus() {
       })
       return data
     },
-    onSuccess: () => {
+    // The PATCH already answers with the updated order — write it straight into
+    // the detail cache so the screen flips immediately. Without this,
+    // ['order', id] stayed stale until the next 10s poll: the advance button
+    // kept offering the transition that had just succeeded and re-enabled
+    // itself, so drivers tapped again and hit "Transición inválida: X → X".
+    onSuccess: (order, vars) => {
+      qc.setQueryData(['order', vars.id], order)
+      qc.invalidateQueries({ queryKey: ['order', vars.id] })
       qc.invalidateQueries({ queryKey: ['orders'] })
     },
   })

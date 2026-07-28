@@ -1094,6 +1094,16 @@ export class OrdersService {
   ) {
     const order = await this.findOne(id, user);
 
+    // Idempotent no-op. The driver app advances an order from two places (route
+    // list + order detail) and runs on mobile data, so the same PATCH lands
+    // twice whenever a response is lost or a screen is a few seconds stale.
+    // Returning the order — instead of "Transición inválida: X → X" — keeps
+    // that duplicate silent. It must short-circuit BEFORE the side effects
+    // below so a re-sent DELIVERED can never capture Stripe, credit points, or
+    // issue an invoice a second time. findOne() already scoped the order to
+    // this user, so there is nothing here they could not already GET.
+    if (order.status === dto.status) return order;
+
     const allowed = ALLOWED_TRANSITIONS[order.status];
     if (!allowed.includes(dto.status)) {
       throw new BadRequestException(
