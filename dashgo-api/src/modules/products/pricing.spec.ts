@@ -1,6 +1,7 @@
 import { Product } from '../../entities';
 import {
   SUBSCRIBER_BEBEDERO_RENT_CENTS,
+  getEffectivePrice,
   resolveBebederoRentCents,
 } from './pricing';
 
@@ -64,5 +65,160 @@ describe('resolveBebederoRentCents', () => {
       0,
     );
     expect(r).toEqual({ monthlyRentCents: 0, tier: 'catalog' });
+  });
+});
+
+/** Single-payment product builder for getEffectivePrice tests. $10.00 base. */
+function mkPriced(overrides: Partial<Product> = {}): Product {
+  return {
+    id: 'prod-2',
+    name: 'Botellón',
+    priceToPublic: '10.00',
+    pricingMode: 'single_payment',
+    offerLabel: null,
+    offerDiscountPct: null,
+    offerStartsAt: null,
+    offerEndsAt: null,
+    subscriberPriceCents: null,
+    ...overrides,
+  } as unknown as Product;
+}
+
+const NOW = new Date('2026-08-02T12:00:00Z');
+
+describe('getEffectivePrice', () => {
+  describe('sin precio de suscriptor (comportamiento existente)', () => {
+    it('no offer → base price', () => {
+      expect(getEffectivePrice(mkPriced(), NOW)).toEqual({
+        priceCents: 1000,
+        basePriceCents: 1000,
+        discountPct: null,
+        offerActive: false,
+        subscriberPriceApplied: false,
+      });
+    });
+
+    it('offer inside its window → discounted price', () => {
+      const p = mkPriced({
+        offerDiscountPct: '20',
+        offerStartsAt: new Date('2026-08-01T00:00:00Z'),
+        offerEndsAt: new Date('2026-08-31T00:00:00Z'),
+      });
+      expect(getEffectivePrice(p, NOW)).toEqual({
+        priceCents: 800,
+        basePriceCents: 1000,
+        discountPct: 20,
+        offerActive: true,
+        subscriberPriceApplied: false,
+      });
+    });
+
+    it('offer already expired → base price', () => {
+      const p = mkPriced({
+        offerDiscountPct: '20',
+        offerEndsAt: new Date('2026-07-01T00:00:00Z'),
+      });
+      expect(getEffectivePrice(p, NOW).priceCents).toBe(1000);
+    });
+
+    it('offer not started yet → base price', () => {
+      const p = mkPriced({
+        offerDiscountPct: '20',
+        offerStartsAt: new Date('2026-09-01T00:00:00Z'),
+      });
+      expect(getEffectivePrice(p, NOW).priceCents).toBe(1000);
+    });
+  });
+
+  describe('precio de suscriptor', () => {
+    it('subscriber with a subscriber price pays it', () => {
+      const p = mkPriced({ subscriberPriceCents: 750 });
+      expect(getEffectivePrice(p, NOW, { isSubscriber: true })).toEqual({
+        priceCents: 750,
+        basePriceCents: 1000,
+        discountPct: null,
+        offerActive: false,
+        subscriberPriceApplied: true,
+      });
+    });
+
+    it('non-subscriber IGNORES the subscriber price', () => {
+      const p = mkPriced({ subscriberPriceCents: 750 });
+      const r = getEffectivePrice(p, NOW, { isSubscriber: false });
+      expect(r.priceCents).toBe(1000);
+      expect(r.subscriberPriceApplied).toBe(false);
+    });
+
+    it('defaults to non-subscriber when no options are passed', () => {
+      const p = mkPriced({ subscriberPriceCents: 750 });
+      expect(getEffectivePrice(p, NOW).priceCents).toBe(1000);
+    });
+
+    it('subscriber price beats a weaker offer — never stacked', () => {
+      // $10 base, 20% off ⇒ $8. The $7.50 subscriber price is lower, so it is
+      // the one charged, and the offer is not reported as active: the two
+      // never combine.
+      const p = mkPriced({
+        subscriberPriceCents: 750,
+        offerDiscountPct: '20',
+        offerStartsAt: new Date('2026-08-01T00:00:00Z'),
+        offerEndsAt: new Date('2026-08-31T00:00:00Z'),
+      });
+      expect(getEffectivePrice(p, NOW, { isSubscriber: true })).toEqual({
+        priceCents: 750,
+        basePriceCents: 1000,
+        discountPct: null,
+        offerActive: false,
+        subscriberPriceApplied: true,
+      });
+    });
+
+    it('a CHEAPER offer wins — a subscriber never pays more than the public', () => {
+      // 60% off ⇒ $4, below the $7.50 subscriber price. The subscriber price is
+      // a FLOOR, not a fixed price: nobody with a subscription may end up worse
+      // off than someone without one.
+      const p = mkPriced({
+        subscriberPriceCents: 750,
+        offerDiscountPct: '60',
+      });
+      expect(getEffectivePrice(p, NOW, { isSubscriber: true })).toEqual({
+        priceCents: 400,
+        basePriceCents: 1000,
+        discountPct: 60,
+        offerActive: true,
+        subscriberPriceApplied: false,
+      });
+    });
+
+    it('ties go to the public price (no subscriber badge for the same money)', () => {
+      // 25% off ⇒ $7.50, exactly the subscriber price. Nothing is gained by
+      // claiming the subscriber price applied.
+      const p = mkPriced({
+        subscriberPriceCents: 750,
+        offerDiscountPct: '25',
+      });
+      const r = getEffectivePrice(p, NOW, { isSubscriber: true });
+      expect(r.priceCents).toBe(750);
+      expect(r.subscriberPriceApplied).toBe(false);
+      expect(r.offerActive).toBe(true);
+    });
+
+    it('a subscriber price of 0 is honoured (free), not treated as unset', () => {
+      const p = mkPriced({ subscriberPriceCents: 0 });
+      const r = getEffectivePrice(p, NOW, { isSubscriber: true });
+      expect(r.priceCents).toBe(0);
+      expect(r.subscriberPriceApplied).toBe(true);
+    });
+
+    it('subscriber with NO subscriber price falls back to the offer', () => {
+      const p = mkPriced({
+        subscriberPriceCents: null,
+        offerDiscountPct: '20',
+      });
+      const r = getEffectivePrice(p, NOW, { isSubscriber: true });
+      expect(r.priceCents).toBe(800);
+      expect(r.offerActive).toBe(true);
+      expect(r.subscriberPriceApplied).toBe(false);
+    });
   });
 });

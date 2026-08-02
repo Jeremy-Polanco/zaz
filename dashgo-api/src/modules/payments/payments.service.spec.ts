@@ -16,6 +16,7 @@ import { OrderStatus, PaymentMethod } from '../../entities/enums';
 import { PointsService } from '../points/points.service';
 import { ShippingService } from '../shipping/shipping.service';
 import { CreditService } from '../credit/credit.service';
+import { SubscriptionService } from '../subscription/subscription.service';
 import { createMockStripe, MockStripe } from '../../test-utils/stripe';
 
 // ---------------------------------------------------------------------------
@@ -100,6 +101,7 @@ describe('PaymentsService', () => {
   let configService: jest.Mocked<ConfigService>;
   let pointsService: jest.Mocked<PointsService>;
   let shippingService: jest.Mocked<ShippingService>;
+  let subscriptionService: jest.Mocked<SubscriptionService>;
 
   beforeEach(async () => {
     mockStripeInstance = createMockStripe();
@@ -131,6 +133,10 @@ describe('PaymentsService', () => {
       computeQuote: jest.fn().mockResolvedValue({ shippingCents: 0 }),
     } as unknown as jest.Mocked<ShippingService>;
 
+    subscriptionService = {
+      isActiveSubscriber: jest.fn().mockResolvedValue(false),
+    } as unknown as jest.Mocked<SubscriptionService>;
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         PaymentsService,
@@ -140,6 +146,7 @@ describe('PaymentsService', () => {
         { provide: PointsService, useValue: pointsService },
         { provide: ShippingService, useValue: shippingService },
         { provide: CreditService, useValue: creditService },
+        { provide: SubscriptionService, useValue: subscriptionService },
       ],
     }).compile();
 
@@ -259,6 +266,7 @@ describe('PaymentsService', () => {
         { provide: PointsService, useValue: pointsService },
         { provide: ShippingService, useValue: shippingService },
         { provide: CreditService, useValue: creditService },
+        { provide: SubscriptionService, useValue: subscriptionService },
       ],
     }).compile();
     const svc = mod.get<PaymentsService>(PaymentsService);
@@ -320,6 +328,82 @@ describe('PaymentsService', () => {
         amount: 1089,
         currency: 'usd',
       });
+    });
+
+    it('charges an active subscriber the product subscriber price', async () => {
+      productsRepo.find.mockResolvedValue([
+        makeProduct({
+          id: 'prod-1',
+          priceToPublic: '5.00',
+          subscriberPriceCents: 350,
+        }),
+      ]);
+      subscriptionService.isActiveSubscriber.mockResolvedValueOnce(true);
+      mockStripeInstance.paymentIntents.create.mockResolvedValueOnce({
+        id: 'pi_sub',
+        client_secret: 'secret_sub',
+        amount: 762,
+        currency: 'usd',
+      });
+
+      await service.createIntentForItems({
+        userId: 'user-1',
+        items: [{ productId: 'prod-1', quantity: 2 }],
+      });
+
+      // subtotal 700 (350 × 2), tax round(700 * 0.08887) = 62, total 762 —
+      // the intent must match what OrdersService quotes, or the customer sees
+      // one price and pays another.
+      expect(mockStripeInstance.paymentIntents.create).toHaveBeenCalledWith(
+        expect.objectContaining({ amount: 762 }),
+        expect.anything(),
+      );
+    });
+
+    it('charges a NON-subscriber the catalog price even when a subscriber price exists', async () => {
+      productsRepo.find.mockResolvedValue([
+        makeProduct({
+          id: 'prod-1',
+          priceToPublic: '5.00',
+          subscriberPriceCents: 350,
+        }),
+      ]);
+      subscriptionService.isActiveSubscriber.mockResolvedValueOnce(false);
+      mockStripeInstance.paymentIntents.create.mockResolvedValueOnce({
+        id: 'pi_cat',
+        client_secret: 's',
+        amount: 1089,
+        currency: 'usd',
+      });
+
+      await service.createIntentForItems({
+        userId: 'user-1',
+        items: [{ productId: 'prod-1', quantity: 2 }],
+      });
+
+      expect(mockStripeInstance.paymentIntents.create).toHaveBeenCalledWith(
+        expect.objectContaining({ amount: 1089 }),
+        expect.anything(),
+      );
+    });
+
+    it('does NOT query the subscription when no item has a subscriber price', async () => {
+      productsRepo.find.mockResolvedValue([
+        makeProduct({ id: 'prod-1', priceToPublic: '5.00' }),
+      ]);
+      mockStripeInstance.paymentIntents.create.mockResolvedValueOnce({
+        id: 'pi_x',
+        client_secret: 's',
+        amount: 1089,
+        currency: 'usd',
+      });
+
+      await service.createIntentForItems({
+        userId: 'user-1',
+        items: [{ productId: 'prod-1', quantity: 2 }],
+      });
+
+      expect(subscriptionService.isActiveSubscriber).not.toHaveBeenCalled();
     });
 
     it('throws when a product does not exist', async () => {

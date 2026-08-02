@@ -110,6 +110,22 @@ export class Product {
   offerEndsAt!: Date | null;
 
   /**
+   * Price (in cents) an ACTIVE SUBSCRIBER pays for this product. NULL means the
+   * product has no subscriber price and everyone pays the catalog/offer price.
+   *
+   * When set, it WINS outright for subscribers: the offer is not evaluated and
+   * the two never stack, even when the offer would be cheaper (see
+   * `getEffectivePrice`). 0 is a valid value — the product is free for
+   * subscribers — so callers must check `!= null`, never truthiness.
+   *
+   * The catalog endpoint is anonymous, so it only EXPOSES this number as a
+   * hook ("Suscriptores: $X"). Whether it is actually charged is decided
+   * server-side at order time, where the subscription is verified.
+   */
+  @Column({ name: 'subscriber_price_cents', type: 'integer', nullable: true })
+  subscriberPriceCents!: number | null;
+
+  /**
    * Rental pricing fields.
    *
    * `monthlyRentCents` and `lateFeeCents` are only semantically meaningful when

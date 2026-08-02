@@ -22,6 +22,7 @@ import { Button, SectionHeading } from '../components/ui'
 import { userAddressToGeoAddress } from '../lib/address'
 import { cn, formatCents } from '../lib/utils'
 import { computeQuotePreviewCents } from '../lib/tax'
+import { effectivePriceCentsFor, subscriberPriceWins } from '../lib/pricing'
 import { TOKEN_KEY } from '../lib/api'
 
 
@@ -128,7 +129,7 @@ function CheckoutPage() {
 
   const subtotalCents = cartItems.reduce((sum, it) => {
     const p = products?.find((x) => x.id === it.productId)
-    return sum + (p ? p.effectivePriceCents * it.quantity : 0)
+    return sum + (p ? effectivePriceCentsFor(p, isActiveSubscriber) * it.quantity : 0)
   }, 0)
 
   const claimableCents = balance?.claimableCents ?? 0
@@ -584,7 +585,14 @@ function CheckoutPage() {
               {cartItems.map((it) => {
                 const p = products?.find((x) => x.id === it.productId)
                 if (!p) return null
-                const lineCents = p.effectivePriceCents * it.quantity
+                const unitCents = effectivePriceCentsFor(p, isActiveSubscriber)
+                const lineCents = unitCents * it.quantity
+                // Cuando gana el precio de suscriptor se tacha el precio
+                // público y NO se muestra la etiqueta de oferta.
+                const subscriberPriceApplied = subscriberPriceWins(
+                  p,
+                  isActiveSubscriber,
+                )
                 return (
                   <li
                     key={it.productId}
@@ -595,7 +603,11 @@ function CheckoutPage() {
                         <p className="text-base font-medium text-ink">
                           {p.name}
                         </p>
-                        {p.offerActive && p.offerLabel ? (
+                        {subscriberPriceApplied ? (
+                          <span className="bg-accent px-1.5 py-0.5 text-[0.55rem] uppercase tracking-[0.12em] text-brand-dark">
+                            Suscriptor
+                          </span>
+                        ) : p.offerActive && p.offerLabel ? (
                           <span className="bg-accent px-1.5 py-0.5 text-[0.55rem] uppercase tracking-[0.12em] text-brand-dark">
                             {p.offerLabel}
                           </span>
@@ -603,17 +615,26 @@ function CheckoutPage() {
                       </div>
                       <p className="mt-1 nums text-[0.7rem] uppercase tracking-[0.14em] text-ink-muted">
                         {it.quantity} ×{' '}
-                        {p.offerActive ? (
+                        {subscriberPriceApplied ? (
+                          <>
+                            <span className="line-through">
+                              {formatCents(p.effectivePriceCents)}
+                            </span>{' '}
+                            <span className="text-brand">
+                              {formatCents(unitCents)}
+                            </span>
+                          </>
+                        ) : p.offerActive ? (
                           <>
                             <span className="line-through">
                               {formatCents(p.basePriceCents)}
                             </span>{' '}
                             <span className="text-brand">
-                              {formatCents(p.effectivePriceCents)}
+                              {formatCents(unitCents)}
                             </span>
                           </>
                         ) : (
-                          formatCents(p.effectivePriceCents)
+                          formatCents(unitCents)
                         )}
                       </p>
                     </div>

@@ -122,6 +122,7 @@ export class ProductsService implements OnModuleInit {
         dto.offerDiscountPct != null ? String(dto.offerDiscountPct) : null,
       offerStartsAt: dto.offerStartsAt ? new Date(dto.offerStartsAt) : null,
       offerEndsAt: dto.offerEndsAt ? new Date(dto.offerEndsAt) : null,
+      subscriberPriceCents: dto.subscriberPriceCents ?? null,
       pricingMode: dto.pricingMode ?? 'single_payment',
       monthlyRentCents: dto.monthlyRentCents ?? 0,
       lateFeeCents: dto.lateFeeCents ?? 0,
@@ -192,6 +193,11 @@ export class ProductsService implements OnModuleInit {
     }
     if (dto.offerEndsAt !== undefined) {
       patch.offerEndsAt = dto.offerEndsAt ? new Date(dto.offerEndsAt) : null;
+    }
+    // `?? null` y no `||`: 0 es un precio de suscriptor válido (gratis), así
+    // que solo un null explícito limpia el campo.
+    if (dto.subscriberPriceCents !== undefined) {
+      patch.subscriberPriceCents = dto.subscriberPriceCents ?? null;
     }
 
     // Rental pricing fields

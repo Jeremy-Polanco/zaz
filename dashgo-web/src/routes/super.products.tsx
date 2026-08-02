@@ -73,6 +73,8 @@ type FormState = {
   offerDiscountText: string
   offerStartsAt: string
   offerEndsAt: string
+  /** Precio para suscriptores, en dólares. Vacío = sin precio de suscriptor. */
+  subscriberPriceText: string
   // Rental pricing
   pricingMode: 'single_payment' | 'rental'
   monthlyRentText: string
@@ -88,6 +90,7 @@ type FormState = {
     promoterCommissionText?: string
     pointsText?: string
     offerDiscountText?: string
+    subscriberPriceText?: string
     image?: string
     monthlyRentText?: string
     lateFeeText?: string
@@ -114,6 +117,7 @@ const emptyForm: FormState = {
   offerDiscountText: '',
   offerStartsAt: '',
   offerEndsAt: '',
+  subscriberPriceText: '',
   pricingMode: 'single_payment',
   monthlyRentText: '',
   lateFeeText: '',
@@ -224,6 +228,12 @@ export function ProductForm({
       offerDiscountText: editing.offerDiscountPct ?? '',
       offerStartsAt: toDateInput(editing.offerStartsAt),
       offerEndsAt: toDateInput(editing.offerEndsAt),
+      // `!= null` a propósito: 0 es un precio de suscriptor válido (gratis) y
+      // tiene que rellenar el campo con "0", no dejarlo vacío.
+      subscriberPriceText:
+        editing.subscriberPriceCents != null
+          ? (editing.subscriberPriceCents / 100).toFixed(2)
+          : '',
       pricingMode: editing.pricingMode ?? 'single_payment',
       monthlyRentText: editing.monthlyRentCents ? String(editing.monthlyRentCents / 100) : '',
       lateFeeText: editing.lateFeeCents ? String(editing.lateFeeCents / 100) : '',
@@ -303,6 +313,18 @@ export function ProductForm({
         errors.theftFeeText = '0 o más'
     }
 
+    // Precio de suscriptor. Vacío = sin precio de suscriptor (null). $0.00 SÍ
+    // es válido: el producto sale gratis para suscriptores.
+    let subscriberPriceCents: number | null = null
+    if (state.subscriberPriceText.trim() !== '') {
+      const subscriberPrice = parseFloat(state.subscriberPriceText)
+      if (!Number.isFinite(subscriberPrice) || subscriberPrice < 0) {
+        errors.subscriberPriceText = 'Ingresa un precio válido'
+      } else {
+        subscriberPriceCents = Math.round(subscriberPrice * 100)
+      }
+    }
+
     let offerDiscount: number | null = null
     if (showOffer && state.offerDiscountText.trim() !== '') {
       offerDiscount = parseFloat(state.offerDiscountText)
@@ -337,6 +359,7 @@ export function ProductForm({
       offerDiscountPct: showOffer && offerDiscount != null ? offerDiscount : null,
       offerStartsAt: showOffer ? fromDateInput(state.offerStartsAt) : null,
       offerEndsAt: showOffer ? fromDateInput(state.offerEndsAt) : null,
+      subscriberPriceCents,
       pricingMode: state.pricingMode,
       ...(state.pricingMode === 'rental'
         ? {
@@ -829,6 +852,41 @@ export function ProductForm({
                       </span>
                     </div>
                     <FieldError message={state.errors.priceText} />
+                  </div>
+
+                  <div>
+                    <Label htmlFor="subscriberPrice">
+                      Precio para suscriptores (opcional)
+                    </Label>
+                    <div className="flex items-center border border-ink/15 bg-paper focus-within:border-ink">
+                      <span className="px-3 py-2.5 text-sm text-ink-muted">$</span>
+                      <Input
+                        id="subscriberPrice"
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        value={state.subscriberPriceText}
+                        onChange={(e) =>
+                          setState((s) => ({
+                            ...s,
+                            subscriberPriceText: e.target.value,
+                          }))
+                        }
+                        className="nums flex-1 border-0 bg-transparent px-3 py-2.5 text-sm text-ink outline-none"
+                        placeholder="Vacío = mismo precio para todos"
+                      />
+                      <span className="px-3 py-2.5 text-[0.65rem] uppercase tracking-[0.10em] text-ink-muted">
+                        USD
+                      </span>
+                    </div>
+                    <FieldError message={state.errors.subscriberPriceText} />
+                    <p className="mt-1.5 text-[0.7rem] text-ink-muted">
+                      Tope de precio para suscriptores activos: pagan este
+                      precio, o el de la oferta si resulta más barato. Nunca
+                      pagan más que un cliente sin suscripción, y los descuentos
+                      no se acumulan. Dejalo vacío para que no haya precio de
+                      suscriptor.
+                    </p>
                   </div>
 
                   <button

@@ -318,6 +318,8 @@ export type CreateProductInput = {
   offerDiscountPct?: number | null
   offerStartsAt?: string | null
   offerEndsAt?: string | null
+  /** Precio en cents para suscriptores activos. null = sin precio de suscriptor. */
+  subscriberPriceCents?: number | null
   pricingMode?: 'single_payment' | 'rental'
   monthlyRentCents?: number
   lateFeeCents?: number

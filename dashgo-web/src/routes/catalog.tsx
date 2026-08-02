@@ -3,8 +3,13 @@ import { useMemo, useState } from 'react'
 import { z } from 'zod'
 import { Button } from '../components/ui'
 import { CategoryCard } from '../components/CategoryCard'
-import { useCategories, useProducts, useCurrentUser } from '../lib/queries'
+import { useCategories, useProducts, useCurrentUser, useMySubscription } from '../lib/queries'
 import { useCart } from '../lib/cart'
+import {
+  effectivePriceCentsFor,
+  showsSubscriberTeaser,
+  subscriberPriceWins,
+} from '../lib/pricing'
 import { formatCents } from '../lib/utils'
 import { TOKEN_KEY, api } from '../lib/api'
 import type { AuthUser, Product } from '../lib/types'
@@ -47,6 +52,10 @@ function CatalogPage() {
   const { data: products, isPending } = useProducts()
   const { data: categories } = useCategories()
   const { data: user } = useCurrentUser()
+  const { data: subscription } = useMySubscription()
+  // Misma regla que checkout.tsx y que SubscriptionService.isActiveSubscriber.
+  const isActiveSubscriber =
+    subscription?.status === 'active' || subscription?.status === 'past_due'
   const { items, totalItems, update } = useCart()
   const { cat } = useSearch({ from: '/catalog' })
   const navigate = useNavigate({ from: '/catalog' })
@@ -97,7 +106,7 @@ function CatalogPage() {
 
   const totalCents = (products ?? []).reduce((sum, p) => {
     const qty = items[p.id] ?? 0
-    return sum + p.effectivePriceCents * qty
+    return sum + effectivePriceCentsFor(p, isActiveSubscriber) * qty
   }, 0)
 
   const setCat = (next: string | undefined) => {
@@ -223,6 +232,7 @@ function CatalogPage() {
                 <ProductCard
                   key={p.id}
                   product={p}
+                  isSubscriber={isActiveSubscriber}
                   quantity={items[p.id] ?? 0}
                   onDec={() => update(p.id, -1)}
                   onInc={() => update(p.id, 1)}
@@ -255,6 +265,7 @@ function CatalogPage() {
                   <ProductCard
                     key={p.id}
                     product={p}
+                    isSubscriber={isActiveSubscriber}
                     quantity={items[p.id] ?? 0}
                     onDec={() => update(p.id, -1)}
                     onInc={() => update(p.id, 1)}
@@ -322,14 +333,25 @@ function CategoryChip({
 function ProductCard({
   product,
   quantity,
+  isSubscriber,
   onDec,
   onInc,
 }: {
   product: Product
   quantity: number
+  isSubscriber: boolean
   onDec: () => void
   onInc: () => void
 }) {
+  const priceCents = effectivePriceCentsFor(product, isSubscriber)
+  const showTeaser = showsSubscriberTeaser(product, isSubscriber)
+  // Cuando gana el precio de suscriptor se tacha el precio público; si no,
+  // se tacha el de catálogo cuando hay oferta. Nunca los dos.
+  const struckCents = subscriberPriceWins(product, isSubscriber)
+    ? product.effectivePriceCents
+    : product.offerActive
+      ? product.basePriceCents
+      : null
   const imgSrc = product.imageUpdatedAt
     ? `${import.meta.env.VITE_API_URL}/products/${product.id}/image?t=${new Date(product.imageUpdatedAt).getTime()}`
     : null
@@ -369,13 +391,22 @@ function ProductCard({
         </p>
 
         <div className="flex items-baseline gap-2">
-          <TypographicPrice cents={product.effectivePriceCents} />
-          {product.offerActive ? (
+          <TypographicPrice cents={priceCents} />
+          {struckCents != null ? (
             <span className="nums text-[0.65rem] text-ink-muted line-through">
-              {formatCents(product.basePriceCents)}
+              {formatCents(struckCents)}
             </span>
           ) : null}
         </div>
+
+        {showTeaser ? (
+          <p className="text-[0.62rem] leading-tight text-ink-muted">
+            Suscriptores:{' '}
+            <span className="nums font-semibold text-ink">
+              {formatCents(product.subscriberPriceCents!)}
+            </span>
+          </p>
+        ) : null}
 
         {product.isAvailable ? (
           quantity === 0 ? (

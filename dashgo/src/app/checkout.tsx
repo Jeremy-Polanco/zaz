@@ -20,6 +20,7 @@ import {
 } from '../lib/queries'
 import { userAddressToGeoAddress } from '../lib/address'
 import { formatCents } from '../lib/format'
+import { effectivePriceCentsFor, subscriberPriceWins } from '../lib/pricing'
 import { computeQuotePreviewCents } from '../lib/tax'
 import type { PaymentMethod } from '../lib/types'
 import { Button, Eyebrow, Hairline } from '../components/ui'
@@ -28,6 +29,9 @@ import { Button, Eyebrow, Hairline } from '../components/ui'
 
 export default function CheckoutScreen() {
   const { t } = useTranslation('checkout')
+  // La etiqueta "Suscriptor" vive en el namespace del catálogo — una sola
+  // fuente para el mismo texto en tarjeta y en resumen de checkout.
+  const { t: tCatalog } = useTranslation('catalog')
   const cartState = useCart()
   const { data: user, isPending: userPending } = useCurrentUser()
 
@@ -102,10 +106,14 @@ export default function CheckoutScreen() {
     () =>
       lineItems.reduce(
         (sum, li) =>
-          sum + (li.product ? li.product.effectivePriceCents * li.quantity : 0),
+          sum +
+          (li.product
+            ? effectivePriceCentsFor(li.product, isActiveSubscriber) *
+              li.quantity
+            : 0),
         0,
       ),
-    [lineItems],
+    [lineItems, isActiveSubscriber],
   )
 
   const rentalFirstMonthCents = useMemo(
@@ -396,8 +404,20 @@ export default function CheckoutScreen() {
               {t('summary.title')}
             </Text>
           </View>
-          {lineItems.map((li) =>
-            li.product ? (
+          {lineItems.map((li) => {
+            if (!li.product) return null
+            const unitCents = effectivePriceCentsFor(
+              li.product,
+              isActiveSubscriber,
+            )
+            // Cuando gana el precio de suscriptor se tacha el precio público
+            // y la etiqueta de oferta no se muestra.
+            const subscriberPriceApplied = subscriberPriceWins(
+              li.product,
+              isActiveSubscriber,
+            )
+            const discounted = subscriberPriceApplied || li.product.offerActive
+            return (
               <View
                 key={li.productId}
                 className="flex-row items-start justify-between border-b border-ink/10 py-3"
@@ -407,27 +427,37 @@ export default function CheckoutScreen() {
                     <Text className="font-sans-medium text-[15px] text-ink">
                       {li.product.name}
                     </Text>
-                    {li.product.offerActive && li.product.offerLabel && (
+                    {subscriberPriceApplied ? (
+                      <View className="bg-accent px-1.5 py-0.5">
+                        <Text className="font-sans text-[9px] uppercase tracking-label text-paper">
+                          {tCatalog('product.subscriberBadge')}
+                        </Text>
+                      </View>
+                    ) : li.product.offerActive && li.product.offerLabel ? (
                       <View className="bg-accent px-1.5 py-0.5">
                         <Text className="font-sans text-[9px] uppercase tracking-label text-paper">
                           {li.product.offerLabel}
                         </Text>
                       </View>
-                    )}
+                    ) : null}
                   </View>
-                  {li.product.offerActive ? (
+                  {discounted ? (
                     <View className="mt-0.5 flex-row items-center gap-2">
                       <Text
                         className="font-sans text-[11px] uppercase tracking-label text-ink-muted"
                         style={{ fontVariant: ['tabular-nums'] }}
                       >
-                        {li.quantity} × {formatCents(li.product.effectivePriceCents)}
+                        {li.quantity} × {formatCents(unitCents)}
                       </Text>
                       <Text
                         className="font-sans text-[11px] text-ink-muted line-through"
                         style={{ fontVariant: ['tabular-nums'] }}
                       >
-                        {formatCents(li.product.basePriceCents)}
+                        {formatCents(
+                          subscriberPriceApplied
+                            ? li.product.effectivePriceCents
+                            : li.product.basePriceCents,
+                        )}
                       </Text>
                     </View>
                   ) : li.product.pricingMode === 'rental' && li.product.monthlyRentCents ? (
@@ -451,19 +481,19 @@ export default function CheckoutScreen() {
                       className="mt-0.5 font-sans text-[11px] uppercase tracking-label text-ink-muted"
                       style={{ fontVariant: ['tabular-nums'] }}
                     >
-                      {li.quantity} × {formatCents(li.product.effectivePriceCents)}
+                      {li.quantity} × {formatCents(unitCents)}
                     </Text>
                   )}
                 </View>
                 <Text
-                  className={`font-sans-semibold text-[17px] ${li.product.offerActive ? 'text-brand' : 'text-ink'}`}
+                  className={`font-sans-semibold text-[17px] ${discounted ? 'text-brand' : 'text-ink'}`}
                   style={{ fontVariant: ['tabular-nums'] }}
                 >
-                  {formatCents(li.product.effectivePriceCents * li.quantity)}
+                  {formatCents(unitCents * li.quantity)}
                 </Text>
               </View>
-            ) : null,
-          )}
+            )
+          })}
         </View>
 
         {/* 02 · Entrega — only when the customer has saved addresses */}

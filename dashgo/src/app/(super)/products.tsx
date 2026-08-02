@@ -58,6 +58,8 @@ type FormState = {
   offerStartsAt: string
   offerEndsAt: string
   offerOpen: boolean
+  /** Precio para suscriptores, en dólares. Vacío = sin precio de suscriptor. */
+  subscriberPriceText: string
   errors: {
     name?: string
     priceText?: string
@@ -65,6 +67,7 @@ type FormState = {
     promoterCommissionText?: string
     pointsText?: string
     displayOrderText?: string
+    subscriberPriceText?: string
     offerDiscountText?: string
     offerStartsAt?: string
     offerEndsAt?: string
@@ -90,6 +93,7 @@ const emptyForm: FormState = {
   offerStartsAt: '',
   offerEndsAt: '',
   offerOpen: false,
+  subscriberPriceText: '',
   errors: {},
 }
 
@@ -154,6 +158,12 @@ function ProductForm({
           editing.offerStartsAt ||
           editing.offerEndsAt,
       ),
+      // `!= null` a propósito: 0 es un precio de suscriptor válido (gratis) y
+      // tiene que rellenar el campo con "0.00", no dejarlo vacío.
+      subscriberPriceText:
+        editing.subscriberPriceCents != null
+          ? (editing.subscriberPriceCents / 100).toFixed(2)
+          : '',
       errors: {},
     }
   })
@@ -209,6 +219,18 @@ function ProductForm({
       : null
     if (offerEndsIso === undefined) errors.offerEndsAt = 'YYYY-MM-DD'
 
+    // Precio de suscriptor. Vacío = sin precio de suscriptor (null). $0.00 SÍ
+    // es válido: el producto sale gratis para suscriptores.
+    let subscriberPriceCents: number | null = null
+    if (state.subscriberPriceText.trim() !== '') {
+      const subscriberPrice = parseFloat(state.subscriberPriceText)
+      if (!Number.isFinite(subscriberPrice) || subscriberPrice < 0) {
+        errors.subscriberPriceText = 'Ingresa un precio válido'
+      } else {
+        subscriberPriceCents = Math.round(subscriberPrice * 100)
+      }
+    }
+
     if (Object.keys(errors).length > 0) {
       setState((s) => ({ ...s, errors }))
       return
@@ -230,6 +252,7 @@ function ProductForm({
       offerDiscountPct: state.offerOpen ? offerDiscount : null,
       offerStartsAt: state.offerOpen ? (offerStartsIso ?? null) : null,
       offerEndsAt: state.offerOpen ? (offerEndsIso ?? null) : null,
+      subscriberPriceCents,
     }
 
     try {
@@ -542,6 +565,34 @@ function ProductForm({
                 </Text>
               </View>
               <FieldError message={state.errors.priceText} />
+            </View>
+
+            <View>
+              <FieldLabel>Precio para suscriptores (opcional)</FieldLabel>
+              <View className="mt-1 flex-row items-center border-b border-ink/25">
+                <Text className="pr-2 font-sans text-[16px] text-ink-muted">$</Text>
+                <TextInput
+                  className="flex-1 h-11 pb-1 font-sans text-[16px] text-ink"
+                  placeholder="Vacío = mismo precio para todos"
+                  placeholderTextColor="#6B6488"
+                  keyboardType="decimal-pad"
+                  value={state.subscriberPriceText}
+                  onChangeText={(t) =>
+                    setState((s) => ({ ...s, subscriberPriceText: t }))
+                  }
+                  style={{ fontVariant: ['tabular-nums'] }}
+                />
+                <Text className="font-sans text-[10px] uppercase tracking-label text-ink-muted">
+                  USD
+                </Text>
+              </View>
+              <FieldError message={state.errors.subscriberPriceText} />
+              <Text className="mt-1.5 font-sans text-[11px] leading-snug text-ink-muted">
+                Tope de precio para suscriptores activos: pagan este precio, o el
+                de la oferta si resulta más barato. Nunca pagan más que un
+                cliente sin suscripción, y los descuentos no se acumulan. Dejalo
+                vacío para que no haya precio de suscriptor.
+              </Text>
             </View>
 
             {/* Offer toggle */}

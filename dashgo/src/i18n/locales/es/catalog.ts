@@ -7,6 +7,8 @@ export default {
   },
   product: {
     offer: 'Oferta',
+    subscriberPrice: 'Suscriptores: {{price}}',
+    subscriberBadge: 'Suscriptor',
     rentalBadge: 'Alquiler {{price}}/mes',
     theftWarning:
       '⚠️ Equipo en alquiler. Si dejás de pagar y te quedás con él, se cobra una multa por robo de {{fee}}.',

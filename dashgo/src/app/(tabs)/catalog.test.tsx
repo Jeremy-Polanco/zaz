@@ -16,6 +16,8 @@ jest.mock('../../lib/queries', () => ({
   useProducts: jest.fn(),
   useCategories: jest.fn(),
   useCurrentUser: jest.fn(),
+  // Sin suscripción por defecto: el catálogo muestra precios de catálogo.
+  useMySubscription: jest.fn(() => ({ data: null })),
 }))
 
 jest.mock('../../lib/cart', () => ({

@@ -1,9 +1,11 @@
 import {
   BadRequestException,
+  Inject,
   Injectable,
   Logger,
   OnModuleInit,
   ServiceUnavailableException,
+  forwardRef,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -15,6 +17,7 @@ import { getEffectivePrice } from '../products/pricing';
 import { PointsService } from '../points/points.service';
 import { ShippingService } from '../shipping/shipping.service';
 import { CreditService } from '../credit/credit.service';
+import { SubscriptionService } from '../subscription/subscription.service';
 import { assertStripeProductionConfig } from '../../common/stripe/stripe-runtime-guard';
 import { TAX_RATE } from '../../common/tax';
 
@@ -52,6 +55,8 @@ export class PaymentsService implements OnModuleInit {
     private readonly points: PointsService,
     private readonly shipping: ShippingService,
     private readonly credit: CreditService,
+    @Inject(forwardRef(() => SubscriptionService))
+    private readonly subscription: SubscriptionService,
   ) {}
 
   onModuleInit() {
@@ -87,6 +92,18 @@ export class PaymentsService implements OnModuleInit {
     const byId = new Map(products.map((p) => [p.id, p]));
 
     const now = new Date();
+
+    // El precio de suscriptor tiene que aplicarse acá también: este intent es
+    // el monto que Stripe cobra, y si no coincide con el total que calcula
+    // OrdersService el cliente ve un precio y paga otro. Solo consultamos la
+    // suscripción si el carrito tiene algún producto con precio de suscriptor.
+    const hasSubscriberPricedItem = input.items.some(
+      (item) => byId.get(item.productId)?.subscriberPriceCents != null,
+    );
+    const isSubscriber = hasSubscriberPricedItem
+      ? await this.subscription.isActiveSubscriber(input.userId)
+      : false;
+
     let subtotalCents = 0;
     for (const item of input.items) {
       const product = byId.get(item.productId);
@@ -98,7 +115,7 @@ export class PaymentsService implements OnModuleInit {
           `El producto "${product.name}" no está disponible`,
         );
       }
-      const effective = getEffectivePrice(product, now);
+      const effective = getEffectivePrice(product, now, { isSubscriber });
       subtotalCents += effective.priceCents * item.quantity;
     }
     if (subtotalCents <= 0) {

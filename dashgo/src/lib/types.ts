@@ -97,6 +97,12 @@ export interface Product {
   offerDiscountPct: string | null
   offerStartsAt: string | null
   offerEndsAt: string | null
+  /**
+   * Precio (en cents) para suscriptores activos. null = sin precio de
+   * suscriptor. Le GANA a la oferta y nunca se acumulan. 0 es válido (gratis
+   * para suscriptores), así que siempre comparar con `!= null`.
+   */
+  subscriberPriceCents?: number | null
   effectivePriceCents: number
   basePriceCents: number
   offerActive: boolean

@@ -2101,6 +2101,151 @@ describe('OrdersService', () => {
   });
 
   // ─────────────────────────────────────────────────────────────────────────
+  // Precio de suscriptor por producto — gana sobre la oferta, nunca se acumula
+  // ─────────────────────────────────────────────────────────────────────────
+
+  describe('create — per-product subscriber price', () => {
+    // $5.00 catalog, $3.50 for subscribers. A plain single_payment product:
+    // no bebedero, no maintenance service.
+    const water = fakeProduct({
+      id: 'prod-water',
+      priceToPublic: '5.00',
+      subscriberPriceCents: 350,
+    });
+
+    const waterCart = {
+      items: [{ productId: 'prod-water', quantity: 2 }],
+      deliveryAddress: { text: '123 Test', lat: 18.4861, lng: -69.9312 },
+      paymentMethod: PaymentMethod.CASH,
+      usePoints: false,
+      useCredit: false,
+    } as import('./dto/create-order.dto').CreateOrderDto;
+
+    let savedOrderArg: Partial<Order> | undefined;
+    let savedItems: Partial<OrderItem>[] = [];
+
+    function setupTx() {
+      savedOrderArg = undefined;
+      savedItems = [];
+      (dataSource.transaction as jest.Mock).mockImplementation(
+        async (cb: (mgr: EntityManager) => Promise<unknown>) => {
+          const orderRepo = makeRepoMock<Order>();
+          const itemRepo = makeRepoMock<OrderItem>();
+          orderRepo.create.mockImplementation((d) => {
+            savedOrderArg = d as Partial<Order>;
+            return { ...d, id: 'order-water-1' } as Order;
+          });
+          orderRepo.save.mockResolvedValue(fakeOrder({ id: 'order-water-1' }));
+          orderRepo.update.mockResolvedValue({ affected: 1 } as never);
+          // create() is called once per line item, not with an array.
+          itemRepo.create.mockImplementation((d) => {
+            savedItems.push(d as Partial<OrderItem>);
+            return d as OrderItem;
+          });
+          itemRepo.save.mockResolvedValue({} as never);
+          const mgr = {
+            getRepository: (entity: unknown) => {
+              if (entity === Order) return orderRepo;
+              if (entity === OrderItem) return itemRepo;
+              return makeRepoMock();
+            },
+          } as unknown as EntityManager;
+          return cb(mgr);
+        },
+      );
+      ordersRepo.findOne.mockResolvedValue(
+        fakeOrder({ id: 'order-water-1', customer: fakeUser() as never, items: [] }),
+      );
+    }
+
+    it('active subscriber pays the subscriber price', async () => {
+      productsRepo.find.mockResolvedValue([water]);
+      subscriptionService.isActiveSubscriber.mockResolvedValue(true);
+      setupTx();
+
+      await service.create(fakeUser(UserRole.CLIENT), waterCart);
+
+      // 350 × 2 = 700
+      expect(savedOrderArg?.subtotal).toBe('7.00');
+      expect(savedItems[0]?.priceAtOrder).toBe('3.50');
+    });
+
+    it('non-subscriber pays the catalog price', async () => {
+      productsRepo.find.mockResolvedValue([water]);
+      subscriptionService.isActiveSubscriber.mockResolvedValue(false);
+      setupTx();
+
+      await service.create(fakeUser(UserRole.CLIENT), waterCart);
+
+      expect(savedOrderArg?.subtotal).toBe('10.00');
+      expect(savedItems[0]?.priceAtOrder).toBe('5.00');
+    });
+
+    it('subscriber price beats a weaker offer — never stacked', async () => {
+      productsRepo.find.mockResolvedValue([
+        fakeProduct({
+          id: 'prod-water',
+          priceToPublic: '5.00',
+          subscriberPriceCents: 350,
+          offerDiscountPct: '20', // $4.00 — the $3.50 subscriber price is lower
+        }),
+      ]);
+      subscriptionService.isActiveSubscriber.mockResolvedValue(true);
+      setupTx();
+
+      await service.create(fakeUser(UserRole.CLIENT), waterCart);
+
+      // 350 × 2 = 700, not 400 × 2
+      expect(savedOrderArg?.subtotal).toBe('7.00');
+    });
+
+    it('a CHEAPER offer wins — a subscriber never pays more than the public', async () => {
+      productsRepo.find.mockResolvedValue([
+        fakeProduct({
+          id: 'prod-water',
+          priceToPublic: '5.00',
+          subscriberPriceCents: 350,
+          offerDiscountPct: '50', // $2.50 — below the subscriber price
+        }),
+      ]);
+      subscriptionService.isActiveSubscriber.mockResolvedValue(true);
+      setupTx();
+
+      await service.create(fakeUser(UserRole.CLIENT), waterCart);
+
+      // 250 × 2 = 500. The subscriber price is a floor, not a fixed price.
+      expect(savedOrderArg?.subtotal).toBe('5.00');
+      expect(savedItems[0]?.priceAtOrder).toBe('2.50');
+    });
+
+    it('a subscriber-priced item ALONE still triggers the subscription check', async () => {
+      // Regression guard: the subscription query used to run only for bebedero
+      // or maintenance carts. A subscriber buying nothing but water would have
+      // silently fallen back to the catalog price.
+      productsRepo.find.mockResolvedValue([water]);
+      subscriptionService.isActiveSubscriber.mockResolvedValue(true);
+      setupTx();
+
+      await service.create(fakeUser(UserRole.CLIENT), waterCart);
+
+      expect(subscriptionService.isActiveSubscriber).toHaveBeenCalledWith(
+        'user-1',
+      );
+    });
+
+    it('does NOT query the subscription when no item has a subscriber price', async () => {
+      productsRepo.find.mockResolvedValue([
+        fakeProduct({ id: 'prod-water', subscriberPriceCents: null }),
+      ]);
+      setupTx();
+
+      await service.create(fakeUser(UserRole.CLIENT), waterCart);
+
+      expect(subscriptionService.isActiveSubscriber).not.toHaveBeenCalled();
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────
   // T64 — markDelivered activates rentals
   // ─────────────────────────────────────────────────────────────────────────
 

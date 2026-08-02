@@ -7,6 +7,8 @@ export default {
   },
   product: {
     offer: 'Sale',
+    subscriberPrice: 'Subscribers: {{price}}',
+    subscriberBadge: 'Subscriber',
     rentalBadge: 'Rental {{price}}/mo',
     theftWarning:
       '⚠️ Rental equipment. If you stop paying and keep it, a theft fee of {{fee}} will be charged.',

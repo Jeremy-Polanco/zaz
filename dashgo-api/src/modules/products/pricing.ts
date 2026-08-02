@@ -5,37 +5,67 @@ export interface EffectivePrice {
   basePriceCents: number;
   discountPct: number | null;
   offerActive: boolean;
+  /** True when `priceCents` came from the product's subscriber price. */
+  subscriberPriceApplied: boolean;
+}
+
+export interface EffectivePriceOptions {
+  /**
+   * Whether the buyer is an active subscriber RIGHT NOW. Must be resolved
+   * server-side against the subscription — never taken from the client.
+   */
+  isSubscriber?: boolean;
 }
 
 export function getEffectivePrice(
   product: Product,
   now: Date = new Date(),
+  opts: EffectivePriceOptions = {},
 ): EffectivePrice {
   const base = parseFloat(product.priceToPublic);
   const basePriceCents = Math.round(base * 100);
 
+  // 1) Precio público: catálogo, o el de la oferta si está vigente.
   const hasOffer = product.offerDiscountPct != null;
   const inWindow =
     hasOffer &&
     (!product.offerStartsAt || product.offerStartsAt <= now) &&
     (!product.offerEndsAt || product.offerEndsAt >= now);
 
-  if (!hasOffer || !inWindow) {
+  let publicPriceCents = basePriceCents;
+  let discountPct: number | null = null;
+  let offerActive = false;
+  if (hasOffer && inWindow) {
+    discountPct = parseFloat(product.offerDiscountPct!);
+    publicPriceCents = Math.round(basePriceCents * (1 - discountPct / 100));
+    offerActive = true;
+  }
+
+  // 2) El precio de suscriptor es un PISO, no un precio fijo: el suscriptor
+  // paga el MENOR entre su precio y el precio público. Nunca más caro que
+  // alguien sin suscripción — una promo agresiva no puede dejar al suscriptor
+  // peor que al público, y las dos nunca se acumulan.
+  // `!= null` a propósito: 0 es un precio válido (gratis para suscriptores).
+  if (
+    opts.isSubscriber &&
+    product.subscriberPriceCents != null &&
+    product.subscriberPriceCents < publicPriceCents
+  ) {
     return {
-      priceCents: basePriceCents,
+      priceCents: product.subscriberPriceCents,
       basePriceCents,
       discountPct: null,
       offerActive: false,
+      subscriberPriceApplied: true,
     };
   }
 
-  const discountPct = parseFloat(product.offerDiscountPct!);
-  const discountedCents = Math.round(basePriceCents * (1 - discountPct / 100));
   return {
-    priceCents: discountedCents,
+    priceCents: publicPriceCents,
     basePriceCents,
     discountPct,
-    offerActive: true,
+    offerActive,
+    subscriberPriceApplied: false,
   };
 }
 

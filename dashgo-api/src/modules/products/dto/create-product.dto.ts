@@ -72,6 +72,15 @@ export class CreateProductDto {
   @IsDateString()
   offerEndsAt?: string | null;
 
+  // Precio (en cents) para suscriptores activos. null = sin precio de
+  // suscriptor (todos pagan catálogo/oferta). Cuando está seteado le GANA a la
+  // oferta y nunca se acumulan. 0 es válido: gratis para suscriptores.
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(1000000)
+  subscriberPriceCents?: number | null;
+
   // Rental pricing
   @IsOptional()
   @IsEnum(['single_payment', 'rental'])

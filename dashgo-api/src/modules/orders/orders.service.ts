@@ -227,12 +227,13 @@ export class OrdersService {
         (input) => byId.get(input.productId)?.requiresQuote === false,
       );
 
-    // Subscriber benefits depend on subscription status. Two benefits ride on
-    // it: (1) free bebedero maintenance, and (2) subscriber bebedero pricing —
-    // the first bebedero rents free ($0/mo), each additional at $6.99/mo. A
-    // bebedero is a rental product with requiresMaintenance=true. Resolve the
-    // (single) subscription query only when the cart actually contains a
-    // maintenance item OR a bebedero, to avoid an extra query otherwise.
+    // Subscriber benefits depend on subscription status. Three benefits ride on
+    // it: (1) free bebedero maintenance, (2) subscriber bebedero pricing — the
+    // first bebedero rents free ($0/mo), each additional at $6.99/mo — and
+    // (3) the per-product subscriber price. A bebedero is a rental product with
+    // requiresMaintenance=true. Resolve the (single) subscription query only
+    // when the cart can actually trigger one of the three, to avoid an extra
+    // query otherwise.
     const isBebedero = (p: Product | undefined): boolean =>
       p?.pricingMode === 'rental' && p?.requiresMaintenance === true;
 
@@ -242,8 +243,14 @@ export class OrdersService {
     const hasBebederoItem = dto.items.some((input) =>
       isBebedero(byId.get(input.productId)),
     );
+    // Sin esto, un suscriptor que compra SOLO productos con precio de
+    // suscriptor (agua, por ejemplo) nunca dispararía la consulta y terminaría
+    // pagando el precio de catálogo.
+    const hasSubscriberPricedItem = dto.items.some(
+      (input) => byId.get(input.productId)?.subscriberPriceCents != null,
+    );
     const isSubscriber =
-      hasMaintenanceItem || hasBebederoItem
+      hasMaintenanceItem || hasBebederoItem || hasSubscriberPricedItem
         ? await this.subscriptionService.isActiveSubscriber(user.id)
         : false;
 
@@ -309,7 +316,7 @@ export class OrdersService {
         lineCents = 0;
         priceAtOrder = '0.00';
       } else {
-        const effective = getEffectivePrice(product, now);
+        const effective = getEffectivePrice(product, now, { isSubscriber });
         lineCents = effective.priceCents * input.quantity;
         priceAtOrder = (effective.priceCents / 100).toFixed(2);
       }

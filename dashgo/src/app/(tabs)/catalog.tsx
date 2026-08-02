@@ -14,7 +14,17 @@ import { useTranslation } from 'react-i18next'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { router } from 'expo-router'
 import { SymbolView } from 'expo-symbols'
-import { useCategories, useCurrentUser, useProducts } from '../../lib/queries'
+import {
+  useCategories,
+  useCurrentUser,
+  useMySubscription,
+  useProducts,
+} from '../../lib/queries'
+import {
+  effectivePriceCentsFor,
+  showsSubscriberTeaser,
+  subscriberPriceWins,
+} from '../../lib/pricing'
 import { cart, useCart } from '../../lib/cart'
 import { productImageUrl } from '../../lib/api'
 import { formatCents } from '../../lib/format'
@@ -221,8 +231,26 @@ function TypographicPrice({
   )
 }
 
-function ProductCard({ product, qty }: { product: Product; qty: number }) {
+function ProductCard({
+  product,
+  qty,
+  isSubscriber,
+}: {
+  product: Product
+  qty: number
+  isSubscriber: boolean
+}) {
   const { t } = useTranslation('catalog')
+  const priceCents = effectivePriceCentsFor(product, isSubscriber)
+  const showTeaser = showsSubscriberTeaser(product, isSubscriber)
+  // Cuando gana el precio de suscriptor se tacha el precio público; si no, se
+  // tacha el de catálogo cuando hay oferta. Nunca los dos.
+  const subscriberPriceApplied = subscriberPriceWins(product, isSubscriber)
+  const struckCents = subscriberPriceApplied
+    ? product.effectivePriceCents
+    : product.offerActive
+      ? product.basePriceCents
+      : null
   const hasImage = !!product.imageContentType
   const unavailable = !product.isAvailable
   const placeholder = product.name.slice(0, 3).toUpperCase()
@@ -257,13 +285,19 @@ function ProductCard({ product, qty }: { product: Product; qty: number }) {
           </View>
         )}
 
-        {product.offerActive && (
+        {subscriberPriceApplied ? (
+          <View className="absolute left-1.5 top-1.5 bg-accent px-1.5 py-0.5">
+            <Text className="font-sans-semibold text-[8px] uppercase tracking-label text-brand-dark">
+              {t('product.subscriberBadge')}
+            </Text>
+          </View>
+        ) : product.offerActive ? (
           <View className="absolute left-1.5 top-1.5 bg-accent px-1.5 py-0.5">
             <Text className="font-sans-semibold text-[8px] uppercase tracking-label text-brand-dark">
               {t('product.offer')}
             </Text>
           </View>
-        )}
+        ) : null}
 
         {qty > 0 && (
           <View className="absolute right-1.5 top-1.5 h-6 w-6 items-center justify-center rounded-full bg-brand">
@@ -287,16 +321,24 @@ function ProductCard({ product, qty }: { product: Product; qty: number }) {
         </Text>
 
         <View className="mt-1.5 flex-row items-baseline gap-2">
-          <TypographicPrice cents={product.effectivePriceCents} size="lg" />
-          {product.offerActive && (
+          <TypographicPrice cents={priceCents} size="lg" />
+          {struckCents != null && (
             <Text
               className="font-sans text-[10px] text-ink-muted line-through"
               style={{ fontVariant: ['tabular-nums'] }}
             >
-              {formatCents(product.basePriceCents)}
+              {formatCents(struckCents)}
             </Text>
           )}
         </View>
+
+        {showTeaser ? (
+          <Text className="mt-1 font-sans text-[10px] leading-snug text-ink-muted">
+            {t('product.subscriberPrice', {
+              price: formatCents(product.subscriberPriceCents!),
+            })}
+          </Text>
+        ) : null}
 
         {product.pricingMode === 'rental' && product.monthlyRentCents ? (
           <View className="mt-1.5 flex-row items-center">
@@ -335,8 +377,24 @@ function ProductCard({ product, qty }: { product: Product; qty: number }) {
   )
 }
 
-function ProductRow({ product, qty }: { product: Product; qty: number }) {
+function ProductRow({
+  product,
+  qty,
+  isSubscriber,
+}: {
+  product: Product
+  qty: number
+  isSubscriber: boolean
+}) {
   const { t } = useTranslation('catalog')
+  const priceCents = effectivePriceCentsFor(product, isSubscriber)
+  const showTeaser = showsSubscriberTeaser(product, isSubscriber)
+  const subscriberPriceApplied = subscriberPriceWins(product, isSubscriber)
+  const struckCents = subscriberPriceApplied
+    ? product.effectivePriceCents
+    : product.offerActive
+      ? product.basePriceCents
+      : null
   const hasImage = !!product.imageContentType
   const unavailable = !product.isAvailable
   return (
@@ -357,13 +415,19 @@ function ProductRow({ product, qty }: { product: Product; qty: number }) {
             </Text>
           </View>
         )}
-        {product.offerActive && (
+        {subscriberPriceApplied ? (
+          <View className="absolute left-0 top-0 bg-accent px-1.5 py-0.5">
+            <Text className="font-sans-semibold text-[9px] uppercase tracking-label text-brand-dark">
+              {t('product.subscriberBadge')}
+            </Text>
+          </View>
+        ) : product.offerActive ? (
           <View className="absolute left-0 top-0 bg-accent px-1.5 py-0.5">
             <Text className="font-sans-semibold text-[9px] uppercase tracking-label text-brand-dark">
               {t('product.offer')}
             </Text>
           </View>
-        )}
+        ) : null}
       </View>
 
       <View className="flex-1">
@@ -389,15 +453,22 @@ function ProductRow({ product, qty }: { product: Product; qty: number }) {
             {t('product.theftWarning', { fee: formatCents(product.theftFeeCents ?? 0) })}
           </Text>
         ) : null}
+        {showTeaser ? (
+          <Text className="mt-1 font-sans text-[10px] leading-snug text-ink-muted">
+            {t('product.subscriberPrice', {
+              price: formatCents(product.subscriberPriceCents!),
+            })}
+          </Text>
+        ) : null}
         <View className="mt-2 flex-row items-end justify-between">
           <View className="flex-row items-baseline gap-2">
-            <TypographicPrice cents={product.effectivePriceCents} size="md" />
-            {product.offerActive && (
+            <TypographicPrice cents={priceCents} size="md" />
+            {struckCents != null && (
               <Text
                 className="font-sans text-[11px] text-ink-muted line-through"
                 style={{ fontVariant: ['tabular-nums'] }}
               >
-                {formatCents(product.basePriceCents)}
+                {formatCents(struckCents)}
               </Text>
             )}
           </View>
@@ -476,6 +547,10 @@ export default function CatalogTab() {
   const { data: user } = useCurrentUser()
   const { data: products, isPending, refetch, isRefetching } = useProducts()
   const { data: categories } = useCategories()
+  const { data: subscription } = useMySubscription()
+  // Misma regla que checkout.tsx y que SubscriptionService.isActiveSubscriber.
+  const isActiveSubscriber =
+    subscription?.status === 'active' || subscription?.status === 'past_due'
   const cartState = useCart()
   const [activeSlug, setActiveSlug] = useState<string | null>(null)
   const [viewMode, setViewMode] = useState<'list' | 'grid'>('grid')
@@ -502,9 +577,9 @@ export default function CatalogTab() {
     if (!products) return 0
     return products.reduce((sum, p) => {
       const q = cartState.items[p.id] ?? 0
-      return sum + q * p.effectivePriceCents
+      return sum + q * effectivePriceCentsFor(p, isActiveSubscriber)
     }, 0)
-  }, [products, cartState])
+  }, [products, cartState, isActiveSubscriber])
 
   const itemsCount = useMemo(
     () => Object.values(cartState.items).reduce((a, b) => a + b, 0),
@@ -709,10 +784,18 @@ export default function CatalogTab() {
           ListHeaderComponent={renderListHeader}
           renderItem={({ item }) =>
             viewMode === 'list' ? (
-              <ProductRow product={item} qty={cartState.items[item.id] ?? 0} />
+              <ProductRow
+                product={item}
+                qty={cartState.items[item.id] ?? 0}
+                isSubscriber={isActiveSubscriber}
+              />
             ) : (
               <View className="px-4">
-                <ProductCard product={item} qty={cartState.items[item.id] ?? 0} />
+                <ProductCard
+                  product={item}
+                  qty={cartState.items[item.id] ?? 0}
+                  isSubscriber={isActiveSubscriber}
+                />
               </View>
             )
           }
