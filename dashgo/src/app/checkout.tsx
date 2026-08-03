@@ -184,11 +184,20 @@ export default function CheckoutScreen() {
   const allSkipQuote =
     lineItems.length > 0 &&
     lineItems.every((li) => li.product?.requiresQuote === false)
+  // Parte del subtotal que realmente paga impuesto: los ítems 'exempt' (agua)
+  // quedan fuera de la base. Espejo de computeTaxableBase en el backend.
+  const taxableSubtotalCents = lineItems.reduce((sum, li) => {
+    if (!li.product || li.product.taxCategory === 'exempt') return sum
+    return (
+      sum + effectivePriceCentsFor(li.product, isActiveSubscriber) * li.quantity
+    )
+  }, 0)
   const skipQuoteTaxCents = allSkipQuote
     ? computeQuotePreviewCents({
         subtotalCents,
         shippingCents: 0,
         pointsRedeemedCents: redeemCents,
+        taxableSubtotalCents,
       }).taxCents
     : 0
   const skipQuoteTotalCents = previewTotalCents + skipQuoteTaxCents + tipCents

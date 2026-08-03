@@ -16,6 +16,7 @@ import { Button, UdashMark } from '../components/ui'
 import { NetworkBanner } from '../components/NetworkBanner'
 import { MaintenanceBanner } from '../components/MaintenanceBanner'
 import { LocationSelector } from '../components/LocationSelector'
+import { roleLabel } from '../lib/roles'
 
 const LOCKOUT_ALLOWLIST = new Set<string>(['/credit/pay', '/login'])
 
@@ -116,6 +117,24 @@ function RoleNavLinks({
         </Link>
         <Link to="/super/notifications" className={linkClass} onClick={onNavigate}>
           Notificar
+        </Link>
+        <Link to="/cuenta" className={linkClass} onClick={onNavigate}>
+          Mi cuenta
+        </Link>
+      </>
+    )
+  }
+  // Vendedor: panel recortado. Solo su cartera de pedidos y sus clientes — el
+  // resto del panel admin (productos, categorías, crédito, suscripción…) no le
+  // corresponde, y la API igual lo rechazaría.
+  if (role === 'seller') {
+    return (
+      <>
+        <Link to="/super/orders" className={linkClass} onClick={onNavigate}>
+          Mis pedidos
+        </Link>
+        <Link to="/super/users" className={linkClass} onClick={onNavigate}>
+          Mis clientes
         </Link>
         <Link to="/cuenta" className={linkClass} onClick={onNavigate}>
           Mi cuenta
@@ -319,9 +338,7 @@ function MobileNav({
 }
 
 function ROLE_LABEL(role: string) {
-  if (role === 'super_admin_delivery') return 'Reparto'
-  if (role === 'promoter') return 'Promotor'
-  return 'Cliente'
+  return roleLabel(role as UserRole)
 }
 
 function NavUser() {

@@ -1,6 +1,12 @@
 export enum UserRole {
   CLIENT = 'client',
   PROMOTER = 'promoter',
+  /**
+   * Vendedor. Ve y opera SOLO los pedidos y los clientes que tiene asignados
+   * (`users.seller_id`). La asignación la hace únicamente el super admin — un
+   * vendedor no puede asignarse clientes a sí mismo ni moverlos de cartera.
+   */
+  SELLER = 'seller',
   SUPER_ADMIN_DELIVERY = 'super_admin_delivery',
 }
 

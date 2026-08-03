@@ -17,6 +17,7 @@ import {
 import { useLogin, useSendOtp, useVerifyOtp } from '../../lib/queries'
 import type { UserRole } from '../../lib/types'
 import { Button, Eyebrow, FieldLabel, FieldError, PhoneField, DashGoMark, BoltIcon } from '../../components/ui'
+import { isStaff } from '../../lib/roles'
 import {
   extractWhatsAppErrorCode,
   SUPPORT_PHONE,
@@ -64,7 +65,7 @@ export function isOtpEnabled(): boolean {
 }
 
 function routeByRole(role: UserRole) {
-  if (role === 'super_admin_delivery') {
+  if (isStaff(role)) {
     router.replace('/(super)')
   } else if (role === 'promoter') {
     router.replace('/(promoter)')

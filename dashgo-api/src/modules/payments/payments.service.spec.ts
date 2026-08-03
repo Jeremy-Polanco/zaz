@@ -58,6 +58,7 @@ function fakeOrder(overrides: Partial<Order> = {}): Order {
     shipping: '0.00',
     tax: '0.00',
     taxRate: '0.08887',
+    taxableSubtotal: '0.00',
     totalAmount: '10.00',
     tip: '0.00',
     creditApplied: '5.00',

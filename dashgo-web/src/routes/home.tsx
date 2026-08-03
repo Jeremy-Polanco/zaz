@@ -4,6 +4,7 @@ import { TOKEN_KEY, api } from '../lib/api'
 import type { AuthUser } from '../lib/types'
 import { useCategories, useProducts } from '../lib/queries'
 import { CategoryCard } from '../components/CategoryCard'
+import { isStaff } from '../lib/roles'
 
 export const Route = createFileRoute('/home')({
   beforeLoad: async () => {
@@ -12,7 +13,7 @@ export const Route = createFileRoute('/home')({
     }
     try {
       const { data: me } = await api.get<AuthUser>('/auth/me')
-      if (me.role === 'super_admin_delivery') {
+      if (isStaff(me.role)) {
         throw redirect({ to: '/super/orders' })
       }
       if (me.role === 'promoter') {

@@ -37,7 +37,9 @@ export class UsersController {
     return this.users.updateMe(user, dto);
   }
 
-  @Roles(UserRole.SUPER_ADMIN_DELIVERY)
+  // El vendedor entra acá, pero `UsersService.findAll` le filtra la lista a su
+  // propia cartera. La asignación (PATCH de abajo) sigue siendo del super admin.
+  @Roles(UserRole.SUPER_ADMIN_DELIVERY, UserRole.SELLER)
   @Get()
   findAll(
     @CurrentUser() user: AuthenticatedUser,

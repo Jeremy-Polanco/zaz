@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Tabs, router } from 'expo-router'
 import { useCurrentUser } from '../../lib/queries'
 import { MoreSheet, type MoreSheetItem } from '../../components/MoreSheet'
+import { isStaff } from '../../lib/roles'
 import {
   TabBarIcon,
   TabBarLabel,
@@ -37,7 +38,8 @@ export default function SuperLayout() {
       router.replace('/(auth)/login')
       return
     }
-    if (user.role !== 'super_admin_delivery') {
+    // El vendedor entra al panel: la API le acota todo a su cartera.
+    if (!isStaff(user.role)) {
       router.replace('/(tabs)')
     }
   }, [user, isPending])

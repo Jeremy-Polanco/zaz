@@ -12,6 +12,7 @@ import {
 } from '../lib/schemas'
 import { useLogin, useSendOtp, useVerifyOtp } from '../lib/auth'
 import { Button, FieldError, Input, Label, PhoneField } from '../components/ui'
+import { isStaff } from '../lib/roles'
 
 export const Route = createFileRoute('/login')({
   validateSearch: (search: Record<string, unknown>) => ({
@@ -40,7 +41,7 @@ export function isFirstLoginError(err: unknown): boolean {
 export function destForRole(role: string, next?: string): string {
   return (
     next ??
-    (role === 'super_admin_delivery'
+    (isStaff(role as UserRole)
       ? '/super/orders'
       : role === 'promoter'
         ? '/promoter'

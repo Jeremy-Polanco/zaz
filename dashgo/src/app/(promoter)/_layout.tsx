@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Tabs, router } from 'expo-router'
 import { useCurrentUser } from '../../lib/queries'
 import { MoreSheet, type MoreSheetItem } from '../../components/MoreSheet'
+import { isStaff } from '../../lib/roles'
 import {
   TabBarIcon,
   TabBarLabel,
@@ -35,7 +36,7 @@ export default function PromoterLayout() {
       router.replace('/(auth)/login')
       return
     }
-    if (user.role === 'super_admin_delivery') {
+    if (isStaff(user.role)) {
       router.replace('/(super)')
     } else if (user.role === 'client') {
       router.replace('/(tabs)')

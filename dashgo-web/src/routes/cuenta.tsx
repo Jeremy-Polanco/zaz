@@ -11,6 +11,7 @@ import { useCurrentUser, useDeleteAccount, useLogout } from '../lib/auth'
 import { useUpdateMe } from '../lib/queries'
 import { TOKEN_KEY } from '../lib/api'
 import { serverMessage } from '../lib/utils'
+import { roleLabel as sharedRoleLabel } from '../lib/roles'
 
 export const Route = createFileRoute('/cuenta')({
   beforeLoad: () => {
@@ -22,9 +23,7 @@ export const Route = createFileRoute('/cuenta')({
 })
 
 function roleLabel(role: string) {
-  if (role === 'super_admin_delivery') return 'Reparto'
-  if (role === 'promoter') return 'Promotor'
-  return 'Cliente'
+  return sharedRoleLabel(role as UserRole)
 }
 
 function AccountPage() {

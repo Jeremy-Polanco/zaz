@@ -19,6 +19,8 @@ export interface AuthenticatedUser {
   activeLocationId?: string | null;
   referralCode?: string | null;
   referredById?: string | null;
+  /** Vendedor asignado a ESTE usuario (cuando es cliente). Solo lectura. */
+  sellerId?: string | null;
   stripeCustomerId?: string | null;
   createdAt?: string;
 }

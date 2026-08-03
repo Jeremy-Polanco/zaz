@@ -13,6 +13,7 @@ import {
 import { formatCents } from '../lib/utils'
 import { TOKEN_KEY, api } from '../lib/api'
 import type { AuthUser, Product } from '../lib/types'
+import { isStaff } from '../lib/roles'
 
 const catalogSearchSchema = z.object({
   cat: z.string().optional(),
@@ -38,8 +39,7 @@ export const Route = createFileRoute('/catalog')({
       throw redirect({ to: '/login', search: { next: undefined, ref: undefined } })
     try {
       const { data: me } = await api.get<AuthUser>('/auth/me')
-      if (me.role === 'super_admin_delivery')
-        throw redirect({ to: '/super/orders' })
+      if (isStaff(me.role)) throw redirect({ to: '/super/orders' })
     } catch (e) {
       if (isRedirect(e)) throw e
       throw redirect({ to: '/login', search: { next: undefined, ref: undefined } })

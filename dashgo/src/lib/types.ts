@@ -1,4 +1,9 @@
-export type UserRole = 'client' | 'promoter' | 'super_admin_delivery'
+export type UserRole =
+  | 'client'
+  | 'promoter'
+  /** Vendedor: ve y opera SOLO los pedidos y clientes de su cartera. */
+  | 'seller'
+  | 'super_admin_delivery'
 
 export type OrderStatus =
   | 'pending_quote'
@@ -103,6 +108,11 @@ export interface Product {
    * para suscriptores), así que siempre comparar con `!= null`.
    */
   subscriberPriceCents?: number | null
+  /**
+   * Categoría fiscal. 'standard' (default) paga impuesto, 'exempt' no —
+   * el agua embotellada es el caso. Ver dashgo-api/src/common/tax.ts.
+   */
+  taxCategory?: 'standard' | 'exempt'
   effectivePriceCents: number
   basePriceCents: number
   offerActive: boolean

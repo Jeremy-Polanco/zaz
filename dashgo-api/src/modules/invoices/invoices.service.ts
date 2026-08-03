@@ -124,8 +124,16 @@ export class InvoicesService {
     });
     if (!order) throw new NotFoundException('Pedido no encontrado');
 
+    // El vendedor llega a la factura SOLO si el pedido es de un cliente de su
+    // cartera. Se compara contra el `seller_id` del cliente del pedido, no
+    // contra nada que venga del request.
+    const isAssignedSeller =
+      currentUser.role === UserRole.SELLER &&
+      order.customer?.sellerId === currentUser.id;
+
     if (
       currentUser.role !== UserRole.SUPER_ADMIN_DELIVERY &&
+      !isAssignedSeller &&
       order.customerId !== currentUser.id
     ) {
       throw new ForbiddenException('Sin acceso a esta factura');

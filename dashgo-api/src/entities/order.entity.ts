@@ -109,6 +109,24 @@ export class Order {
   })
   taxRate!: string;
 
+  /**
+   * Base gravable congelada al cotizar: la parte del pedido sobre la que se
+   * aplicó `tax_rate`, ya con el envío y los puntos prorrateados.
+   *
+   * Sin esto el cálculo no se puede reconstruir después. La orden guarda UN
+   * solo `tax_rate`, y con ítems mixtos (agua exenta + producto gravado) el
+   * rate por sí solo no explica el impuesto cobrado. Este es el número que
+   * responde una auditoría.
+   */
+  @Column({
+    name: 'taxable_subtotal',
+    type: 'numeric',
+    precision: 10,
+    scale: 2,
+    default: 0,
+  })
+  taxableSubtotal!: string;
+
   @Column({
     name: 'total_amount',
     type: 'numeric',

@@ -2,8 +2,14 @@ import { createFileRoute, isRedirect, redirect } from '@tanstack/react-router'
 import { Fragment, useMemo, useState } from 'react'
 import { SectionHeading } from '../components/ui'
 import { UserAddressesPanel } from '../components/UserAddressesPanel'
-import { useAdminUsers, useCurrentUser, useDeleteUser } from '../lib/queries'
+import {
+  useAdminUsers,
+  useCurrentUser,
+  useDeleteUser,
+  useUpdateUserAdmin,
+} from '../lib/queries'
 import { TOKEN_KEY, api } from '../lib/api'
+import { isStaff, isSuperAdmin } from '../lib/roles'
 import { serverMessage } from '../lib/utils'
 import type { AdminUser, AdminUsersSubscriptionFilter, AuthUser } from '../lib/types'
 
@@ -16,7 +22,8 @@ export const Route = createFileRoute('/super/users')({
     }
     try {
       const { data: me } = await api.get<AuthUser>('/auth/me')
-      if (me.role !== 'super_admin_delivery') throw redirect({ to: '/' })
+      // El vendedor entra: la API le acota la lista a su cartera.
+      if (!isStaff(me.role)) throw redirect({ to: '/' })
     } catch (e) {
       if (isRedirect(e)) throw e
       throw redirect({ to: '/login', search: { next: undefined, ref: undefined } })
@@ -145,6 +152,58 @@ function DeleteUserModal({
   )
 }
 
+/**
+ * Celda "Vendedor". Para el super admin es un selector; para cualquier otro rol
+ * (incluido un vendedor mirando su propia cartera) es texto plano.
+ *
+ * Esconder el selector NO es el permiso: `UsersService.updateByAdmin` rechaza a
+ * cualquiera que no sea super admin, y además valida que el id asignado tenga
+ * rol `seller`. Esto es solo la UI.
+ */
+function SellerCell({
+  user,
+  sellers,
+  canAssign,
+  onAssign,
+  pending,
+}: {
+  user: AdminUser
+  sellers: AdminUser[]
+  canAssign: boolean
+  onAssign: (sellerId: string | null) => void
+  pending: boolean
+}) {
+  // Un vendedor no tiene vendedor asignado — la columna no aplica.
+  if (user.role === 'seller' || user.role === 'super_admin_delivery') {
+    return <span className="text-ink-muted/50">—</span>
+  }
+
+  const current = sellers.find((s) => s.id === user.sellerId)
+
+  if (!canAssign) {
+    return (
+      <span className="text-ink-muted">{current?.fullName ?? 'Sin asignar'}</span>
+    )
+  }
+
+  return (
+    <select
+      value={user.sellerId ?? ''}
+      disabled={pending}
+      onChange={(e) => onAssign(e.target.value === '' ? null : e.target.value)}
+      aria-label={`Vendedor de ${user.fullName}`}
+      className="w-full max-w-40 border border-ink/15 bg-paper px-2 py-1.5 text-[0.7rem] text-ink outline-none focus:border-ink disabled:opacity-50"
+    >
+      <option value="">Sin asignar</option>
+      {sellers.map((s) => (
+        <option key={s.id} value={s.id}>
+          {s.fullName}
+        </option>
+      ))}
+    </select>
+  )
+}
+
 // ── Main page ──────────────────────────────────────────────────────────────────
 
 function SuperUsersPage() {
@@ -159,6 +218,15 @@ function SuperUsersPage() {
   const { data: users, isPending } = useAdminUsers(subscription)
   const { data: me } = useCurrentUser()
   const deleteUser = useDeleteUser()
+  const updateUser = useUpdateUserAdmin()
+  // Solo el super admin asigna cartera. Un vendedor entra a esta pantalla (ve
+  // sus clientes) pero NO puede reasignar: si pudiera, el día que se pelea con
+  // otro vendedor se lleva los clientes. La API lo rechaza igual.
+  const canAssign = isSuperAdmin(me?.role)
+  const sellers = useMemo(
+    () => (users ?? []).filter((u) => u.role === 'seller'),
+    [users],
+  )
 
   const filtered = useMemo(() => {
     if (!users) return []
@@ -271,6 +339,9 @@ function SuperUsersPage() {
                 <th className="p-4 text-left text-[10px] font-medium uppercase tracking-wide text-ink-muted">
                   Suscripción
                 </th>
+                <th className="p-4 text-left text-[10px] font-medium uppercase tracking-wide text-ink-muted">
+                  Vendedor
+                </th>
                 <th className="p-4 text-right text-[10px] font-medium uppercase tracking-wide text-ink-muted">
                   Direcciones
                 </th>
@@ -282,7 +353,7 @@ function SuperUsersPage() {
             <tbody>
               {filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="py-12 text-center text-ink-muted">
+                  <td colSpan={9} className="py-12 text-center text-ink-muted">
                     Sin usuarios que coincidan
                   </td>
                 </tr>
@@ -315,6 +386,17 @@ function SuperUsersPage() {
                         </td>
                         <td className="p-4">
                           <SubscriptionBadge user={u} />
+                        </td>
+                        <td className="p-4">
+                          <SellerCell
+                            user={u}
+                            sellers={sellers}
+                            canAssign={canAssign}
+                            onAssign={(sellerId) =>
+                              updateUser.mutate({ id: u.id, sellerId })
+                            }
+                            pending={updateUser.isPending}
+                          />
                         </td>
                         <td className="p-4 text-right">
                           <button

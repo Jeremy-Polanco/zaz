@@ -170,11 +170,19 @@ function CheckoutPage() {
     cartItems.every(
       (it) => products?.find((x) => x.id === it.productId)?.requiresQuote === false,
     )
+  // Parte del subtotal que realmente paga impuesto: los ítems 'exempt' (agua)
+  // quedan fuera de la base. Espejo de computeTaxableBase en el backend.
+  const taxableSubtotalCents = cartItems.reduce((sum, it) => {
+    const p = products?.find((x) => x.id === it.productId)
+    if (!p || p.taxCategory === 'exempt') return sum
+    return sum + effectivePriceCentsFor(p, isActiveSubscriber) * it.quantity
+  }, 0)
   const skipQuoteTaxCents = allSkipQuote
     ? computeQuotePreviewCents({
         subtotalCents,
         shippingCents: 0,
         pointsRedeemedCents: pointsAppliedCents,
+        taxableSubtotalCents,
       }).taxCents
     : 0
   const skipQuoteTotalCents = previewTotalCents + skipQuoteTaxCents + tipCents

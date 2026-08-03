@@ -2,6 +2,7 @@ import { useEffect } from 'react'
 import { View, ActivityIndicator, Text } from 'react-native'
 import { router } from 'expo-router'
 import { useCurrentUser } from '../lib/queries'
+import { isStaff } from '../lib/roles'
 
 export default function Index() {
   const { data: user, isPending } = useCurrentUser()
@@ -14,7 +15,7 @@ export default function Index() {
       router.replace('/(tabs)')
       return
     }
-    if (user.role === 'super_admin_delivery') {
+    if (isStaff(user.role)) {
       router.replace('/(super)')
     } else if (user.role === 'promoter') {
       router.replace('/(promoter)')

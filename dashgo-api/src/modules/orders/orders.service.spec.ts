@@ -111,6 +111,7 @@ function fakeOrder(overrides: Partial<Order> = {}): Order {
     shipping: '0.00',
     tax: '0.00',
     taxRate: '0.08887',
+    taxableSubtotal: '0.00',
     totalAmount: '10.00',
     tip: '0.00',
     creditApplied: '0.00',
@@ -2243,6 +2244,85 @@ describe('OrdersService', () => {
 
       expect(subscriptionService.isActiveSubscriber).not.toHaveBeenCalled();
     });
+
+    // ───────────────────────────────────────────────────────────────────────
+    // Categoría fiscal — el agua exenta no paga impuesto
+    // ───────────────────────────────────────────────────────────────────────
+
+    it('a skip-quote order of EXEMPT items owes no tax', async () => {
+      productsRepo.find.mockResolvedValue([
+        fakeProduct({
+          id: 'prod-water',
+          priceToPublic: '5.00',
+          subscriberPriceCents: null,
+          requiresQuote: false, // skipQuote → el impuesto se calcula ya
+          taxCategory: 'exempt',
+        }),
+      ]);
+      setupTx();
+
+      await service.create(fakeUser(UserRole.CLIENT), waterCart);
+
+      expect(savedOrderArg?.subtotal).toBe('10.00');
+      expect(savedOrderArg?.tax).toBe('0.00');
+      expect(savedOrderArg?.taxableSubtotal).toBe('0.00');
+      // Sin impuesto, el total es el subtotal pelado.
+      expect(savedOrderArg?.totalAmount).toBe('10.00');
+    });
+
+    it('a skip-quote order of STANDARD items is taxed as before', async () => {
+      productsRepo.find.mockResolvedValue([
+        fakeProduct({
+          id: 'prod-water',
+          priceToPublic: '5.00',
+          subscriberPriceCents: null,
+          requiresQuote: false,
+          taxCategory: 'standard',
+        }),
+      ]);
+      setupTx();
+
+      await service.create(fakeUser(UserRole.CLIENT), waterCart);
+
+      // 1000 gravable → round(1000 * 0.08887) = 89
+      expect(savedOrderArg?.tax).toBe('0.89');
+      expect(savedOrderArg?.taxableSubtotal).toBe('10.00');
+      expect(savedOrderArg?.totalAmount).toBe('10.89');
+    });
+
+    it('a MIXED skip-quote order taxes only the standard half', async () => {
+      productsRepo.find.mockResolvedValue([
+        fakeProduct({
+          id: 'prod-water',
+          priceToPublic: '5.00',
+          subscriberPriceCents: null,
+          requiresQuote: false,
+          taxCategory: 'exempt',
+        }),
+        fakeProduct({
+          id: 'prod-soda',
+          priceToPublic: '3.00',
+          subscriberPriceCents: null,
+          requiresQuote: false,
+          taxCategory: 'standard',
+        }),
+      ]);
+      setupTx();
+
+      await service.create(fakeUser(UserRole.CLIENT), {
+        ...waterCart,
+        items: [
+          { productId: 'prod-water', quantity: 2 }, // $10 exento
+          { productId: 'prod-soda', quantity: 1 }, // $3 gravado
+        ],
+      } as import('./dto/create-order.dto').CreateOrderDto);
+
+      expect(savedOrderArg?.subtotal).toBe('13.00');
+      // Solo los $3 pagan: round(300 * 0.08887) = 27
+      expect(savedOrderArg?.tax).toBe('0.27');
+      expect(savedOrderArg?.taxableSubtotal).toBe('3.00');
+      expect(savedOrderArg?.totalAmount).toBe('13.27');
+    });
   });
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -2780,6 +2860,17 @@ describe('OrdersService', () => {
       const callArg = ordersRepo.find.mock.calls[0][0] as Record<string, unknown>;
       expect(callArg.where).toEqual({ customerId: 'user-1' });
     });
+
+    it('SELLER scope restricts to the customers assigned to them', async () => {
+      ordersRepo.find.mockResolvedValue([]);
+
+      await service.findAll(fakeUser(UserRole.SELLER));
+
+      const callArg = ordersRepo.find.mock.calls[0][0] as Record<string, unknown>;
+      // Nunca `{}`: un vendedor jamás debe caer en el scope irrestricto.
+      expect(callArg.where).toEqual({ customer: { sellerId: 'user-1' } });
+      expect(callArg.where).not.toEqual({});
+    });
   });
 
   describe('findOne', () => {
@@ -2963,6 +3054,22 @@ describe('OrdersService', () => {
       await expect(
         service.setQuote('order-1', 300, fakeUser(UserRole.CLIENT)),
       ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('throws Forbidden for a PROMOTER', async () => {
+      await expect(
+        service.setQuote('order-1', 300, fakeUser(UserRole.PROMOTER)),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('a SELLER passes the role guard — the scope is what limits them', async () => {
+      // El vendedor no queda frenado por el rol; queda frenado por findOne, que
+      // aplica buildScope. Acá el pedido no es de su cartera → NotFound.
+      ordersRepo.findOne.mockResolvedValue(null);
+
+      await expect(
+        service.setQuote('order-1', 300, fakeUser(UserRole.SELLER)),
+      ).rejects.toThrow(NotFoundException);
     });
 
     it('throws BadRequest when shippingCents is not an integer', async () => {

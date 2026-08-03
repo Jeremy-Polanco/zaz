@@ -3,6 +3,7 @@ import { Tabs, router } from 'expo-router'
 import { useTranslation } from 'react-i18next'
 import { useCurrentUser } from '../../lib/queries'
 import { MoreSheet, type MoreSheetItem } from '../../components/MoreSheet'
+import { isStaff } from '../../lib/roles'
 import {
   TabBarIcon,
   TabBarLabel,
@@ -47,7 +48,7 @@ export default function TabLayout() {
 
   useEffect(() => {
     if (isPending) return
-    if (user?.role === 'super_admin_delivery') {
+    if (isStaff(user?.role)) {
       router.replace('/(super)')
     }
   }, [user, isPending])

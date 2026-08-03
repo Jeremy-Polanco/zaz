@@ -35,6 +35,7 @@ import type {
   SubscriptionPlan,
   UpdateAddressInput,
   UserAddress,
+  UserRole,
 } from './types'
 import type {
   AdjustCreditInput,
@@ -289,6 +290,35 @@ export function useCurrentUser() {
 }
 
 /**
+ * Super-admin: PATCH /users/:id — asigna (o desasigna, con `null`) el vendedor
+ * de un cliente, o cambia su rol.
+ *
+ * Solo el super admin. El servidor lo vuelve a validar: rechaza asignar a un
+ * usuario que no tenga rol `seller` y rechaza que alguien sea su propio
+ * vendedor. Este hook no es el permiso — el permiso está en la API.
+ */
+export function useUpdateUserAdmin() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async ({
+      id,
+      ...patch
+    }: {
+      id: string
+      sellerId?: string | null
+      role?: UserRole
+      maintenanceTimerDisabled?: boolean
+    }) => {
+      const { data } = await api.patch<AdminUser>(`/users/${id}`, patch)
+      return data
+    },
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['users', 'admin'] })
+    },
+  })
+}
+
+/**
  * Super-admin: DELETE /users/:id — irreversibly deletes a user account.
  * Runs the full deletion flow server-side (anonymizes orders, cascades
  * related rows, durable audit). Invalidates the admin users list on success.
@@ -320,6 +350,8 @@ export type CreateProductInput = {
   offerEndsAt?: string | null
   /** Precio en cents para suscriptores activos. null = sin precio de suscriptor. */
   subscriberPriceCents?: number | null
+  /** 'standard' paga impuesto, 'exempt' no (agua embotellada en NJ). */
+  taxCategory?: 'standard' | 'exempt'
   pricingMode?: 'single_payment' | 'rental'
   monthlyRentCents?: number
   lateFeeCents?: number

@@ -142,6 +142,7 @@ function AccountLink({ label, iosIcon, androidIcon, href }: AccountLinkProps) {
 /** Maps API roles to their i18n keys in the `profile` namespace. */
 const ROLE_LABEL_KEY: Record<string, string> = {
   client: 'roles.client',
+  seller: 'roles.seller',
   super_admin_delivery: 'roles.superAdminDelivery',
 }
 

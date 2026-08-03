@@ -4,6 +4,7 @@ export default {
   role: 'Rol',
   roles: {
     client: 'Cliente',
+    seller: 'Vendedor',
     superAdminDelivery: 'Super Admin · Reparto',
   },
   phone: 'Teléfono',

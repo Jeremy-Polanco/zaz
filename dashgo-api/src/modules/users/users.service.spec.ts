@@ -92,6 +92,47 @@ describe('UsersService.findAll (admin list)', () => {
     );
   });
 
+  it('rejects PROMOTER callers too', async () => {
+    const promoter = { id: 'p', role: UserRole.PROMOTER } as AuthenticatedUser;
+    await expect(service.findAll(promoter, {})).rejects.toThrow(
+      ForbiddenException,
+    );
+  });
+
+  it('a SELLER only sees the customers assigned to them', async () => {
+    // Sin este filtro el panel de usuarios le entrega la base de clientes
+    // completa a cualquier vendedor. Es el agujero grande de este rol.
+    const seller = {
+      id: 'seller-1',
+      role: UserRole.SELLER,
+    } as AuthenticatedUser;
+    userRepo._qb.getRawAndEntities.mockResolvedValueOnce({
+      entities: [],
+      raw: [],
+    });
+
+    await service.findAll(seller, {});
+
+    expect(userRepo._qb.andWhere).toHaveBeenCalledWith(
+      'user.seller_id = :sellerId',
+      { sellerId: 'seller-1' },
+    );
+  });
+
+  it('a SUPER_ADMIN gets NO seller filter', async () => {
+    userRepo._qb.getRawAndEntities.mockResolvedValueOnce({
+      entities: [],
+      raw: [],
+    });
+
+    await service.findAll(admin, {});
+
+    const sellerScoped = userRepo._qb.andWhere.mock.calls.some(
+      (c: unknown[]) => String(c[0]).includes('seller_id'),
+    );
+    expect(sellerScoped).toBe(false);
+  });
+
   it('user WITH active subscription → hasActiveSubscription true, subscriptionStatus "active"', async () => {
     const u = fakeUser({ id: 'u-active' });
     userRepo._qb.getRawAndEntities.mockResolvedValueOnce({
@@ -225,6 +266,86 @@ describe('UsersService.updateByAdmin', () => {
     await expect(
       service.updateByAdmin(admin, 'ghost', { maintenanceTimerDisabled: true }),
     ).rejects.toThrow(NotFoundException);
+  });
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // Asignación de vendedor — solo el super admin, y solo a un vendedor real
+  // ───────────────────────────────────────────────────────────────────────────
+
+  it('assigns a seller to a customer', async () => {
+    userRepo.findOne
+      .mockResolvedValueOnce(fakeUser({ id: 'target-1' })) // target
+      .mockResolvedValueOnce(fakeUser({ id: 'seller-1', role: UserRole.SELLER }))
+      .mockResolvedValueOnce(fakeUser({ id: 'target-1', sellerId: 'seller-1' }));
+
+    const result = await service.updateByAdmin(admin, 'target-1', {
+      sellerId: 'seller-1',
+    });
+
+    expect(userRepo.update).toHaveBeenCalledWith('target-1', {
+      sellerId: 'seller-1',
+    });
+    expect(result.sellerId).toBe('seller-1');
+  });
+
+  it('a SELLER cannot assign customers to themselves', async () => {
+    // La regla comercial que sostiene todo esto: si un vendedor puede moverse
+    // clientes, el día que se pelea con otro se lleva la cartera.
+    const seller = {
+      id: 'seller-1',
+      role: UserRole.SELLER,
+    } as AuthenticatedUser;
+
+    await expect(
+      service.updateByAdmin(seller, 'target-1', { sellerId: 'seller-1' }),
+    ).rejects.toThrow(ForbiddenException);
+    expect(userRepo.update).not.toHaveBeenCalled();
+  });
+
+  it('rejects assigning a user who is NOT a seller', async () => {
+    userRepo.findOne
+      .mockResolvedValueOnce(fakeUser({ id: 'target-1' }))
+      .mockResolvedValueOnce(fakeUser({ id: 'other-1', role: UserRole.CLIENT }));
+
+    await expect(
+      service.updateByAdmin(admin, 'target-1', { sellerId: 'other-1' }),
+    ).rejects.toThrow('El usuario asignado no tiene rol de vendedor');
+    expect(userRepo.update).not.toHaveBeenCalled();
+  });
+
+  it('rejects assigning a seller id that does not exist', async () => {
+    userRepo.findOne
+      .mockResolvedValueOnce(fakeUser({ id: 'target-1' }))
+      .mockResolvedValueOnce(null);
+
+    await expect(
+      service.updateByAdmin(admin, 'target-1', { sellerId: 'ghost' }),
+    ).rejects.toThrow('El usuario asignado no tiene rol de vendedor');
+  });
+
+  it('rejects making a user their own seller', async () => {
+    userRepo.findOne
+      .mockResolvedValueOnce(fakeUser({ id: 'target-1', role: UserRole.SELLER }))
+      .mockResolvedValueOnce(
+        fakeUser({ id: 'target-1', role: UserRole.SELLER }),
+      );
+
+    await expect(
+      service.updateByAdmin(admin, 'target-1', { sellerId: 'target-1' }),
+    ).rejects.toThrow('Un usuario no puede ser su propio vendedor');
+  });
+
+  it('unassigns a seller with an explicit null (no seller lookup)', async () => {
+    userRepo.findOne
+      .mockResolvedValueOnce(fakeUser({ id: 'target-1', sellerId: 'seller-1' }))
+      .mockResolvedValueOnce(fakeUser({ id: 'target-1', sellerId: null }));
+
+    const result = await service.updateByAdmin(admin, 'target-1', {
+      sellerId: null,
+    });
+
+    expect(userRepo.update).toHaveBeenCalledWith('target-1', { sellerId: null });
+    expect(result.sellerId).toBeNull();
   });
 });
 

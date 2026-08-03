@@ -83,6 +83,12 @@ export class UpdateProductDto {
   @Max(1000000)
   subscriberPriceCents?: number | null;
 
+  // Categoría fiscal: 'standard' (default) paga impuesto, 'exempt' no. El caso
+  // que lo motiva es el agua embotellada, exenta en NJ. Ver common/tax.ts.
+  @IsOptional()
+  @IsEnum(['standard', 'exempt'])
+  taxCategory?: 'standard' | 'exempt';
+
   // Rental pricing
   @IsOptional()
   @IsEnum(['single_payment', 'rental'])

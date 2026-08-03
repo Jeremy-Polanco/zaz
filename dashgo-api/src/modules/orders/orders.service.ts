@@ -18,7 +18,8 @@ import {
   type GeoAddress,
 } from '../../entities/enums';
 import { AuthenticatedUser } from '../../common/types/authenticated-user';
-import { TAX_RATE } from '../../common/tax';
+import { TAX_RATE, computeTaxableBase } from '../../common/tax';
+import type { TaxableLine } from '../../common/tax';
 import { CreateOrderDto, DeliveryAddressDto } from './dto/create-order.dto';
 import { UpdateOrderStatusDto } from './dto/update-order-status.dto';
 import { PaymentsService } from '../payments/payments.service';
@@ -87,10 +88,30 @@ export class OrdersService {
     private readonly orderNotifications: OrderNotificationsService,
   ) {}
 
+  /**
+   * Operaciones que un vendedor SÍ puede hacer sobre un pedido (cotizar, fijar
+   * dirección, mover estados). Es seguro abrirlas porque todas resuelven el
+   * pedido con `findOne(id, user)`, que ya aplica `buildScope` — un vendedor
+   * solo llega a los pedidos de SU cartera. Las destructivas (borrar) siguen
+   * siendo exclusivas del super admin.
+   */
+  private assertCanOperateOrders(user: AuthenticatedUser, action: string) {
+    if (
+      user.role !== UserRole.SUPER_ADMIN_DELIVERY &&
+      user.role !== UserRole.SELLER
+    ) {
+      throw new ForbiddenException(action);
+    }
+  }
+
   private buildScope(user: AuthenticatedUser): FindOptionsWhere<Order> {
     switch (user.role) {
       case UserRole.SUPER_ADMIN_DELIVERY:
         return {};
+      case UserRole.SELLER:
+        // El vendedor ve SOLO los pedidos de los clientes que tiene asignados.
+        // Un vendedor sin cartera no ve nada — nunca "todo".
+        return { customer: { sellerId: user.id } };
       case UserRole.CLIENT:
       default:
         return { customerId: user.id };
@@ -326,8 +347,19 @@ export class OrdersService {
         productId: input.productId,
         quantity: input.quantity,
         priceAtOrder,
+        // Categoría fiscal del producto al momento de la orden — la base
+        // gravable se arma solo con las líneas 'standard'.
+        taxCategory: product.taxCategory,
+        lineCents,
       };
     });
+
+    // Líneas para el cálculo fiscal. Un pedido de solo agua (exenta) no paga
+    // impuesto, ni siquiera sobre el envío.
+    const taxLines: TaxableLine[] = builtItems.map((i) => ({
+      lineCents: i.lineCents,
+      taxCategory: i.taxCategory,
+    }));
 
     const saved = await this.dataSource.transaction(async (tx) => {
       const orderRepo = tx.getRepository(Order);
@@ -374,14 +406,22 @@ export class OrdersService {
       // order skips that step entirely: shipping stays $0 (included), we compute
       // tax now — exactly as setQuote would — and land the order directly in
       // QUOTED so the customer can pay immediately.
-      const taxableCents = Math.max(0, subtotalCents - pointsRedeemedCents);
-      const taxCents = skipQuote ? Math.round(taxableCents * TAX_RATE) : 0;
+      //
+      // La base gravable sale SOLO de las líneas 'standard'; los puntos se
+      // prorratean por la parte gravable del pedido (ver common/tax.ts). Un
+      // pedido de puro agua exenta no paga impuesto.
+      const base = computeTaxableBase(taxLines, { pointsRedeemedCents });
+      // Lo que el cliente termina debiendo sigue descontando TODOS los puntos,
+      // no solo la parte prorrateada — el prorrateo es únicamente para repartir
+      // el descuento entre la mitad gravada y la exenta.
+      const netCents = Math.max(0, subtotalCents - pointsRedeemedCents);
+      const taxCents = skipQuote ? base.taxCents : 0;
       // Propina: % of the product subtotal (before points/credit), untaxed —
       // it rides on top of the taxed total and flows into the Stripe charge.
       const tipCents = dto.tipPercent
         ? Math.round((subtotalCents * dto.tipPercent) / 100)
         : 0;
-      const totalCents = taxableCents + taxCents + tipCents;
+      const totalCents = netCents + taxCents + tipCents;
 
       // When no address is supplied, fall back to the customer's default saved
       // location so subsequent orders auto-inherit it (the colmado can still
@@ -405,6 +445,9 @@ export class OrdersService {
         shipping: '0.00',
         tax: (taxCents / 100).toFixed(2),
         taxRate: TAX_RATE.toFixed(5),
+        // Congela la base gravable — sin esto el impuesto de un pedido mixto
+        // no se puede reconstruir después.
+        taxableSubtotal: ((skipQuote ? base.taxableCents : 0) / 100).toFixed(2),
         tip: (tipCents / 100).toFixed(2),
         totalAmount: (totalCents / 100).toFixed(2),
         quotedAt: skipQuote ? now : null,
@@ -535,11 +578,19 @@ export class OrdersService {
     inactive7d: { count: number; customers: CustomerActivityRow[] };
     inactive30d: { count: number; customers: CustomerActivityRow[] };
   }> {
-    if (user.role !== UserRole.SUPER_ADMIN_DELIVERY) {
-      throw new ForbiddenException(
-        'Solo el super admin puede ver la actividad de clientes',
-      );
-    }
+    this.assertCanOperateOrders(
+      user,
+      'Solo el super admin o un vendedor pueden ver la actividad de clientes',
+    );
+
+    // El vendedor ve la actividad SOLO de su cartera. El filtro va parametrizado
+    // ($1 = seller id) y no interpolado: este es SQL crudo y el id viene del
+    // token, pero concatenar identificadores acá es cómo se cuela una inyección
+    // el día que alguien reutilice el patrón con input del cliente.
+    const sellerId =
+      user.role === UserRole.SELLER ? user.id : null;
+    const sellerFilter = sellerId ? 'AND u.seller_id = $1' : '';
+    const sellerParams = sellerId ? [sellerId] : [];
 
     const orderedToday: CustomerActivityRow[] = await this.orders.query(
       `
@@ -548,11 +599,13 @@ export class OrdersService {
       FROM users u
       JOIN orders o ON o.customer_id = u.id AND o.status != 'cancelled'
       WHERE u.role = 'client'
+        ${sellerFilter}
         AND (o.created_at AT TIME ZONE 'America/New_York')::date =
             (now() AT TIME ZONE 'America/New_York')::date
       GROUP BY u.id, u.full_name, u.phone
       ORDER BY MAX(o.created_at) DESC
       `,
+      sellerParams,
     );
 
     const inactiveSince = (days: number): Promise<CustomerActivityRow[]> =>
@@ -563,12 +616,13 @@ export class OrdersService {
         FROM users u
         LEFT JOIN orders o ON o.customer_id = u.id AND o.status != 'cancelled'
         WHERE u.role = 'client'
+        ${sellerId ? 'AND u.seller_id = $2' : ''}
         GROUP BY u.id, u.full_name, u.phone
         HAVING MAX(o.created_at) IS NULL
             OR MAX(o.created_at) <= now() - ($1 || ' days')::interval
         ORDER BY MAX(o.created_at) DESC NULLS LAST
         `,
-        [days],
+        sellerId ? [days, sellerId] : [days],
       );
 
     const inactive7d = await inactiveSince(7);
@@ -591,9 +645,12 @@ export class OrdersService {
     shippingCents: number,
     user: AuthenticatedUser,
   ) {
-    if (user.role !== UserRole.SUPER_ADMIN_DELIVERY) {
-      throw new ForbiddenException('Solo el super admin puede cotizar pedidos');
-    }
+    // El vendedor puede cotizar los pedidos de SU cartera: `findOne(id, user)`
+    // más abajo aplica el scope, así que no alcanza a los demás.
+    this.assertCanOperateOrders(
+      user,
+      'Solo el super admin o el vendedor asignado pueden cotizar pedidos',
+    );
     if (!Number.isInteger(shippingCents) || shippingCents < 0) {
       throw new BadRequestException('shippingCents inválido');
     }
@@ -620,18 +677,41 @@ export class OrdersService {
     const pointsRedeemedCents = Math.round(
       parseFloat(order.pointsRedeemed) * 100,
     );
-    const taxableCents = Math.max(
+
+    // Base gravable a partir de las LÍNEAS: solo los ítems 'standard' pagan
+    // impuesto, y el envío y los puntos se prorratean por la parte gravable
+    // (ver common/tax.ts). `findOne` ya trae items + items.product. Si por lo
+    // que sea el pedido llegara sin líneas, se cae a "todo gravable", que es
+    // el comportamiento histórico — nunca cobrar de menos.
+    const taxLines: TaxableLine[] = (order.items ?? []).map((item) => ({
+      lineCents: Math.round(parseFloat(item.priceAtOrder) * 100) * item.quantity,
+      taxCategory: item.product?.taxCategory ?? 'standard',
+    }));
+    const base = taxLines.length
+      ? computeTaxableBase(taxLines, {
+          shippingCents: effectiveShippingCents,
+          pointsRedeemedCents,
+        })
+      : computeTaxableBase([{ lineCents: subtotalCents, taxCategory: 'standard' }], {
+          shippingCents: effectiveShippingCents,
+          pointsRedeemedCents,
+        });
+
+    // El neto que paga el cliente descuenta TODOS los puntos; el prorrateo solo
+    // reparte el descuento entre la mitad gravada y la exenta.
+    const netCents = Math.max(
       0,
       subtotalCents + effectiveShippingCents - pointsRedeemedCents,
     );
-    const taxCents = Math.round(taxableCents * TAX_RATE);
+    const taxCents = base.taxCents;
     // Preserve the propina chosen at checkout — untaxed, rides on the total.
     const tipCents = Math.round(parseFloat(order.tip ?? '0') * 100);
-    const totalCents = taxableCents + taxCents + tipCents;
+    const totalCents = netCents + taxCents + tipCents;
 
     await this.orders.update(id, {
       shipping: (effectiveShippingCents / 100).toFixed(2),
       tax: (taxCents / 100).toFixed(2),
+      taxableSubtotal: (base.taxableCents / 100).toFixed(2),
       totalAmount: (totalCents / 100).toFixed(2),
       status: OrderStatus.QUOTED,
       quotedAt: order.quotedAt ?? new Date(),
@@ -683,11 +763,10 @@ export class OrdersService {
     address: DeliveryAddressDto,
     user: AuthenticatedUser,
   ) {
-    if (user.role !== UserRole.SUPER_ADMIN_DELIVERY) {
-      throw new ForbiddenException(
-        'Solo el super admin puede fijar la dirección de entrega',
-      );
-    }
+    this.assertCanOperateOrders(
+      user,
+      'Solo el super admin o el vendedor asignado pueden fijar la dirección de entrega',
+    );
     const order = await this.findOne(id, user);
     await this.orders.update(order.id, {
       deliveryAddress: {
@@ -1272,7 +1351,14 @@ export class OrdersService {
     to: OrderStatus,
     user: AuthenticatedUser,
   ) {
-    if (user.role === UserRole.SUPER_ADMIN_DELIVERY) return;
+    // El vendedor opera los pedidos de su cartera con la misma libertad que el
+    // super admin. El límite no es QUÉ transición puede hacer, sino SOBRE QUÉ
+    // pedidos llega — y eso ya lo resolvió `findOne` vía `buildScope`.
+    if (
+      user.role === UserRole.SUPER_ADMIN_DELIVERY ||
+      user.role === UserRole.SELLER
+    )
+      return;
 
     if (user.role === UserRole.CLIENT || user.role === UserRole.PROMOTER) {
       const clientCancellable = [

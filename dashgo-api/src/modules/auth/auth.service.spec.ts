@@ -159,6 +159,8 @@ function fakeUser(overrides: Partial<User> = {}): User {
     maintenanceTimerDisabled: false,
     referralCode: null,
     referredById: null,
+    sellerId: null,
+    seller: null,
     referredBy: null,
     stripeCustomerId: null,
     dateOfBirth: null,

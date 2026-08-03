@@ -19,7 +19,8 @@ import { ShippingService } from '../shipping/shipping.service';
 import { CreditService } from '../credit/credit.service';
 import { SubscriptionService } from '../subscription/subscription.service';
 import { assertStripeProductionConfig } from '../../common/stripe/stripe-runtime-guard';
-import { TAX_RATE } from '../../common/tax';
+import { TAX_RATE, computeTaxableBase } from '../../common/tax';
+import type { TaxableLine } from '../../common/tax';
 
 type StripeClient = InstanceType<typeof Stripe>;
 
@@ -105,6 +106,7 @@ export class PaymentsService implements OnModuleInit {
       : false;
 
     let subtotalCents = 0;
+    const taxLines: TaxableLine[] = [];
     for (const item of input.items) {
       const product = byId.get(item.productId);
       if (!product) {
@@ -116,7 +118,9 @@ export class PaymentsService implements OnModuleInit {
         );
       }
       const effective = getEffectivePrice(product, now, { isSubscriber });
-      subtotalCents += effective.priceCents * item.quantity;
+      const lineCents = effective.priceCents * item.quantity;
+      subtotalCents += lineCents;
+      taxLines.push({ lineCents, taxCategory: product.taxCategory });
     }
     if (subtotalCents <= 0) {
       throw new BadRequestException('Monto inválido');
@@ -136,12 +140,19 @@ export class PaymentsService implements OnModuleInit {
     });
     const shippingCents = quote.shippingCents;
 
-    const taxableCents = Math.max(
+    // Solo las líneas 'standard' pagan impuesto; envío y puntos se prorratean
+    // por la parte gravable (ver common/tax.ts). Tiene que coincidir con lo que
+    // calcula OrdersService o el intent no cuadra con el total de la orden.
+    const base = computeTaxableBase(taxLines, {
+      shippingCents,
+      pointsRedeemedCents,
+    });
+    const netCents = Math.max(
       0,
       subtotalCents + shippingCents - pointsRedeemedCents,
     );
-    const taxCents = Math.round(taxableCents * TAX_RATE);
-    const totalCents = taxableCents + taxCents;
+    const taxCents = base.taxCents;
+    const totalCents = netCents + taxCents;
 
     const intent = await stripe.paymentIntents.create(
       {

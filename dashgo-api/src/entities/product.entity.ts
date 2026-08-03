@@ -7,6 +7,7 @@ import {
   PrimaryGeneratedColumn,
 } from 'typeorm';
 import { Category } from './category.entity';
+import type { TaxCategory } from '../common/tax';
 
 @Entity('products')
 export class Product {
@@ -124,6 +125,22 @@ export class Product {
    */
   @Column({ name: 'subscriber_price_cents', type: 'integer', nullable: true })
   subscriberPriceCents!: number | null;
+
+  /**
+   * Categoría fiscal del producto. 'standard' (default) paga TAX_RATE;
+   * 'exempt' no paga impuesto — el caso que lo motivó es el agua embotellada,
+   * exenta en NJ.
+   *
+   * Varchar y no boolean a propósito: la exención de US es
+   * (categoría × jurisdicción), no un switch. Ver `src/common/tax.ts`.
+   */
+  @Column({
+    name: 'tax_category',
+    type: 'varchar',
+    length: 20,
+    default: 'standard',
+  })
+  taxCategory!: TaxCategory;
 
   /**
    * Rental pricing fields.

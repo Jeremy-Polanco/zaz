@@ -11,6 +11,7 @@ import { formatAddressLine } from '../lib/address'
 import type { Order, OrderStatus } from '../lib/types'
 import type { ColumnDef } from '@tanstack/react-table'
 import { TOKEN_KEY, api } from '../lib/api'
+import { isStaff } from '../lib/roles'
 import type { AuthUser } from '../lib/types'
 import { SuscriptorBadge } from '../components/SuscriptorBadge'
 
@@ -19,7 +20,8 @@ export const Route = createFileRoute('/super/orders')({
     if (!localStorage.getItem(TOKEN_KEY)) throw redirect({ to: '/login', search: { next: undefined, ref: undefined } })
     try {
       const { data: me } = await api.get<AuthUser>('/auth/me')
-      if (me.role !== 'super_admin_delivery') throw redirect({ to: '/' })
+      // El vendedor entra: la API le acota la lista a su cartera.
+      if (!isStaff(me.role)) throw redirect({ to: '/' })
     } catch (e) {
       if (isRedirect(e)) throw e
       throw redirect({ to: '/login', search: { next: undefined, ref: undefined } })

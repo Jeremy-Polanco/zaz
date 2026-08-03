@@ -63,6 +63,23 @@ export class User {
   stripeCustomerId!: string | null;
 
   /**
+   * Vendedor (rol SELLER) que tiene asignado a este cliente. NULL = sin
+   * vendedor asignado. Un cliente tiene UN vendedor; un vendedor tiene muchos
+   * clientes.
+   *
+   * Solo el super admin escribe este campo. El vendedor lo LEE — es lo que
+   * acota `OrdersService.buildScope` para que vea únicamente los pedidos de su
+   * cartera. FK ON DELETE SET NULL: borrar al vendedor desasigna a sus
+   * clientes, nunca los borra.
+   */
+  @Column({ name: 'seller_id', type: 'uuid', nullable: true })
+  sellerId!: string | null;
+
+  @ManyToOne(() => User, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'seller_id' })
+  seller!: User | null;
+
+  /**
    * The `UserAddress` this user is currently operating from. Meaningful for
    * `SUPER_ADMIN_DELIVERY` (repartidor): when a driver works out of multiple
    * locations they pick the active one, which becomes the shipping origin

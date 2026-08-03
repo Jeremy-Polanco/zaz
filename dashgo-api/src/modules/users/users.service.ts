@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ForbiddenException,
   Injectable,
   NotFoundException,
@@ -44,8 +45,10 @@ export class UsersService {
   }
 
   /**
-   * Admin patch of another user. Currently only the bebedero maintenance timer
-   * switch. SUPER_ADMIN_DELIVERY only.
+   * Admin patch of another user: timer de mantenimiento, rol y asignación de
+   * vendedor. SUPER_ADMIN_DELIVERY only — que la asignación de cartera sea
+   * exclusiva del super admin es la regla que impide que un vendedor se lleve
+   * los clientes de otro.
    */
   async updateByAdmin(
     actor: AuthenticatedUser,
@@ -57,6 +60,28 @@ export class UsersService {
     }
     const target = await this.users.findOne({ where: { id } });
     if (!target) throw new NotFoundException();
+
+    if (dto.sellerId !== undefined && dto.sellerId !== null) {
+      // Un cliente no puede quedar asignado a alguien que no es vendedor: sin
+      // esta validación el scope de pedidos apuntaría a un id que nunca va a
+      // poder abrir el panel, y el cliente quedaría invisible para todos.
+      const seller = await this.users.findOne({
+        where: { id: dto.sellerId },
+      });
+      if (!seller || seller.role !== UserRole.SELLER) {
+        throw new BadRequestException({
+          code: 'NOT_A_SELLER',
+          message: 'El usuario asignado no tiene rol de vendedor',
+        });
+      }
+      if (dto.sellerId === id) {
+        throw new BadRequestException({
+          code: 'SELF_ASSIGNMENT',
+          message: 'Un usuario no puede ser su propio vendedor',
+        });
+      }
+    }
+
     await this.users.update(id, dto);
     const updated = await this.users.findOne({ where: { id } });
     if (!updated) throw new NotFoundException();
@@ -106,7 +131,10 @@ export class UsersService {
     user: AuthenticatedUser,
     filter: ListUsersQueryDto = {},
   ): Promise<AdminUser[]> {
-    if (user.role !== UserRole.SUPER_ADMIN_DELIVERY) {
+    if (
+      user.role !== UserRole.SUPER_ADMIN_DELIVERY &&
+      user.role !== UserRole.SELLER
+    ) {
       throw new ForbiddenException();
     }
 
@@ -115,6 +143,13 @@ export class UsersService {
       .leftJoin(Subscription, 'subscription', 'subscription.user_id = user.id')
       .addSelect('subscription.status', 'subscription_status')
       .orderBy('user.createdAt', 'DESC');
+
+    // El vendedor ve SOLO los usuarios de su cartera. Sin este filtro, el panel
+    // de usuarios le entregaría la base de clientes completa — es el agujero
+    // grande de este rol, y va acá y no en el front.
+    if (user.role === UserRole.SELLER) {
+      qb.andWhere('user.seller_id = :sellerId', { sellerId: user.id });
+    }
 
     if (filter.subscription === UserSubscriptionFilter.ACTIVE) {
       qb.andWhere('subscription.status = :activeStatus', {

@@ -75,6 +75,8 @@ type FormState = {
   offerEndsAt: string
   /** Precio para suscriptores, en dólares. Vacío = sin precio de suscriptor. */
   subscriberPriceText: string
+  /** true = producto exento de impuesto (agua). false = paga TAX_RATE. */
+  taxExempt: boolean
   // Rental pricing
   pricingMode: 'single_payment' | 'rental'
   monthlyRentText: string
@@ -118,6 +120,7 @@ const emptyForm: FormState = {
   offerStartsAt: '',
   offerEndsAt: '',
   subscriberPriceText: '',
+  taxExempt: false,
   pricingMode: 'single_payment',
   monthlyRentText: '',
   lateFeeText: '',
@@ -234,6 +237,7 @@ export function ProductForm({
         editing.subscriberPriceCents != null
           ? (editing.subscriberPriceCents / 100).toFixed(2)
           : '',
+      taxExempt: editing.taxCategory === 'exempt',
       pricingMode: editing.pricingMode ?? 'single_payment',
       monthlyRentText: editing.monthlyRentCents ? String(editing.monthlyRentCents / 100) : '',
       lateFeeText: editing.lateFeeCents ? String(editing.lateFeeCents / 100) : '',
@@ -360,6 +364,7 @@ export function ProductForm({
       offerStartsAt: showOffer ? fromDateInput(state.offerStartsAt) : null,
       offerEndsAt: showOffer ? fromDateInput(state.offerEndsAt) : null,
       subscriberPriceCents,
+      taxCategory: state.taxExempt ? ('exempt' as const) : ('standard' as const),
       pricingMode: state.pricingMode,
       ...(state.pricingMode === 'rental'
         ? {
@@ -888,6 +893,41 @@ export function ProductForm({
                       suscriptor.
                     </p>
                   </div>
+
+                  <button
+                    type="button"
+                    onClick={() => setState((s) => ({ ...s, taxExempt: !s.taxExempt }))}
+                    className={`flex items-center gap-3 border px-4 py-3 text-left ${
+                      state.taxExempt
+                        ? 'border-accent-dark bg-accent-light'
+                        : 'border-ink/15 bg-paper hover:border-ink/30'
+                    }`}
+                    data-testid="tax-exempt-toggle"
+                  >
+                    <span
+                      className={`relative h-5 w-9 rounded-full transition-colors ${
+                        state.taxExempt ? 'bg-brand' : 'bg-ink/15'
+                      }`}
+                    >
+                      <span
+                        className={`absolute top-0.5 h-4 w-4 rounded-full transition-transform ${
+                          state.taxExempt
+                            ? 'translate-x-[18px] bg-accent'
+                            : 'translate-x-0.5 bg-paper'
+                        }`}
+                      />
+                    </span>
+                    <div className="flex-1">
+                      <div className="text-sm font-semibold text-ink">
+                        Exento de impuesto
+                      </div>
+                      <div className="text-[0.7rem] text-ink-muted">
+                        {state.taxExempt
+                          ? 'No se le cobra tax (agua embotellada, etc.)'
+                          : 'Paga tax normal'}
+                      </div>
+                    </div>
+                  </button>
 
                   <button
                     type="button"

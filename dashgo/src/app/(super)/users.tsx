@@ -17,6 +17,7 @@ import { UserAddressesPanel } from '../../components/UserAddressesPanel'
 const ROLE_LABELS: Record<UserRole, string> = {
   client: 'Cliente',
   promoter: 'Promotor',
+  seller: 'Vendedor',
   super_admin_delivery: 'Reparto',
 }
 

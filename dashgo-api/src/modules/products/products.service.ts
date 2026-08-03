@@ -123,6 +123,7 @@ export class ProductsService implements OnModuleInit {
       offerStartsAt: dto.offerStartsAt ? new Date(dto.offerStartsAt) : null,
       offerEndsAt: dto.offerEndsAt ? new Date(dto.offerEndsAt) : null,
       subscriberPriceCents: dto.subscriberPriceCents ?? null,
+      taxCategory: dto.taxCategory ?? 'standard',
       pricingMode: dto.pricingMode ?? 'single_payment',
       monthlyRentCents: dto.monthlyRentCents ?? 0,
       lateFeeCents: dto.lateFeeCents ?? 0,
@@ -199,6 +200,7 @@ export class ProductsService implements OnModuleInit {
     if (dto.subscriberPriceCents !== undefined) {
       patch.subscriberPriceCents = dto.subscriberPriceCents ?? null;
     }
+    if (dto.taxCategory !== undefined) patch.taxCategory = dto.taxCategory;
 
     // Rental pricing fields
     if (dto.pricingMode !== undefined) patch.pricingMode = dto.pricingMode;

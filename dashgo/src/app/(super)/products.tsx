@@ -60,6 +60,8 @@ type FormState = {
   offerOpen: boolean
   /** Precio para suscriptores, en dólares. Vacío = sin precio de suscriptor. */
   subscriberPriceText: string
+  /** true = producto exento de impuesto (agua). false = paga TAX_RATE. */
+  taxExempt: boolean
   errors: {
     name?: string
     priceText?: string
@@ -94,6 +96,7 @@ const emptyForm: FormState = {
   offerEndsAt: '',
   offerOpen: false,
   subscriberPriceText: '',
+  taxExempt: false,
   errors: {},
 }
 
@@ -164,6 +167,7 @@ function ProductForm({
         editing.subscriberPriceCents != null
           ? (editing.subscriberPriceCents / 100).toFixed(2)
           : '',
+      taxExempt: editing.taxCategory === 'exempt',
       errors: {},
     }
   })
@@ -253,6 +257,7 @@ function ProductForm({
       offerStartsAt: state.offerOpen ? (offerStartsIso ?? null) : null,
       offerEndsAt: state.offerOpen ? (offerEndsIso ?? null) : null,
       subscriberPriceCents,
+      taxCategory: state.taxExempt ? ('exempt' as const) : ('standard' as const),
     }
 
     try {
@@ -594,6 +599,38 @@ function ProductForm({
                 vacío para que no haya precio de suscriptor.
               </Text>
             </View>
+
+            <Pressable
+              onPress={() => setState((s) => ({ ...s, taxExempt: !s.taxExempt }))}
+              className={`flex-row items-center gap-3 border px-3 py-3 ${
+                state.taxExempt
+                  ? 'border-accent-dark bg-accent-light'
+                  : 'border-ink/15 bg-paper'
+              }`}
+            >
+              <View
+                className={`h-5 w-9 rounded-full p-0.5 ${
+                  state.taxExempt ? 'bg-brand' : 'bg-ink/15'
+                }`}
+              >
+                <View
+                  className={`h-4 w-4 rounded-full ${
+                    state.taxExempt ? 'bg-accent' : 'bg-paper'
+                  }`}
+                  style={{ transform: [{ translateX: state.taxExempt ? 16 : 0 }] }}
+                />
+              </View>
+              <View className="flex-1">
+                <Text className="font-sans-semibold text-[15px] text-ink">
+                  Exento de impuesto
+                </Text>
+                <Text className="font-sans text-[11px] text-ink-muted">
+                  {state.taxExempt
+                    ? 'No se le cobra tax (agua embotellada, etc.)'
+                    : 'Paga tax normal'}
+                </Text>
+              </View>
+            </Pressable>
 
             {/* Offer toggle */}
             <Pressable
