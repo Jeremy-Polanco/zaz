@@ -98,6 +98,9 @@ function RoleNavLinks({
         <Link to="/super/promoters" className={linkClass} onClick={onNavigate}>
           Promotores
         </Link>
+        <Link to="/super/sellers" className={linkClass} onClick={onNavigate}>
+          Vendedores
+        </Link>
         <Link to="/super/users" className={linkClass} onClick={onNavigate}>
           Usuarios
         </Link>
@@ -135,6 +138,9 @@ function RoleNavLinks({
         </Link>
         <Link to="/super/users" className={linkClass} onClick={onNavigate}>
           Mis clientes
+        </Link>
+        <Link to="/seller/earnings" className={linkClass} onClick={onNavigate}>
+          Mis ingresos
         </Link>
         <Link to="/cuenta" className={linkClass} onClick={onNavigate}>
           Mi cuenta

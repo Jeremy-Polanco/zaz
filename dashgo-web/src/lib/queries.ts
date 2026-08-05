@@ -31,6 +31,8 @@ import type {
   Rental,
   RentalFilter,
   SellerCatalogItem,
+  SellerEarnings,
+  SellerPayableRow,
   ShippingQuote,
   Subscription,
   SubscriptionPlan,
@@ -102,6 +104,25 @@ export function useSetSellerCatalog() {
       // El catálogo del cliente depende de esto — que se refresque solo.
       void qc.invalidateQueries({ queryKey: ['products'] })
     },
+  })
+}
+
+/** Ingresos de un vendedor. El vendedor pide los suyos; el admin cualquiera. */
+export function useSellerEarnings(sellerId: string | null) {
+  return useQuery<SellerEarnings>({
+    queryKey: ['sellers', sellerId, 'earnings'],
+    queryFn: async () =>
+      (await api.get<SellerEarnings>(`/sellers/${sellerId}/earnings`)).data,
+    enabled: !!sellerId,
+  })
+}
+
+/** Super admin: a quién hay que pagarle y cuánto, separado por método. */
+export function useSellersPayable() {
+  return useQuery<SellerPayableRow[]>({
+    queryKey: ['sellers', 'payable'],
+    queryFn: async () =>
+      (await api.get<SellerPayableRow[]>('/sellers/payable')).data,
   })
 }
 
