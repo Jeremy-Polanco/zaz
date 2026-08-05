@@ -20,3 +20,4 @@ export * from './account-deletion.entity';
 export * from './stripe-webhook-event.entity';
 export * from './push-token.entity';
 export * from './app-setting.entity';
+export * from './seller-product.entity';

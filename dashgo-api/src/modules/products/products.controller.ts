@@ -8,6 +8,7 @@ import {
   ParseUUIDPipe,
   Patch,
   Post,
+  Put,
   Res,
   UploadedFile,
   UseGuards,
@@ -27,6 +28,7 @@ import { CreateProductDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
 import { UpdateInventoryDto } from './dto/update-inventory.dto';
 import { ReorderProductsDto } from './dto/reorder-products.dto';
+import { SetSellerCatalogDto } from './dto/set-seller-catalog.dto';
 
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('products')
@@ -38,10 +40,16 @@ export class ProductsController {
    * poder ver productos sin registrarse). Solo expone productos disponibles
    * vía el DTO de cliente; el throttler global sigue aplicando.
    */
+  /**
+   * `@CurrentUser()` acá es OPCIONAL: la ruta sigue siendo pública, pero
+   * `JwtAuthGuard` ahora resuelve al usuario cuando viene un token válido. Eso
+   * permite acotar el catálogo al vendedor del cliente sin cerrar el browse de
+   * invitados (Apple 5.1.1). Sin token → `null` → catálogo completo.
+   */
   @Public()
   @Get()
-  findAll() {
-    return this.products.findAllPublic();
+  findAll(@CurrentUser() user?: AuthenticatedUser | null) {
+    return this.products.findAllPublic(user ?? null);
   }
 
   /** Catálogo completo para super admin. */
@@ -49,6 +57,34 @@ export class ProductsController {
   @Get('admin')
   findAllAdmin(@CurrentUser() user: AuthenticatedUser) {
     return this.products.findAllForAdmin(user);
+  }
+
+  /**
+   * Catálogo de un vendedor: qué productos lleva y cuánto gana por cada uno.
+   * El super admin ve cualquiera; el vendedor solo el suyo (lo valida el
+   * servicio, no basta el rol).
+   *
+   * Declarado ANTES de `GET :id/image` no hace falta —`sellers` no colisiona
+   * con un UUID— pero se mantiene junto a los demás endpoints de admin.
+   */
+  @Roles(UserRole.SUPER_ADMIN_DELIVERY, UserRole.SELLER)
+  @Get('sellers/:sellerId/catalog')
+  getSellerCatalog(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('sellerId', ParseUUIDPipe) sellerId: string,
+  ) {
+    return this.products.getSellerCatalog(sellerId, user);
+  }
+
+  /** Reemplaza el catálogo completo de un vendedor. Solo super admin. */
+  @Roles(UserRole.SUPER_ADMIN_DELIVERY)
+  @Put('sellers/:sellerId/catalog')
+  setSellerCatalog(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('sellerId', ParseUUIDPipe) sellerId: string,
+    @Body() dto: SetSellerCatalogDto,
+  ) {
+    return this.products.setSellerCatalog(sellerId, user, dto);
   }
 
   @Public()

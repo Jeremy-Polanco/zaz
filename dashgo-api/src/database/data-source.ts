@@ -3,6 +3,7 @@ import { DataSource } from 'typeorm';
 import {
   AccountDeletion,
   AppSetting,
+  SellerProduct,
   Category,
   Counter,
   CreditAccount,
@@ -74,6 +75,7 @@ export const AppDataSource = new DataSource({
     StripeWebhookEvent,
     PushToken,
     AppSetting,
+    SellerProduct,
   ],
   synchronize: false,
   migrationsRun: true,

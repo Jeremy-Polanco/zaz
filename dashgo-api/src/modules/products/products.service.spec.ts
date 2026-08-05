@@ -17,6 +17,8 @@ import { ConfigService } from '@nestjs/config';
 import { Repository } from 'typeorm';
 import { ProductsService } from './products.service';
 import { Product } from '../../entities/product.entity';
+import { SellerProduct } from '../../entities/seller-product.entity';
+import { User } from '../../entities/user.entity';
 import { Rental, RentalStatus } from '../../entities/rental.entity';
 import { UserRole } from '../../entities/enums';
 import { AuthenticatedUser } from '../../common/types/authenticated-user';
@@ -119,6 +121,8 @@ function fakeRental(overrides: Partial<Rental> = {}): Rental {
 
 describe('ProductsService', () => {
   let service: ProductsService;
+  let sellerProductsRepo: { find: jest.Mock };
+  let usersRepo: { findOne: jest.Mock };
   let productsRepo: jest.Mocked<Repository<Product>>;
   let rentalsRepo: jest.Mocked<Repository<Rental>>;
 
@@ -135,11 +139,18 @@ describe('ProductsService', () => {
       }),
     };
 
+    // Sin filas: ningún vendedor tiene catálogo, así que el catálogo público
+    // no se filtra — exactamente el comportamiento previo a la feature.
+    sellerProductsRepo = { find: jest.fn().mockResolvedValue([]) };
+    usersRepo = { findOne: jest.fn() };
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         ProductsService,
         { provide: getRepositoryToken(Product), useValue: productsRepo },
         { provide: getRepositoryToken(Rental), useValue: rentalsRepo },
+        { provide: getRepositoryToken(SellerProduct), useValue: sellerProductsRepo },
+        { provide: getRepositoryToken(User), useValue: usersRepo },
         { provide: ConfigService, useValue: configService },
       ],
     }).compile();
@@ -511,6 +522,150 @@ describe('ProductsService', () => {
           order: { displayOrder: 'ASC', createdAt: 'DESC' },
         }),
       );
+    });
+
+    // ───────────────────────────────────────────────────────────────────────
+    // Catálogo acotado al vendedor del cliente
+    // ───────────────────────────────────────────────────────────────────────
+
+    it('un INVITADO ve el catálogo completo', async () => {
+      productsRepo.find.mockResolvedValueOnce([
+        fakeProduct({ id: 'p-1' }),
+        fakeProduct({ id: 'p-2' }),
+      ]);
+
+      const result = await service.findAllPublic(null);
+
+      expect(result.map((p) => p.id)).toEqual(['p-1', 'p-2']);
+      // Sin vendedor no hay ni siquiera consulta al catálogo del vendedor.
+      expect(sellerProductsRepo.find).not.toHaveBeenCalled();
+    });
+
+    it('un cliente SIN vendedor asignado ve el catálogo completo', async () => {
+      productsRepo.find.mockResolvedValueOnce([
+        fakeProduct({ id: 'p-1' }),
+        fakeProduct({ id: 'p-2' }),
+      ]);
+
+      const result = await service.findAllPublic({
+        id: 'u-1',
+        role: UserRole.CLIENT,
+        email: null,
+        sellerId: null,
+      } as never);
+
+      expect(result.map((p) => p.id)).toEqual(['p-1', 'p-2']);
+      expect(sellerProductsRepo.find).not.toHaveBeenCalled();
+    });
+
+    it('un cliente CON vendedor ve solo el catálogo de su vendedor', async () => {
+      productsRepo.find.mockResolvedValueOnce([
+        fakeProduct({ id: 'p-1' }),
+        fakeProduct({ id: 'p-2' }),
+        fakeProduct({ id: 'p-3' }),
+      ]);
+      sellerProductsRepo.find.mockResolvedValueOnce([
+        { productId: 'p-1' },
+        { productId: 'p-3' },
+      ]);
+
+      const result = await service.findAllPublic({
+        id: 'u-1',
+        role: UserRole.CLIENT,
+        email: null,
+        sellerId: 'seller-1',
+      } as never);
+
+      expect(result.map((p) => p.id)).toEqual(['p-1', 'p-3']);
+      expect(sellerProductsRepo.find).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { sellerId: 'seller-1' } }),
+      );
+    });
+
+    it('un vendedor SIN catálogo cargado no le tapa nada a su cartera', async () => {
+      // Salvaguarda deliberada: un vendedor recién creado no puede dejar a sus
+      // clientes sin poder comprar. Falla hacia "vende igual".
+      productsRepo.find.mockResolvedValueOnce([
+        fakeProduct({ id: 'p-1' }),
+        fakeProduct({ id: 'p-2' }),
+      ]);
+      sellerProductsRepo.find.mockResolvedValueOnce([]);
+
+      const result = await service.findAllPublic({
+        id: 'u-1',
+        role: UserRole.CLIENT,
+        email: null,
+        sellerId: 'seller-nuevo',
+      } as never);
+
+      expect(result.map((p) => p.id)).toEqual(['p-1', 'p-2']);
+    });
+
+    it('un vendedor NO puede espiar el catálogo de otro vendedor', async () => {
+      // Es su lista de productos y sus márgenes.
+      await expect(
+        service.getSellerCatalog('otro-vendedor', {
+          id: 'seller-1',
+          role: UserRole.SELLER,
+          email: null,
+        } as never),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('un vendedor SÍ puede ver el suyo', async () => {
+      sellerProductsRepo.find.mockResolvedValueOnce([]);
+      await expect(
+        service.getSellerCatalog('seller-1', {
+          id: 'seller-1',
+          role: UserRole.SELLER,
+          email: null,
+        } as never),
+      ).resolves.toEqual([]);
+    });
+
+    it('un CLIENTE no puede ver ningún catálogo de vendedor', async () => {
+      await expect(
+        service.getSellerCatalog('seller-1', {
+          id: 'seller-1',
+          role: UserRole.CLIENT,
+          email: null,
+        } as never),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('setSellerCatalog rechaza a quien no es super admin', async () => {
+      await expect(
+        service.setSellerCatalog(
+          'seller-1',
+          { id: 'seller-1', role: UserRole.SELLER, email: null } as never,
+          { items: [] },
+        ),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('setSellerCatalog rechaza cargarle catálogo a alguien que no es vendedor', async () => {
+      usersRepo.findOne.mockResolvedValueOnce({
+        id: 'u-1',
+        role: UserRole.CLIENT,
+      });
+      await expect(
+        service.setSellerCatalog('u-1', superAdmin, { items: [] }),
+      ).rejects.toThrow('Ese usuario no tiene rol de vendedor');
+    });
+
+    it('setSellerCatalog rechaza productos duplicados', async () => {
+      usersRepo.findOne.mockResolvedValueOnce({
+        id: 's-1',
+        role: UserRole.SELLER,
+      });
+      await expect(
+        service.setSellerCatalog('s-1', superAdmin, {
+          items: [
+            { productId: 'p-1', commissionPct: 5 },
+            { productId: 'p-1', commissionPct: 8 },
+          ],
+        }),
+      ).rejects.toThrow('Productos duplicados');
     });
 
     it('findAllForAdmin orders by displayOrder ASC then createdAt DESC', async () => {

@@ -13,7 +13,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 import { ConfigService } from '@nestjs/config';
 import Stripe = require('stripe');
-import { Product } from '../../entities';
+import { Product, SellerProduct, User } from '../../entities';
 import { Rental, RentalStatus } from '../../entities/rental.entity';
 import { UserRole } from '../../entities/enums';
 import { AuthenticatedUser } from '../../common/types/authenticated-user';
@@ -21,7 +21,9 @@ import { CreateProductDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
 import { UpdateInventoryDto } from './dto/update-inventory.dto';
 import { ReorderProductsDto } from './dto/reorder-products.dto';
+import { SetSellerCatalogDto } from './dto/set-seller-catalog.dto';
 import { decorateProduct, ProductWithPricing } from './pricing';
+import { applyCatalogScope } from './catalog-scope';
 
 type StripeClient = InstanceType<typeof Stripe>;
 
@@ -37,6 +39,10 @@ export class ProductsService implements OnModuleInit {
     private readonly products: Repository<Product>,
     @InjectRepository(Rental)
     private readonly rentals: Repository<Rental>,
+    @InjectRepository(SellerProduct)
+    private readonly sellerProducts: Repository<SellerProduct>,
+    @InjectRepository(User)
+    private readonly users: Repository<User>,
     private readonly config: ConfigService,
   ) {}
 
@@ -59,16 +65,27 @@ export class ProductsService implements OnModuleInit {
    * alquiler (robo/mora) SÍ son públicos — el catálogo del cliente los
    * muestra como disclosure.
    */
-  async findAllPublic(): Promise<
-    Omit<ProductForClient, 'promoterCommissionPct' | 'pointsPct'>[]
-  > {
+  async findAllPublic(
+    viewer?: AuthenticatedUser | null,
+  ): Promise<Omit<ProductForClient, 'promoterCommissionPct' | 'pointsPct'>[]> {
     const rows = await this.products.find({
       where: { isAvailable: true },
       relations: ['category'],
       order: { displayOrder: 'ASC', createdAt: 'DESC' },
     });
+
+    // Un cliente con vendedor asignado ve SOLO el catálogo de su vendedor.
+    // Invitado, cliente sin vendedor, o vendedor sin catálogo cargado → ve
+    // todo (ver catalog-scope.ts para por qué falla hacia "puede comprar").
+    const scoped = viewer?.sellerId
+      ? applyCatalogScope(
+          rows,
+          await this.sellerCatalogProductIds(viewer.sellerId),
+        )
+      : rows;
+
     const now = new Date();
-    return rows.map((p) => {
+    return scoped.map((p) => {
       const { promoterCommissionPct, pointsPct, ...pub } = this.toClient(
         p,
         now,
@@ -77,6 +94,90 @@ export class ProductsService implements OnModuleInit {
       void pointsPct;
       return pub;
     });
+  }
+
+  /** Ids de los productos que lleva un vendedor. Vacío = catálogo sin cargar. */
+  private async sellerCatalogProductIds(sellerId: string): Promise<string[]> {
+    const rows = await this.sellerProducts.find({
+      where: { sellerId },
+      select: ['productId'],
+    });
+    return rows.map((r) => r.productId);
+  }
+
+  /**
+   * Catálogo de un vendedor. El super admin ve el de cualquiera; un vendedor
+   * solo el suyo — nunca el de otro, que es su lista de productos y sus
+   * márgenes.
+   */
+  async getSellerCatalog(
+    sellerId: string,
+    actor: AuthenticatedUser,
+  ): Promise<SellerProduct[]> {
+    if (actor.role !== UserRole.SUPER_ADMIN_DELIVERY) {
+      if (actor.role !== UserRole.SELLER || actor.id !== sellerId) {
+        throw new ForbiddenException('Sin acceso a este catálogo');
+      }
+    }
+    return this.sellerProducts.find({
+      where: { sellerId },
+      relations: ['product'],
+    });
+  }
+
+  /**
+   * Reemplaza el catálogo completo de un vendedor. Solo super admin.
+   *
+   * Reemplazo total dentro de una transacción: dos admins editando a la vez no
+   * pueden dejarlo mitad viejo y mitad nuevo.
+   */
+  async setSellerCatalog(
+    sellerId: string,
+    actor: AuthenticatedUser,
+    dto: SetSellerCatalogDto,
+  ): Promise<SellerProduct[]> {
+    this.assertSuperAdmin(actor);
+
+    const seller = await this.users.findOne({ where: { id: sellerId } });
+    if (!seller) throw new NotFoundException('Vendedor no encontrado');
+    if (seller.role !== UserRole.SELLER) {
+      throw new BadRequestException({
+        code: 'NOT_A_SELLER',
+        message: 'Ese usuario no tiene rol de vendedor',
+      });
+    }
+
+    const ids = dto.items.map((i) => i.productId);
+    if (new Set(ids).size !== ids.length) {
+      throw new BadRequestException('Productos duplicados en el catálogo');
+    }
+    if (ids.length > 0) {
+      const found = await this.products.find({
+        where: { id: In(ids) },
+        select: ['id'],
+      });
+      if (found.length !== ids.length) {
+        throw new NotFoundException('Producto no encontrado');
+      }
+    }
+
+    await this.sellerProducts.manager.transaction(async (tx) => {
+      const repo = tx.getRepository(SellerProduct);
+      await repo.delete({ sellerId });
+      if (dto.items.length > 0) {
+        await repo.save(
+          dto.items.map((i) =>
+            repo.create({
+              sellerId,
+              productId: i.productId,
+              commissionPct: i.commissionPct.toFixed(2),
+            }),
+          ),
+        );
+      }
+    });
+
+    return this.getSellerCatalog(sellerId, actor);
   }
 
   /** Catálogo editable (super admin) — todos los productos. */
