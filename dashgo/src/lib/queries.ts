@@ -8,6 +8,9 @@ import type {
   AdminRentalResponse,
   AdminUser,
   UserRole,
+  SellerCatalogItem,
+  SellerEarnings,
+  SellerPayableRow,
   AdminUsersSubscriptionFilter,
   AuthorizedIntent,
   AuthUser,
@@ -208,6 +211,65 @@ export function useUpdateInventory() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['products'] })
     },
+  })
+}
+
+
+/** Catálogo de un vendedor: qué productos lleva y cuánto gana por cada uno. */
+export function useSellerCatalog(sellerId: string | null) {
+  return useQuery<SellerCatalogItem[]>({
+    queryKey: ['sellers', sellerId, 'catalog'],
+    queryFn: async () =>
+      (await api.get<SellerCatalogItem[]>(`/products/sellers/${sellerId}/catalog`))
+        .data,
+    enabled: !!sellerId,
+  })
+}
+
+/**
+ * Reemplaza el catálogo COMPLETO de un vendedor (no parches por producto):
+ * así dos ediciones simultáneas no lo dejan mitad viejo y mitad nuevo.
+ */
+export function useSetSellerCatalog() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async ({
+      sellerId,
+      items,
+    }: {
+      sellerId: string
+      items: { productId: string; commissionPct: number }[]
+    }) => {
+      const { data } = await api.put<SellerCatalogItem[]>(
+        `/products/sellers/${sellerId}/catalog`,
+        { items },
+      )
+      return data
+    },
+    onSuccess: (_d, vars) => {
+      qc.invalidateQueries({ queryKey: ['sellers', vars.sellerId, 'catalog'] })
+      // El catálogo que ve el cliente depende de esto.
+      qc.invalidateQueries({ queryKey: ['products'] })
+    },
+  })
+}
+
+/** Ingresos de un vendedor. El vendedor pide los suyos; el admin cualquiera. */
+export function useSellerEarnings(sellerId: string | null) {
+  return useQuery<SellerEarnings>({
+    queryKey: ['sellers', sellerId, 'earnings'],
+    queryFn: async () =>
+      (await api.get<SellerEarnings>(`/sellers/${sellerId}/earnings`)).data,
+    enabled: !!sellerId,
+  })
+}
+
+/** Super admin: a quién hay que pagarle y cuánto, separado por método. */
+export function useSellersPayable() {
+  return useQuery<SellerPayableRow[]>({
+    queryKey: ['sellers', 'payable'],
+    queryFn: async () =>
+      (await api.get<SellerPayableRow[]>('/sellers/payable')).data,
   })
 }
 

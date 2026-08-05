@@ -529,6 +529,43 @@ export interface AdminUser {
   sellerId?: string | null
 }
 
+
+export interface SellerEarningsBreakdown {
+  pendingCents: number
+  claimableCents: number
+  paidCents: number
+}
+
+/**
+ * Ingresos de un vendedor. El desglose por método de pago NO es decorativo:
+ * con tarjeta la plata entró a la empresa y se le debe la comisión; en
+ * efectivo alguien ya agarró los billetes.
+ */
+export interface SellerEarnings extends SellerEarningsBreakdown {
+  sellerId: string
+  byPaymentMethod: {
+    card: SellerEarningsBreakdown
+    cash: SellerEarningsBreakdown
+    unknown: SellerEarningsBreakdown
+  }
+}
+
+export interface SellerPayableRow extends SellerEarnings {
+  fullName: string
+}
+
+/**
+ * Una línea del catálogo de un vendedor. `commissionPct` es lo que GANA el
+ * vendedor sobre esa línea (numeric del backend → string).
+ */
+export interface SellerCatalogItem {
+  id: string
+  sellerId: string
+  productId: string
+  commissionPct: string
+  product?: Product
+}
+
 export type AdminUsersSubscriptionFilter = 'active' | 'none'
 
 // ── User Addresses ────────────────────────────────────────────────────────────

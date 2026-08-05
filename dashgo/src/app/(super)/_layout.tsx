@@ -24,13 +24,27 @@ const SUPER_MORE_ITEMS: MoreSheetItem[] = [
   { label: 'Usuarios', icon: { ios: 'person.2.fill', android: 'group' }, route: '/(super)/users' },
   { label: 'Suscripción', icon: { ios: 'crown.fill', android: 'workspace_premium' }, route: '/(super)/subscription' },
   { label: 'Alquileres', icon: { ios: 'drop.fill', android: 'water_drop' }, route: '/(super)/rentals' },
+  { label: 'Vendedores', icon: { ios: 'bag.fill', android: 'store' }, route: '/(super)/sellers' },
   { label: 'Reparto', icon: { ios: 'person.crop.circle.fill', android: 'account_circle' }, route: '/(super)/profile' },
+]
+
+/**
+ * Overflow del VENDEDOR. Entra al mismo panel, pero recortado: su cartera de
+ * clientes y sus ingresos. El resto (productos, categorías, crédito,
+ * suscripción, promotores) no le corresponde y la API se lo rechazaría —
+ * mostrarle pestañas que no puede usar es peor que no mostrarlas.
+ */
+const SELLER_MORE_ITEMS: MoreSheetItem[] = [
+  { label: 'Mis clientes', icon: { ios: 'person.2.fill', android: 'group' }, route: '/(super)/users' },
+  { label: 'Mis ingresos', icon: { ios: 'dollarsign.circle.fill', android: 'payments' }, route: '/(super)/earnings' },
+  { label: 'Mi cuenta', icon: { ios: 'person.crop.circle.fill', android: 'account_circle' }, route: '/(super)/profile' },
 ]
 
 export default function SuperLayout() {
   const { data: user, isPending } = useCurrentUser()
   const [moreOpen, setMoreOpen] = useState(false)
   const screenOptions = useTabBarScreenOptions()
+  const isSellerView = user?.role === 'seller'
 
   useEffect(() => {
     if (isPending) return
@@ -59,6 +73,8 @@ export default function SuperLayout() {
           name="products"
           options={{
             title: 'Catálogo',
+            // El vendedor no administra el catálogo global.
+            href: isSellerView ? null : undefined,
             tabBarIcon: ({ focused }) => <TabBarIcon focused={focused} name={ICONS.products} />,
             tabBarLabel: ({ focused }) => <TabBarLabel focused={focused}>Catálogo</TabBarLabel>,
           }}
@@ -67,6 +83,7 @@ export default function SuperLayout() {
           name="categories"
           options={{
             title: 'Categorías',
+            href: isSellerView ? null : undefined,
             tabBarIcon: ({ focused }) => <TabBarIcon focused={focused} name={ICONS.categories} />,
             tabBarLabel: ({ focused }) => <TabBarLabel focused={focused}>Categorías</TabBarLabel>,
           }}
@@ -96,12 +113,14 @@ export default function SuperLayout() {
         <Tabs.Screen name="subscription" options={{ title: 'Suscripción', href: null }} />
         <Tabs.Screen name="rentals" options={{ title: 'Alquileres', href: null }} />
         <Tabs.Screen name="profile" options={{ title: 'Reparto', href: null }} />
+        <Tabs.Screen name="sellers" options={{ title: 'Vendedores', href: null }} />
+        <Tabs.Screen name="earnings" options={{ title: 'Mis ingresos', href: null }} />
       </Tabs>
 
       <MoreSheet
         visible={moreOpen}
         onClose={() => setMoreOpen(false)}
-        items={SUPER_MORE_ITEMS}
+        items={isSellerView ? SELLER_MORE_ITEMS : SUPER_MORE_ITEMS}
       />
     </>
   )

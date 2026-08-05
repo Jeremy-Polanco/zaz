@@ -18,6 +18,7 @@ import {
 import type { AdminUser, AdminUsersSubscriptionFilter, UserRole } from '../../lib/types'
 import { Eyebrow, Hairline, SectionHead } from '../../components/ui'
 import { UserAddressesPanel } from '../../components/UserAddressesPanel'
+import { SellerCatalogPanel } from '../../components/SellerCatalogPanel'
 import { isSuperAdmin } from '../../lib/roles'
 
 const ROLE_LABELS: Record<UserRole, string> = {
@@ -83,6 +84,7 @@ function UserRow({
   pendingUpdate: boolean
 }) {
   const [expanded, setExpanded] = useState(false)
+  const [catalogOpen, setCatalogOpen] = useState(false)
   // Un super admin no se edita desde acá — ni a sí mismo (perdería el panel sin
   // forma de volver) ni a otro.
   const editable =
@@ -110,6 +112,13 @@ function UserRow({
               {expanded ? 'Ocultar' : 'Direcciones'}
             </Text>
           </Pressable>
+          {canEditRole && item.role === 'seller' ? (
+            <Pressable onPress={() => setCatalogOpen((v) => !v)} hitSlop={8}>
+              <Text className="font-sans text-[10px] uppercase tracking-label text-brand">
+                {catalogOpen ? 'Ocultar' : 'Catálogo'}
+              </Text>
+            </Pressable>
+          ) : null}
           {/* Self-deletion is a 403 on DELETE /users/:id — the admin's own
               account is deleted from Perfil (DELETE /auth/me) instead. */}
           {isSelf ? (
@@ -221,6 +230,11 @@ function UserRow({
               ))}
             </View>
           ) : null}
+        </View>
+      ) : null}
+      {catalogOpen ? (
+        <View className="mt-3">
+          <SellerCatalogPanel sellerId={item.id} sellerName={item.fullName} />
         </View>
       ) : null}
       {expanded ? (
