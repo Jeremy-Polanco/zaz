@@ -2,6 +2,7 @@ import { createFileRoute, isRedirect, redirect } from '@tanstack/react-router'
 import { Fragment, useMemo, useState } from 'react'
 import { SectionHeading } from '../components/ui'
 import { UserAddressesPanel } from '../components/UserAddressesPanel'
+import { SellerCatalogPanel } from '../components/SellerCatalogPanel'
 import {
   useAdminUsers,
   useCurrentUser,
@@ -278,6 +279,7 @@ function SuperUsersPage() {
   >(undefined)
   const [searchText, setSearchText] = useState('')
   const [expandedId, setExpandedId] = useState<string | null>(null)
+  const [catalogId, setCatalogId] = useState<string | null>(null)
   const [pendingDelete, setPendingDelete] = useState<AdminUser | null>(null)
   const [birthdayMonthOnly, setBirthdayMonthOnly] = useState(false)
 
@@ -488,6 +490,18 @@ function SuperUsersPage() {
                           >
                             {expanded ? 'Ocultar' : 'Direcciones'}
                           </button>
+                          {u.role === 'seller' ? (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setCatalogId(catalogId === u.id ? null : u.id)
+                              }
+                              aria-expanded={catalogId === u.id}
+                              className="ml-3 text-[0.65rem] uppercase tracking-[0.12em] text-brand hover:underline"
+                            >
+                              {catalogId === u.id ? 'Ocultar' : 'Catálogo'}
+                            </button>
+                          ) : null}
                         </td>
                         <td className="p-4 text-right">
                           {me?.id === u.id ? (
@@ -507,8 +521,18 @@ function SuperUsersPage() {
                       </tr>
                       {expanded && (
                         <tr className="border-b border-ink/10 bg-ink/3">
-                          <td colSpan={8} className="p-4">
+                          <td colSpan={9} className="p-4">
                             <UserAddressesPanel userId={u.id} />
+                          </td>
+                        </tr>
+                      )}
+                      {catalogId === u.id && (
+                        <tr className="border-b border-ink/10 bg-ink/3">
+                          <td colSpan={9} className="p-4">
+                            <SellerCatalogPanel
+                              sellerId={u.id}
+                              sellerName={u.fullName}
+                            />
                           </td>
                         </tr>
                       )}

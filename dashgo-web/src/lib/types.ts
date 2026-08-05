@@ -501,6 +501,18 @@ export interface AdminUser {
   sellerId?: string | null
 }
 
+/**
+ * Una línea del catálogo de un vendedor. `commissionPct` es lo que GANA el
+ * vendedor sobre esa línea (numeric del backend → string).
+ */
+export interface SellerCatalogItem {
+  id: string
+  sellerId: string
+  productId: string
+  commissionPct: string
+  product?: Product
+}
+
 /** Filter for GET /users?subscription=... — omit for all users. */
 export type AdminUsersSubscriptionFilter = 'active' | 'none'
 

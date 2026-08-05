@@ -30,6 +30,7 @@ import type {
   CreateAddressInput,
   Rental,
   RentalFilter,
+  SellerCatalogItem,
   ShippingQuote,
   Subscription,
   SubscriptionPlan,
@@ -58,6 +59,49 @@ export function useAdminProducts() {
   return useQuery<Product[]>({
     queryKey: ['products', 'admin'],
     queryFn: async () => (await api.get<Product[]>('/products/admin')).data,
+  })
+}
+
+/**
+ * Catálogo de un vendedor: qué productos lleva y cuánto gana por cada uno.
+ * El super admin puede pedir el de cualquiera; un vendedor solo el suyo (lo
+ * decide el servidor).
+ */
+export function useSellerCatalog(sellerId: string | null) {
+  return useQuery<SellerCatalogItem[]>({
+    queryKey: ['sellers', sellerId, 'catalog'],
+    queryFn: async () =>
+      (await api.get<SellerCatalogItem[]>(`/products/sellers/${sellerId}/catalog`))
+        .data,
+    enabled: !!sellerId,
+  })
+}
+
+/**
+ * Reemplaza el catálogo COMPLETO de un vendedor (no parches por producto):
+ * así dos ediciones simultáneas no lo dejan mitad viejo y mitad nuevo.
+ */
+export function useSetSellerCatalog() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async ({
+      sellerId,
+      items,
+    }: {
+      sellerId: string
+      items: { productId: string; commissionPct: number }[]
+    }) => {
+      const { data } = await api.put<SellerCatalogItem[]>(
+        `/products/sellers/${sellerId}/catalog`,
+        { items },
+      )
+      return data
+    },
+    onSuccess: (_data, vars) => {
+      void qc.invalidateQueries({ queryKey: ['sellers', vars.sellerId, 'catalog'] })
+      // El catálogo del cliente depende de esto — que se refresque solo.
+      void qc.invalidateQueries({ queryKey: ['products'] })
+    },
   })
 }
 
