@@ -82,7 +82,44 @@ export class UsersService {
       }
     }
 
-    await this.users.update(id, dto);
+    if (dto.role !== undefined && dto.role !== target.role) {
+      // Escalada de privilegios: el super admin NO se reparte por HTTP. Se
+      // provisiona por bootstrap/consola a propósito, así una sesión de admin
+      // robada no puede fabricar otro admin.
+      if (dto.role === UserRole.SUPER_ADMIN_DELIVERY) {
+        throw new BadRequestException({
+          code: 'CANNOT_GRANT_SUPER_ADMIN',
+          message: 'El rol de super admin no se asigna desde el panel',
+        });
+      }
+      // Auto-bloqueo: un admin que se degrada a sí mismo pierde el panel y no
+      // tiene forma de volver.
+      if (id === actor.id) {
+        throw new BadRequestException({
+          code: 'CANNOT_CHANGE_OWN_ROLE',
+          message: 'No podés cambiar tu propio rol',
+        });
+      }
+    }
+
+    // Degradar a un vendedor deja a TODA su cartera apuntando a alguien que ya
+    // no es vendedor: esos clientes desaparecen del panel de todos (el scope
+    // busca `seller_id` de un seller). Se desasignan en la misma transacción
+    // que el cambio de rol — nunca en dos pasos.
+    const losesSellerRole =
+      target.role === UserRole.SELLER &&
+      dto.role !== undefined &&
+      dto.role !== UserRole.SELLER;
+
+    await this.users.manager.transaction(async (tx) => {
+      await tx.getRepository(User).update(id, dto);
+      if (losesSellerRole) {
+        await tx
+          .getRepository(User)
+          .update({ sellerId: id }, { sellerId: null });
+      }
+    });
+
     const updated = await this.users.findOne({ where: { id } });
     if (!updated) throw new NotFoundException();
     return updated;

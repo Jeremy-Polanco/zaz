@@ -9,9 +9,14 @@ import {
   useUpdateUserAdmin,
 } from '../lib/queries'
 import { TOKEN_KEY, api } from '../lib/api'
-import { isStaff, isSuperAdmin } from '../lib/roles'
+import { isStaff, isSuperAdmin, roleLabel } from '../lib/roles'
 import { serverMessage } from '../lib/utils'
-import type { AdminUser, AdminUsersSubscriptionFilter, AuthUser } from '../lib/types'
+import type {
+  AdminUser,
+  AdminUsersSubscriptionFilter,
+  AuthUser,
+  UserRole,
+} from '../lib/types'
 
 // ── Route definition ───────────────────────────────────────────────────────────
 
@@ -149,6 +154,56 @@ function DeleteUserModal({
         </div>
       </div>
     </div>
+  )
+}
+
+/**
+ * Roles asignables desde el panel. `super_admin_delivery` NO está: el super
+ * admin se provisiona por bootstrap/consola a propósito, así una sesión de
+ * admin robada no puede fabricar otro admin. El backend lo rechaza igual.
+ */
+const ASSIGNABLE_ROLES: { value: UserRole; label: string }[] = [
+  { value: 'client', label: 'Cliente' },
+  { value: 'seller', label: 'Vendedor' },
+  { value: 'promoter', label: 'Promotor' },
+]
+
+/**
+ * Celda "Rol". Acá es donde se registra un vendedor: la persona se da de alta
+ * como cliente normal (teléfono + OTP) y el super admin la pasa a Vendedor.
+ *
+ * Un super admin no se puede editar desde acá — ni a sí mismo (se quedaría sin
+ * panel y sin forma de volver) ni a otro.
+ */
+function RoleCell({
+  user,
+  canEdit,
+  onChange,
+  pending,
+}: {
+  user: AdminUser
+  canEdit: boolean
+  onChange: (role: UserRole) => void
+  pending: boolean
+}) {
+  if (!canEdit || user.role === 'super_admin_delivery') {
+    return <span>{roleLabel(user.role)}</span>
+  }
+
+  return (
+    <select
+      value={user.role}
+      disabled={pending}
+      onChange={(e) => onChange(e.target.value as UserRole)}
+      aria-label={`Rol de ${user.fullName}`}
+      className="w-full max-w-32 border border-ink/15 bg-paper px-2 py-1.5 text-[0.7rem] normal-case tracking-normal text-ink outline-none focus:border-ink disabled:opacity-50"
+    >
+      {ASSIGNABLE_ROLES.map((r) => (
+        <option key={r.value} value={r.value}>
+          {r.label}
+        </option>
+      ))}
+    </select>
   )
 }
 
@@ -330,7 +385,7 @@ function SuperUsersPage() {
                 <th className="hidden p-4 text-left text-[10px] font-medium uppercase tracking-wide text-ink-muted md:table-cell">
                   Email
                 </th>
-                <th className="hidden p-4 text-left text-[10px] font-medium uppercase tracking-wide text-ink-muted sm:table-cell">
+                <th className="p-4 text-left text-[10px] font-medium uppercase tracking-wide text-ink-muted">
                   Rol
                 </th>
                 <th className="p-4 text-left text-[10px] font-medium uppercase tracking-wide text-ink-muted">
@@ -366,8 +421,15 @@ function SuperUsersPage() {
                         <td className="p-4 font-medium text-ink">{u.fullName}</td>
                         <td className="p-4 text-ink-muted">{u.phone ?? '—'}</td>
                         <td className="hidden p-4 text-ink-muted md:table-cell">{u.email ?? '—'}</td>
-                        <td className="hidden p-4 text-[11px] uppercase tracking-wide text-ink-muted sm:table-cell">
-                          {u.role}
+                        <td className="p-4 text-[11px] uppercase tracking-wide text-ink-muted">
+                          <RoleCell
+                            user={u}
+                            canEdit={canAssign && u.id !== me?.id}
+                            onChange={(role) =>
+                              updateUser.mutate({ id: u.id, role })
+                            }
+                            pending={updateUser.isPending}
+                          />
                         </td>
                         <td className="p-4 whitespace-nowrap">
                           {u.dateOfBirth ? (

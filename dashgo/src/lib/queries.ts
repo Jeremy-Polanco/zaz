@@ -7,6 +7,7 @@ import type {
   AdminPlanResponse,
   AdminRentalResponse,
   AdminUser,
+  UserRole,
   AdminUsersSubscriptionFilter,
   AuthorizedIntent,
   AuthUser,
@@ -1017,6 +1018,35 @@ export function useDeleteUser() {
   return useMutation({
     mutationFn: async (id: string) => {
       await api.delete(`/users/${id}`)
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['users'] })
+    },
+  })
+}
+
+/**
+ * Super-admin: PATCH /users/:id — cambia el rol de un usuario, o asigna /
+ * desasigna (con `null`) su vendedor.
+ *
+ * Acá es donde se "registra" un vendedor: la persona se da de alta como cliente
+ * normal y el super admin la pasa a rol seller. El backend rechaza otorgar
+ * super admin y rechaza que un admin cambie su propio rol.
+ */
+export function useUpdateUserAdmin() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async ({
+      id,
+      ...patch
+    }: {
+      id: string
+      role?: UserRole
+      sellerId?: string | null
+      maintenanceTimerDisabled?: boolean
+    }) => {
+      const { data } = await api.patch<AdminUser>(`/users/${id}`, patch)
+      return data
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['users'] })

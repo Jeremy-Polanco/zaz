@@ -17,6 +17,10 @@ jest.mock('../../lib/queries', () => ({
   useAdminUsers: jest.fn(),
   useCurrentUser: jest.fn(),
   useDeleteUser: jest.fn(),
+  useUpdateUserAdmin: jest.fn(() => ({
+    mutate: jest.fn(),
+    isPending: false,
+  })),
 }))
 
 jest.mock('../../components/UserAddressesPanel', () => ({

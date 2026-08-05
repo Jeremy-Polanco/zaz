@@ -37,10 +37,21 @@ function makeUserRepoMock() {
     getRawAndEntities: jest.fn().mockResolvedValue({ entities: [], raw: [] }),
   };
 
+  // `update` es el mismo mock dentro y fuera de la transacción, así los tests
+  // ven todas las escrituras (el cambio de rol Y el arrastre de la cartera).
+  const update = jest.fn();
+  const manager = {
+    transaction: jest.fn(
+      async (cb: (tx: unknown) => Promise<unknown>) =>
+        cb({ getRepository: () => ({ update }) }),
+    ),
+  };
+
   return {
     findOne: jest.fn(),
     find: jest.fn(),
-    update: jest.fn(),
+    update,
+    manager,
     createQueryBuilder: jest.fn().mockReturnValue(qb),
     _qb: qb,
   };
@@ -333,6 +344,84 @@ describe('UsersService.updateByAdmin', () => {
     await expect(
       service.updateByAdmin(admin, 'target-1', { sellerId: 'target-1' }),
     ).rejects.toThrow('Un usuario no puede ser su propio vendedor');
+  });
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // Cambio de rol — así se "registra" un vendedor
+  // ───────────────────────────────────────────────────────────────────────────
+
+  it('promotes a client to seller', async () => {
+    userRepo.findOne
+      .mockResolvedValueOnce(fakeUser({ id: 'target-1', role: UserRole.CLIENT }))
+      .mockResolvedValueOnce(fakeUser({ id: 'target-1', role: UserRole.SELLER }));
+
+    const result = await service.updateByAdmin(admin, 'target-1', {
+      role: UserRole.SELLER,
+    });
+
+    expect(userRepo.update).toHaveBeenCalledWith('target-1', {
+      role: UserRole.SELLER,
+    });
+    expect(result.role).toBe(UserRole.SELLER);
+  });
+
+  it('refuses to grant SUPER_ADMIN over HTTP (privilege escalation)', async () => {
+    userRepo.findOne.mockResolvedValueOnce(
+      fakeUser({ id: 'target-1', role: UserRole.CLIENT }),
+    );
+
+    await expect(
+      service.updateByAdmin(admin, 'target-1', {
+        role: UserRole.SUPER_ADMIN_DELIVERY,
+      }),
+    ).rejects.toThrow('El rol de super admin no se asigna desde el panel');
+    expect(userRepo.update).not.toHaveBeenCalled();
+  });
+
+  it('refuses to let an admin change their OWN role (self-lockout)', async () => {
+    userRepo.findOne.mockResolvedValueOnce(
+      fakeUser({ id: 'admin-1', role: UserRole.SUPER_ADMIN_DELIVERY }),
+    );
+
+    await expect(
+      service.updateByAdmin(admin, 'admin-1', { role: UserRole.CLIENT }),
+    ).rejects.toThrow('No podés cambiar tu propio rol');
+    expect(userRepo.update).not.toHaveBeenCalled();
+  });
+
+  it('demoting a seller UNASSIGNS their whole book in the same transaction', async () => {
+    // Si no, esos clientes quedan apuntando a un seller_id que ya no es
+    // vendedor y desaparecen del panel de todos.
+    userRepo.findOne
+      .mockResolvedValueOnce(fakeUser({ id: 'seller-1', role: UserRole.SELLER }))
+      .mockResolvedValueOnce(fakeUser({ id: 'seller-1', role: UserRole.CLIENT }));
+
+    await service.updateByAdmin(admin, 'seller-1', { role: UserRole.CLIENT });
+
+    expect(userRepo.manager.transaction).toHaveBeenCalled();
+    expect(userRepo.update).toHaveBeenCalledWith('seller-1', {
+      role: UserRole.CLIENT,
+    });
+    expect(userRepo.update).toHaveBeenCalledWith(
+      { sellerId: 'seller-1' },
+      { sellerId: null },
+    );
+  });
+
+  it('does NOT touch the book when the seller keeps their role', async () => {
+    userRepo.findOne
+      .mockResolvedValueOnce(fakeUser({ id: 'seller-1', role: UserRole.SELLER }))
+      .mockResolvedValueOnce(fakeUser({ id: 'seller-1', role: UserRole.SELLER }));
+
+    await service.updateByAdmin(admin, 'seller-1', {
+      maintenanceTimerDisabled: true,
+    });
+
+    const unassigned = userRepo.update.mock.calls.some(
+      (c: unknown[]) =>
+        typeof c[0] === 'object' && c[0] !== null && 'sellerId' in c[0],
+    );
+    expect(unassigned).toBe(false);
   });
 
   it('unassigns a seller with an explicit null (no seller lookup)', async () => {

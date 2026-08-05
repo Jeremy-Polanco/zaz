@@ -525,6 +525,8 @@ export interface AdminUser {
   createdAt: string
   hasActiveSubscription: boolean
   subscriptionStatus: string | null
+  /** Vendedor asignado. null = sin vendedor. Solo el super admin lo escribe. */
+  sellerId?: string | null
 }
 
 export type AdminUsersSubscriptionFilter = 'active' | 'none'

@@ -9,10 +9,16 @@ import {
   View,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
-import { useAdminUsers, useCurrentUser, useDeleteUser } from '../../lib/queries'
+import {
+  useAdminUsers,
+  useCurrentUser,
+  useDeleteUser,
+  useUpdateUserAdmin,
+} from '../../lib/queries'
 import type { AdminUser, AdminUsersSubscriptionFilter, UserRole } from '../../lib/types'
 import { Eyebrow, Hairline, SectionHead } from '../../components/ui'
 import { UserAddressesPanel } from '../../components/UserAddressesPanel'
+import { isSuperAdmin } from '../../lib/roles'
 
 const ROLE_LABELS: Record<UserRole, string> = {
   client: 'Cliente',
@@ -48,18 +54,39 @@ function SubscriptionBadge({ active }: { active: boolean }) {
   )
 }
 
+/**
+ * Roles asignables desde el panel. `super_admin_delivery` NO está: se
+ * provisiona por bootstrap/consola a propósito, así una sesión de admin robada
+ * no puede fabricar otro admin. El backend lo rechaza igual.
+ */
+const ASSIGNABLE_ROLES: UserRole[] = ['client', 'seller', 'promoter']
+
 function UserRow({
   item,
   isSelf,
   isDeleting,
   onDelete,
+  canEditRole,
+  onChangeRole,
+  sellers,
+  onAssignSeller,
+  pendingUpdate,
 }: {
   item: AdminUser
   isSelf: boolean
   isDeleting: boolean
   onDelete: (user: AdminUser) => void
+  canEditRole: boolean
+  onChangeRole: (user: AdminUser, role: UserRole) => void
+  sellers: AdminUser[]
+  onAssignSeller: (user: AdminUser, sellerId: string | null) => void
+  pendingUpdate: boolean
 }) {
   const [expanded, setExpanded] = useState(false)
+  // Un super admin no se edita desde acá — ni a sí mismo (perdería el panel sin
+  // forma de volver) ni a otro.
+  const editable =
+    canEditRole && !isSelf && item.role !== 'super_admin_delivery'
   return (
     <View className="border-b border-ink/10 py-4">
       <View className="flex-row items-start justify-between gap-3">
@@ -109,6 +136,82 @@ function UserRow({
           )}
         </View>
       </View>
+      {editable ? (
+        <View className="mt-3 gap-2">
+          <View className="flex-row flex-wrap items-center gap-2">
+            <Text className="font-sans text-[10px] uppercase tracking-label text-ink-muted">
+              Rol
+            </Text>
+            {ASSIGNABLE_ROLES.map((r) => (
+              <Pressable
+                key={r}
+                onPress={() => onChangeRole(item, r)}
+                disabled={pendingUpdate || r === item.role}
+                accessibilityRole="button"
+                accessibilityLabel={`Poner a ${item.fullName} como ${ROLE_LABELS[r]}`}
+                className={`border px-2 py-1 ${
+                  r === item.role
+                    ? 'border-brand bg-brand/10'
+                    : 'border-ink/15 bg-paper'
+                }`}
+              >
+                <Text
+                  className={`font-sans text-[11px] ${
+                    r === item.role ? 'text-brand' : 'text-ink-muted'
+                  }`}
+                >
+                  {ROLE_LABELS[r]}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+
+          {item.role !== 'seller' && sellers.length > 0 ? (
+            <View className="flex-row flex-wrap items-center gap-2">
+              <Text className="font-sans text-[10px] uppercase tracking-label text-ink-muted">
+                Vendedor
+              </Text>
+              <Pressable
+                onPress={() => onAssignSeller(item, null)}
+                disabled={pendingUpdate || item.sellerId == null}
+                className={`border px-2 py-1 ${
+                  item.sellerId == null
+                    ? 'border-brand bg-brand/10'
+                    : 'border-ink/15 bg-paper'
+                }`}
+              >
+                <Text
+                  className={`font-sans text-[11px] ${
+                    item.sellerId == null ? 'text-brand' : 'text-ink-muted'
+                  }`}
+                >
+                  Sin asignar
+                </Text>
+              </Pressable>
+              {sellers.map((sel) => (
+                <Pressable
+                  key={sel.id}
+                  onPress={() => onAssignSeller(item, sel.id)}
+                  disabled={pendingUpdate || item.sellerId === sel.id}
+                  className={`border px-2 py-1 ${
+                    item.sellerId === sel.id
+                      ? 'border-brand bg-brand/10'
+                      : 'border-ink/15 bg-paper'
+                  }`}
+                >
+                  <Text
+                    className={`font-sans text-[11px] ${
+                      item.sellerId === sel.id ? 'text-brand' : 'text-ink-muted'
+                    }`}
+                  >
+                    {sel.fullName}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+          ) : null}
+        </View>
+      ) : null}
       {expanded ? (
         <View className="mt-3">
           <UserAddressesPanel userId={item.id} />
@@ -127,6 +230,14 @@ export default function SuperUsersScreen() {
   const { data: users, isPending, refetch, isRefetching } = useAdminUsers(subFilter)
   const { data: me } = useCurrentUser()
   const deleteUser = useDeleteUser()
+  const updateUser = useUpdateUserAdmin()
+  // Solo el super admin toca roles y cartera. Un vendedor entra a esta pantalla
+  // (ve sus clientes) pero no puede reasignar. La API lo rechaza igual.
+  const canEditRole = isSuperAdmin(me?.role)
+  const sellers = useMemo(
+    () => (users ?? []).filter((u) => u.role === 'seller'),
+    [users],
+  )
   const [deletingId, setDeletingId] = useState<string | null>(null)
 
   /**
@@ -259,6 +370,13 @@ export default function SuperUsersScreen() {
             isSelf={me?.id === item.id}
             isDeleting={deletingId === item.id}
             onDelete={handleDelete}
+            canEditRole={canEditRole}
+            onChangeRole={(u, role) => updateUser.mutate({ id: u.id, role })}
+            sellers={sellers}
+            onAssignSeller={(u, sellerId) =>
+              updateUser.mutate({ id: u.id, sellerId })
+            }
+            pendingUpdate={updateUser.isPending}
           />
         )}
         ListEmptyComponent={
