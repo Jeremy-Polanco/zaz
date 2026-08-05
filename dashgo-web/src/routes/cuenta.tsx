@@ -12,6 +12,7 @@ import { useUpdateMe } from '../lib/queries'
 import { TOKEN_KEY } from '../lib/api'
 import { serverMessage } from '../lib/utils'
 import { roleLabel as sharedRoleLabel } from '../lib/roles'
+import type { UserRole } from '../lib/types'
 
 export const Route = createFileRoute('/cuenta')({
   beforeLoad: () => {

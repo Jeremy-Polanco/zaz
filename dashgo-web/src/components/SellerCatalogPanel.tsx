@@ -76,7 +76,7 @@ export function SellerCatalogPanel({
     try {
       await save.mutateAsync({ sellerId, items })
     } catch (e) {
-      setError(serverMessage(e) ?? 'No se pudo guardar el catálogo.')
+      setError(serverMessage(e, 'No se pudo guardar el catálogo.'))
     }
   }
 

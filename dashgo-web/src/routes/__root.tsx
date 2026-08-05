@@ -17,6 +17,7 @@ import { NetworkBanner } from '../components/NetworkBanner'
 import { MaintenanceBanner } from '../components/MaintenanceBanner'
 import { LocationSelector } from '../components/LocationSelector'
 import { roleLabel } from '../lib/roles'
+import type { UserRole } from '../lib/types'
 
 const LOCKOUT_ALLOWLIST = new Set<string>(['/credit/pay', '/login'])
 

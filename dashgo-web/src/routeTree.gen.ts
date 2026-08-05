@@ -26,6 +26,7 @@ import { Route as PromoterIndexRouteImport } from './routes/promoter.index'
 import { Route as OrdersIndexRouteImport } from './routes/orders.index'
 import { Route as SuperUsersRouteImport } from './routes/super.users'
 import { Route as SuperSubscriptionRouteImport } from './routes/super.subscription'
+import { Route as SuperSellersRouteImport } from './routes/super.sellers'
 import { Route as SuperRentalsRouteImport } from './routes/super.rentals'
 import { Route as SuperPromotersRouteImport } from './routes/super.promoters'
 import { Route as SuperProductsRouteImport } from './routes/super.products'
@@ -33,6 +34,7 @@ import { Route as SuperOrdersRouteImport } from './routes/super.orders'
 import { Route as SuperNotificationsRouteImport } from './routes/super.notifications'
 import { Route as SuperCreditRouteImport } from './routes/super.credit'
 import { Route as SuperCategoriesRouteImport } from './routes/super.categories'
+import { Route as SellerEarningsRouteImport } from './routes/seller.earnings'
 import { Route as RCodeRouteImport } from './routes/r.$code'
 import { Route as PromoterPayoutsRouteImport } from './routes/promoter.payouts'
 import { Route as PromoterCommissionsRouteImport } from './routes/promoter.commissions'
@@ -130,6 +132,11 @@ const SuperSubscriptionRoute = SuperSubscriptionRouteImport.update({
   path: '/super/subscription',
   getParentRoute: () => rootRouteImport,
 } as any)
+const SuperSellersRoute = SuperSellersRouteImport.update({
+  id: '/super/sellers',
+  path: '/super/sellers',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const SuperRentalsRoute = SuperRentalsRouteImport.update({
   id: '/super/rentals',
   path: '/super/rentals',
@@ -163,6 +170,11 @@ const SuperCreditRoute = SuperCreditRouteImport.update({
 const SuperCategoriesRoute = SuperCategoriesRouteImport.update({
   id: '/super/categories',
   path: '/super/categories',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SellerEarningsRoute = SellerEarningsRouteImport.update({
+  id: '/seller/earnings',
+  path: '/seller/earnings',
   getParentRoute: () => rootRouteImport,
 } as any)
 const RCodeRoute = RCodeRouteImport.update({
@@ -240,6 +252,7 @@ export interface FileRoutesByFullPath {
   '/promoter/commissions': typeof PromoterCommissionsRoute
   '/promoter/payouts': typeof PromoterPayoutsRoute
   '/r/$code': typeof RCodeRoute
+  '/seller/earnings': typeof SellerEarningsRoute
   '/super/categories': typeof SuperCategoriesRoute
   '/super/credit': typeof SuperCreditRouteWithChildren
   '/super/notifications': typeof SuperNotificationsRoute
@@ -247,6 +260,7 @@ export interface FileRoutesByFullPath {
   '/super/products': typeof SuperProductsRoute
   '/super/promoters': typeof SuperPromotersRouteWithChildren
   '/super/rentals': typeof SuperRentalsRoute
+  '/super/sellers': typeof SuperSellersRoute
   '/super/subscription': typeof SuperSubscriptionRoute
   '/super/users': typeof SuperUsersRoute
   '/orders/': typeof OrdersIndexRoute
@@ -275,11 +289,13 @@ export interface FileRoutesByTo {
   '/promoter/commissions': typeof PromoterCommissionsRoute
   '/promoter/payouts': typeof PromoterPayoutsRoute
   '/r/$code': typeof RCodeRoute
+  '/seller/earnings': typeof SellerEarningsRoute
   '/super/categories': typeof SuperCategoriesRoute
   '/super/notifications': typeof SuperNotificationsRoute
   '/super/orders': typeof SuperOrdersRoute
   '/super/products': typeof SuperProductsRoute
   '/super/rentals': typeof SuperRentalsRoute
+  '/super/sellers': typeof SuperSellersRoute
   '/super/subscription': typeof SuperSubscriptionRoute
   '/super/users': typeof SuperUsersRoute
   '/orders': typeof OrdersIndexRoute
@@ -311,6 +327,7 @@ export interface FileRoutesById {
   '/promoter/commissions': typeof PromoterCommissionsRoute
   '/promoter/payouts': typeof PromoterPayoutsRoute
   '/r/$code': typeof RCodeRoute
+  '/seller/earnings': typeof SellerEarningsRoute
   '/super/categories': typeof SuperCategoriesRoute
   '/super/credit': typeof SuperCreditRouteWithChildren
   '/super/notifications': typeof SuperNotificationsRoute
@@ -318,6 +335,7 @@ export interface FileRoutesById {
   '/super/products': typeof SuperProductsRoute
   '/super/promoters': typeof SuperPromotersRouteWithChildren
   '/super/rentals': typeof SuperRentalsRoute
+  '/super/sellers': typeof SuperSellersRoute
   '/super/subscription': typeof SuperSubscriptionRoute
   '/super/users': typeof SuperUsersRoute
   '/orders/': typeof OrdersIndexRoute
@@ -350,6 +368,7 @@ export interface FileRouteTypes {
     | '/promoter/commissions'
     | '/promoter/payouts'
     | '/r/$code'
+    | '/seller/earnings'
     | '/super/categories'
     | '/super/credit'
     | '/super/notifications'
@@ -357,6 +376,7 @@ export interface FileRouteTypes {
     | '/super/products'
     | '/super/promoters'
     | '/super/rentals'
+    | '/super/sellers'
     | '/super/subscription'
     | '/super/users'
     | '/orders/'
@@ -385,11 +405,13 @@ export interface FileRouteTypes {
     | '/promoter/commissions'
     | '/promoter/payouts'
     | '/r/$code'
+    | '/seller/earnings'
     | '/super/categories'
     | '/super/notifications'
     | '/super/orders'
     | '/super/products'
     | '/super/rentals'
+    | '/super/sellers'
     | '/super/subscription'
     | '/super/users'
     | '/orders'
@@ -420,6 +442,7 @@ export interface FileRouteTypes {
     | '/promoter/commissions'
     | '/promoter/payouts'
     | '/r/$code'
+    | '/seller/earnings'
     | '/super/categories'
     | '/super/credit'
     | '/super/notifications'
@@ -427,6 +450,7 @@ export interface FileRouteTypes {
     | '/super/products'
     | '/super/promoters'
     | '/super/rentals'
+    | '/super/sellers'
     | '/super/subscription'
     | '/super/users'
     | '/orders/'
@@ -456,6 +480,7 @@ export interface RootRouteChildren {
   PromoterCommissionsRoute: typeof PromoterCommissionsRoute
   PromoterPayoutsRoute: typeof PromoterPayoutsRoute
   RCodeRoute: typeof RCodeRoute
+  SellerEarningsRoute: typeof SellerEarningsRoute
   SuperCategoriesRoute: typeof SuperCategoriesRoute
   SuperCreditRoute: typeof SuperCreditRouteWithChildren
   SuperNotificationsRoute: typeof SuperNotificationsRoute
@@ -463,6 +488,7 @@ export interface RootRouteChildren {
   SuperProductsRoute: typeof SuperProductsRoute
   SuperPromotersRoute: typeof SuperPromotersRouteWithChildren
   SuperRentalsRoute: typeof SuperRentalsRoute
+  SuperSellersRoute: typeof SuperSellersRoute
   SuperSubscriptionRoute: typeof SuperSubscriptionRoute
   SuperUsersRoute: typeof SuperUsersRoute
   PromoterIndexRoute: typeof PromoterIndexRoute
@@ -589,6 +615,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SuperSubscriptionRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/super/sellers': {
+      id: '/super/sellers'
+      path: '/super/sellers'
+      fullPath: '/super/sellers'
+      preLoaderRoute: typeof SuperSellersRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/super/rentals': {
       id: '/super/rentals'
       path: '/super/rentals'
@@ -636,6 +669,13 @@ declare module '@tanstack/react-router' {
       path: '/super/categories'
       fullPath: '/super/categories'
       preLoaderRoute: typeof SuperCategoriesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/seller/earnings': {
+      id: '/seller/earnings'
+      path: '/seller/earnings'
+      fullPath: '/seller/earnings'
+      preLoaderRoute: typeof SellerEarningsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/r/$code': {
@@ -801,6 +841,7 @@ const rootRouteChildren: RootRouteChildren = {
   PromoterCommissionsRoute: PromoterCommissionsRoute,
   PromoterPayoutsRoute: PromoterPayoutsRoute,
   RCodeRoute: RCodeRoute,
+  SellerEarningsRoute: SellerEarningsRoute,
   SuperCategoriesRoute: SuperCategoriesRoute,
   SuperCreditRoute: SuperCreditRouteWithChildren,
   SuperNotificationsRoute: SuperNotificationsRoute,
@@ -808,6 +849,7 @@ const rootRouteChildren: RootRouteChildren = {
   SuperProductsRoute: SuperProductsRoute,
   SuperPromotersRoute: SuperPromotersRouteWithChildren,
   SuperRentalsRoute: SuperRentalsRoute,
+  SuperSellersRoute: SuperSellersRoute,
   SuperSubscriptionRoute: SuperSubscriptionRoute,
   SuperUsersRoute: SuperUsersRoute,
   PromoterIndexRoute: PromoterIndexRoute,

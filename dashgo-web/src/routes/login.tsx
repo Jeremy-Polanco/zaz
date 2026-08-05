@@ -13,6 +13,7 @@ import {
 import { useLogin, useSendOtp, useVerifyOtp } from '../lib/auth'
 import { Button, FieldError, Input, Label, PhoneField } from '../components/ui'
 import { isStaff } from '../lib/roles'
+import type { UserRole } from '../lib/types'
 
 export const Route = createFileRoute('/login')({
   validateSearch: (search: Record<string, unknown>) => ({
