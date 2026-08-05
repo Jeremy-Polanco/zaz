@@ -25,6 +25,7 @@ import { PaymentsService } from '../payments/payments.service';
 import { PointsService } from '../points/points.service';
 import { InvoicesService } from '../invoices/invoices.service';
 import { PromotersService } from '../promoters/promoters.service';
+import { SellersService } from '../sellers/sellers.service';
 import { ShippingService } from '../shipping/shipping.service';
 import { CreditService } from '../credit/credit.service';
 import { SubscriptionService } from '../subscription/subscription.service';
@@ -145,6 +146,7 @@ describe('OrdersService', () => {
   let pointsService: jest.Mocked<PointsService>;
   let invoicesService: jest.Mocked<InvoicesService>;
   let promotersService: jest.Mocked<PromotersService>;
+  let sellersService: jest.Mocked<SellersService>;
   let shippingService: jest.Mocked<ShippingService>;
   let creditService: jest.Mocked<CreditService>;
   let subscriptionService: jest.Mocked<SubscriptionService>;
@@ -175,6 +177,13 @@ describe('OrdersService', () => {
     invoicesService = {
       createForOrder: jest.fn(),
     } as unknown as jest.Mocked<InvoicesService>;
+
+    sellersService = {
+
+      creditCommissionsForOrder: jest.fn().mockResolvedValue(undefined),
+
+    } as unknown as jest.Mocked<SellersService>;
+
 
     promotersService = {
       creditCommissionsForOrder: jest.fn(),
@@ -235,6 +244,7 @@ describe('OrdersService', () => {
         { provide: PointsService, useValue: pointsService },
         { provide: InvoicesService, useValue: invoicesService },
         { provide: PromotersService, useValue: promotersService },
+        { provide: SellersService, useValue: sellersService },
         { provide: ShippingService, useValue: shippingService },
         { provide: CreditService, useValue: creditService },
         { provide: SubscriptionService, useValue: subscriptionService },

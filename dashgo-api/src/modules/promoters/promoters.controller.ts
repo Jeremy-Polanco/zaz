@@ -16,15 +16,15 @@ import { Public } from '../../common/decorators/public.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import type { AuthenticatedUser } from '../../common/types/authenticated-user';
 import { UserRole } from '../../entities/enums';
-import { PromoterCommissionEntryStatus } from '../../entities';
+import { CommissionEntryStatus } from '../../entities';
 import { PromotersService } from './promoters.service';
 import { InvitePromoterDto } from './dto/invite-promoter.dto';
 import { CreatePayoutDto } from './dto/create-payout.dto';
 
 const VALID_COMMISSION_STATUS = new Set<string>([
-  PromoterCommissionEntryStatus.PENDING,
-  PromoterCommissionEntryStatus.CLAIMABLE,
-  PromoterCommissionEntryStatus.PAID,
+  CommissionEntryStatus.PENDING,
+  CommissionEntryStatus.CLAIMABLE,
+  CommissionEntryStatus.PAID,
 ]);
 
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -133,10 +133,10 @@ export class PromotersController {
   }
 }
 
-function toStatus(value?: string): PromoterCommissionEntryStatus | undefined {
+function toStatus(value?: string): CommissionEntryStatus | undefined {
   if (!value) return undefined;
   if (!VALID_COMMISSION_STATUS.has(value)) return undefined;
-  return value as PromoterCommissionEntryStatus;
+  return value as CommissionEntryStatus;
 }
 
 function parseIntSafe(value: string | undefined): number | undefined {

@@ -9,9 +9,10 @@ import {
   PointsEntryType,
   PointsLedgerEntry,
   Product,
-  PromoterCommissionEntry,
-  PromoterCommissionEntryStatus,
-  PromoterCommissionEntryType,
+  CommissionEntry,
+  CommissionEntryStatus,
+  EarnerRole,
+  CommissionEntryType,
   User,
 } from '../entities';
 import { UserRole } from '../entities/enums';
@@ -28,7 +29,7 @@ async function run() {
   const categoryRepo = AppDataSource.getRepository(Category);
   const productRepo = AppDataSource.getRepository(Product);
   const ledgerRepo = AppDataSource.getRepository(PointsLedgerEntry);
-  const commRepo = AppDataSource.getRepository(PromoterCommissionEntry);
+  const commRepo = AppDataSource.getRepository(CommissionEntry);
   const creditAccountRepo = AppDataSource.getRepository(CreditAccount);
   const creditMovementRepo = AppDataSource.getRepository(CreditMovement);
 
@@ -283,11 +284,12 @@ async function run() {
   console.log('Seeding comisión claimable demo para promotor…');
   await commRepo.save(
     commRepo.create({
-      promoterId: promoter.id,
+      earnerId: promoter.id,
+      earnerRole: EarnerRole.PROMOTER,
       referredUserId: client.id,
       orderId: null,
-      type: PromoterCommissionEntryType.EARNED,
-      status: PromoterCommissionEntryStatus.CLAIMABLE,
+      type: CommissionEntryType.EARNED,
+      status: CommissionEntryStatus.CLAIMABLE,
       amountCents: 500,
       claimableAt: new Date(Date.now() - 24 * 3600 * 1000),
       payoutId: null,

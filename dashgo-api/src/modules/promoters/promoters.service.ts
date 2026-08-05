@@ -19,9 +19,10 @@ import {
   Order,
   OrderItem,
   Payout,
-  PromoterCommissionEntry,
-  PromoterCommissionEntryStatus,
-  PromoterCommissionEntryType,
+  CommissionEntry,
+  CommissionEntryStatus,
+  EarnerRole,
+  CommissionEntryType,
   User,
 } from '../../entities';
 import { UserRole } from '../../entities/enums';
@@ -85,8 +86,8 @@ export interface ReferredCustomerSummary {
 
 export interface PromoterCommissionEntryView {
   id: string;
-  type: PromoterCommissionEntryType;
-  status: PromoterCommissionEntryStatus;
+  type: CommissionEntryType;
+  status: CommissionEntryStatus;
   amountCents: number;
   orderId: string | null;
   referredUserId: string | null;
@@ -120,7 +121,7 @@ export interface PromoterDashboardView {
 }
 
 export interface CommissionsPageFilter {
-  status?: PromoterCommissionEntryStatus;
+  status?: CommissionEntryStatus;
   page?: number;
   pageSize?: number;
 }
@@ -139,8 +140,8 @@ export class PromotersService {
 
   constructor(
     @InjectRepository(User) private readonly users: Repository<User>,
-    @InjectRepository(PromoterCommissionEntry)
-    private readonly commissions: Repository<PromoterCommissionEntry>,
+    @InjectRepository(CommissionEntry)
+    private readonly commissions: Repository<CommissionEntry>,
     @InjectRepository(Payout) private readonly payouts: Repository<Payout>,
     private readonly dataSource: DataSource,
     private readonly config: ConfigService,
@@ -283,7 +284,7 @@ export class PromotersService {
       const orderRepo = mgr.getRepository(Order);
       const itemRepo = mgr.getRepository(OrderItem);
       const userRepo = mgr.getRepository(User);
-      const commRepo = mgr.getRepository(PromoterCommissionEntry);
+      const commRepo = mgr.getRepository(CommissionEntry);
 
       const order = await orderRepo.findOne({ where: { id: orderId } });
       if (!order) return;
@@ -310,7 +311,7 @@ export class PromotersService {
       const existing = await commRepo.count({
         where: {
           orderId: order.id,
-          type: PromoterCommissionEntryType.EARNED,
+          type: CommissionEntryType.EARNED,
         },
       });
       if (existing > 0) return;
@@ -344,11 +345,12 @@ export class PromotersService {
 
       await commRepo.save(
         commRepo.create({
-          promoterId: promoter.id,
+          earnerId: promoter.id,
+          earnerRole: EarnerRole.PROMOTER,
           referredUserId: customer.id,
           orderId: order.id,
-          type: PromoterCommissionEntryType.EARNED,
-          status: PromoterCommissionEntryStatus.PENDING,
+          type: CommissionEntryType.EARNED,
+          status: CommissionEntryStatus.PENDING,
           amountCents: totalCommissionCents,
           claimableAt,
           payoutId: null,
@@ -370,16 +372,16 @@ export class PromotersService {
     let vested = 0;
 
     await this.dataSource.transaction(async (tx) => {
-      const commRepo = tx.getRepository(PromoterCommissionEntry);
+      const commRepo = tx.getRepository(CommissionEntry);
       const pendingDue = await commRepo.find({
         where: {
-          type: PromoterCommissionEntryType.EARNED,
-          status: PromoterCommissionEntryStatus.PENDING,
+          type: CommissionEntryType.EARNED,
+          status: CommissionEntryStatus.PENDING,
           claimableAt: LessThanOrEqual(now),
         },
       });
       for (const e of pendingDue) {
-        e.status = PromoterCommissionEntryStatus.CLAIMABLE;
+        e.status = CommissionEntryStatus.CLAIMABLE;
         await commRepo.save(e);
         vested++;
       }
@@ -461,7 +463,7 @@ export class PromotersService {
   ): Promise<PayoutView> {
     return this.dataSource.transaction(async (tx) => {
       const userRepo = tx.getRepository(User);
-      const commRepo = tx.getRepository(PromoterCommissionEntry);
+      const commRepo = tx.getRepository(CommissionEntry);
       const payoutRepo = tx.getRepository(Payout);
 
       const promoter = await userRepo.findOne({ where: { id: promoterId } });
@@ -479,9 +481,10 @@ export class PromotersService {
       // Lock claimable entries for this promoter
       const claimable = await commRepo.find({
         where: {
-          promoterId: promoter.id,
-          type: PromoterCommissionEntryType.EARNED,
-          status: PromoterCommissionEntryStatus.CLAIMABLE,
+          earnerId: promoter.id,
+          earnerRole: EarnerRole.PROMOTER,
+          type: CommissionEntryType.EARNED,
+          status: CommissionEntryStatus.CLAIMABLE,
         },
         lock: { mode: 'pessimistic_write' },
       });
@@ -501,7 +504,8 @@ export class PromotersService {
 
       const payout = await payoutRepo.save(
         payoutRepo.create({
-          promoterId: promoter.id,
+          earnerId: promoter.id,
+          earnerRole: EarnerRole.PROMOTER,
           amountCents: totalCents,
           notes: notes && notes.trim().length > 0 ? notes.trim() : null,
           createdByUserId: superAdmin.id,
@@ -509,7 +513,7 @@ export class PromotersService {
       );
 
       for (const entry of claimable) {
-        entry.status = PromoterCommissionEntryStatus.PAID;
+        entry.status = CommissionEntryStatus.PAID;
         entry.payoutId = payout.id;
         await commRepo.save(entry);
       }
@@ -517,11 +521,12 @@ export class PromotersService {
       // Audit aggregated paid_out entry
       await commRepo.save(
         commRepo.create({
-          promoterId: promoter.id,
+          earnerId: promoter.id,
+          earnerRole: EarnerRole.PROMOTER,
           referredUserId: null,
           orderId: null,
-          type: PromoterCommissionEntryType.PAID_OUT,
-          status: PromoterCommissionEntryStatus.PAID,
+          type: CommissionEntryType.PAID_OUT,
+          status: CommissionEntryStatus.PAID,
           amountCents: -totalCents,
           claimableAt: null,
           payoutId: payout.id,
@@ -545,7 +550,7 @@ export class PromotersService {
   private async buildDashboard(promoter: User): Promise<PromoterDashboardView> {
     const [entries, payouts, referredCustomers] = await Promise.all([
       this.commissions.find({
-        where: { promoterId: promoter.id },
+        where: { earnerId: promoter.id, earnerRole: EarnerRole.PROMOTER },
         order: { createdAt: 'DESC' },
         relations: ['referredUser'],
       }),
@@ -587,7 +592,10 @@ export class PromotersService {
     const qb = this.commissions
       .createQueryBuilder('c')
       .leftJoinAndSelect('c.referredUser', 'referredUser')
-      .where('c.promoter_id = :promoterId', { promoterId });
+      .where('c.earner_id = :promoterId AND c.earner_role = :role', {
+        promoterId,
+        role: EarnerRole.PROMOTER,
+      });
 
     if (params.status) {
       qb.andWhere('c.status = :status', { status: params.status });
@@ -616,7 +624,10 @@ export class PromotersService {
     const qb = this.payouts
       .createQueryBuilder('p')
       .leftJoinAndSelect('p.createdBy', 'createdBy')
-      .where('p.promoter_id = :promoterId', { promoterId })
+      .where('p.earner_id = :promoterId AND p.earner_role = :role', {
+        promoterId,
+        role: EarnerRole.PROMOTER,
+      })
       .orderBy('p.createdAt', 'DESC');
     if (limit) qb.take(limit);
     const rows = await qb.getMany();
@@ -644,14 +655,14 @@ export class PromotersService {
       result.set(id, { pendingCents: 0, claimableCents: 0, paidCents: 0 });
     }
     for (const e of entries) {
-      const b = result.get(e.promoterId);
+      const b = result.get(e.earnerId);
       if (!b) continue;
-      if (e.type === PromoterCommissionEntryType.EARNED) {
-        if (e.status === PromoterCommissionEntryStatus.PENDING) {
+      if (e.type === CommissionEntryType.EARNED) {
+        if (e.status === CommissionEntryStatus.PENDING) {
           b.pendingCents += e.amountCents;
-        } else if (e.status === PromoterCommissionEntryStatus.CLAIMABLE) {
+        } else if (e.status === CommissionEntryStatus.CLAIMABLE) {
           b.claimableCents += e.amountCents;
-        } else if (e.status === PromoterCommissionEntryStatus.PAID) {
+        } else if (e.status === CommissionEntryStatus.PAID) {
           b.paidCents += e.amountCents;
         }
       }
@@ -660,18 +671,18 @@ export class PromotersService {
   }
 
   private computeBalancesFromEntries(
-    entries: PromoterCommissionEntry[],
+    entries: CommissionEntry[],
   ): PromoterBalances {
     let pendingCents = 0;
     let claimableCents = 0;
     let paidCents = 0;
     for (const e of entries) {
-      if (e.type !== PromoterCommissionEntryType.EARNED) continue;
-      if (e.status === PromoterCommissionEntryStatus.PENDING)
+      if (e.type !== CommissionEntryType.EARNED) continue;
+      if (e.status === CommissionEntryStatus.PENDING)
         pendingCents += e.amountCents;
-      else if (e.status === PromoterCommissionEntryStatus.CLAIMABLE)
+      else if (e.status === CommissionEntryStatus.CLAIMABLE)
         claimableCents += e.amountCents;
-      else if (e.status === PromoterCommissionEntryStatus.PAID)
+      else if (e.status === CommissionEntryStatus.PAID)
         paidCents += e.amountCents;
     }
     return { pendingCents, claimableCents, paidCents };
@@ -716,8 +727,9 @@ export class PromotersService {
     const commissionsByReferred = new Map<string, number>();
     const earnedEntries = await commRepo.find({
       where: {
-        promoterId,
-        type: PromoterCommissionEntryType.EARNED,
+        earnerId: promoterId,
+        earnerRole: EarnerRole.PROMOTER,
+        type: CommissionEntryType.EARNED,
       },
     });
     for (const e of earnedEntries) {
@@ -755,7 +767,7 @@ export class PromotersService {
   }
 
   private toCommissionView(
-    e: PromoterCommissionEntry,
+    e: CommissionEntry,
   ): PromoterCommissionEntryView {
     return {
       id: e.id,

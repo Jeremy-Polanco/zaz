@@ -20,6 +20,7 @@ import { CategoriesModule } from './modules/categories/categories.module';
 import { OrdersModule } from './modules/orders/orders.module';
 import { PaymentsModule } from './modules/payments/payments.module';
 import { PromotersModule } from './modules/promoters/promoters.module';
+import { SellersModule } from './modules/sellers/sellers.module';
 import { PointsModule } from './modules/points/points.module';
 import { InvoicesModule } from './modules/invoices/invoices.module';
 import { ShippingModule } from './modules/shipping/shipping.module';
@@ -49,6 +50,7 @@ import { RequestLoggerMiddleware } from './common/middleware/request-logger.midd
       useFactory: (config: ConfigService) => buildDatabaseConfig(config),
     }),
     PromotersModule,
+    SellersModule,
     AuthModule,
     UsersModule,
     ProductsModule,

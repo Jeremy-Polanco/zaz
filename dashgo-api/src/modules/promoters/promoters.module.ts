@@ -4,7 +4,7 @@ import {
   Order,
   OrderItem,
   Payout,
-  PromoterCommissionEntry,
+  CommissionEntry,
   User,
 } from '../../entities';
 import { PromotersController } from './promoters.controller';
@@ -17,7 +17,7 @@ import { PromotersService } from './promoters.service';
       Order,
       OrderItem,
       Payout,
-      PromoterCommissionEntry,
+      CommissionEntry,
     ]),
   ],
   controllers: [PromotersController],

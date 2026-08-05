@@ -14,6 +14,7 @@ import { PaymentsModule } from '../payments/payments.module';
 import { PointsModule } from '../points/points.module';
 import { InvoicesModule } from '../invoices/invoices.module';
 import { PromotersModule } from '../promoters/promoters.module';
+import { SellersModule } from '../sellers/sellers.module';
 import { ShippingModule } from '../shipping/shipping.module';
 import { CreditModule } from '../credit/credit.module';
 import { SubscriptionModule } from '../subscription/subscription.module';
@@ -29,6 +30,7 @@ import { RentalsModule } from '../rentals/rentals.module';
     PointsModule,
     InvoicesModule,
     PromotersModule,
+    SellersModule,
     ShippingModule,
     CreditModule,
     SubscriptionModule,

@@ -12,7 +12,7 @@ import {
   Payout,
   PointsLedgerEntry,
   Product,
-  PromoterCommissionEntry,
+  CommissionEntry,
   User,
 } from '../entities';
 import { Subscription } from '../entities/subscription.entity';
@@ -61,7 +61,7 @@ export function buildTestDataSource(): DataSource {
       Invoice,
       Counter,
       Payout,
-      PromoterCommissionEntry,
+      CommissionEntry,
       CreditAccount,
       CreditMovement,
       Subscription,

@@ -37,7 +37,7 @@ import { UserAddress } from '../../entities/user-address.entity';
 import { Subscription } from '../../entities/subscription.entity';
 import { Rental } from '../../entities/rental.entity';
 import { CreditAccount } from '../../entities/credit-account.entity';
-import { PromoterCommissionEntry } from '../../entities/promoter-commission-entry.entity';
+import { CommissionEntry } from '../../entities/commission-entry.entity';
 import { Payout } from '../../entities/payout.entity';
 import { PointsLedgerEntry } from '../../entities/points-ledger-entry.entity';
 import { AccountDeletion } from '../../entities/account-deletion.entity';
@@ -115,8 +115,8 @@ describe('AuthService.sendOtp — WhatsApp (Meta Cloud API) failure handling (FI
           useValue: makeRepoMock<CreditAccount>(),
         },
         {
-          provide: getRepositoryToken(PromoterCommissionEntry),
-          useValue: makeRepoMock<PromoterCommissionEntry>(),
+          provide: getRepositoryToken(CommissionEntry),
+          useValue: makeRepoMock<CommissionEntry>(),
         },
         {
           provide: getRepositoryToken(Payout),

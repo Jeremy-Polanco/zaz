@@ -9,7 +9,7 @@ export * from './points-ledger-entry.entity';
 export * from './invoice.entity';
 export * from './counter.entity';
 export * from './payout.entity';
-export * from './promoter-commission-entry.entity';
+export * from './commission-entry.entity';
 export * from './credit-account.entity';
 export * from './credit-movement.entity';
 export * from './subscription.entity';

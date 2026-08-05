@@ -8,6 +8,7 @@ import {
   PrimaryGeneratedColumn,
 } from 'typeorm';
 import { User } from './user.entity';
+import { EarnerRole } from './commission-entry.entity';
 
 @Entity({ name: 'payouts' })
 export class Payout {
@@ -15,12 +16,21 @@ export class Payout {
   id!: string;
 
   @Index()
-  @Column({ name: 'promoter_id', type: 'uuid' })
-  promoterId!: string;
+  @Column({ name: 'earner_id', type: 'uuid' })
+  earnerId!: string;
 
   @ManyToOne(() => User, { onDelete: 'CASCADE' })
-  @JoinColumn({ name: 'promoter_id' })
-  promoter!: User;
+  @JoinColumn({ name: 'earner_id' })
+  earner!: User;
+
+  /** Si el pago fue a un promotor o a un vendedor. */
+  @Column({
+    name: 'earner_role',
+    type: 'varchar',
+    length: 20,
+    default: EarnerRole.PROMOTER,
+  })
+  earnerRole!: EarnerRole;
 
   @Column({ name: 'amount_cents', type: 'int' })
   amountCents!: number;

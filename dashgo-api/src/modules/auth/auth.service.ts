@@ -21,7 +21,7 @@ import { UserAddress } from '../../entities/user-address.entity';
 import { Subscription } from '../../entities/subscription.entity';
 import { Rental } from '../../entities/rental.entity';
 import { CreditAccount } from '../../entities/credit-account.entity';
-import { PromoterCommissionEntry } from '../../entities/promoter-commission-entry.entity';
+import { CommissionEntry } from '../../entities/commission-entry.entity';
 import { Payout } from '../../entities/payout.entity';
 import { PointsLedgerEntry } from '../../entities/points-ledger-entry.entity';
 import { AccountDeletion } from '../../entities/account-deletion.entity';
@@ -59,8 +59,8 @@ export class AuthService implements OnModuleInit {
     @InjectRepository(Rental) private readonly rentals: Repository<Rental>,
     @InjectRepository(CreditAccount)
     private readonly credit: Repository<CreditAccount>,
-    @InjectRepository(PromoterCommissionEntry)
-    private readonly promoterCommissions: Repository<PromoterCommissionEntry>,
+    @InjectRepository(CommissionEntry)
+    private readonly promoterCommissions: Repository<CommissionEntry>,
     @InjectRepository(Payout) private readonly payouts: Repository<Payout>,
     @InjectRepository(PointsLedgerEntry)
     private readonly pointsLedger: Repository<PointsLedgerEntry>,
@@ -457,7 +457,7 @@ export class AuthService implements OnModuleInit {
       const subRepo = mgr.getRepository(Subscription);
       const rentalRepo = mgr.getRepository(Rental);
       const creditRepo = mgr.getRepository(CreditAccount);
-      const promoterCommissionRepo = mgr.getRepository(PromoterCommissionEntry);
+      const promoterCommissionRepo = mgr.getRepository(CommissionEntry);
       const payoutRepo = mgr.getRepository(Payout);
       const pointsRepo = mgr.getRepository(PointsLedgerEntry);
       const userRepo = mgr.getRepository(User);
@@ -515,8 +515,10 @@ export class AuthService implements OnModuleInit {
       await rentalRepo.delete({ userId });
       await creditRepo.delete({ userId });
       await pointsRepo.delete({ userId });
-      await promoterCommissionRepo.delete({ promoterId: userId });
-      await payoutRepo.delete({ promoterId: userId });
+      // Borra sus comisiones y pagos sea promotor o vendedor: el usuario se va
+      // entero, no por rol.
+      await promoterCommissionRepo.delete({ earnerId: userId });
+      await payoutRepo.delete({ earnerId: userId });
 
       // FIX HIGH-G6 — durable audit row BEFORE the user is deleted, so the
       // insert and the user delete share a transaction. If the insert fails

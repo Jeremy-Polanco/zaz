@@ -26,6 +26,7 @@ import { PaymentsService } from '../payments/payments.service';
 import { PointsService } from '../points/points.service';
 import { InvoicesService } from '../invoices/invoices.service';
 import { PromotersService } from '../promoters/promoters.service';
+import { SellersService } from '../sellers/sellers.service';
 import { ShippingService } from '../shipping/shipping.service';
 import { CreditService } from '../credit/credit.service';
 import { SubscriptionService } from '../subscription/subscription.service';
@@ -80,6 +81,7 @@ export class OrdersService {
     private readonly points: PointsService,
     private readonly invoices: InvoicesService,
     private readonly promotersService: PromotersService,
+    private readonly sellersService: SellersService,
     private readonly shipping: ShippingService,
     private readonly credit: CreditService,
     private readonly subscriptionService: SubscriptionService,
@@ -1258,6 +1260,10 @@ export class OrdersService {
       await this.points.creditForOrder(orderId, tx);
       await this.invoices.createForOrder(orderId, tx);
       await this.promotersService.creditCommissionsForOrder(orderId, tx);
+      // Comisión del vendedor de la cartera. Va en la MISMA transacción que la
+      // entrega: si el asiento falla, la orden no queda entregada sin comisión.
+      // Es idempotente por (orden, rol), así que un reintento no duplica.
+      await this.sellersService.creditCommissionsForOrder(orderId, tx);
     });
 
     // T65: Activate pending_setup rentals for this order OUTSIDE the TX.

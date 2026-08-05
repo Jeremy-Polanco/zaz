@@ -64,7 +64,7 @@ import {
   Payout,
   PointsLedgerEntry,
   Product,
-  PromoterCommissionEntry,
+  CommissionEntry,
   PushToken,
   Rental,
   Subscription,
@@ -79,9 +79,9 @@ import {
   PointsEntryType,
 } from '../../src/entities/points-ledger-entry.entity';
 import {
-  PromoterCommissionEntryStatus,
-  PromoterCommissionEntryType,
-} from '../../src/entities/promoter-commission-entry.entity';
+  CommissionEntryStatus,
+  CommissionEntryType,
+} from '../../src/entities/commission-entry.entity';
 import { SubscriptionStatus } from '../../src/entities/subscription.entity';
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -144,7 +144,7 @@ describe('AuthService.deleteAccount (integration)', () => {
         await ds.getRepository(Order).delete({ id: orderId });
       }
       for (const userId of createdUserIds) {
-        await ds.getRepository(Payout).delete({ promoterId: userId });
+        await ds.getRepository(Payout).delete({ earnerId: userId });
         await ds.getRepository(User).delete({ id: userId });
       }
       await ds.getRepository(Product).delete({ id: product.id });
@@ -288,14 +288,14 @@ describe('AuthService.deleteAccount (integration)', () => {
     );
 
     // The promoter earned a commission for referring this user.
-    await ds.getRepository(PromoterCommissionEntry).save(
-      ds.getRepository(PromoterCommissionEntry).create({
-        promoterId: promoter.id,
+    await ds.getRepository(CommissionEntry).save(
+      ds.getRepository(CommissionEntry).create({
+        earnerId: promoter.id,
         referredUserId: user.id,
-        type: PromoterCommissionEntryType.EARNED,
-        status: PromoterCommissionEntryStatus.CLAIMABLE,
+        type: CommissionEntryType.EARNED,
+        status: CommissionEntryStatus.CLAIMABLE,
         amountCents: 500,
-      } as Partial<PromoterCommissionEntry>),
+      } as Partial<CommissionEntry>),
     );
 
     await expect(auth.deleteAccount(user.id)).resolves.toBeUndefined();
@@ -304,8 +304,8 @@ describe('AuthService.deleteAccount (integration)', () => {
     ).toBeNull();
     // The promoter's commission row survives with the referral nulled.
     const entry = await ds
-      .getRepository(PromoterCommissionEntry)
-      .findOneOrFail({ where: { promoterId: promoter.id } });
+      .getRepository(CommissionEntry)
+      .findOneOrFail({ where: { earnerId: promoter.id } });
     expect(entry.referredUserId).toBeNull();
   });
 
@@ -381,20 +381,20 @@ describe('AuthService.deleteAccount (integration)', () => {
     const admin = await createUser(UserRole.SUPER_ADMIN_DELIVERY);
     const payout = await ds.getRepository(Payout).save(
       ds.getRepository(Payout).create({
-        promoterId: promoter.id,
+        earnerId: promoter.id,
         createdByUserId: admin.id,
         amountCents: 2500,
       } as Partial<Payout>),
     );
-    await ds.getRepository(PromoterCommissionEntry).save(
-      ds.getRepository(PromoterCommissionEntry).create({
-        promoterId: promoter.id,
+    await ds.getRepository(CommissionEntry).save(
+      ds.getRepository(CommissionEntry).create({
+        earnerId: promoter.id,
         referredUserId: referred.id,
-        type: PromoterCommissionEntryType.PAID_OUT,
-        status: PromoterCommissionEntryStatus.PAID,
+        type: CommissionEntryType.PAID_OUT,
+        status: CommissionEntryStatus.PAID,
         amountCents: 500,
         payoutId: payout.id,
-      } as Partial<PromoterCommissionEntry>),
+      } as Partial<CommissionEntry>),
     );
 
     await expect(auth.deleteAccount(promoter.id)).resolves.toBeUndefined();
@@ -410,7 +410,7 @@ describe('AuthService.deleteAccount (integration)', () => {
     const promoter = await createUser(UserRole.PROMOTER);
     const payout = await ds.getRepository(Payout).save(
       ds.getRepository(Payout).create({
-        promoterId: promoter.id,
+        earnerId: promoter.id,
         createdByUserId: admin.id,
         amountCents: 2500,
       } as Partial<Payout>),

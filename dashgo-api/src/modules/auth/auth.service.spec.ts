@@ -33,7 +33,7 @@ import { UserAddress } from '../../entities/user-address.entity';
 import { Subscription } from '../../entities/subscription.entity';
 import { Rental } from '../../entities/rental.entity';
 import { CreditAccount } from '../../entities/credit-account.entity';
-import { PromoterCommissionEntry } from '../../entities/promoter-commission-entry.entity';
+import { CommissionEntry } from '../../entities/commission-entry.entity';
 import { Payout } from '../../entities/payout.entity';
 import { PointsLedgerEntry } from '../../entities/points-ledger-entry.entity';
 import { AccountDeletion } from '../../entities/account-deletion.entity';
@@ -80,7 +80,7 @@ type Repos = {
   subscriptions: jest.Mocked<Repository<Subscription>>;
   rentals: jest.Mocked<Repository<Rental>>;
   credit: jest.Mocked<Repository<CreditAccount>>;
-  promoterCommissions: jest.Mocked<Repository<PromoterCommissionEntry>>;
+  promoterCommissions: jest.Mocked<Repository<CommissionEntry>>;
   payouts: jest.Mocked<Repository<Payout>>;
   pointsLedger: jest.Mocked<Repository<PointsLedgerEntry>>;
   accountDeletions: jest.Mocked<Repository<AccountDeletion>>;
@@ -95,7 +95,7 @@ function makeAllRepos(): Repos {
     subscriptions: makeRepoMock<Subscription>(),
     rentals: makeRepoMock<Rental>(),
     credit: makeRepoMock<CreditAccount>(),
-    promoterCommissions: makeRepoMock<PromoterCommissionEntry>(),
+    promoterCommissions: makeRepoMock<CommissionEntry>(),
     payouts: makeRepoMock<Payout>(),
     pointsLedger: makeRepoMock<PointsLedgerEntry>(),
     accountDeletions: makeRepoMock<AccountDeletion>(),
@@ -124,7 +124,7 @@ function makeDataSourceMock(
           return repos.rentals;
         case 'CreditAccount':
           return repos.credit;
-        case 'PromoterCommissionEntry':
+        case 'CommissionEntry':
           return repos.promoterCommissions;
         case 'Payout':
           return repos.payouts;
@@ -200,7 +200,7 @@ describe('AuthService.deleteAccount (FIX C2)', () => {
         { provide: getRepositoryToken(Rental), useValue: repos.rentals },
         { provide: getRepositoryToken(CreditAccount), useValue: repos.credit },
         {
-          provide: getRepositoryToken(PromoterCommissionEntry),
+          provide: getRepositoryToken(CommissionEntry),
           useValue: repos.promoterCommissions,
         },
         { provide: getRepositoryToken(Payout), useValue: repos.payouts },
@@ -273,9 +273,9 @@ describe('AuthService.deleteAccount (FIX C2)', () => {
       userId: 'user-1',
     });
     expect(repos.promoterCommissions.delete).toHaveBeenCalledWith({
-      promoterId: 'user-1',
+      earnerId: 'user-1',
     });
-    expect(repos.payouts.delete).toHaveBeenCalledWith({ promoterId: 'user-1' });
+    expect(repos.payouts.delete).toHaveBeenCalledWith({ earnerId: 'user-1' });
     expect(repos.users.delete).toHaveBeenCalledWith('user-1');
   });
 

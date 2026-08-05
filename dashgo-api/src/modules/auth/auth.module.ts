@@ -10,7 +10,7 @@ import { UserAddress } from '../../entities/user-address.entity';
 import { Subscription } from '../../entities/subscription.entity';
 import { Rental } from '../../entities/rental.entity';
 import { CreditAccount } from '../../entities/credit-account.entity';
-import { PromoterCommissionEntry } from '../../entities/promoter-commission-entry.entity';
+import { CommissionEntry } from '../../entities/commission-entry.entity';
 import { Payout } from '../../entities/payout.entity';
 import { PointsLedgerEntry } from '../../entities/points-ledger-entry.entity';
 import { AccountDeletion } from '../../entities/account-deletion.entity';
@@ -24,7 +24,7 @@ import { CreditModule } from '../credit/credit.module';
 @Module({
   imports: [
     // Repositories injected into AuthService for FIX C2 (account deletion):
-    // Order/UserAddress/Subscription/Rental/CreditAccount/PromoterCommissionEntry/
+    // Order/UserAddress/Subscription/Rental/CreditAccount/CommissionEntry/
     // Payout/PointsLedgerEntry. The deletion service touches these tables
     // directly inside a single transaction so a partial failure rolls back.
     TypeOrmModule.forFeature([
@@ -35,7 +35,7 @@ import { CreditModule } from '../credit/credit.module';
       Subscription,
       Rental,
       CreditAccount,
-      PromoterCommissionEntry,
+      CommissionEntry,
       Payout,
       PointsLedgerEntry,
       AccountDeletion,
