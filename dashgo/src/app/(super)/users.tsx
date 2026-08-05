@@ -171,6 +171,17 @@ function UserRow({
               <Text className="font-sans text-[10px] uppercase tracking-label text-ink-muted">
                 Vendedor
               </Text>
+              {/* "Sin vendedor" y "tiene uno que no puedo nombrar" son estados
+                  distintos. Si el asignado no está en el padrón, se dice — no
+                  se lo pinta como libre. */}
+              {item.sellerId != null &&
+              !sellers.some((s) => s.id === item.sellerId) ? (
+                <View className="border border-accent-dark bg-accent-light px-2 py-1">
+                  <Text className="font-sans text-[11px] text-ink">
+                    Asignado (fuera de la lista)
+                  </Text>
+                </View>
+              ) : null}
               <Pressable
                 onPress={() => onAssignSeller(item, null)}
                 disabled={pendingUpdate || item.sellerId == null}
@@ -234,9 +245,13 @@ export default function SuperUsersScreen() {
   // Solo el super admin toca roles y cartera. Un vendedor entra a esta pantalla
   // (ve sus clientes) pero no puede reasignar. La API lo rechaza igual.
   const canEditRole = isSuperAdmin(me?.role)
+  // El padrón de vendedores sale de la lista SIN filtrar, no de `users`. Si se
+  // derivara de la filtrada, con un filtro de suscripción puesto los vendedores
+  // no suscriptos desaparecerían de las opciones. Espejo de la web.
+  const { data: allUsers } = useAdminUsers(undefined)
   const sellers = useMemo(
-    () => (users ?? []).filter((u) => u.role === 'seller'),
-    [users],
+    () => (allUsers ?? []).filter((u) => u.role === 'seller'),
+    [allUsers],
   )
   const [deletingId, setDeletingId] = useState<string | null>(null)
 

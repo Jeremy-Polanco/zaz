@@ -175,7 +175,7 @@ const ASSIGNABLE_ROLES: { value: UserRole; label: string }[] = [
  * Un super admin no se puede editar desde acá — ni a sí mismo (se quedaría sin
  * panel y sin forma de volver) ni a otro.
  */
-function RoleCell({
+export function RoleCell({
   user,
   canEdit,
   onChange,
@@ -215,7 +215,7 @@ function RoleCell({
  * cualquiera que no sea super admin, y además valida que el id asignado tenga
  * rol `seller`. Esto es solo la UI.
  */
-function SellerCell({
+export function SellerCell({
   user,
   sellers,
   canAssign,
@@ -234,10 +234,16 @@ function SellerCell({
   }
 
   const current = sellers.find((s) => s.id === user.sellerId)
+  // "Sin vendedor" y "tiene vendedor pero no lo puedo nombrar" son estados
+  // DISTINTOS. Colapsarlos muestra dato falso: un cliente asignado leyéndose
+  // como libre. Si el padrón llega incompleto, se dice lo que se sabe.
+  const assignedButUnknown = user.sellerId != null && current == null
 
   if (!canAssign) {
     return (
-      <span className="text-ink-muted">{current?.fullName ?? 'Sin asignar'}</span>
+      <span className="text-ink-muted">
+        {current?.fullName ?? (assignedButUnknown ? 'Asignado' : 'Sin asignar')}
+      </span>
     )
   }
 
@@ -250,6 +256,11 @@ function SellerCell({
       className="w-full max-w-40 border border-ink/15 bg-paper px-2 py-1.5 text-[0.7rem] text-ink outline-none focus:border-ink disabled:opacity-50"
     >
       <option value="">Sin asignar</option>
+      {/* Sin esta opción el select cae a "" y el cliente se ve libre — y un
+          cambio en otro campo lo desasignaría sin que nadie lo pidiera. */}
+      {assignedButUnknown ? (
+        <option value={user.sellerId ?? ''}>Asignado (fuera de la lista)</option>
+      ) : null}
       {sellers.map((s) => (
         <option key={s.id} value={s.id}>
           {s.fullName}
@@ -278,9 +289,15 @@ function SuperUsersPage() {
   // sus clientes) pero NO puede reasignar: si pudiera, el día que se pelea con
   // otro vendedor se lleva los clientes. La API lo rechaza igual.
   const canAssign = isSuperAdmin(me?.role)
+  // El padrón de vendedores sale de la lista SIN filtrar, no de `users`. Si se
+  // derivara de la lista filtrada, con "Con suscripción activa" puesto los
+  // vendedores no suscriptos desaparecerían del desplegable — y un cliente que
+  // SÍ tiene vendedor mostraría "Sin asignar", que es dato falso, no una
+  // limitación. React Query cachea las dos listas por separado.
+  const { data: allUsers } = useAdminUsers(undefined)
   const sellers = useMemo(
-    () => (users ?? []).filter((u) => u.role === 'seller'),
-    [users],
+    () => (allUsers ?? []).filter((u) => u.role === 'seller'),
+    [allUsers],
   )
 
   const filtered = useMemo(() => {
