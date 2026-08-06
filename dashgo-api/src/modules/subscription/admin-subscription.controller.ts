@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Get,
+  Post,
   Put,
   ServiceUnavailableException,
   UseGuards,
@@ -12,6 +13,7 @@ import { Roles } from '../../common/decorators/roles.decorator';
 import { UserRole } from '../../entities/enums';
 import { SubscriptionService } from './subscription.service';
 import { UpdateSubscriptionPlanDto } from './dto/update-subscription-plan.dto';
+import { CreateSubscriptionPlanDto } from './dto/create-subscription-plan.dto';
 import { AdminPlanResponseDto } from './dto/admin-plan-response.dto';
 
 /**
@@ -59,6 +61,23 @@ export class AdminSubscriptionController {
    */
   @Put('plan')
   async updatePlan(@Body() dto: UpdateSubscriptionPlanDto): Promise<AdminPlanResponseDto> {
-    return this.subscription.updatePlan(dto.unitAmountCents);
+    return this.subscription.updatePlan(dto.unitAmountCents, dto.tier);
+  }
+
+  /** Todos los planes configurados (standard y, si existe, premium). */
+  @Get('plans')
+  async listPlans(): Promise<AdminPlanResponseDto[]> {
+    return this.subscription.listAdminPlans();
+  }
+
+  /**
+   * Crea el plan de un tier que todavía no existe — en la práctica, premium.
+   * Stripe-first: crea producto + precio y recién entonces persiste.
+   */
+  @Post('plans')
+  async createPlan(
+    @Body() dto: CreateSubscriptionPlanDto,
+  ): Promise<AdminPlanResponseDto> {
+    return this.subscription.createPlan(dto.tier, dto.unitAmountCents);
   }
 }

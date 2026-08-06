@@ -69,6 +69,8 @@ type FormState = {
   requiresMaintenance: boolean
   isMaintenanceService: boolean
   isDefaultSubscriberBebedero: boolean
+  /** EL producto alquilado exclusivo del plan premium. */
+  isPremiumSubscriberProduct: boolean
   offerLabel: string
   offerDiscountText: string
   offerStartsAt: string
@@ -115,6 +117,7 @@ const emptyForm: FormState = {
   requiresMaintenance: false,
   isMaintenanceService: false,
   isDefaultSubscriberBebedero: false,
+  isPremiumSubscriberProduct: false,
   offerLabel: '',
   offerDiscountText: '',
   offerStartsAt: '',
@@ -227,6 +230,7 @@ export function ProductForm({
       requiresMaintenance: editing.requiresMaintenance ?? false,
       isMaintenanceService: editing.isMaintenanceService ?? false,
       isDefaultSubscriberBebedero: editing.isDefaultSubscriberBebedero ?? false,
+      isPremiumSubscriberProduct: editing.isPremiumSubscriberProduct ?? false,
       offerLabel: editing.offerLabel ?? '',
       offerDiscountText: editing.offerDiscountPct ?? '',
       offerStartsAt: toDateInput(editing.offerStartsAt),
@@ -358,6 +362,7 @@ export function ProductForm({
       requiresMaintenance: state.requiresMaintenance,
       isMaintenanceService: state.isMaintenanceService,
       isDefaultSubscriberBebedero: state.isDefaultSubscriberBebedero,
+      isPremiumSubscriberProduct: state.isPremiumSubscriberProduct,
       displayOrder: displayOrder ?? 0,
       offerLabel: showOffer && state.offerLabel.trim() ? state.offerLabel.trim() : null,
       offerDiscountPct: showOffer && offerDiscount != null ? offerDiscount : null,
@@ -1211,6 +1216,19 @@ export function ProductForm({
                     on={state.isDefaultSubscriberBebedero}
                     onChange={(v) =>
                       setState((s) => ({ ...s, isDefaultSubscriberBebedero: v }))
+                    }
+                  />
+
+                  <ToggleRow
+                    label="Exclusivo del plan Premium"
+                    sub={
+                      state.isPremiumSubscriberProduct
+                        ? 'Este es EL producto que se entrega gratis al activarse una suscripción Premium. Solo un producto puede tener esta marca. La orden de instalación se crea y se entrega sola, y eso es lo que arranca el mantenimiento.'
+                        : 'Marcá esto en el producto alquilado que viene incluido con el plan Premium.'
+                    }
+                    on={state.isPremiumSubscriberProduct}
+                    onChange={(v) =>
+                      setState((s) => ({ ...s, isPremiumSubscriberProduct: v }))
                     }
                   />
 

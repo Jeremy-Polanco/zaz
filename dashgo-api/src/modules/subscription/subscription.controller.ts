@@ -15,6 +15,7 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Public } from '../../common/decorators/public.decorator';
 import type { AuthenticatedUser } from '../../common/types/authenticated-user';
 import { SubscriptionService } from './subscription.service';
+import { SubscriptionTier } from '../../entities/subscription-plan.entity';
 
 @Controller()
 export class SubscriptionController {
@@ -64,11 +65,23 @@ export class SubscriptionController {
   @Post('subscription/checkout-session')
   createCheckoutSession(
     @CurrentUser() user: AuthenticatedUser,
-    @Body() body: { successUrl: string; cancelUrl: string },
+    @Body()
+    body: { successUrl: string; cancelUrl: string; tier?: SubscriptionTier },
   ) {
     const successUrl = body.successUrl ?? 'https://www.dashgo.dev/subscription?session=success';
     const cancelUrl = body.cancelUrl ?? 'https://www.dashgo.dev/subscription?session=canceled';
-    return this.subscription.createCheckoutSession(user.id, successUrl, cancelUrl);
+    // Solo se aceptan tiers conocidos: un valor arbitrario del cliente no puede
+    // terminar buscando un plan inexistente ni suscribiendo al plan equivocado.
+    const tier =
+      body.tier === SubscriptionTier.PREMIUM
+        ? SubscriptionTier.PREMIUM
+        : SubscriptionTier.STANDARD;
+    return this.subscription.createCheckoutSession(
+      user.id,
+      successUrl,
+      cancelUrl,
+      tier,
+    );
   }
 
   /**

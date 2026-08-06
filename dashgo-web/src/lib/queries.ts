@@ -426,6 +426,7 @@ export type CreateProductInput = {
   requiresMaintenance?: boolean
   isMaintenanceService?: boolean
   isDefaultSubscriberBebedero?: boolean
+  isPremiumSubscriberProduct?: boolean
   displayOrder?: number
 }
 

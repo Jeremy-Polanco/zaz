@@ -118,7 +118,9 @@ export class SubscriptionService implements OnModuleInit {
       this.config.get<string>('STRIPE_SUBSCRIPTION_PRICE_ID') ?? '';
 
     // Bootstrap seed: only seed if no row exists yet
-    const existing = await this.plans.findOne({ where: {} });
+    const existing = await this.plans.findOne({
+      where: { tier: SubscriptionTier.STANDARD },
+    });
     if (existing) {
       this.logger.log('subscription_plan already seeded — skipping bootstrap');
       return;
@@ -139,6 +141,7 @@ export class SubscriptionService implements OnModuleInit {
           : (price.product as { id: string }).id;
 
       const plan = this.plans.create({
+        tier: SubscriptionTier.STANDARD,
         stripeProductId: productId,
         activeStripePriceId: price.id,
         unitAmountCents: price.unit_amount ?? 0,
@@ -168,6 +171,7 @@ export class SubscriptionService implements OnModuleInit {
     userId: string,
     successUrl: string,
     cancelUrl: string,
+    tier: SubscriptionTier = SubscriptionTier.STANDARD,
   ): Promise<{ url: string }> {
     const stripe = this.requireStripe();
 
@@ -204,7 +208,7 @@ export class SubscriptionService implements OnModuleInit {
     }
 
     const customerId = await this.getOrCreateStripeCustomer(userId);
-    const activePlan = await this.getActivePlanRow();
+    const activePlan = await this.getActivePlanRow(tier);
 
     const session = await stripe.checkout.sessions.create({
       mode: 'subscription',
@@ -291,8 +295,10 @@ export class SubscriptionService implements OnModuleInit {
     });
   }
 
-  async getPlan(): Promise<PlanDto | null> {
-    const plan = await this.plans.findOne({ where: {} });
+  async getPlan(
+    tier: SubscriptionTier = SubscriptionTier.STANDARD,
+  ): Promise<PlanDto | null> {
+    const plan = await this.plans.findOne({ where: { tier } });
     if (!plan) return null;
     return {
       // Gross (tax-inclusive) — what the customer is actually charged. The DB
@@ -309,8 +315,10 @@ export class SubscriptionService implements OnModuleInit {
    * subscriber — see resolveBebederoRentCents (products/pricing.ts). Net (not
    * gross) keeps it consistent with how bebedero rent is taxed at order time.
    */
-  async getPlanNetCents(): Promise<number | null> {
-    const plan = await this.plans.findOne({ where: {} });
+  async getPlanNetCents(
+    tier: SubscriptionTier = SubscriptionTier.STANDARD,
+  ): Promise<number | null> {
+    const plan = await this.plans.findOne({ where: { tier } });
     return plan ? plan.unitAmountCents : null;
   }
 
@@ -323,8 +331,11 @@ export class SubscriptionService implements OnModuleInit {
    *   3. Archive old Price (NON-BLOCKING — log warn but continue)
    *   4. Persist DB update
    */
-  async updatePlan(unitAmountCents: number): Promise<AdminPlanResponseDto> {
-    const plan = await this.getActivePlanRow();
+  async updatePlan(
+    unitAmountCents: number,
+    tier: SubscriptionTier = SubscriptionTier.STANDARD,
+  ): Promise<AdminPlanResponseDto> {
+    const plan = await this.getActivePlanRow(tier);
     const stripe = this.requireStripe();
     const oldPriceId = plan.activeStripePriceId;
 
@@ -412,8 +423,67 @@ export class SubscriptionService implements OnModuleInit {
     return this.toAdminPlanResponse(plan);
   }
 
-  async getAdminPlan(): Promise<AdminPlanResponseDto> {
-    return this.toAdminPlanResponse(await this.getActivePlanRow());
+  async getAdminPlan(
+    tier: SubscriptionTier = SubscriptionTier.STANDARD,
+  ): Promise<AdminPlanResponseDto> {
+    return this.toAdminPlanResponse(await this.getActivePlanRow(tier));
+  }
+
+  /** Todos los planes configurados, para el panel. */
+  async listAdminPlans(): Promise<AdminPlanResponseDto[]> {
+    const rows = await this.plans.find({ order: { tier: 'ASC' } });
+    return rows.map((r) => this.toAdminPlanResponse(r));
+  }
+
+  /**
+   * Crea el plan de un tier que todavía no existe (el caso real: premium).
+   *
+   * Stripe-first, igual que `updatePlan`: si el producto o el precio fallan, no
+   * queda una fila en la base apuntando a nada. El producto se crea con
+   * idempotencyKey por tier para que un reintento no genere dos productos.
+   */
+  async createPlan(
+    tier: SubscriptionTier,
+    unitAmountCents: number,
+  ): Promise<AdminPlanResponseDto> {
+    const existing = await this.plans.findOne({ where: { tier } });
+    if (existing) {
+      throw new ConflictException({
+        code: 'PLAN_ALREADY_EXISTS',
+        message: `Ya existe un plan ${tier}. Editá su precio en vez de crearlo.`,
+      });
+    }
+    const stripe = this.requireStripe();
+
+    const product = await stripe.products.create(
+      { name: `Suscripción ${tier}`, metadata: { tier } },
+      { idempotencyKey: `subscription-plan:${tier}` },
+    );
+    const price = await stripe.prices.create(
+      {
+        // El admin carga el neto; el cliente paga neto + impuesto. El neto
+        // queda como fuente de verdad editable en la base.
+        unit_amount: computeGrossCents(unitAmountCents),
+        currency: 'usd',
+        recurring: { interval: 'month' },
+        product: product.id,
+      },
+      { idempotencyKey: `subscription-plan-price:${tier}:${unitAmountCents}` },
+    );
+    await stripe.products.update(product.id, { default_price: price.id });
+
+    const saved = await this.plans.save(
+      this.plans.create({
+        tier,
+        stripeProductId: product.id,
+        activeStripePriceId: price.id,
+        unitAmountCents,
+        currency: 'usd',
+        interval: 'month',
+      }),
+    );
+    this.logger.log(`plan ${tier} creado: ${product.id} / ${price.id}`);
+    return this.toAdminPlanResponse(saved);
   }
 
   /**
@@ -423,6 +493,7 @@ export class SubscriptionService implements OnModuleInit {
   private toAdminPlanResponse(plan: SubscriptionPlan): AdminPlanResponseDto {
     return {
       id: plan.id,
+      tier: plan.tier,
       stripeProductId: plan.stripeProductId,
       activeStripePriceId: plan.activeStripePriceId,
       unitAmountCents: plan.unitAmountCents,
@@ -611,8 +682,10 @@ export class SubscriptionService implements OnModuleInit {
    * Throws 503 SUBSCRIPTION_PLAN_NOT_CONFIGURED if no row exists.
    * Used by createCheckoutSession, updatePlan, and getAdminPlan.
    */
-  private async getActivePlanRow(): Promise<SubscriptionPlan> {
-    const plan = await this.plans.findOne({ where: {} });
+  private async getActivePlanRow(
+    tier: SubscriptionTier = SubscriptionTier.STANDARD,
+  ): Promise<SubscriptionPlan> {
+    const plan = await this.plans.findOne({ where: { tier } });
     if (!plan) {
       throw new ServiceUnavailableException({
         statusCode: 503,

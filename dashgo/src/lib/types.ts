@@ -125,6 +125,13 @@ export interface Product {
   requiresMaintenance?: boolean
   /** Marks the dedicated "Mantenimiento Bebedero" service product. */
   isMaintenanceService?: boolean
+  /** EL bebedero que se regala al suscribirse (a lo sumo uno). */
+  isDefaultSubscriberBebedero?: boolean
+  /**
+   * EL producto alquilado exclusivo del plan Premium: se entrega gratis al
+   * activarse una suscripción premium. A lo sumo un producto lo lleva.
+   */
+  isPremiumSubscriberProduct?: boolean
 }
 
 export type RentalStatus =

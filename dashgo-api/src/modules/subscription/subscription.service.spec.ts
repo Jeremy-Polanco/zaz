@@ -18,6 +18,7 @@ import { SubscriptionTier } from '../../entities/subscription-plan.entity';
 import { User } from '../../entities/user.entity';
 import { SubscriptionPlan } from '../../entities/subscription-plan.entity';
 import { createMockStripe, MockStripe } from '../../test-utils/stripe';
+import { computeGrossCents } from '../../common/tax';
 
 // ---------------------------------------------------------------------------
 // Module-level Stripe mock
@@ -1936,5 +1937,119 @@ describe('SubscriptionService — coverage completion', () => {
         SubscriptionStatus.INCOMPLETE,
       );
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Planes por tier — la base de la suscripción premium
+// ---------------------------------------------------------------------------
+
+describe('SubscriptionService — planes por tier', () => {
+  let service: SubscriptionService;
+  let plansRepo: jest.Mocked<Repository<SubscriptionPlan>>;
+
+  function repoMock<T>(): jest.Mocked<Repository<T>> {
+    return {
+      findOne: jest.fn(),
+      find: jest.fn(),
+      save: jest.fn((e: unknown) => Promise.resolve(e)),
+      update: jest.fn(),
+      create: jest.fn((dto: Partial<T>) => dto as T),
+      upsert: jest.fn(),
+      createQueryBuilder: jest.fn(),
+      count: jest.fn(),
+    } as unknown as jest.Mocked<Repository<T>>;
+  }
+
+  beforeEach(async () => {
+    mockStripeInstance = createMockStripe();
+    plansRepo = repoMock<SubscriptionPlan>();
+
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        SubscriptionService,
+        { provide: getRepositoryToken(Subscription), useValue: repoMock() },
+        { provide: getRepositoryToken(User), useValue: repoMock() },
+        { provide: getRepositoryToken(SubscriptionPlan), useValue: plansRepo },
+        {
+          provide: ConfigService,
+          useValue: {
+            get: jest.fn((k: string) =>
+              k === 'STRIPE_SECRET_KEY' ? 'sk_test_x' : undefined,
+            ),
+          },
+        },
+        { provide: EventEmitter2, useValue: { emit: jest.fn() } },
+      ],
+    }).compile();
+
+    service = module.get<SubscriptionService>(SubscriptionService);
+    await service.onModuleInit();
+    jest.clearAllMocks();
+  });
+
+  it('getPlan busca el plan STANDARD por defecto', async () => {
+    plansRepo.findOne.mockResolvedValueOnce(null);
+    await service.getPlan();
+    expect(plansRepo.findOne).toHaveBeenCalledWith({
+      where: { tier: SubscriptionTier.STANDARD },
+    });
+  });
+
+  it('getPlan puede pedir el PREMIUM', async () => {
+    plansRepo.findOne.mockResolvedValueOnce(null);
+    await service.getPlan(SubscriptionTier.PREMIUM);
+    expect(plansRepo.findOne).toHaveBeenCalledWith({
+      where: { tier: SubscriptionTier.PREMIUM },
+    });
+  });
+
+  it('createPlan rechaza duplicar un tier que ya existe', async () => {
+    plansRepo.findOne.mockResolvedValueOnce({
+      tier: SubscriptionTier.PREMIUM,
+    } as SubscriptionPlan);
+
+    await expect(
+      service.createPlan(SubscriptionTier.PREMIUM, 2999),
+    ).rejects.toThrow('Ya existe un plan');
+    expect(mockStripeInstance.products.create).not.toHaveBeenCalled();
+  });
+
+  it('createPlan cobra el BRUTO en Stripe y guarda el NETO en la base', async () => {
+    // El admin carga 29.99 netos; el cliente paga neto + impuesto. El neto
+    // queda como fuente de verdad editable.
+    plansRepo.findOne.mockResolvedValueOnce(null);
+    mockStripeInstance.products.create = jest
+      .fn()
+      .mockResolvedValue({ id: 'prod_prem' });
+    mockStripeInstance.prices.create.mockResolvedValueOnce({
+      id: 'price_prem',
+    });
+    mockStripeInstance.products.update.mockResolvedValue({});
+
+    const result = await service.createPlan(SubscriptionTier.PREMIUM, 2999);
+
+    expect(mockStripeInstance.prices.create).toHaveBeenCalledWith(
+      expect.objectContaining({ unit_amount: computeGrossCents(2999) }),
+      expect.anything(),
+    );
+    expect(result.unitAmountCents).toBe(2999);
+    expect(result.tier).toBe(SubscriptionTier.PREMIUM);
+  });
+
+  it('createPlan usa idempotencyKey por tier — un reintento no crea dos productos', async () => {
+    plansRepo.findOne.mockResolvedValueOnce(null);
+    mockStripeInstance.products.create = jest
+      .fn()
+      .mockResolvedValue({ id: 'prod_prem' });
+    mockStripeInstance.prices.create.mockResolvedValueOnce({ id: 'price_x' });
+    mockStripeInstance.products.update.mockResolvedValue({});
+
+    await service.createPlan(SubscriptionTier.PREMIUM, 2999);
+
+    expect(mockStripeInstance.products.create).toHaveBeenCalledWith(
+      expect.anything(),
+      { idempotencyKey: 'subscription-plan:premium' },
+    );
   });
 });

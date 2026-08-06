@@ -131,6 +131,11 @@ export interface Product {
   isMaintenanceService?: boolean
   /** Marks THE bebedero handed out free when a user subscribes (at most one). */
   isDefaultSubscriberBebedero?: boolean
+  /**
+   * EL producto alquilado exclusivo del plan Premium: se entrega gratis al
+   * activarse una suscripción premium. A lo sumo un producto lo lleva.
+   */
+  isPremiumSubscriberProduct?: boolean
   /** Catalog position — lower number appears first. */
   displayOrder: number
 }

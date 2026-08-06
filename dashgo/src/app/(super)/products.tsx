@@ -50,6 +50,8 @@ type FormState = {
   requiresQuote: boolean
   requiresMaintenance: boolean
   isMaintenanceService: boolean
+  /** EL producto alquilado exclusivo del plan Premium. */
+  isPremiumSubscriberProduct: boolean
   promoterCommissionText: string
   pointsText: string
   displayOrderText: string
@@ -87,6 +89,7 @@ const emptyForm: FormState = {
   requiresQuote: true,
   requiresMaintenance: false,
   isMaintenanceService: false,
+  isPremiumSubscriberProduct: false,
   promoterCommissionText: '0',
   pointsText: '1',
   displayOrderText: '0',
@@ -144,6 +147,7 @@ function ProductForm({
       requiresQuote: editing.requiresQuote ?? true,
       requiresMaintenance: editing.requiresMaintenance ?? false,
       isMaintenanceService: editing.isMaintenanceService ?? false,
+      isPremiumSubscriberProduct: editing.isPremiumSubscriberProduct ?? false,
       promoterCommissionText: editing.promoterCommissionPct ?? '0',
       pointsText: editing.pointsPct ?? '1',
       displayOrderText: String(editing.displayOrder ?? 0),
@@ -249,6 +253,7 @@ function ProductForm({
       requiresQuote: state.requiresQuote,
       requiresMaintenance: state.requiresMaintenance,
       isMaintenanceService: state.isMaintenanceService,
+      isPremiumSubscriberProduct: state.isPremiumSubscriberProduct,
       promoterCommissionPct: commission,
       pointsPct: points,
       displayOrder,
@@ -896,6 +901,19 @@ function ProductForm({
               on={state.isMaintenanceService}
               onChange={(v) =>
                 setState((s) => ({ ...s, isMaintenanceService: v }))
+              }
+            />
+
+            <ToggleRow
+              label="Exclusivo del plan Premium"
+              sub={
+                state.isPremiumSubscriberProduct
+                  ? 'Este es EL producto que se entrega gratis al activarse una suscripción Premium. Solo un producto puede tenerlo. La orden de instalación se crea y se entrega sola, y eso arranca el mantenimiento.'
+                  : 'Marcá esto en el producto alquilado incluido con el plan Premium.'
+              }
+              on={state.isPremiumSubscriberProduct}
+              onChange={(v) =>
+                setState((s) => ({ ...s, isPremiumSubscriberProduct: v }))
               }
             />
 
