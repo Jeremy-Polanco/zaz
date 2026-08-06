@@ -13,6 +13,7 @@ import {
   useUpdateSubscriptionPlan,
 } from '../lib/queries'
 import { Button, FieldError, Input, Label, SectionHeading } from '../components/ui'
+import { PremiumPlanCard } from '../components/PremiumPlanCard'
 import type { AdminPlanResponse } from '../lib/types'
 import { TAX_RATE, computeGrossCents } from '../lib/tax'
 
@@ -209,6 +210,7 @@ export function SuperSubscriptionPage() {
           </div>
         </form>
       </div>
+      <PremiumPlanCard />
     </div>
   )
 }

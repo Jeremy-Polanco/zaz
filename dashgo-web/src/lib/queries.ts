@@ -36,6 +36,7 @@ import type {
   ShippingQuote,
   Subscription,
   SubscriptionPlan,
+  SubscriptionTier,
   UpdateAddressInput,
   UserAddress,
   UserRole,
@@ -1247,10 +1248,47 @@ export function useDeleteAddressForUser(userId: string) {
 }
 
 /** Super-admin: PUT /admin/subscription/plan — update monthly price */
+/** Todos los planes configurados (standard y, si existe, premium). */
+export function useAdminSubscriptionPlans() {
+  return useQuery<AdminPlanResponse[]>({
+    queryKey: ['admin', 'subscription', 'plans'],
+    queryFn: async () =>
+      (await api.get<AdminPlanResponse[]>('/admin/subscription/plans')).data,
+    staleTime: 0,
+  })
+}
+
+/**
+ * Crea el plan de un tier que todavía no existe — en la práctica, premium.
+ * Crea producto y precio REALES en Stripe.
+ */
+export function useCreateSubscriptionPlan() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (body: {
+      tier: SubscriptionTier
+      unitAmountCents: number
+    }) => {
+      const { data } = await api.post<AdminPlanResponse>(
+        '/admin/subscription/plans',
+        body,
+      )
+      return data
+    },
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['admin', 'subscription'] })
+      void qc.invalidateQueries({ queryKey: ['subscription', 'plan'] })
+    },
+  })
+}
+
 export function useUpdateSubscriptionPlan() {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: async (body: { unitAmountCents: number }) => {
+    mutationFn: async (body: {
+      unitAmountCents: number
+      tier?: SubscriptionTier
+    }) => {
       const { data } = await api.put<AdminPlanResponse>(
         '/admin/subscription/plan',
         body,
@@ -1258,7 +1296,7 @@ export function useUpdateSubscriptionPlan() {
       return data
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['admin', 'subscription', 'plan'] })
+      qc.invalidateQueries({ queryKey: ['admin', 'subscription'] })
       qc.invalidateQueries({ queryKey: ['subscription', 'plan'] })
     },
   })

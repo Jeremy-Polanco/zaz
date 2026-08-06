@@ -424,7 +424,11 @@ export interface SubscriptionPlan {
   interval: 'month'
 }
 
+/** Plan de suscripción: el de siempre o el premium. */
+export type SubscriptionTier = 'standard' | 'premium'
+
 export interface AdminPlanResponse {
+  tier: SubscriptionTier
   id: string
   stripeProductId: string
   activeStripePriceId: string

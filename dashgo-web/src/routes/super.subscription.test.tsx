@@ -31,6 +31,9 @@ vi.mock('@tanstack/react-router', async (importOriginal) => {
 vi.mock('../lib/queries', () => ({
   useAdminSubscriptionPlan: vi.fn(),
   useUpdateSubscriptionPlan: vi.fn(),
+  // La tarjeta del plan Premium vive en la misma página.
+  useAdminSubscriptionPlans: vi.fn(() => ({ data: [], isPending: false })),
+  useCreateSubscriptionPlan: vi.fn(() => ({ mutateAsync: vi.fn(), isPending: false })),
 }))
 vi.mock('../lib/api', () => ({
   api: { get: vi.fn(), put: vi.fn() },
@@ -50,6 +53,7 @@ const mockUseMutation = vi.mocked(useUpdateSubscriptionPlan)
 
 const defaultPlan: AdminPlanResponse = {
   id: 'plan-uuid-001',
+  tier: 'standard' as const,
   stripeProductId: 'prod_test001',
   activeStripePriceId: 'price_test001',
   unitAmountCents: 1000,
