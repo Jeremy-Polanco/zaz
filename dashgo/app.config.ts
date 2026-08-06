@@ -55,18 +55,25 @@ function assertProductionStripeKey() {
  *   Both App Store Connect and EAS Update expect strict semver.
  *
  * `ios.buildNumber` (CFBundleVersion, App Store unique-per-upload):
- *   Source of truth = EAS remote version service.
- *   eas.json sets `"autoIncrement": true` for the production profile, so
- *   EAS bumps and persists the next buildNumber on every `eas build`.
- *   The literal `'1'` below is ONLY a local-dev placeholder for
- *   `expo prebuild` / `expo run:ios`. It is OVERRIDDEN at build time by:
- *     1. `process.env.EAS_BUILD_NUMBER` when EAS injects it, or
- *     2. EAS's own native-project mutation during the build.
+ *   Source of truth = EL LITERAL DE ABAJO. eas.json tiene
+ *   `appVersionSource: "local"`, así que NADIE lo incrementa solo: hay que
+ *   subirlo a mano antes de cada subida a TestFlight/App Store.
+ *
+ *   Este comentario decía lo contrario (que EAS lo manejaba con
+ *   `autoIncrement`) mientras la config hacía lo opuesto. Esa contradicción
+ *   costó cuatro submits rechazados del build 16 sobre la versión 1.0.5:
+ *   App Store Connect ya tenía ese número y devolvía "Build number 16 for app
+ *   version 1.0.5 has already been used".
+ *
+ *   ARREGLO DEFINITIVO (una sola vez, necesita terminal interactiva):
+ *     1. eas.json → `"appVersionSource": "remote"`
+ *     2. eas.json → `"autoIncrement": true` en el perfil production
+ *     3. `npx eas-cli build:version:set --platform ios`  → ingresar el último
+ *        número ya usado; EAS incrementa desde ahí en cada build.
+ *   Mientras tanto, el literal de abajo manda.
  *
  * `android.versionCode` (Play Store monotonically-increasing integer):
- *   Same pattern as buildNumber — managed by EAS autoIncrement, with the
- *   literal `1` as a local-dev fallback. Overridden by
- *   `process.env.EAS_BUILD_VERSION_CODE` at EAS build time.
+ *   Mismo caso que buildNumber: hoy es manual, no autoIncrement.
  *
  * Why this matters:
  *   - Apple REJECTS duplicate buildNumbers on a given version. A hardcoded
@@ -77,13 +84,14 @@ function assertProductionStripeKey() {
  *     via EAS Update can target the right runtime version channel.
  */
 function resolveIosBuildNumber(): string {
-  // appVersionSource is 'local' (eas.json) — the build number comes from here.
-  // EAS_BUILD_NUMBER is still honored if injected; otherwise use the explicit
-  // value below. BUMP THIS by 1 before each App Store/TestFlight upload —
-  // Apple rejects a duplicate buildNumber on the same version (1.0).
+  // appVersionSource es 'local' (eas.json): este número ES el CFBundleVersion
+  // que se sube. SUBILO EN 1 antes de cada subida a TestFlight/App Store —
+  // Apple rechaza un buildNumber repetido dentro de la misma versión.
+  //
+  // Último subido a App Store Connect: 17 (versión 1.0.5).
   const fromEas = process.env.EAS_BUILD_NUMBER
   if (fromEas && fromEas.length > 0) return fromEas
-  return '17'
+  return '18'
 }
 
 function resolveAndroidVersionCode(): number {
