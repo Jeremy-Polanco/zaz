@@ -13,6 +13,10 @@ export default {
   none: {
     pricePerMonth: '{{price}} / month',
     details: 'Taxes included · {{perks}} Cancel anytime.',
+    detailsPremium:
+      'Taxes included · {{perks}} Also includes the exclusive Premium unit, installed at no cost. Cancel anytime.',
+    planLabel: 'Monthly plan',
+    premiumLabel: 'Premium',
     subscribe: 'Subscribe',
   },
   active: {

@@ -22,6 +22,9 @@ vi.mock('@tanstack/react-router', async (importOriginal) => {
 vi.mock('../lib/queries', () => ({
   useMySubscription: vi.fn(),
   useSubscriptionPlan: vi.fn(),
+  // Los planes disponibles (standard + premium). Vacío = la pantalla cae al
+  // plan único de siempre, que es lo que estos tests ejercitan.
+  useSubscriptionPlans: vi.fn(() => ({ data: [] })),
   useCreateCheckoutSession: vi.fn(),
   useCreatePortalSession: vi.fn(),
   useCancelSubscription: vi.fn(),
@@ -165,7 +168,9 @@ describe('SubscriptionPage — no subscription', () => {
 
     await userEvent.click(screen.getByRole('button', { name: 'Suscribirme' }))
 
-    expect(checkout.mutate).toHaveBeenCalledWith({})
+    // El checkout ahora nombra el plan explícitamente. En el fallback de un
+    // solo plan, ese plan es el standard.
+    expect(checkout.mutate).toHaveBeenCalledWith({ tier: 'standard' })
   })
 
   it('shows "Redirigiendo…" and blocks a second click while checkout is in flight', () => {

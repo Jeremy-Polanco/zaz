@@ -7,6 +7,7 @@ import { useTranslation } from 'react-i18next'
 import {
   useMySubscription,
   useSubscriptionPlan,
+  useSubscriptionPlans,
   useCreateCheckoutSession,
   useCreatePortalSession,
   useCancelSubscription,
@@ -14,6 +15,7 @@ import {
 } from '../../lib/queries'
 import { formatCents, formatDate } from '../../lib/format'
 import { Button, Eyebrow, Hairline } from '../../components/ui'
+import type { SubscriptionTier } from '../../lib/types'
 
 const SUCCESS_URL = 'dashgo://subscription?success=1'
 const CANCEL_URL = 'dashgo://subscription?cancel=1'
@@ -35,6 +37,7 @@ export default function SubscriptionTab() {
   const params = useLocalSearchParams<{ success?: string; cancel?: string }>()
   const { data: sub, isPending: subPending, refetch } = useMySubscription()
   const { data: plan, isPending: planPending } = useSubscriptionPlan()
+  const { data: plans } = useSubscriptionPlans()
   const checkout = useCreateCheckoutSession()
   const portal = useCreatePortalSession()
   const cancel = useCancelSubscription()
@@ -52,10 +55,11 @@ export default function SubscriptionTab() {
     }, [refetch, params.success]),
   )
 
-  const openCheckout = async () => {
+  const openCheckout = async (tier?: SubscriptionTier) => {
     const result = await checkout.mutateAsync({
       successUrl: SUCCESS_URL,
       cancelUrl: CANCEL_URL,
+      tier,
     })
     if (result?.url) {
       await WebBrowser.openAuthSessionAsync(result.url, SUCCESS_URL)
@@ -121,24 +125,48 @@ export default function SubscriptionTab() {
         <Hairline className="my-6" />
 
         {sub === null || sub === undefined ? (
-          /* No subscription */
-          <View className="border border-ink/15 bg-paper p-6">
-            <Text className="font-sans-semibold text-[26px] text-ink">
-              {t('none.pricePerMonth', {
-                price: plan ? formatCents(plan.priceCents) : '$10.00',
-              })}
-            </Text>
-            <Text className="mt-2 text-[14px] text-ink-soft">
-              {t('none.details', { perks: t('perks') })}
-            </Text>
-            <View className="mt-5">
-              <Button
-                onPress={openCheckout}
-                disabled={checkout.isPending}
-              >
-                {checkout.isPending ? t('redirecting') : t('none.subscribe')}
-              </Button>
-            </View>
+          /* Sin suscripción: se ofrecen los planes disponibles. Si el premium
+             no está configurado, la lista trae solo el standard y la pantalla
+             se ve igual que antes. */
+          <View className="gap-4">
+            {(plans && plans.length > 0
+              ? plans
+              : plan
+                ? [{ ...plan, tier: 'standard' as const }]
+                : []
+            ).map((p) => {
+              const isPremium = p.tier === 'premium'
+              return (
+                <View
+                  key={p.tier ?? 'standard'}
+                  className={`border p-6 ${
+                    isPremium
+                      ? 'border-accent-dark bg-accent-light'
+                      : 'border-ink/15 bg-paper'
+                  }`}
+                >
+                  <Text className="font-sans text-[11px] uppercase tracking-label text-ink-muted">
+                    {isPremium ? t('none.premiumLabel') : t('none.planLabel')}
+                  </Text>
+                  <Text className="mt-1 font-sans-semibold text-[26px] text-ink">
+                    {t('none.pricePerMonth', { price: formatCents(p.priceCents) })}
+                  </Text>
+                  <Text className="mt-2 text-[14px] text-ink-soft">
+                    {isPremium
+                      ? t('none.detailsPremium', { perks: t('perks') })
+                      : t('none.details', { perks: t('perks') })}
+                  </Text>
+                  <View className="mt-5">
+                    <Button
+                      onPress={() => openCheckout(p.tier)}
+                      disabled={checkout.isPending}
+                    >
+                      {checkout.isPending ? t('redirecting') : t('none.subscribe')}
+                    </Button>
+                  </View>
+                </View>
+              )
+            })}
           </View>
         ) : sub.status === 'active' && !sub.cancelAtPeriodEnd ? (
           /* Active, auto-renewing */
@@ -209,7 +237,9 @@ export default function SubscriptionTab() {
               {t('canceled.title')}
             </Text>
             <View className="mt-5">
-              <Button onPress={openCheckout} disabled={checkout.isPending}>
+              {/* Envuelto a propósito: pasar `openCheckout` directo mandaría el
+                  evento del tap como `tier`. */}
+              <Button onPress={() => openCheckout()} disabled={checkout.isPending}>
                 {checkout.isPending ? t('redirecting') : t('canceled.resubscribe')}
               </Button>
             </View>

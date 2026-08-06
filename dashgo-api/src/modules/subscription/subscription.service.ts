@@ -301,6 +301,7 @@ export class SubscriptionService implements OnModuleInit {
     const plan = await this.plans.findOne({ where: { tier } });
     if (!plan) return null;
     return {
+      tier: plan.tier,
       // Gross (tax-inclusive) — what the customer is actually charged. The DB
       // stores the net amount; tax (8.887%) is applied here at display time.
       priceCents: computeGrossCents(plan.unitAmountCents),
@@ -427,6 +428,20 @@ export class SubscriptionService implements OnModuleInit {
     tier: SubscriptionTier = SubscriptionTier.STANDARD,
   ): Promise<AdminPlanResponseDto> {
     return this.toAdminPlanResponse(await this.getActivePlanRow(tier));
+  }
+
+  /**
+   * Planes disponibles para el cliente. Los precios que viajan son BRUTOS
+   * (con impuesto) — es lo que la persona va a pagar.
+   */
+  async listPublicPlans(): Promise<PlanDto[]> {
+    const rows = await this.plans.find({ order: { tier: 'ASC' } });
+    return rows.map((plan) => ({
+      tier: plan.tier,
+      priceCents: computeGrossCents(plan.unitAmountCents),
+      currency: plan.currency as 'usd',
+      interval: plan.interval as 'month',
+    }));
   }
 
   /** Todos los planes configurados, para el panel. */

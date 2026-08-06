@@ -5,6 +5,7 @@ import { SectionHeading, Button } from '../components/ui'
 import {
   useMySubscription,
   useSubscriptionPlan,
+  useSubscriptionPlans,
   useCreateCheckoutSession,
   useCreatePortalSession,
   useCancelSubscription,
@@ -41,6 +42,7 @@ export function SubscriptionPage() {
   const { session } = Route.useSearch()
   const { data: sub, isPending: subPending, refetch } = useMySubscription()
   const { data: plan, isPending: planPending } = useSubscriptionPlan()
+  const { data: plans } = useSubscriptionPlans()
   const checkout = useCreateCheckoutSession()
   const portal = useCreatePortalSession()
   const cancel = useCancelSubscription()
@@ -82,21 +84,47 @@ export function SubscriptionPage() {
       )}
 
       {sub === null || sub === undefined ? (
-        /* No subscription */
-        <div className="border border-ink/15 bg-paper p-8">
-          <p className="mb-1 text-2xl font-semibold text-ink">
-            ${plan ? (plan.priceCents / 100).toFixed(2) : '10.00'} / mes
-          </p>
-          <p className="mb-6 text-base text-ink-muted">
-            {`Impuestos incluidos · ${SUBSCRIPTION_PERKS} Cancela cuando quieras.`}
-          </p>
-          <Button
-            variant="accent"
-            onClick={() => checkout.mutate({})}
-            disabled={checkout.isPending}
-          >
-            {checkout.isPending ? 'Redirigiendo…' : 'Suscribirme'}
-          </Button>
+        /* Sin suscripción: se ofrecen los planes disponibles. Si el premium no
+           está configurado, la lista trae solo el standard y la pantalla se ve
+           igual que antes. */
+        <div className="grid gap-4 md:grid-cols-2">
+          {(plans && plans.length > 0
+            ? plans
+            : plan
+              ? [{ ...plan, tier: 'standard' as const }]
+              : []
+          ).map((p) => {
+            const isPremium = p.tier === 'premium'
+            return (
+              <div
+                key={p.tier ?? 'standard'}
+                className={`border p-8 ${
+                  isPremium
+                    ? 'border-accent-dark bg-accent-light'
+                    : 'border-ink/15 bg-paper'
+                }`}
+              >
+                <p className="text-[0.7rem] uppercase tracking-[0.14em] text-ink-muted">
+                  {isPremium ? 'Premium' : 'Plan mensual'}
+                </p>
+                <p className="mb-1 mt-1 text-2xl font-semibold text-ink">
+                  ${(p.priceCents / 100).toFixed(2)} / mes
+                </p>
+                <p className="mb-6 text-base text-ink-muted">
+                  {isPremium
+                    ? `Impuestos incluidos · ${SUBSCRIPTION_PERKS} Además incluye el equipo exclusivo Premium, instalado sin costo. Cancela cuando quieras.`
+                    : `Impuestos incluidos · ${SUBSCRIPTION_PERKS} Cancela cuando quieras.`}
+                </p>
+                <Button
+                  variant="accent"
+                  onClick={() => checkout.mutate({ tier: p.tier })}
+                  disabled={checkout.isPending}
+                >
+                  {checkout.isPending ? 'Redirigiendo…' : 'Suscribirme'}
+                </Button>
+              </div>
+            )
+          })}
         </div>
       ) : sub.status === 'active' && !sub.cancelAtPeriodEnd ? (
         /* Active, auto-renewing */

@@ -495,7 +495,11 @@ export interface Subscription {
   canceledAt: string | null
 }
 
+export type SubscriptionTier = 'standard' | 'premium'
+
 export interface SubscriptionPlan {
+  /** Qué plan es. Presente desde que existen los tiers. */
+  tier?: SubscriptionTier
   priceCents: number
   currency: 'usd'
   interval: 'month'

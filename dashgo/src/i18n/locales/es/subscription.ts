@@ -15,6 +15,10 @@ export default {
   none: {
     pricePerMonth: '{{price}} / mes',
     details: 'Impuestos incluidos · {{perks}} Cancela cuando quieras.',
+    detailsPremium:
+      'Impuestos incluidos · {{perks}} Además incluye el equipo exclusivo Premium, instalado sin costo. Cancela cuando quieras.',
+    planLabel: 'Plan mensual',
+    premiumLabel: 'Premium',
     subscribe: 'Suscribirme',
   },
   active: {

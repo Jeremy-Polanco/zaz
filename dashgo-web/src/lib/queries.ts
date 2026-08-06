@@ -996,13 +996,31 @@ export function useSubscriptionPlan() {
   })
 }
 
+/**
+ * Público: los planes disponibles. Precios BRUTOS — lo que la persona paga.
+ * Lista vacía si todavía no hay ninguno configurado.
+ */
+export function useSubscriptionPlans() {
+  return useQuery<SubscriptionPlan[]>({
+    queryKey: ['subscription', 'plans'],
+    queryFn: async () =>
+      (await api.get<SubscriptionPlan[]>('/subscription/plans')).data,
+    staleTime: 3_600_000,
+  })
+}
+
 /** Client: POST /subscription/checkout-session — redirects to Stripe Checkout */
 export function useCreateCheckoutSession() {
   return useMutation({
-    mutationFn: async (opts?: { successUrl?: string; cancelUrl?: string }) => {
+    mutationFn: async (opts?: {
+      successUrl?: string
+      cancelUrl?: string
+      tier?: SubscriptionTier
+    }) => {
       const { data } = await api.post<{ url: string }>('/subscription/checkout-session', {
         successUrl: opts?.successUrl ?? 'https://www.dashgo.dev/subscription?session=success',
         cancelUrl: opts?.cancelUrl ?? 'https://www.dashgo.dev/subscription?session=canceled',
+        tier: opts?.tier,
       })
       return data
     },

@@ -41,6 +41,7 @@ import type {
   ShippingQuote,
   Subscription,
   SubscriptionPlan,
+  SubscriptionTier,
   UpdateAddressInput,
   UpdateSubscriptionPlanInput,
   UserAddress,
@@ -1140,12 +1141,30 @@ export function useSubscriptionPlan() {
 }
 
 /** Client: POST /subscription/checkout-session — returns { url } */
+/**
+ * Público: los planes disponibles. Precios BRUTOS — lo que la persona paga.
+ * Lista vacía si todavía no hay ninguno configurado.
+ */
+export function useSubscriptionPlans() {
+  return useQuery<SubscriptionPlan[]>({
+    queryKey: ['subscription', 'plans'],
+    queryFn: async () =>
+      (await api.get<SubscriptionPlan[]>('/subscription/plans')).data,
+    staleTime: 3_600_000,
+  })
+}
+
 export function useCreateCheckoutSession() {
   return useMutation({
-    mutationFn: async (opts?: { successUrl?: string; cancelUrl?: string }) => {
+    mutationFn: async (opts?: {
+      successUrl?: string
+      cancelUrl?: string
+      tier?: SubscriptionTier
+    }) => {
       const { data } = await api.post<{ url: string }>('/subscription/checkout-session', {
         successUrl: opts?.successUrl ?? 'dashgo://subscription?success=1',
         cancelUrl: opts?.cancelUrl ?? 'dashgo://subscription?cancel=1',
+        tier: opts?.tier,
       })
       return data
     },

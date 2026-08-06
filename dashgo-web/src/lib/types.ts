@@ -419,6 +419,8 @@ export interface Subscription {
 }
 
 export interface SubscriptionPlan {
+  /** Qué plan es. Presente desde que existen los tiers. */
+  tier?: SubscriptionTier
   priceCents: number
   currency: 'usd'
   interval: 'month'

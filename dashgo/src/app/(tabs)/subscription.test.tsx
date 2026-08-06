@@ -21,6 +21,8 @@ import { renderWithProviders } from '../../test/test-utils'
 jest.mock('../../lib/queries', () => ({
   useMySubscription: jest.fn(),
   useSubscriptionPlan: jest.fn(),
+  // Los planes disponibles. Vacío = la pantalla cae al plan único de siempre.
+  useSubscriptionPlans: jest.fn(() => ({ data: [] })),
   useCreateCheckoutSession: jest.fn(),
   useCreatePortalSession: jest.fn(),
   useCancelSubscription: jest.fn(),

@@ -41,6 +41,17 @@ export class SubscriptionController {
   }
 
   /**
+   * GET /subscription/plans — público. Los planes disponibles, para que el
+   * cliente elija. Lista vacía si todavía no hay ninguno configurado: mejor una
+   * pantalla sin opciones que un 503 en una ruta pública.
+   */
+  @Public()
+  @Get('subscription/plans')
+  async getPlans() {
+    return this.subscription.listPublicPlans();
+  }
+
+  /**
    * GET /me/subscription — returns subscriber's current subscription or null.
    *
    * `null` is serialized as JSON literal `null` on the wire — bypassing
