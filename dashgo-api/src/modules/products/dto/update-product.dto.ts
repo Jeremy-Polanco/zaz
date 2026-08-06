@@ -138,6 +138,12 @@ export class UpdateProductDto {
   @IsBoolean()
   isDefaultSubscriberBebedero?: boolean;
 
+  // Marca EL producto alquilado exclusivo del plan premium: se entrega gratis
+  // al activarse una suscripción premium. A lo sumo un producto lo lleva.
+  @IsOptional()
+  @IsBoolean()
+  isPremiumSubscriberProduct?: boolean;
+
   // Posición en el catálogo (menor número aparece primero)
   @IsOptional()
   @IsInt()

@@ -6,10 +6,27 @@ import {
   UpdateDateColumn,
 } from 'typeorm';
 
+/**
+ * Tier de suscripción. `standard` es el plan de siempre; `premium` es el plan
+ * caro que además incluye un producto alquilado exclusivo.
+ */
+export enum SubscriptionTier {
+  STANDARD = 'standard',
+  PREMIUM = 'premium',
+}
+
 @Entity('subscription_plan')
 export class SubscriptionPlan {
   @PrimaryGeneratedColumn('uuid')
   id!: string;
+
+  /** Un solo plan por tier (unique index en la migración). */
+  @Column({
+    type: 'varchar',
+    length: 20,
+    default: SubscriptionTier.STANDARD,
+  })
+  tier!: SubscriptionTier;
 
   @Column({ name: 'stripe_product_id', type: 'varchar', length: 64 })
   stripeProductId!: string;

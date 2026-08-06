@@ -227,6 +227,21 @@ export class Product {
   })
   isDefaultSubscriberBebedero!: boolean;
 
+  /**
+   * Marca EL producto alquilado exclusivo del plan premium: se entrega gratis
+   * al activarse una suscripción premium. Como el bebedero por defecto, a lo
+   * sumo un producto lleva esta marca (índice único parcial).
+   *
+   * Va aparte de `isDefaultSubscriberBebedero` a propósito: son dos productos
+   * distintos para dos planes distintos, y un premium recibe los dos.
+   */
+  @Column({
+    name: 'is_premium_subscriber_product',
+    type: 'boolean',
+    default: false,
+  })
+  isPremiumSubscriberProduct!: boolean;
+
   /** Posición en el catálogo — menor número aparece primero. */
   @Column({ name: 'display_order', type: 'int', default: 0 })
   displayOrder!: number;

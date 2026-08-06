@@ -1224,6 +1224,57 @@ export class OrdersService {
     return updated;
   }
 
+  /**
+   * Lleva a ENTREGADA una orden de instalación provisionada por el sistema
+   * (el bebedero del suscriptor, el producto exclusivo premium).
+   *
+   * Existe porque el alquiler NO se activa hasta que la orden se entrega: sin
+   * esto la instalación queda esperando que un humano la camine por el flujo, y
+   * el contador de mantenimiento nunca arranca. Recorre la máquina de estados
+   * en vez de escribir DELIVERED a mano, así corren los efectos reales —
+   * activación del alquiler, mantenimiento, factura, puntos y comisiones.
+   *
+   * GUARDA DURA: solo órdenes de total $0. Este método salta la validación y el
+   * cobro; si aceptara órdenes con saldo sería una forma de entregar sin pagar.
+   * Devuelve false (sin tirar) cuando no aplica — es un efecto de fondo y no
+   * puede tumbar la activación de una suscripción.
+   */
+  async deliverProvisionedOrder(orderId: string): Promise<boolean> {
+    try {
+      const order = await this.orders.findOne({ where: { id: orderId } });
+      if (!order) return false;
+      if (order.status === OrderStatus.DELIVERED) return true; // idempotente
+
+      const totalCents = Math.round(parseFloat(order.totalAmount) * 100);
+      if (totalCents !== 0) {
+        this.logger.warn(
+          `deliverProvisionedOrder: orden ${orderId} no es de $0 (${totalCents}) — se deja en el flujo manual`,
+        );
+        return false;
+      }
+      if (order.status !== OrderStatus.CONFIRMED_BY_COLMADO) {
+        this.logger.warn(
+          `deliverProvisionedOrder: orden ${orderId} está en ${order.status}, se esperaba confirmada — se deja para el reconcile`,
+        );
+        return false;
+      }
+
+      await this.orders.update(orderId, {
+        status: OrderStatus.IN_DELIVERY_ROUTE,
+      });
+      await this.markDelivered(orderId);
+
+      const delivered = await this.orders.findOne({ where: { id: orderId } });
+      if (delivered) this.orderNotifications.notifyStatus(delivered);
+      return true;
+    } catch (err) {
+      this.logger.error(
+        `deliverProvisionedOrder falló para ${orderId}: ${(err as Error).message}`,
+      );
+      return false;
+    }
+  }
+
   private async markDelivered(orderId: string) {
     let customerId: string | null = null;
     await this.dataSource.transaction(async (tx) => {

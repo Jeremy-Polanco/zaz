@@ -2849,6 +2849,62 @@ describe('OrdersService', () => {
   // findAll / findOne — scope + not-found branches
   // ─────────────────────────────────────────────────────────────────────────
 
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // deliverProvisionedOrder — instalaciones provisionadas por el sistema
+  // ─────────────────────────────────────────────────────────────────────────
+
+  describe('deliverProvisionedOrder', () => {
+    it('RECHAZA una orden con saldo — no es una vía para entregar sin pagar', async () => {
+      ordersRepo.findOne.mockResolvedValueOnce(
+        fakeOrder({
+          status: OrderStatus.CONFIRMED_BY_COLMADO,
+          totalAmount: '25.00',
+        }),
+      );
+
+      await expect(service.deliverProvisionedOrder('order-1')).resolves.toBe(
+        false,
+      );
+      expect(ordersRepo.update).not.toHaveBeenCalled();
+    });
+
+    it('no toca una orden que todavía no está confirmada', async () => {
+      ordersRepo.findOne.mockResolvedValueOnce(
+        fakeOrder({ status: OrderStatus.QUOTED, totalAmount: '0.00' }),
+      );
+
+      await expect(service.deliverProvisionedOrder('order-1')).resolves.toBe(
+        false,
+      );
+      expect(ordersRepo.update).not.toHaveBeenCalled();
+    });
+
+    it('es idempotente: una orden ya entregada devuelve true sin re-entregar', async () => {
+      ordersRepo.findOne.mockResolvedValueOnce(
+        fakeOrder({ status: OrderStatus.DELIVERED, totalAmount: '0.00' }),
+      );
+
+      await expect(service.deliverProvisionedOrder('order-1')).resolves.toBe(
+        true,
+      );
+      expect(ordersRepo.update).not.toHaveBeenCalled();
+    });
+
+    it('una orden inexistente devuelve false sin tirar', async () => {
+      ordersRepo.findOne.mockResolvedValueOnce(null);
+      await expect(service.deliverProvisionedOrder('nope')).resolves.toBe(false);
+    });
+
+    it('nunca tira: un error interno se reporta como false', async () => {
+      // Es un efecto de fondo — no puede tumbar la activación de una suscripción.
+      ordersRepo.findOne.mockRejectedValueOnce(new Error('db caída'));
+      await expect(service.deliverProvisionedOrder('order-1')).resolves.toBe(
+        false,
+      );
+    });
+  });
+
   describe('findAll', () => {
     it('SUPER_ADMIN_DELIVERY scope returns all orders (empty where scope)', async () => {
       const list = [fakeOrder(), fakeOrder({ id: 'order-2' })];

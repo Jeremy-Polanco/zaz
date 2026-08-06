@@ -14,6 +14,7 @@ import { Repository } from 'typeorm';
 import { SubscriptionService } from './subscription.service';
 import { SUBSCRIPTION_ACTIVATED } from '../../common/events/subscription.events';
 import { Subscription, SubscriptionStatus } from '../../entities/subscription.entity';
+import { SubscriptionTier } from '../../entities/subscription-plan.entity';
 import { User } from '../../entities/user.entity';
 import { SubscriptionPlan } from '../../entities/subscription-plan.entity';
 import { createMockStripe, MockStripe } from '../../test-utils/stripe';
@@ -73,6 +74,7 @@ function fakeSubscription(overrides: Partial<Subscription> = {}): Subscription {
     userId: 'user-1',
     stripeSubscriptionId: 'sub_stripe_1',
     status: SubscriptionStatus.ACTIVE,
+  tier: SubscriptionTier.STANDARD,
     currentPeriodStart: now,
     currentPeriodEnd: end,
     cancelAtPeriodEnd: false,
@@ -136,6 +138,7 @@ describe('SubscriptionService', () => {
     // (existing tests do not exercise the seed path)
     plansRepo.findOne.mockResolvedValue({
       id: 'existing-plan',
+      tier: SubscriptionTier.STANDARD,
       stripeProductId: 'prod_test',
       activeStripePriceId: 'price_test_monthly',
       unitAmountCents: 1000,
@@ -585,6 +588,7 @@ describe('SubscriptionService — bootstrap seed (T7)', () => {
 
     plansRepo.save.mockResolvedValue({
       id: 'plan-uuid-1',
+      tier: SubscriptionTier.STANDARD,
       stripeProductId: 'prod_abc123',
       activeStripePriceId: 'price_test_monthly',
       unitAmountCents: 1000,
@@ -633,6 +637,7 @@ describe('SubscriptionService — bootstrap seed (T7)', () => {
   it('skips seeding when a subscription_plan row already exists', async () => {
     plansRepo.findOne.mockResolvedValue({
       id: 'existing-plan-uuid',
+      tier: SubscriptionTier.STANDARD,
       stripeProductId: 'prod_existing',
       activeStripePriceId: 'price_existing',
       unitAmountCents: 999,
@@ -686,6 +691,7 @@ describe('SubscriptionService — updatePlan (T11–T22)', () => {
 
   const existingPlan: SubscriptionPlan = {
     id: 'plan-uuid-existing',
+    tier: SubscriptionTier.STANDARD,
     stripeProductId: 'prod_existing',
     activeStripePriceId: 'price_OLD',
     unitAmountCents: 1000,
@@ -952,6 +958,7 @@ describe('SubscriptionService — createCheckoutSession plan source (T23)', () =
     // DB row exists so onModuleInit skips seeding
     plansRepo.findOne.mockResolvedValue({
       id: 'plan-uuid-checkout',
+      tier: SubscriptionTier.STANDARD,
       stripeProductId: 'prod_checkout',
       activeStripePriceId: 'price_FROM_DB',
       unitAmountCents: 1000,
@@ -979,6 +986,7 @@ describe('SubscriptionService — createCheckoutSession plan source (T23)', () =
     jest.clearAllMocks();
     plansRepo.findOne.mockResolvedValue({
       id: 'plan-uuid-checkout',
+      tier: SubscriptionTier.STANDARD,
       stripeProductId: 'prod_checkout',
       activeStripePriceId: 'price_FROM_DB',
       unitAmountCents: 1000,
@@ -1065,6 +1073,7 @@ describe('SubscriptionService — getAdminPlan (T25)', () => {
 
   const fullPlanRow: SubscriptionPlan = {
     id: 'plan-admin-uuid',
+    tier: SubscriptionTier.STANDARD,
     stripeProductId: 'prod_admin_123',
     activeStripePriceId: 'price_admin_abc',
     unitAmountCents: 2000,
@@ -1194,6 +1203,7 @@ describe('SubscriptionService — getPlan (T9)', () => {
   it('returns plan DTO from the DB row when one exists', async () => {
     plansRepo.findOne.mockResolvedValue({
       id: 'plan-uuid-1',
+      tier: SubscriptionTier.STANDARD,
       stripeProductId: 'prod_abc',
       activeStripePriceId: 'price_abc',
       unitAmountCents: 1500,
@@ -1216,6 +1226,7 @@ describe('SubscriptionService — getPlan (T9)', () => {
   it('returns gross priceCents derived from the stored net unitAmountCents', async () => {
     plansRepo.findOne.mockResolvedValue({
       id: 'plan-uuid-2',
+      tier: SubscriptionTier.STANDARD,
       stripeProductId: 'prod_xyz',
       activeStripePriceId: 'price_xyz',
       unitAmountCents: 4999,
@@ -1309,6 +1320,7 @@ describe('SubscriptionService — coverage completion', () => {
     // DB row exists so onModuleInit skips seeding when Stripe is enabled
     plansRepo.findOne.mockResolvedValue({
       id: 'plan-uuid',
+      tier: SubscriptionTier.STANDARD,
       stripeProductId: 'prod_x',
       activeStripePriceId: 'price_x',
       unitAmountCents: 1000,
@@ -1335,6 +1347,7 @@ describe('SubscriptionService — coverage completion', () => {
     // Re-apply the seeded-plan stub after clearing call history
     plansRepo.findOne.mockResolvedValue({
       id: 'plan-uuid',
+      tier: SubscriptionTier.STANDARD,
       stripeProductId: 'prod_x',
       activeStripePriceId: 'price_x',
       unitAmountCents: 1000,

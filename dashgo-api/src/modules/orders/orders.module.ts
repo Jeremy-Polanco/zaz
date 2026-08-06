@@ -6,6 +6,7 @@ import { User } from '../../entities/user.entity';
 import { OrdersController } from './orders.controller';
 import { OrdersService } from './orders.service';
 import { SubscriberBebederoListener } from './subscriber-bebedero.listener';
+import { PremiumProductListener } from './premium-product.listener';
 import { OrderNotificationsService } from './order-notifications.service';
 import { WinBackCron } from './win-back.cron';
 import { WhatsAppModule } from '../whatsapp/whatsapp.module';
@@ -44,6 +45,7 @@ import { RentalsModule } from '../rentals/rentals.module';
   providers: [
     OrdersService,
     SubscriberBebederoListener,
+    PremiumProductListener,
     OrderNotificationsService,
     WinBackCron,
   ],

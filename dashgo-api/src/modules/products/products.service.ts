@@ -234,6 +234,7 @@ export class ProductsService implements OnModuleInit {
       requiresMaintenance: dto.requiresMaintenance ?? false,
       isMaintenanceService: dto.isMaintenanceService ?? false,
       isDefaultSubscriberBebedero: dto.isDefaultSubscriberBebedero ?? false,
+      isPremiumSubscriberProduct: dto.isPremiumSubscriberProduct ?? false,
       displayOrder: dto.displayOrder ?? 0,
     });
     const saved = await this.products.save(product);
@@ -325,6 +326,8 @@ export class ProductsService implements OnModuleInit {
       patch.isMaintenanceService = dto.isMaintenanceService;
     if (dto.isDefaultSubscriberBebedero !== undefined)
       patch.isDefaultSubscriberBebedero = dto.isDefaultSubscriberBebedero;
+    if (dto.isPremiumSubscriberProduct !== undefined)
+      patch.isPremiumSubscriberProduct = dto.isPremiumSubscriberProduct;
     if (dto.displayOrder !== undefined) patch.displayOrder = dto.displayOrder;
     const adminProvidedStripeIds =
       typeof dto.stripeProductId === 'string' &&

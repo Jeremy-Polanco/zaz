@@ -19,7 +19,14 @@ import {
   SubscriptionStatus,
 } from '../../entities/subscription.entity';
 import { User } from '../../entities/user.entity';
-import { SubscriptionPlan } from '../../entities/subscription-plan.entity';
+import {
+  SubscriptionPlan,
+  SubscriptionTier,
+} from '../../entities/subscription-plan.entity';
+import {
+  extractStripeProductId,
+  resolveTierFromStripeProduct,
+} from './tier-resolution';
 import { SubscriptionResponseDto } from './dto/subscription-response.dto';
 import { PlanDto } from './dto/plan.dto';
 import { AdminPlanResponseDto } from './dto/admin-plan-response.dto';
@@ -427,6 +434,26 @@ export class SubscriptionService implements OnModuleInit {
   }
 
   /**
+   * Tier de la suscripción ACTIVA de un usuario, o `null` si no tiene ninguna.
+   *
+   * `isActiveSubscriber` sigue existiendo y sigue significando "tiene alguna
+   * suscripción activa" — no cambió para nadie. Este método es el que permite
+   * que un beneficio decida si lo desbloquean todos los planes o solo premium.
+   * Misma condición de vigencia, una sola query, sin llamar a Stripe.
+   */
+  async getActiveTier(userId: string): Promise<SubscriptionTier | null> {
+    const row = await this.subscriptions
+      .createQueryBuilder('s')
+      .select('s.tier', 'tier')
+      .where('s.user_id = :userId', { userId })
+      .andWhere("s.status IN ('active','past_due')")
+      .andWhere('s.current_period_end > NOW()')
+      .limit(1)
+      .getRawOne<{ tier: SubscriptionTier }>();
+    return row?.tier ?? null;
+  }
+
+  /**
    * Single SQL query — NO Stripe call.
    * Returns true for status IN ('active','past_due') AND current_period_end > NOW()
    */
@@ -658,11 +685,20 @@ export class SubscriptionService implements OnModuleInit {
 
     const normalizedStatus = this.normalizeStatus(stripeSub.status);
 
+    // Tier por PRODUCTO de Stripe, no por price id: los precios rotan cada vez
+    // que el admin cambia el monto y el viejo sigue vivo para los ya suscriptos.
+    const plans = await this.plans.find();
+    const tier = resolveTierFromStripeProduct(
+      extractStripeProductId(stripeSub as never),
+      plans,
+    );
+
     await this.subscriptions.upsert(
       {
         userId,
         stripeSubscriptionId: stripeSub.id,
         status: normalizedStatus,
+        tier,
         currentPeriodStart: start,
         currentPeriodEnd: end,
         cancelAtPeriodEnd: stripeSub.cancel_at_period_end,
@@ -679,7 +715,7 @@ export class SubscriptionService implements OnModuleInit {
     // create duplicate bebedero orders. Event-driven to keep the module graph
     // acyclic (OrdersModule already depends on SubscriptionModule).
     if (normalizedStatus === SubscriptionStatus.ACTIVE) {
-      this.events.emit(SUBSCRIPTION_ACTIVATED, { userId });
+      this.events.emit(SUBSCRIPTION_ACTIVATED, { userId, tier });
     }
   }
 

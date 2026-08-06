@@ -8,6 +8,7 @@ import {
   UpdateDateColumn,
 } from 'typeorm';
 import { User } from './user.entity';
+import { SubscriptionTier } from './subscription-plan.entity';
 
 export enum SubscriptionStatus {
   ACTIVE = 'active',
@@ -38,6 +39,19 @@ export class Subscription {
 
   @Column({ type: 'enum', enum: SubscriptionStatus })
   status!: SubscriptionStatus;
+
+  /**
+   * En qué plan está esta suscripción. Snapshot resuelto contra el
+   * `stripe_product_id` del plan y NO contra el price id: al cambiar el precio
+   * Stripe emite un price nuevo y el viejo sigue vivo para quien ya estaba
+   * suscripto, así que el price id no identifica el plan. El producto no rota.
+   */
+  @Column({
+    type: 'varchar',
+    length: 20,
+    default: SubscriptionTier.STANDARD,
+  })
+  tier!: SubscriptionTier;
 
   @Column({ name: 'current_period_start', type: 'timestamptz' })
   currentPeriodStart!: Date;
