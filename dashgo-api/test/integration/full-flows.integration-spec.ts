@@ -134,6 +134,15 @@ describe('Full flow integration — end-to-end role journeys', () => {
         .whereInIds(createdOrderIds)
         .execute();
     }
+    // Rentals seeded directly (no order behind them) are not covered by the
+    // order_id sweep above, and they hold FKs to both products and users — so
+    // they have to go before either of those deletes can succeed.
+    if (createdUserIds.length) {
+      await dataSource.query(
+        `DELETE FROM rentals WHERE user_id = ANY($1::uuid[])`,
+        [createdUserIds],
+      );
+    }
     if (createdProductIds.length) {
       await dataSource
         .getRepository(Product)
@@ -385,6 +394,14 @@ describe('Full flow integration — end-to-end role journeys', () => {
   // ----------------------------------------------------------------
 
   describe('RENTAL_ALREADY_ACTIVE returns structured code on second rental attempt', () => {
+    // Two DIFFERENT guards can block a second rental order, and create() runs
+    // them in this order:
+    //   1. ACTIVE_ORDER_EXISTS  — the client still has an order in progress
+    //   2. RENTAL_ALREADY_ACTIVE — the client already rents this product
+    // Placing a first order and immediately placing a second one therefore
+    // reports ACTIVE_ORDER_EXISTS and never reaches the rental check. Each
+    // guard gets its own test so neither can hide the other.
+
     it('rejects a second rental for the same user+product with code field', async () => {
       const client = await seedUser({ role: UserRole.CLIENT });
       const rental = await seedProduct({
@@ -396,15 +413,18 @@ describe('Full flow integration — end-to-end role journeys', () => {
         stripePriceId: 'price_dup',
       });
 
-      // First order succeeds + creates pending_setup rental
-      const first = await ordersService.create(asAuthUser(client), {
-        items: [{ productId: rental.id, quantity: 1 }],
-        paymentMethod: PaymentMethod.CASH,
-        deliveryAddress: { text: 'Dup 1', lat: 40.7, lng: -74.0 },
-      });
-      createdOrderIds.push(first.id);
+      // An ACTIVE rental with NO open order — the only way to reach the rental
+      // guard, since an in-progress order would trip ACTIVE_ORDER_EXISTS first.
+      await dataSource.getRepository(Rental).save({
+        userId: client.id,
+        productId: rental.id,
+        orderId: null,
+        stripePriceId: 'price_dup',
+        status: RentalStatus.ACTIVE,
+        monthlyRentCents: 1500,
+        lateFeeCents: 500,
+      } as unknown as Rental);
 
-      // Second order for the same product should be blocked
       try {
         await ordersService.create(asAuthUser(client), {
           items: [{ productId: rental.id, quantity: 1 }],
@@ -416,6 +436,39 @@ describe('Full flow integration — end-to-end role journeys', () => {
         const response = (err as { getResponse?: () => unknown }).getResponse?.();
         expect(response).toMatchObject({
           code: 'RENTAL_ALREADY_ACTIVE',
+        });
+      }
+    });
+
+    it('rejects any second order while the first is still in progress', async () => {
+      const client = await seedUser({ role: UserRole.CLIENT });
+      const rental = await seedProduct({
+        name: `Rental Open ${Date.now()}`,
+        pricingMode: 'rental',
+        monthlyRentCents: 1500,
+        lateFeeCents: 500,
+        stripeProductId: 'prod_open',
+        stripePriceId: 'price_open',
+      });
+
+      const first = await ordersService.create(asAuthUser(client), {
+        items: [{ productId: rental.id, quantity: 1 }],
+        paymentMethod: PaymentMethod.CASH,
+        deliveryAddress: { text: 'Open 1', lat: 40.7, lng: -74.0 },
+      });
+      createdOrderIds.push(first.id);
+
+      try {
+        await ordersService.create(asAuthUser(client), {
+          items: [{ productId: rental.id, quantity: 1 }],
+          paymentMethod: PaymentMethod.CASH,
+          deliveryAddress: { text: 'Open 2', lat: 40.7, lng: -74.0 },
+        });
+        throw new Error('Expected ACTIVE_ORDER_EXISTS conflict');
+      } catch (err) {
+        const response = (err as { getResponse?: () => unknown }).getResponse?.();
+        expect(response).toMatchObject({
+          code: 'ACTIVE_ORDER_EXISTS',
         });
       }
     });
@@ -492,7 +545,11 @@ describe('Full flow integration — end-to-end role journeys', () => {
       // is invoked inside the markDelivered TX). Drive the order through the full
       // status pipeline so the commission entry is written.
       const admin = await seedUser({ role: UserRole.SUPER_ADMIN_DELIVERY });
-      await ordersService.setQuote(order.id, 0, asAuthUser(admin));
+      // Non-zero shipping on purpose: a $0 quote fires tryAutoConfirmFreeOrder,
+      // which advances the order to CONFIRMED_BY_COLMADO on its own and makes
+      // the explicit confirm below throw. Shipping does not affect the
+      // commission, which is a percentage of the product price.
+      await ordersService.setQuote(order.id, 300, asAuthUser(admin));
       await ordersService.confirmCashOrder(order.id, asAuthUser(referred));
       for (const next of [
         OrderStatus.CONFIRMED_BY_COLMADO,

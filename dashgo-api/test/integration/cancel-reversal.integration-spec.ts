@@ -256,7 +256,12 @@ describe('OrdersService cancel — full reversal', () => {
     });
 
     const admin = adminAs('admin-stock');
-    await ordersService.setQuote(order.id, 0, admin);
+    // Shipping must be NON-zero here. A $0 quote triggers
+    // tryAutoConfirmFreeOrder, which walks the order straight to
+    // CONFIRMED_BY_COLMADO — the manual confirm below would then throw
+    // "no se puede confirmar un pedido en estado confirmed_by_colmado".
+    // This test is about the cancel reversal, so it stays on the manual path.
+    await ordersService.setQuote(order.id, 300, admin);
     await ordersService.confirmCashOrder(order.id, clientAs(user.id));
     await ordersService.updateStatus(
       order.id,
@@ -340,28 +345,57 @@ describe('OrdersService cancel — full reversal', () => {
     expect(after?.canceledAt).toBeTruthy();
   });
 
-  it('second cancel of an already-cancelled order is rejected (transition not allowed)', async () => {
+  // A repeated CANCELLED PATCH is a deliberate no-op: the driver app advances
+  // orders from two screens on mobile data, so the same request lands twice.
+  // What must NEVER happen is the reversals running a second time — cancelling
+  // an already-cancelled order cannot hand back stock it already handed back.
+  it('second cancel of an already-cancelled order is a no-op (no double reversal)', async () => {
     const cat = await seedCategory();
-    const product = await seedProduct(cat);
+    const product = await seedProduct(cat, { stock: 50 });
     const user = await seedUserWithCredit();
 
     const order = await ordersService.create(clientAs(user.id), {
-      items: [{ productId: product.id, quantity: 1 }],
+      items: [{ productId: product.id, quantity: 3 }],
       paymentMethod: PaymentMethod.CASH,
       deliveryAddress: { text: 'Idem St', lat: 40.7, lng: -74.0 },
     });
     const admin = adminAs('admin-idem');
+
+    // Confirm it first so there is a real stock decrement to reverse.
+    // Non-zero shipping keeps the free-order auto-confirm out of the way.
+    await ordersService.setQuote(order.id, 300, admin);
+    await ordersService.confirmCashOrder(order.id, clientAs(user.id));
+    await ordersService.updateStatus(
+      order.id,
+      { status: OrderStatus.CONFIRMED_BY_COLMADO },
+      admin,
+    );
+    const decremented = await dataSource
+      .getRepository(Product)
+      .findOne({ where: { id: product.id } });
+    expect(decremented?.stock).toBe(47);
+
     await ordersService.updateStatus(
       order.id,
       { status: OrderStatus.CANCELLED },
       admin,
     );
-    await expect(
-      ordersService.updateStatus(
-        order.id,
-        { status: OrderStatus.CANCELLED },
-        admin,
-      ),
-    ).rejects.toThrow();
+    const afterFirst = await dataSource
+      .getRepository(Product)
+      .findOne({ where: { id: product.id } });
+    expect(afterFirst?.stock).toBe(50);
+
+    // Second cancel: resolves instead of throwing, and restores nothing extra.
+    const repeated = await ordersService.updateStatus(
+      order.id,
+      { status: OrderStatus.CANCELLED },
+      admin,
+    );
+    expect(repeated.status).toBe(OrderStatus.CANCELLED);
+
+    const afterSecond = await dataSource
+      .getRepository(Product)
+      .findOne({ where: { id: product.id } });
+    expect(afterSecond?.stock).toBe(50);
   });
 });
