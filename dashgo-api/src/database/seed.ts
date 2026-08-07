@@ -22,7 +22,7 @@ async function run() {
   await AppDataSource.query('CREATE EXTENSION IF NOT EXISTS pgcrypto');
 
   await AppDataSource.query(
-    'TRUNCATE TABLE credit_movement, credit_account, promoter_commission_entries, payouts, invoices, points_ledger_entries, counters, order_items, orders, products, categories, users RESTART IDENTITY CASCADE',
+    'TRUNCATE TABLE credit_movement, credit_account, commission_entries, payouts, invoices, points_ledger_entries, counters, order_items, orders, products, categories, users RESTART IDENTITY CASCADE',
   );
 
   const userRepo = AppDataSource.getRepository(User);

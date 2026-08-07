@@ -400,8 +400,8 @@ export class AuthService implements OnModuleInit {
    *     - rentals
    *     - credit_account (movements cascade via FK)
    *     - points_ledger_entries
-   *     - promoter_commission_entries where the user IS the promoter
-   *     - payouts the user received as a promoter
+   *     - commission_entries where the user IS the earner
+   *     - payouts the user received as an earner
    *
    *   SOFT-ANONYMIZE (7-year tax/accounting retention — RD law)
    *     - orders: customer_id → NULL,

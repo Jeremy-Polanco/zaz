@@ -647,9 +647,15 @@ export class PromotersService {
   ): Promise<Map<string, PromoterBalances>> {
     const result = new Map<string, PromoterBalances>();
     if (promoterIds.length === 0) return result;
+    // `earner_role` no es opcional: vendedores y promotores comparten esta
+    // tabla, así que un usuario que pasó de vendedor a promotor arrastra
+    // asientos viejos que son OTRA deuda. Sumarlos infla el saldo del panel.
     const entries = await this.commissions
       .createQueryBuilder('c')
-      .where('c.promoter_id IN (:...ids)', { ids: promoterIds })
+      .where('c.earner_id IN (:...ids) AND c.earner_role = :role', {
+        ids: promoterIds,
+        role: EarnerRole.PROMOTER,
+      })
       .getMany();
     for (const id of promoterIds) {
       result.set(id, { pendingCents: 0, claimableCents: 0, paidCents: 0 });
