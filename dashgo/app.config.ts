@@ -88,7 +88,11 @@ function resolveIosBuildNumber(): string {
   // que se sube. SUBILO EN 1 antes de cada subida a TestFlight/App Store —
   // Apple rechaza un buildNumber repetido dentro de la misma versión.
   //
-  // Último subido a App Store Connect: 17 (versión 1.0.5).
+  // Último subido a App Store Connect: 17 (versión 1.0.5) — RECHAZADO por
+  // Apple: error 90186 "train version '1.0.5' is closed" + 90062 "must contain
+  // a higher version than the previously approved version". Una vez que Apple
+  // APRUEBA una versión, su tren se cierra: subir sólo el buildNumber no
+  // alcanza, hay que subir `version`. Por eso 1.0.6.
   const fromEas = process.env.EAS_BUILD_NUMBER
   if (fromEas && fromEas.length > 0) return fromEas
   return '18'
@@ -118,7 +122,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     // EAS Update + App Store both require strict semver here. Apple closes a
     // version train once it's approved (error 90186), so every App Store
     // upload after a release MUST carry a higher version than the live one.
-    version: '1.0.5',
+    version: '1.0.6',
     orientation: 'portrait',
     icon: './assets/images/icon.png',
     scheme: 'dashgo',
