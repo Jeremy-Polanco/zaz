@@ -20,6 +20,7 @@ import { AdminRentalResponseDto } from './dto/admin-rental-response.dto';
 import { ChargeLateFeeResponseDto } from './dto/charge-late-fee-response.dto';
 import { ChargeTheftFeeResponseDto } from './dto/charge-theft-fee-response.dto';
 import { assertStripeProductionConfig } from '../../common/stripe/stripe-runtime-guard';
+import { PREMIUM_BEBEDERO_CATALOG_SURCHARGE_CENTS } from '../products/pricing';
 
 type StripeClient = InstanceType<typeof Stripe>;
 
@@ -30,6 +31,8 @@ type StripeClient = InstanceType<typeof Stripe>;
  */
 const BEBEDERO_FREE_LOOKUP_KEY = 'bebedero_free_monthly';
 const BEBEDERO_SUBSCRIBER_LOOKUP_KEY = 'bebedero_subscriber_monthly';
+const BEBEDERO_PREMIUM_LOOKUP_KEY = 'bebedero_premium_monthly';
+const BEBEDERO_PREMIUM_CATALOG_LOOKUP_KEY = 'bebedero_premium_catalog_monthly';
 
 /** Statuses that indicate an active rental contract (no new duplicate allowed). */
 const BLOCKING_STATUSES = [
@@ -91,6 +94,14 @@ export class RentalsService implements OnModuleInit {
     freePriceId: string;
     subscriberPriceId: string;
     subscriberAmountCents: number;
+  } | null = null;
+
+  /** Caché de las tarifas del bebedero PREMIUM, por monto del plan premium. */
+  private premiumBebederoRatePrices: {
+    freePriceId: string;
+    premiumPriceId: string;
+    premiumCatalogPriceId: string;
+    premiumAmountCents: number;
   } | null = null;
 
   constructor(
@@ -586,7 +597,155 @@ export class RentalsService implements OnModuleInit {
       .where('rental.userId = :userId', { userId })
       .andWhere('product.pricingMode = :mode', { mode: 'rental' })
       .andWhere('product.requiresMaintenance = true')
+      // El producto exclusivo del premium NO consume el "primer bebedero
+      // gratis" del beneficio común. Sin esta exclusión, los dos listeners de
+      // provisión (bebedero estándar y unidad premium) corren sobre el mismo
+      // evento y el resultado dependía de cuál llegara primero: si el premium
+      // ganaba la carrera, el bebedero estándar "gratis" se auto-ordenaba a
+      // tarifa de suscriptor — un alquiler mensual que nadie pidió.
+      .andWhere('product.isPremiumSubscriberProduct = false')
       .getCount();
+  }
+
+  /**
+   * Cuántos rentals de UN producto tuvo el usuario en su vida, en cualquier
+   * estado. Decide si la unidad "incluida con premium" ya fue usada: una vez
+   * consumida (aunque después se cancele), las siguientes se cobran.
+   */
+  async countRentalsForUserAndProduct(
+    userId: string,
+    productId: string,
+    tx?: EntityManager,
+  ): Promise<number> {
+    const repo = tx ? tx.getRepository(Rental) : this.rentals;
+    return repo.count({ where: { userId, productId } });
+  }
+
+  /**
+   * Precios Stripe recurrentes para la tarifa del bebedero PREMIUM. Mismo
+   * patrón que `ensureBebederoRatePrices` (lookup keys + caché por monto +
+   * rotación con transfer_lookup_key), con dos tarifas propias:
+   *
+   *   - precio de la suscripción premium → unidad adicional de un premium
+   *       lookup_key bebedero_premium_monthly
+   *   - suscripción premium + $5        → quien no tiene premium activa
+   *       lookup_key bebedero_premium_catalog_monthly
+   *
+   * La unidad incluida ($0) reutiliza el price free del bebedero estándar —
+   * un $0 recurrente es idéntico sea cual sea el plan.
+   */
+  async ensurePremiumBebederoRatePrices(premiumNetCents: number): Promise<{
+    freePriceId: string;
+    premiumPriceId: string;
+    premiumCatalogPriceId: string;
+  }> {
+    const catalogCents =
+      premiumNetCents + PREMIUM_BEBEDERO_CATALOG_SURCHARGE_CENTS;
+
+    const cached = this.premiumBebederoRatePrices;
+    if (cached && cached.premiumAmountCents === premiumNetCents) {
+      return {
+        freePriceId: cached.freePriceId,
+        premiumPriceId: cached.premiumPriceId,
+        premiumCatalogPriceId: cached.premiumCatalogPriceId,
+      };
+    }
+
+    const stripe = this.requireStripe();
+    const existing = await stripe.prices.list({
+      lookup_keys: [
+        BEBEDERO_FREE_LOOKUP_KEY,
+        BEBEDERO_PREMIUM_LOOKUP_KEY,
+        BEBEDERO_PREMIUM_CATALOG_LOOKUP_KEY,
+      ],
+      active: true,
+    });
+    const byKey = new Map<string, { id: string; amount: number | null }>();
+    for (const p of existing.data ?? []) {
+      if (p.lookup_key) {
+        byKey.set(p.lookup_key, { id: p.id, amount: p.unit_amount ?? null });
+      }
+    }
+
+    let rateProductId: string | undefined;
+    const ensureRateProduct = async (): Promise<string> => {
+      if (rateProductId) return rateProductId;
+      const product = await stripe.products.create(
+        {
+          name: 'Bebedero Premium — Tarifa',
+          metadata: { kind: 'bebedero_premium_rate' },
+        },
+        { idempotencyKey: 'bebedero-premium-rate-product' },
+      );
+      rateProductId = product.id;
+      return rateProductId;
+    };
+
+    let freePriceId = byKey.get(BEBEDERO_FREE_LOOKUP_KEY)?.id;
+    if (!freePriceId) {
+      const price = await stripe.prices.create(
+        {
+          unit_amount: 0,
+          currency: 'usd',
+          recurring: { interval: 'month' },
+          product: await ensureRateProduct(),
+          lookup_key: BEBEDERO_FREE_LOOKUP_KEY,
+        },
+        { idempotencyKey: 'bebedero-rate-price-free' },
+      );
+      freePriceId = price.id;
+    }
+
+    // Reusa cada tarifa solo si ya factura el monto vivo; si el plan cambió,
+    // mint nuevo + transfer_lookup_key + archivar el viejo (no bloqueante).
+    const resolveRate = async (
+      lookupKey: string,
+      amountCents: number,
+      idemSuffix: string,
+    ): Promise<string> => {
+      const found = byKey.get(lookupKey);
+      if (found && found.amount === amountCents) return found.id;
+      const price = await stripe.prices.create(
+        {
+          unit_amount: amountCents,
+          currency: 'usd',
+          recurring: { interval: 'month' },
+          product: await ensureRateProduct(),
+          lookup_key: lookupKey,
+          transfer_lookup_key: true,
+        },
+        { idempotencyKey: `bebedero-premium-rate-${idemSuffix}-${amountCents}` },
+      );
+      if (found && found.id !== price.id) {
+        try {
+          await stripe.prices.update(found.id, { active: false });
+        } catch (e) {
+          this.logger.warn(
+            `failed to archive stale premium rate price ${found.id}: ${(e as Error).message}`,
+          );
+        }
+      }
+      return price.id;
+    };
+
+    const premiumPriceId = await resolveRate(
+      BEBEDERO_PREMIUM_LOOKUP_KEY,
+      premiumNetCents,
+      'subscriber',
+    );
+    const premiumCatalogPriceId = await resolveRate(
+      BEBEDERO_PREMIUM_CATALOG_LOOKUP_KEY,
+      catalogCents,
+      'catalog',
+    );
+
+    this.premiumBebederoRatePrices = {
+      freePriceId,
+      premiumPriceId,
+      premiumCatalogPriceId,
+      premiumAmountCents: premiumNetCents,
+    };
+    return { freePriceId, premiumPriceId, premiumCatalogPriceId };
   }
 
   // ─────────────────────────────────────────────────────────────────────────

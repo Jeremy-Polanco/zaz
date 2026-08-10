@@ -37,7 +37,9 @@ import {
   SUBSCRIBER_BEBEDERO_RENT_CENTS,
   getEffectivePrice,
   resolveBebederoRentCents,
+  resolvePremiumBebederoRentCents,
 } from '../products/pricing';
+import { SubscriptionTier } from '../../entities/subscription-plan.entity';
 
 const ALLOWED_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
   [OrderStatus.PENDING_QUOTE]: [OrderStatus.QUOTED, OrderStatus.CANCELLED],
@@ -259,12 +261,21 @@ export class OrdersService {
     // query otherwise.
     const isBebedero = (p: Product | undefined): boolean =>
       p?.pricingMode === 'rental' && p?.requiresMaintenance === true;
+    // El producto exclusivo del premium se excluye del beneficio ESTÁNDAR: si
+    // pasara por resolveBebederoRentCents, un suscriptor común sin bebederos
+    // previos se llevaría gratis (primer bebedero free) el producto de un plan
+    // que no paga. Su precio lo resuelve resolvePremiumBebederoRentCents.
+    const isStandardBebedero = (p: Product | undefined): boolean =>
+      isBebedero(p) && p?.isPremiumSubscriberProduct !== true;
 
     const hasMaintenanceItem = dto.items.some(
       (input) => byId.get(input.productId)?.isMaintenanceService === true,
     );
     const hasBebederoItem = dto.items.some((input) =>
-      isBebedero(byId.get(input.productId)),
+      isStandardBebedero(byId.get(input.productId)),
+    );
+    const hasPremiumProductItem = dto.items.some(
+      (input) => byId.get(input.productId)?.isPremiumSubscriberProduct === true,
     );
     // Sin esto, un suscriptor que compra SOLO productos con precio de
     // suscriptor (agua, por ejemplo) nunca dispararía la consulta y terminaría
@@ -273,7 +284,10 @@ export class OrdersService {
       (input) => byId.get(input.productId)?.subscriberPriceCents != null,
     );
     const isSubscriber =
-      hasMaintenanceItem || hasBebederoItem || hasSubscriberPricedItem
+      hasMaintenanceItem ||
+      hasBebederoItem ||
+      hasSubscriberPricedItem ||
+      hasPremiumProductItem
         ? await this.subscriptionService.isActiveSubscriber(user.id)
         : false;
 
@@ -299,7 +313,7 @@ export class OrdersService {
       let ordinal = priorCount;
       for (const input of dto.items) {
         const product = byId.get(input.productId)!;
-        if (!isBebedero(product)) continue;
+        if (!isStandardBebedero(product)) continue;
         const rent = resolveBebederoRentCents(
           product,
           true,
@@ -316,6 +330,53 @@ export class OrdersService {
           });
         }
         ordinal += 1;
+      }
+    }
+
+    // Producto exclusivo del plan premium. Su regla es propia: 1 unidad
+    // incluida ($0) con la suscripción premium activa, cada adicional al
+    // precio de esa suscripción, y sin premium activa cuesta la suscripción
+    // + $5. La instalación automática (PremiumProductListener) entra por este
+    // mismo camino: la unidad incluida da una orden de $0, que es lo que
+    // permite entregarla sola vía deliverProvisionedOrder.
+    if (hasPremiumProductItem) {
+      const activeTier = await this.subscriptionService.getActiveTier(user.id);
+      const premiumActive = activeTier === SubscriptionTier.PREMIUM;
+      const premiumNetCents = await this.subscriptionService.getPlanNetCents(
+        SubscriptionTier.PREMIUM,
+      );
+      for (const input of dto.items) {
+        const product = byId.get(input.productId)!;
+        if (product.isPremiumSubscriberProduct !== true) continue;
+        const priorPremium =
+          await this.rentalsService.countRentalsForUserAndProduct(
+            user.id,
+            product.id,
+          );
+        const rent = resolvePremiumBebederoRentCents(
+          product,
+          premiumActive,
+          priorPremium,
+          premiumNetCents,
+        );
+        // Sin plan premium configurado no hay tarifas Stripe que asignar: el
+        // producto queda en su maquinaria de catálogo (nunca cobra de menos).
+        // Es un estado incoherente (premium activo exige que el plan exista) y
+        // la instalación queda para el flujo manual/reconcile.
+        if (!rent || premiumNetCents == null) continue;
+        const rates =
+          await this.rentalsService.ensurePremiumBebederoRatePrices(
+            premiumNetCents,
+          );
+        bebederoRateByProductId.set(product.id, {
+          monthlyRentCents: rent.monthlyRentCents,
+          stripePriceId:
+            rent.tier === 'included'
+              ? rates.freePriceId
+              : rent.tier === 'premium'
+                ? rates.premiumPriceId
+                : rates.premiumCatalogPriceId,
+        });
       }
     }
 

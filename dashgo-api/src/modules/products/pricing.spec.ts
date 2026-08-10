@@ -1,8 +1,10 @@
 import { Product } from '../../entities';
 import {
+  PREMIUM_BEBEDERO_CATALOG_SURCHARGE_CENTS,
   SUBSCRIBER_BEBEDERO_RENT_CENTS,
   getEffectivePrice,
   resolveBebederoRentCents,
+  resolvePremiumBebederoRentCents,
 } from './pricing';
 
 /** Minimal Product builder for pure pricing unit tests. */
@@ -65,6 +67,73 @@ describe('resolveBebederoRentCents', () => {
       0,
     );
     expect(r).toEqual({ monthlyRentCents: 0, tier: 'catalog' });
+  });
+});
+
+describe('resolvePremiumBebederoRentCents', () => {
+  // El bebedero premium de $34.99 de catálogo, con el plan premium a $29.99.
+  const premium = () =>
+    mkProduct({
+      id: 'prod-premium',
+      isPremiumSubscriberProduct: true,
+      monthlyRentCents: 3499,
+    });
+  const PREMIUM_NET = 2999;
+
+  it('un producto que NO es el premium no aplica (lo resuelve la regla estándar)', () => {
+    expect(
+      resolvePremiumBebederoRentCents(mkProduct(), true, 0, PREMIUM_NET),
+    ).toBeNull();
+  });
+
+  it('suscriptor premium, PRIMERA unidad → $0 (1 incluido con la suscripción)', () => {
+    expect(resolvePremiumBebederoRentCents(premium(), true, 0, PREMIUM_NET)).toEqual({
+      monthlyRentCents: 0,
+      tier: 'included',
+    });
+  });
+
+  it('suscriptor premium, unidad ADICIONAL → el precio de la suscripción', () => {
+    expect(resolvePremiumBebederoRentCents(premium(), true, 1, PREMIUM_NET)).toEqual({
+      monthlyRentCents: PREMIUM_NET,
+      tier: 'premium',
+    });
+  });
+
+  it('SIN suscripción premium activa → precio de la suscripción + $5', () => {
+    expect(resolvePremiumBebederoRentCents(premium(), false, 0, PREMIUM_NET)).toEqual({
+      monthlyRentCents: PREMIUM_NET + PREMIUM_BEBEDERO_CATALOG_SURCHARGE_CENTS,
+      tier: 'catalog',
+    });
+    expect(PREMIUM_BEBEDERO_CATALOG_SURCHARGE_CENTS).toBe(500);
+  });
+
+  it('un suscriptor ESTÁNDAR no lo lleva gratis: paga el catálogo (+$5)', () => {
+    // premiumActive es false para un suscriptor estándar. Este es el carve-out
+    // que impide que la regla "primer bebedero gratis" del plan común regale el
+    // producto exclusivo del premium.
+    const r = resolvePremiumBebederoRentCents(premium(), false, 0, PREMIUM_NET);
+    expect(r?.tier).toBe('catalog');
+    expect(r?.monthlyRentCents).toBe(3499);
+  });
+
+  it('sin plan premium configurado cae al catálogo del producto — nunca cobra de menos', () => {
+    expect(resolvePremiumBebederoRentCents(premium(), false, 0, null)).toEqual({
+      monthlyRentCents: 3499,
+      tier: 'catalog',
+    });
+    // Estado raro (premium activo sin plan): también catálogo, no gratis.
+    expect(resolvePremiumBebederoRentCents(premium(), true, 1, null)).toEqual({
+      monthlyRentCents: 3499,
+      tier: 'catalog',
+    });
+  });
+
+  it('la unidad incluida sigue siendo $0 aunque no haya plan (es la instalación)', () => {
+    expect(resolvePremiumBebederoRentCents(premium(), true, 0, null)).toEqual({
+      monthlyRentCents: 0,
+      tier: 'included',
+    });
   });
 });
 

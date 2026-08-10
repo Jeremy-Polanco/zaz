@@ -133,6 +133,63 @@ export function resolveBebederoRentCents(
   };
 }
 
+/**
+ * Recargo de catálogo del bebedero premium: quien NO tiene la suscripción
+ * premium activa lo alquila al precio de la suscripción + este monto.
+ */
+export const PREMIUM_BEBEDERO_CATALOG_SURCHARGE_CENTS = 500;
+
+export type PremiumBebederoRentTier = 'included' | 'premium' | 'catalog';
+
+export interface PremiumBebederoRent {
+  monthlyRentCents: number;
+  tier: PremiumBebederoRentTier;
+}
+
+/**
+ * Renta mensual del producto exclusivo del plan premium.
+ *
+ * Regla del negocio: 1 unidad viene INCLUIDA con la suscripción premium ($0);
+ * cada adicional cuesta lo mismo que la suscripción; sin suscripción premium
+ * activa, cuesta la suscripción + $5.
+ *
+ * Devuelve `null` para cualquier otro producto: el premium queda EXCLUIDO de
+ * `resolveBebederoRentCents` a propósito. Si pasara por la regla estándar, un
+ * suscriptor común sin bebederos previos se llevaría gratis (primer bebedero
+ * free) el producto exclusivo de un plan que no paga.
+ *
+ * `premiumActive` es "tiene la suscripción PREMIUM activa" (getActiveTier),
+ * no cualquier suscripción. `priorPremiumCount` cuenta rentals de ESTE
+ * producto en cualquier estado — una vez usada la unidad incluida, no se
+ * repite. Sin plan premium configurado se cae al catálogo del producto:
+ * cobrar de menos es el error caro; la única excepción es la unidad incluida,
+ * que es $0 por definición (es la orden de instalación).
+ */
+export function resolvePremiumBebederoRentCents(
+  product: Product,
+  premiumActive: boolean,
+  priorPremiumCount: number,
+  premiumNetCents: number | null,
+): PremiumBebederoRent | null {
+  if (!product.isPremiumSubscriberProduct) return null;
+
+  if (premiumActive && priorPremiumCount === 0) {
+    return { monthlyRentCents: 0, tier: 'included' };
+  }
+
+  if (premiumActive && premiumNetCents != null) {
+    return { monthlyRentCents: premiumNetCents, tier: 'premium' };
+  }
+
+  return {
+    monthlyRentCents:
+      premiumNetCents != null
+        ? premiumNetCents + PREMIUM_BEBEDERO_CATALOG_SURCHARGE_CENTS
+        : product.monthlyRentCents,
+    tier: 'catalog',
+  };
+}
+
 export type ProductWithPricing = Product & {
   effectivePriceCents: number;
   basePriceCents: number;

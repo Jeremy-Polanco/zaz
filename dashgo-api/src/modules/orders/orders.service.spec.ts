@@ -26,6 +26,7 @@ import { PointsService } from '../points/points.service';
 import { InvoicesService } from '../invoices/invoices.service';
 import { PromotersService } from '../promoters/promoters.service';
 import { SellersService } from '../sellers/sellers.service';
+import { SubscriptionTier } from '../../entities/subscription-plan.entity';
 import { ShippingService } from '../shipping/shipping.service';
 import { CreditService } from '../credit/credit.service';
 import { SubscriptionService } from '../subscription/subscription.service';
@@ -205,6 +206,7 @@ describe('OrdersService', () => {
       isActiveSubscriber: jest.fn().mockResolvedValue(false),
       getOrCreateStripeCustomer: jest.fn().mockResolvedValue('cus_test_default'),
       getPlanNetCents: jest.fn().mockResolvedValue(699),
+      getActiveTier: jest.fn().mockResolvedValue(null),
     } as unknown as jest.Mocked<SubscriptionService>;
 
     twilioService = {
@@ -219,6 +221,12 @@ describe('OrdersService', () => {
       cancelPendingForOrder: jest.fn().mockResolvedValue(undefined),
       getOrderIdsWithRentals: jest.fn().mockResolvedValue([]),
       countBebederoRentalsForUser: jest.fn().mockResolvedValue(0),
+      countRentalsForUserAndProduct: jest.fn().mockResolvedValue(0),
+      ensurePremiumBebederoRatePrices: jest.fn().mockResolvedValue({
+        freePriceId: 'price_free_existing',
+        premiumPriceId: 'price_premium_rate',
+        premiumCatalogPriceId: 'price_premium_catalog',
+      }),
       ensureBebederoRatePrices: jest.fn().mockResolvedValue({
         freePriceId: 'price_free_existing',
         subscriberPriceId: 'price_sub_existing',
@@ -2849,6 +2857,151 @@ describe('OrdersService', () => {
   // findAll / findOne — scope + not-found branches
   // ─────────────────────────────────────────────────────────────────────────
 
+
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Bebedero Premium — 1 incluido, adicional al precio del plan, sino +$5
+  // ─────────────────────────────────────────────────────────────────────────
+
+  describe('create — premium bebedero pricing', () => {
+    const premiumBebedero = fakeRentalProduct({
+      id: 'prod-premium-beb',
+      name: 'Bebedero Premium',
+      requiresMaintenance: true,
+      isPremiumSubscriberProduct: true,
+      monthlyRentCents: 3499, // fallback de catálogo
+      requiresQuote: false,
+    });
+
+    const premiumCart = {
+      items: [{ productId: 'prod-premium-beb', quantity: 1 }],
+      deliveryAddress: { text: '123 Test', lat: 18.4861, lng: -69.9312 },
+      paymentMethod: PaymentMethod.CASH,
+      usePoints: false,
+      useCredit: false,
+    } as import('./dto/create-order.dto').CreateOrderDto;
+
+    let savedOrderArg: Partial<Order> | undefined;
+
+    function setupTx() {
+      savedOrderArg = undefined;
+      (dataSource.transaction as jest.Mock).mockImplementation(
+        async (cb: (mgr: EntityManager) => Promise<unknown>) => {
+          const orderRepo = makeRepoMock<Order>();
+          const itemRepo = makeRepoMock<OrderItem>();
+          orderRepo.create.mockImplementation((d) => {
+            savedOrderArg = d as Partial<Order>;
+            return { ...d, id: 'order-premium-1' } as Order;
+          });
+          orderRepo.save.mockResolvedValue(fakeOrder({ id: 'order-premium-1' }));
+          orderRepo.update.mockResolvedValue({ affected: 1 } as never);
+          itemRepo.create.mockImplementation((d) => d as OrderItem);
+          itemRepo.save.mockResolvedValue({} as never);
+          const mgr = {
+            getRepository: (entity: unknown) => {
+              if (entity === Order) return orderRepo;
+              if (entity === OrderItem) return itemRepo;
+              return makeRepoMock();
+            },
+          } as unknown as EntityManager;
+          return cb(mgr);
+        },
+      );
+      ordersRepo.findOne.mockResolvedValue(
+        fakeOrder({ id: 'order-premium-1', customer: fakeUser() as never, items: [] }),
+      );
+    }
+
+    beforeEach(() => {
+      productsRepo.find.mockResolvedValue([premiumBebedero]);
+      subscriptionService.getPlanNetCents.mockResolvedValue(2999); // plan premium
+      setupTx();
+    });
+
+    it('suscriptor premium, primera unidad → orden de $0 AUNQUE ya tenga el bebedero estándar', async () => {
+      // El caso de la instalación automática. Antes del carve-out, el premium
+      // caía en la regla estándar: con un bebedero previo el ordinal daba ≥1 y
+      // la orden salía al precio del plan común — no $0 — y
+      // deliverProvisionedOrder la rechazaba: instalación trabada para siempre.
+      subscriptionService.getActiveTier.mockResolvedValue(
+        SubscriptionTier.PREMIUM,
+      );
+      rentalsService.countBebederoRentalsForUser.mockResolvedValue(1); // ya tiene el estándar
+      rentalsService.countRentalsForUserAndProduct.mockResolvedValue(0); // primer premium
+
+      await service.create(fakeUser(UserRole.CLIENT), premiumCart);
+
+      expect(savedOrderArg?.subtotal).toBe('0.00');
+      expect(rentalsService.createForOrder).toHaveBeenCalledWith(
+        expect.objectContaining({
+          productId: 'prod-premium-beb',
+          monthlyRentCentsOverride: 0,
+          stripePriceIdOverride: 'price_free_existing',
+        }),
+        expect.anything(),
+      );
+    });
+
+    it('suscriptor premium, unidad ADICIONAL → al precio de la suscripción premium', async () => {
+      subscriptionService.getActiveTier.mockResolvedValue(
+        SubscriptionTier.PREMIUM,
+      );
+      rentalsService.countRentalsForUserAndProduct.mockResolvedValue(1);
+
+      await service.create(fakeUser(UserRole.CLIENT), premiumCart);
+
+      expect(savedOrderArg?.subtotal).toBe('29.99');
+      expect(rentalsService.createForOrder).toHaveBeenCalledWith(
+        expect.objectContaining({
+          monthlyRentCentsOverride: 2999,
+          stripePriceIdOverride: 'price_premium_rate',
+        }),
+        expect.anything(),
+      );
+    });
+
+    it('un suscriptor ESTÁNDAR no se lo lleva gratis: paga suscripción + $5', async () => {
+      // El carve-out. Sin él, la regla "primer bebedero gratis" del plan común
+      // regalaba el producto exclusivo del premium.
+      subscriptionService.isActiveSubscriber.mockResolvedValue(true);
+      subscriptionService.getActiveTier.mockResolvedValue(
+        SubscriptionTier.STANDARD,
+      );
+      rentalsService.countBebederoRentalsForUser.mockResolvedValue(0);
+
+      await service.create(fakeUser(UserRole.CLIENT), premiumCart);
+
+      expect(savedOrderArg?.subtotal).toBe('34.99');
+      expect(rentalsService.createForOrder).toHaveBeenCalledWith(
+        expect.objectContaining({
+          monthlyRentCentsOverride: 3499,
+          stripePriceIdOverride: 'price_premium_catalog',
+        }),
+        expect.anything(),
+      );
+    });
+
+    it('sin ninguna suscripción → suscripción + $5', async () => {
+      subscriptionService.getActiveTier.mockResolvedValue(null);
+
+      await service.create(fakeUser(UserRole.CLIENT), premiumCart);
+
+      expect(savedOrderArg?.subtotal).toBe('34.99');
+    });
+
+    it('sin plan premium configurado → catálogo del producto, sin overrides', async () => {
+      subscriptionService.getActiveTier.mockResolvedValue(null);
+      subscriptionService.getPlanNetCents.mockResolvedValue(null);
+
+      await service.create(fakeUser(UserRole.CLIENT), premiumCart);
+
+      // Nunca cobra de menos: cae al monthly_rent_cents del producto.
+      expect(savedOrderArg?.subtotal).toBe('34.99');
+      const call = rentalsService.createForOrder.mock.calls[0][0];
+      expect(call.monthlyRentCentsOverride).toBeUndefined();
+      expect(rentalsService.ensurePremiumBebederoRatePrices).not.toHaveBeenCalled();
+    });
+  });
 
   // ─────────────────────────────────────────────────────────────────────────
   // deliverProvisionedOrder — instalaciones provisionadas por el sistema
