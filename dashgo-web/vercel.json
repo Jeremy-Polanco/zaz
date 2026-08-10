@@ -27,14 +27,54 @@
     {
       "source": "/(.*)",
       "headers": [
-        { "key": "X-Content-Type-Options", "value": "nosniff" },
-        { "key": "X-Frame-Options", "value": "DENY" },
-        { "key": "Referrer-Policy", "value": "strict-origin-when-cross-origin" },
+        {
+          "key": "X-Content-Type-Options",
+          "value": "nosniff"
+        },
+        {
+          "key": "X-Frame-Options",
+          "value": "DENY"
+        },
+        {
+          "key": "Referrer-Policy",
+          "value": "strict-origin-when-cross-origin"
+        },
         {
           "key": "Permissions-Policy",
           "value": "camera=(self), microphone=(self), geolocation=(self), payment=(self)"
         }
       ]
+    }
+  ],
+  "redirects": [
+    {
+      "source": "/app",
+      "has": [
+        {
+          "type": "header",
+          "key": "user-agent",
+          "value": ".*Android.*"
+        }
+      ],
+      "destination": "https://play.google.com/store/apps/details?id=com.dashgo.app",
+      "permanent": false
+    },
+    {
+      "source": "/app",
+      "has": [
+        {
+          "type": "header",
+          "key": "user-agent",
+          "value": ".*(iPhone|iPad|iPod).*"
+        }
+      ],
+      "destination": "https://apps.apple.com/us/app/udash/id6775469989",
+      "permanent": false
+    },
+    {
+      "source": "/app",
+      "destination": "/",
+      "permanent": false
     }
   ]
 }
