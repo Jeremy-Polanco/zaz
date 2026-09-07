@@ -79,8 +79,9 @@ export class PaymentReconciliationCron implements OnApplicationBootstrap {
     scanned: number;
     authorized: number;
     released: number;
+    holdsReleased: number;
   }> {
-    const result = { scanned: 0, authorized: 0, released: 0 };
+    const result = { scanned: 0, authorized: 0, released: 0, holdsReleased: 0 };
     if (!this.payments.isEnabled()) return result;
 
     const since = new Date(Date.now() - LOOKBACK_DAYS * 24 * 60 * 60 * 1000);
@@ -107,6 +108,11 @@ export class PaymentReconciliationCron implements OnApplicationBootstrap {
         );
         continue;
       }
+      // Always visible: this is the line you grep when a customer says "me
+      // descontaron" and the panel says "esperando al cliente".
+      this.logger.log(
+        `order ${order.id} (quoted, ${order.totalAmount}): intent ${intentId} is ${status}`,
+      );
 
       if (status === 'requires_capture' || status === 'succeeded') {
         this.logger.warn(
@@ -129,9 +135,43 @@ export class PaymentReconciliationCron implements OnApplicationBootstrap {
       // processing: the customer is mid-checkout or abandoned — nothing to do.
     }
 
-    if (result.authorized || result.released) {
+    // Orphaned holds: orders cancelled (before cancellation released the
+    // intent) whose card is still authorized. Release them so the customer's
+    // bank frees the money now instead of when the authorization expires.
+    const cancelled = await this.orders.find({
+      where: {
+        status: OrderStatus.CANCELLED,
+        paymentMethod: PaymentMethod.DIGITAL,
+        stripePaymentIntentId: Not(IsNull()),
+        paidAt: IsNull(),
+        createdAt: MoreThan(since),
+      },
+      order: { createdAt: 'ASC' },
+      take: BATCH,
+    });
+    for (const order of cancelled) {
+      const intentId = order.stripePaymentIntentId!;
+      let status: string;
+      try {
+        status = (await this.payments.retrieveIntent(intentId)).status;
+      } catch (err) {
+        this.logger.warn(
+          `cancelled order ${order.id}: could not read intent ${intentId} — ${(err as Error).message}`,
+        );
+        continue;
+      }
+      if (status !== 'requires_capture') continue;
+      this.logger.warn(
+        `cancelled order ${order.id} (${order.totalAmount}) still holds intent ${intentId} — releasing the hold`,
+      );
+      if (await this.payments.cancelIntent(intentId)) {
+        result.holdsReleased += 1;
+      }
+    }
+
+    if (result.scanned || cancelled.length) {
       this.logger.log(
-        `reconciled digital orders: ${JSON.stringify(result)}`,
+        `reconciled digital orders: ${JSON.stringify(result)} (cancelled scanned: ${cancelled.length})`,
       );
     }
     return result;
