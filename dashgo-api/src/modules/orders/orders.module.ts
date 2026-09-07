@@ -9,6 +9,7 @@ import { SubscriberBebederoListener } from './subscriber-bebedero.listener';
 import { PremiumProductListener } from './premium-product.listener';
 import { OrderNotificationsService } from './order-notifications.service';
 import { WinBackCron } from './win-back.cron';
+import { PaymentReconciliationCron } from './payment-reconciliation.cron';
 import { WhatsAppModule } from '../whatsapp/whatsapp.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { PaymentsModule } from '../payments/payments.module';
@@ -48,6 +49,7 @@ import { RentalsModule } from '../rentals/rentals.module';
     PremiumProductListener,
     OrderNotificationsService,
     WinBackCron,
+    PaymentReconciliationCron,
   ],
   exports: [OrdersService],
 })

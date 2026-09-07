@@ -165,7 +165,9 @@ describe('OrdersService', () => {
       createAuthorizationIntent: jest.fn(),
       retrieveIntent: jest.fn(),
       captureIntent: jest.fn(),
+      cancelIntent: jest.fn().mockResolvedValue(true),
       handleAuthFailureByIntentId: jest.fn(),
+      markAuthorizedByIntentId: jest.fn(),
     } as unknown as jest.Mocked<PaymentsService>;
 
     pointsService = {
@@ -4208,6 +4210,121 @@ describe('OrdersService', () => {
       });
       // Direct update path → no transaction, no stock changes
       expect(dataSource.transaction).not.toHaveBeenCalled();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // authorize — self-heal: the hold is already authorized at Stripe but the
+  // webhook never reached us. Instead of bouncing the customer against a
+  // PaymentSheet that cannot present, advance the order right here.
+  // -------------------------------------------------------------------------
+
+  describe('authorize — self-heals an already-authorized intent', () => {
+    const digitalQuoted = () =>
+      fakeOrder({
+        status: OrderStatus.QUOTED,
+        paymentMethod: PaymentMethod.DIGITAL,
+        stripePaymentIntentId: 'pi_held',
+        customerId: 'user-1',
+        customer: fakeUser() as never,
+      });
+
+    it('marks the order authorized, auto-confirms and answers ALREADY_AUTHORIZED', async () => {
+      ordersRepo.findOne.mockResolvedValue(digitalQuoted());
+      paymentsService.retrieveIntent.mockResolvedValue({
+        id: 'pi_held',
+        status: 'requires_capture',
+        client_secret: 'cs_held',
+        amount: 3964,
+        currency: 'usd',
+      } as never);
+      const autoSpy = jest
+        .spyOn(service, 'autoConfirmSkipQuoteByIntentId')
+        .mockResolvedValue(undefined);
+
+      await expect(
+        service.authorize('order-1', fakeUser(UserRole.CLIENT)),
+      ).rejects.toMatchObject({ response: { code: 'ALREADY_AUTHORIZED' } });
+
+      expect(paymentsService.markAuthorizedByIntentId).toHaveBeenCalledWith('pi_held');
+      expect(autoSpy).toHaveBeenCalledWith('pi_held');
+      expect(paymentsService.createAuthorizationIntent).not.toHaveBeenCalled();
+    });
+
+    it('still hands back the same client secret while the customer has not finished paying', async () => {
+      ordersRepo.findOne.mockResolvedValue(digitalQuoted());
+      paymentsService.retrieveIntent.mockResolvedValue({
+        id: 'pi_held',
+        status: 'requires_payment_method',
+        client_secret: 'cs_held',
+        amount: 3964,
+        currency: 'usd',
+      } as never);
+
+      await expect(
+        service.authorize('order-1', fakeUser(UserRole.CLIENT)),
+      ).resolves.toMatchObject({ paymentIntentId: 'pi_held', clientSecret: 'cs_held' });
+      expect(paymentsService.markAuthorizedByIntentId).not.toHaveBeenCalled();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // updateStatus → CANCELLED releases the Stripe hold (digital orders only)
+  // -------------------------------------------------------------------------
+
+  describe('updateStatus → CANCELLED releases the Stripe hold', () => {
+    const superUser = fakeUser(UserRole.SUPER_ADMIN_DELIVERY);
+
+    const mockCancelTx = () => {
+      (dataSource.transaction as jest.Mock).mockImplementation(
+        async (cb: (mgr: EntityManager) => Promise<unknown>) => {
+          const orderRepo = makeRepoMock<Order>();
+          orderRepo.update.mockResolvedValue({ affected: 1 } as never);
+          const mgr = {
+            getRepository: (entity: unknown) => {
+              if (entity === Order) return orderRepo;
+              return makeRepoMock();
+            },
+          };
+          return cb(mgr as unknown as EntityManager);
+        },
+      );
+    };
+
+    it('cancels the uncaptured intent of a digital order', async () => {
+      const order = fakeOrder({
+        status: OrderStatus.QUOTED,
+        paymentMethod: PaymentMethod.DIGITAL,
+        stripePaymentIntentId: 'pi_held',
+        creditApplied: '0.00',
+        customer: fakeUser() as never,
+      });
+      mockCancelTx();
+      ordersRepo.findOne
+        .mockResolvedValueOnce(order)
+        .mockResolvedValueOnce({ ...order, status: OrderStatus.CANCELLED } as never);
+
+      await service.updateStatus('order-1', { status: OrderStatus.CANCELLED }, superUser);
+
+      expect(paymentsService.cancelIntent).toHaveBeenCalledWith('pi_held');
+    });
+
+    it('does not touch Stripe for a cash order', async () => {
+      const order = fakeOrder({
+        status: OrderStatus.QUOTED,
+        paymentMethod: PaymentMethod.CASH,
+        stripePaymentIntentId: null,
+        creditApplied: '0.00',
+        customer: fakeUser() as never,
+      });
+      mockCancelTx();
+      ordersRepo.findOne
+        .mockResolvedValueOnce(order)
+        .mockResolvedValueOnce({ ...order, status: OrderStatus.CANCELLED } as never);
+
+      await service.updateStatus('order-1', { status: OrderStatus.CANCELLED }, superUser);
+
+      expect(paymentsService.cancelIntent).not.toHaveBeenCalled();
     });
   });
 });

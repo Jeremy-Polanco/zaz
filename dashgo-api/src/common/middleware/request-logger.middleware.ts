@@ -11,7 +11,10 @@ export class RequestLoggerMiddleware implements NestMiddleware {
       return next();
     }
 
-    const { method, url } = req;
+    // `req.url` is relative to the middleware mount point (it logged every
+    // request as "POST / 201"); `originalUrl` is the full path the client hit.
+    const { method } = req;
+    const url = req.originalUrl || req.url;
     const start = Date.now();
 
     res.on('finish', () => {

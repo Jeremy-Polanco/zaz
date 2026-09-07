@@ -712,4 +712,80 @@ describe('PaymentsService', () => {
       expect(ordersRepo.update).not.toHaveBeenCalled();
     });
   });
+
+  // -------------------------------------------------------------------------
+  // cancelIntent — release an uncaptured hold when an order is cancelled
+  // -------------------------------------------------------------------------
+
+  describe('cancelIntent', () => {
+    it('cancels the intent at Stripe (releases the hold) and reports true', async () => {
+      await expect(service.cancelIntent('pi_hold')).resolves.toBe(true);
+      expect(mockStripeInstance.paymentIntents.cancel).toHaveBeenCalledWith(
+        'pi_hold',
+      );
+    });
+
+    it('swallows Stripe errors (already canceled / captured) and reports false', async () => {
+      mockStripeInstance.paymentIntents.cancel.mockRejectedValueOnce(
+        new Error('This PaymentIntent has already been canceled'),
+      );
+      await expect(service.cancelIntent('pi_hold')).resolves.toBe(false);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // ensureWebhookEndpointEnabled — Stripe auto-disables an endpoint after days
+  // of failed deliveries (e.g. the app being archived); re-enable OURS only.
+  // -------------------------------------------------------------------------
+
+  describe('ensureWebhookEndpointEnabled', () => {
+    it('re-enables our endpoint when Stripe marked it disabled, ignoring others', async () => {
+      mockStripeInstance.webhookEndpoints.list.mockResolvedValueOnce({
+        data: [
+          {
+            id: 'we_ours',
+            url: 'https://api.dashgo.dev/api/payments/webhook',
+            status: 'disabled',
+          },
+          { id: 'we_other', url: 'https://other.example.com/hook', status: 'disabled' },
+        ],
+      });
+
+      const result = await service.ensureWebhookEndpointEnabled();
+
+      expect(mockStripeInstance.webhookEndpoints.update).toHaveBeenCalledTimes(1);
+      expect(mockStripeInstance.webhookEndpoints.update).toHaveBeenCalledWith(
+        'we_ours',
+        { disabled: false },
+      );
+      expect(result).toEqual({ checked: 1, reenabled: 1 });
+    });
+
+    it('leaves an enabled endpoint alone', async () => {
+      mockStripeInstance.webhookEndpoints.list.mockResolvedValueOnce({
+        data: [
+          {
+            id: 'we_ours',
+            url: 'https://api.dashgo.dev/api/payments/webhook',
+            status: 'enabled',
+          },
+        ],
+      });
+
+      const result = await service.ensureWebhookEndpointEnabled();
+
+      expect(mockStripeInstance.webhookEndpoints.update).not.toHaveBeenCalled();
+      expect(result).toEqual({ checked: 1, reenabled: 0 });
+    });
+
+    it('never throws — a restricted key without webhook permissions just logs', async () => {
+      mockStripeInstance.webhookEndpoints.list.mockRejectedValueOnce(
+        new Error('This API key does not have access to webhook_endpoints'),
+      );
+      await expect(service.ensureWebhookEndpointEnabled()).resolves.toEqual({
+        checked: 0,
+        reenabled: 0,
+      });
+    });
+  });
 });

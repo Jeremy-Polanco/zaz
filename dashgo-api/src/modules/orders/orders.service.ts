@@ -907,10 +907,23 @@ export class OrdersService {
       const existing = await this.payments.retrieveIntent(
         order.stripePaymentIntentId,
       );
+      // Self-heal: the hold is already authorized at Stripe but the webhook
+      // that advances the order never reached us. A PaymentSheet cannot
+      // present an authorized intent, so instead of bouncing the customer we
+      // converge the order right here and tell them it's already handled.
       if (
-        existing.status !== 'canceled' &&
-        existing.status !== 'succeeded'
+        existing.status === 'requires_capture' ||
+        existing.status === 'succeeded'
       ) {
+        await this.payments.markAuthorizedByIntentId(existing.id);
+        await this.autoConfirmSkipQuoteByIntentId(existing.id);
+        throw new ConflictException({
+          code: 'ALREADY_AUTHORIZED',
+          message:
+            'Tu pago ya fue autorizado — el pedido se está confirmando.',
+        });
+      }
+      if (existing.status !== 'canceled') {
         return {
           paymentIntentId: existing.id,
           clientSecret: existing.client_secret ?? '',
@@ -1167,6 +1180,16 @@ export class OrdersService {
         }
       }
     });
+
+    // Digital orders: release the uncaptured hold right away. Without this the
+    // customer's bank sits on the money for ~7 days until the authorization
+    // expires on its own. Best-effort epilogue — cancelIntent never throws.
+    // The resulting `payment_intent.canceled` webhook is a no-op for a
+    // CANCELLED order (handleAuthFailureByIntentId only touches QUOTED /
+    // PENDING_VALIDATION).
+    if (order.stripePaymentIntentId && !order.paidAt) {
+      await this.payments.cancelIntent(order.stripePaymentIntentId);
+    }
   }
 
   /**

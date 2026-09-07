@@ -58,6 +58,10 @@ export interface MockStripe {
   webhooks: {
     constructEvent: jest.Mock;
   };
+  webhookEndpoints: {
+    list: jest.Mock;
+    update: jest.Mock;
+  };
 }
 
 /**
@@ -163,6 +167,10 @@ export function createMockStripe(): MockStripe {
         const body = Buffer.isBuffer(rawBody) ? rawBody.toString() : rawBody;
         return JSON.parse(body) as unknown;
       }),
+    },
+    webhookEndpoints: {
+      list: jest.fn().mockResolvedValue({ data: [] }),
+      update: jest.fn().mockResolvedValue({}),
     },
   };
 }

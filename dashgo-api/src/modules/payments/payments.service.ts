@@ -42,6 +42,15 @@ export interface CreatedIntent {
   currency: string;
 }
 
+/** Our webhook route, matched by path so staging/prod hosts both qualify. */
+function isOurWebhookUrl(url: string): boolean {
+  try {
+    return new URL(url).pathname.endsWith('/payments/webhook');
+  } catch {
+    return false;
+  }
+}
+
 @Injectable()
 export class PaymentsService implements OnModuleInit {
   private readonly logger = new Logger(PaymentsService.name);
@@ -177,6 +186,60 @@ export class PaymentsService implements OnModuleInit {
   async retrieveIntent(id: string) {
     const stripe = this.requireStripe();
     return stripe.paymentIntents.retrieve(id);
+  }
+
+  /**
+   * Releases an uncaptured hold. Best-effort: an intent that is already
+   * canceled or captured makes Stripe throw, and that is fine — the caller
+   * (order cancellation) must never fail because of it.
+   */
+  async cancelIntent(id: string): Promise<boolean> {
+    const stripe = this.requireStripe();
+    try {
+      await stripe.paymentIntents.cancel(id);
+      return true;
+    } catch (err) {
+      this.logger.warn(
+        `cancelIntent(${id}) skipped: ${(err as Error).message}`,
+      );
+      return false;
+    }
+  }
+
+  /**
+   * Stripe auto-disables a webhook endpoint after days of failed deliveries
+   * (this happened when the app sat archived for a week) and then never
+   * resumes on its own — every digital order strands in QUOTED. Re-enable OUR
+   * endpoint (matched by path, never someone else's) and log the state so the
+   * next incident is visible in the logs. Never throws: a restricted key
+   * without webhook permissions must not break boot or the cron.
+   */
+  async ensureWebhookEndpointEnabled(): Promise<{
+    checked: number;
+    reenabled: number;
+  }> {
+    if (!this.isEnabled()) return { checked: 0, reenabled: 0 };
+    const stripe = this.requireStripe();
+    let checked = 0;
+    let reenabled = 0;
+    try {
+      const endpoints = await stripe.webhookEndpoints.list({ limit: 20 });
+      for (const ep of endpoints.data) {
+        if (!isOurWebhookUrl(ep.url)) continue;
+        checked += 1;
+        if (ep.status !== 'disabled') continue;
+        await stripe.webhookEndpoints.update(ep.id, { disabled: false });
+        reenabled += 1;
+        this.logger.warn(
+          `Stripe had DISABLED our webhook endpoint ${ep.id} (${ep.url}) — re-enabled it`,
+        );
+      }
+    } catch (err) {
+      this.logger.warn(
+        `ensureWebhookEndpointEnabled skipped: ${(err as Error).message}`,
+      );
+    }
+    return { checked, reenabled };
   }
 
   /**
