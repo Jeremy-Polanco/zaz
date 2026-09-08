@@ -160,13 +160,23 @@ export default ({ config }: ConfigContext): ExpoConfig => {
         CFBundleDisplayName: 'Udash',
       },
       // Universal Links. Pairs with the web's
-      // https://dashgo.dev/.well-known/apple-app-site-association (which lists
-      // the /r/* paths under appID 3K7TM3DZBB.com.dashgo.app). With this in
-      // place, tapping a promoter link https://dashgo.dev/r/CODE opens the app
-      // straight on src/app/r/[code].tsx instead of bouncing to Safari.
-      // Entitlement-level change: requires a NEW EAS/native build — an OTA
-      // update will NOT enable it.
-      associatedDomains: ['applinks:dashgo.dev', 'applinks:www.dashgo.dev'],
+      // https://www.dashgo.dev/.well-known/apple-app-site-association (which
+      // lists the /r/* paths under appID 3K7TM3DZBB.com.dashgo.app). With this
+      // in place, tapping a promoter link https://www.dashgo.dev/r/CODE opens
+      // the app straight on src/app/r/[code].tsx instead of bouncing to Safari.
+      //
+      // ONLY `www` — the apex is deliberately absent. dashgo.dev 307-redirects
+      // to www at the Vercel domain level, and Apple does NOT follow redirects
+      // when fetching the AASA file, so `applinks:dashgo.dev` could never
+      // validate. Promoter links are built from PUBLIC_WEB_URL, which is
+      // https://www.dashgo.dev in production (see DEPLOYMENT.md), so www is the
+      // domain that actually gets shared. Add the apex back only if that
+      // redirect is removed in the Vercel dashboard.
+      //
+      // Entitlement-level change: requires a NEW EAS/native build (and the
+      // Associated Domains capability on the App ID) — an OTA update will NOT
+      // enable it.
+      associatedDomains: ['applinks:www.dashgo.dev'],
     },
     android: {
       adaptiveIcon: {
@@ -182,18 +192,24 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       versionCode: resolveAndroidVersionCode(),
       permissions: ['ACCESS_COARSE_LOCATION', 'ACCESS_FINE_LOCATION'],
       // Android App Links. Pairs with the web's
-      // https://dashgo.dev/.well-known/assetlinks.json (package com.dashgo.app
-      // + the release signing-cert SHA-256). `autoVerify` is what makes
-      // Android open the app WITHOUT the "open with" chooser. Manifest-level
-      // change: requires a NEW EAS/native build, not an OTA update.
+      // https://www.dashgo.dev/.well-known/assetlinks.json (package
+      // com.dashgo.app + the release signing-cert SHA-256). `autoVerify` is
+      // what makes Android open the app WITHOUT the "open with" chooser.
+      //
+      // ONLY `www`, same reason as ios.associatedDomains above: the apex
+      // 307-redirects and can never pass verification. Here it is worse than
+      // useless — a host that fails verification inside an autoVerify filter
+      // can sink verification for the hosts next to it, so listing the apex
+      // would risk breaking www too.
+      //
+      // Manifest-level change: requires a NEW EAS/native build, not an OTA
+      // update. Verification stays inert until the real Play App Signing
+      // SHA-256 is pasted into assetlinks.json.
       intentFilters: [
         {
           action: 'VIEW',
           autoVerify: true,
-          data: [
-            { scheme: 'https', host: 'dashgo.dev', pathPrefix: '/r' },
-            { scheme: 'https', host: 'www.dashgo.dev', pathPrefix: '/r' },
-          ],
+          data: [{ scheme: 'https', host: 'www.dashgo.dev', pathPrefix: '/r' }],
           category: ['BROWSABLE', 'DEFAULT'],
         },
       ],

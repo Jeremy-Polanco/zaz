@@ -1,9 +1,22 @@
 # `/.well-known` — universal links & app links
 
-These two files let `https://dashgo.dev/r/<CODE>` open the **Udash app** instead
-of the web landing when the app is installed. They are served as static assets
-from `public/` (the SPA catch-all rewrite in `vercel.json` skips any path
+These two files let `https://www.dashgo.dev/r/<CODE>` open the **Udash app**
+instead of the web landing when the app is installed. They are served as static
+assets from `public/` (the SPA catch-all rewrite in `vercel.json` skips any path
 containing a dot, so `.well-known` is never swallowed by `index.html`).
+
+## ⚠️ `www` only — never the apex
+
+`dashgo.dev` **307-redirects** to `www.dashgo.dev` at the Vercel domain level,
+and neither Apple nor Android follows redirects when fetching these files. So
+only `www.dashgo.dev` can ever validate, and it is the only host declared in the
+app (`ios.associatedDomains` / `android.intentFilters` in `dashgo/app.config.ts`).
+
+That is consistent with what actually gets shared: promoter links are built from
+`PUBLIC_WEB_URL`, which is `https://www.dashgo.dev` in production (DEPLOYMENT.md).
+
+If someone removes the apex→www redirect in the Vercel dashboard, add
+`dashgo.dev` back to both lists in `app.config.ts` and cut a new native build.
 
 ## iOS — `apple-app-site-association`
 
@@ -17,7 +30,7 @@ Ready to ship. No extension on purpose; `vercel.json` adds
 Verify after deploy:
 
 ```bash
-curl -sI https://dashgo.dev/.well-known/apple-app-site-association | grep -i content-type
+curl -sI https://www.dashgo.dev/.well-known/apple-app-site-association | grep -i content-type
 ```
 
 ## Android — `assetlinks.json` (⚠️ INCOMPLETE)
