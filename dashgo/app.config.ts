@@ -92,10 +92,11 @@ function resolveIosBuildNumber(): string {
   // Apple: error 90186 "train version '1.0.5' is closed" + 90062 "must contain
   // a higher version than the previously approved version". Una vez que Apple
   // APRUEBA una versión, su tren se cierra: subir sólo el buildNumber no
-  // alcanza, hay que subir `version`. Por eso 1.0.6.
+  // alcanza, hay que subir `version`. Por eso 1.0.6, y 1.0.7 (build 19) el
+  // 2026-09-08 cuando la 1.0.6 (18) ya estaba aprobada.
   const fromEas = process.env.EAS_BUILD_NUMBER
   if (fromEas && fromEas.length > 0) return fromEas
-  return '18'
+  return '19'
 }
 
 function resolveAndroidVersionCode(): number {
@@ -108,7 +109,7 @@ function resolveAndroidVersionCode(): number {
   }
   // appVersionSource is 'local' — BUMP THIS by 1 before each Play upload,
   // same ritual as the iOS buildNumber above.
-  return 4
+  return 5
 }
 
 export default ({ config }: ConfigContext): ExpoConfig => {
@@ -122,7 +123,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     // EAS Update + App Store both require strict semver here. Apple closes a
     // version train once it's approved (error 90186), so every App Store
     // upload after a release MUST carry a higher version than the live one.
-    version: '1.0.6',
+    version: '1.0.7',
     orientation: 'portrait',
     icon: './assets/images/icon.png',
     scheme: 'dashgo',
@@ -158,6 +159,14 @@ export default ({ config }: ConfigContext): ExpoConfig => {
         // Ensure the home-screen label reads "Udash", not the lowercase slug.
         CFBundleDisplayName: 'Udash',
       },
+      // Universal Links. Pairs with the web's
+      // https://dashgo.dev/.well-known/apple-app-site-association (which lists
+      // the /r/* paths under appID 3K7TM3DZBB.com.dashgo.app). With this in
+      // place, tapping a promoter link https://dashgo.dev/r/CODE opens the app
+      // straight on src/app/r/[code].tsx instead of bouncing to Safari.
+      // Entitlement-level change: requires a NEW EAS/native build — an OTA
+      // update will NOT enable it.
+      associatedDomains: ['applinks:dashgo.dev', 'applinks:www.dashgo.dev'],
     },
     android: {
       adaptiveIcon: {
@@ -172,6 +181,22 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       // local-dev placeholder only — never trusted for Play Store uploads.
       versionCode: resolveAndroidVersionCode(),
       permissions: ['ACCESS_COARSE_LOCATION', 'ACCESS_FINE_LOCATION'],
+      // Android App Links. Pairs with the web's
+      // https://dashgo.dev/.well-known/assetlinks.json (package com.dashgo.app
+      // + the release signing-cert SHA-256). `autoVerify` is what makes
+      // Android open the app WITHOUT the "open with" chooser. Manifest-level
+      // change: requires a NEW EAS/native build, not an OTA update.
+      intentFilters: [
+        {
+          action: 'VIEW',
+          autoVerify: true,
+          data: [
+            { scheme: 'https', host: 'dashgo.dev', pathPrefix: '/r' },
+            { scheme: 'https', host: 'www.dashgo.dev', pathPrefix: '/r' },
+          ],
+          category: ['BROWSABLE', 'DEFAULT'],
+        },
+      ],
     },
     web: {
       output: 'static',

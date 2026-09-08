@@ -25,6 +25,17 @@ export default {
     eyebrowCode: 'Código',
   },
   referralBadge: 'Registrándote con:',
+  // Manual promoter-code entry — for people who installed from the store and
+  // opened the app cold, so the /r/CODE link never reached the app.
+  promoterCode: {
+    toggle: 'Tengo un código de promotor',
+    label: 'Código de promotor',
+    placeholder: 'ABC23456',
+    paste: 'Pegar',
+    valid: 'Te invitó {{name}}',
+    invalid: 'Código no válido',
+    helper: 'Solo aplica al crear una cuenta nueva.',
+  },
   firstLogin: {
     detected: 'Primer ingreso detectado — dinos cómo te llamas para crear tu cuenta.',
     nameLabel: 'Tu nombre',

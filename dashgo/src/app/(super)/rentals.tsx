@@ -12,6 +12,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context'
 import {
   useAdminRentals,
+  useAdminRentalsSummary,
   useCancelRental,
   useChargeLateFee,
   useChargeTheftFee,
@@ -303,21 +304,50 @@ function RentalRow({
 
 // ── Screen ───────────────────────────────────────────────────────────────────
 
+const PAGE_SIZE = 25
+
 export default function SuperRentalsScreen() {
   const [statusFilter, setStatusFilter] = useState<RentalStatus | undefined>(undefined)
   const [customerSearch, setCustomerSearch] = useState('')
+  const [page, setPage] = useState(1)
   const [pendingAction, setPendingAction] = useState<PendingAction | null>(null)
 
   const filters = useMemo<RentalFilter>(
     () => ({
-      page: 1,
-      pageSize: 25,
+      page,
+      pageSize: PAGE_SIZE,
       status: statusFilter ? [statusFilter] : undefined,
     }),
-    [statusFilter],
+    [statusFilter, page],
   )
 
-  const { data: rentals, isPending, refetch, isRefetching } = useAdminRentals(filters)
+  const { data, isPending, refetch, isRefetching } = useAdminRentals(filters)
+  const rentals = data?.items
+  // Server-side count for the current filter. `rentals.length` is only the size
+  // of the 25-row window, so using it made "N resultados" describe the page.
+  const total = data?.total ?? 0
+  const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE))
+
+  // KPI cards read the GLOBAL summary: they describe every rental, not the page
+  // on screen and not the active chip filter.
+  const { data: summary } = useAdminRentalsSummary()
+  const alDiaValue = summary ? summary.byStatus.active : '—'
+  const debiendoValue = summary
+    ? summary.byStatus.past_due + summary.byStatus.unpaid
+    : '—'
+  const enRiesgoValue = summary ? formatCents(summary.rentAtRiskCents) : '—'
+
+  // Changing the chip or the search reshuffles the dataset — page 2 of "Todos"
+  // is not page 2 of "Activo", so start over.
+  const handleStatusFilter = (value: RentalStatus | undefined) => {
+    setStatusFilter(value)
+    setPage(1)
+  }
+
+  const handleCustomerSearch = (value: string) => {
+    setCustomerSearch(value)
+    setPage(1)
+  }
   const chargeMutation = useChargeLateFee()
   const theftMutation = useChargeTheftFee()
   const cancelMutation = useCancelRental()
@@ -330,19 +360,6 @@ export default function SuperRentalsScreen() {
     cancelMutation.isPending ||
     retryMutation.isPending ||
     resetMaintenanceMutation.isPending
-
-  // Summary from the (status-filtered) fetched list — no extra request.
-  const summary = useMemo(() => {
-    const list = rentals ?? []
-    const debiendo = list.filter(
-      (r) => r.status === 'past_due' || r.status === 'unpaid',
-    )
-    return {
-      alDiaCount: list.filter((r) => r.status === 'active').length,
-      debiendoCount: debiendo.length,
-      rentAtRiskCents: debiendo.reduce((sum, r) => sum + r.monthlyRentCents, 0),
-    }
-  }, [rentals])
 
   // Customer name search is applied client-side over the fetched list.
   const displayed = useMemo(() => {
@@ -403,17 +420,15 @@ export default function SuperRentalsScreen() {
               eyebrow="Panel · Alquileres"
               title="Alquileres"
               italicTail="activos."
-              subtitle={`${rentals?.length ?? 0} resultado${rentals?.length === 1 ? '' : 's'}.`}
+              subtitle={`${total} resultado${total === 1 ? '' : 's'}.`}
             />
 
+            {/* Global KPIs from /admin/rentals/summary — "—" until they load.
+                A placeholder beats a number that is quietly wrong. */}
             <View className="mb-5 flex-row gap-2">
-              <KpiCard label="Al día" value={summary.alDiaCount} tone="ok" />
-              <KpiCard label="Debiendo" value={summary.debiendoCount} tone="warn" />
-              <KpiCard
-                label="En riesgo"
-                value={formatCents(summary.rentAtRiskCents)}
-                tone="idle"
-              />
+              <KpiCard label="Al día" value={alDiaValue} tone="ok" />
+              <KpiCard label="Debiendo" value={debiendoValue} tone="warn" />
+              <KpiCard label="En riesgo" value={enRiesgoValue} tone="idle" />
             </View>
 
             <TextInput
@@ -421,7 +436,7 @@ export default function SuperRentalsScreen() {
               placeholder="Buscar cliente por nombre…"
               placeholderTextColor="#6B6488"
               value={customerSearch}
-              onChangeText={setCustomerSearch}
+              onChangeText={handleCustomerSearch}
               autoCapitalize="none"
             />
 
@@ -429,7 +444,7 @@ export default function SuperRentalsScreen() {
               {STATUS_FILTERS.map((f) => (
                 <Pressable
                   key={f.label}
-                  onPress={() => setStatusFilter(f.value)}
+                  onPress={() => handleStatusFilter(f.value)}
                   className={`min-h-[44px] justify-center border px-3 py-3 ${
                     statusFilter === f.value
                       ? 'border-ink bg-ink'
@@ -451,6 +466,44 @@ export default function SuperRentalsScreen() {
         renderItem={({ item }) => (
           <RentalRow rental={item} onAction={setPendingAction} />
         )}
+        ListFooterComponent={
+          // The list is one server page; without this there was no way to reach
+          // rental #26. Hidden when everything fits on one page.
+          total > PAGE_SIZE ? (
+            <View className="mt-5 flex-row items-center justify-center gap-3">
+              <Pressable
+                disabled={page <= 1}
+                onPress={() => setPage((p) => Math.max(1, p - 1))}
+                className={`min-h-[44px] justify-center border px-3 py-3 ${
+                  page <= 1 ? 'border-ink/10 bg-paper opacity-40' : 'border-ink/20 bg-paper'
+                }`}
+              >
+                <Text className="font-sans text-[10px] uppercase tracking-label text-ink-muted">
+                  Anterior
+                </Text>
+              </Pressable>
+              <Text
+                className="font-sans text-[10px] uppercase tracking-label text-ink-muted"
+                style={{ fontVariant: ['tabular-nums'] }}
+              >
+                Página {page} de {pageCount}
+              </Text>
+              <Pressable
+                disabled={page >= pageCount}
+                onPress={() => setPage((p) => Math.min(pageCount, p + 1))}
+                className={`min-h-[44px] justify-center border px-3 py-3 ${
+                  page >= pageCount
+                    ? 'border-ink/10 bg-paper opacity-40'
+                    : 'border-ink/20 bg-paper'
+                }`}
+              >
+                <Text className="font-sans text-[10px] uppercase tracking-label text-ink-muted">
+                  Siguiente
+                </Text>
+              </Pressable>
+            </View>
+          ) : null
+        }
         ListEmptyComponent={
           <View className="items-center py-16">
             <Eyebrow>Sin resultados</Eyebrow>

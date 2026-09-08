@@ -13,12 +13,14 @@ import { renderWithProviders } from '../../test/test-utils'
 
 // ── module mocks ──────────────────────────────────────────────────────────────
 
+const mockUpdateMutate = jest.fn()
+
 jest.mock('../../lib/queries', () => ({
   useAdminUsers: jest.fn(),
   useCurrentUser: jest.fn(),
   useDeleteUser: jest.fn(),
   useUpdateUserAdmin: jest.fn(() => ({
-    mutate: jest.fn(),
+    mutate: mockUpdateMutate,
     isPending: false,
   })),
 }))
@@ -153,5 +155,129 @@ describe('SuperUsersScreen (mobile) — delete user', () => {
         'No podés eliminar tu propia cuenta.',
       ),
     )
+  })
+})
+
+
+/**
+ * Asignación de cartera (vendedor) y de atribución (promotor).
+ *
+ * Los chips de vendedor existían sin un solo test. Los de promotor son nuevos:
+ * hasta ahora `referredById` solo se escribía UNA vez, en el alta, desde el
+ * link de referido — para un cliente ya registrado no había forma de
+ * atribuirlo a un promotor. El backend valida los dos casos (rol correcto y
+ * no-auto-asignación); esto es solo la UI.
+ */
+describe('SuperUsersScreen (mobile) — asignación de vendedor y promotor', () => {
+  const roster: AdminUser[] = [
+    adminUser(),
+    adminUser({ id: 's-1', fullName: 'Vendedor Uno', role: 'seller' }),
+    adminUser({ id: 'p-1', fullName: 'Promotor Uno', role: 'promoter' }),
+  ]
+
+  beforeEach(() => {
+    jest.clearAllMocks()
+
+    mockUsers.mockReturnValue({
+      data: roster,
+      isPending: false,
+      isRefetching: false,
+      refetch: jest.fn(),
+    } as unknown as ReturnType<typeof useAdminUsers>)
+
+    mockMe.mockReturnValue({
+      data: { id: 'admin-1', role: 'super_admin_delivery' },
+    } as unknown as ReturnType<typeof useCurrentUser>)
+
+    mockDeleteUser.mockReturnValue({
+      mutate: jest.fn(),
+      mutateAsync: jest.fn(),
+      isPending: false,
+    } as unknown as ReturnType<typeof useDeleteUser>)
+  })
+
+  it('asigna un vendedor a un cliente', () => {
+    renderWithProviders(<SuperUsersScreen />)
+
+    fireEvent.press(
+      screen.getByLabelText('Asignarle Ana Cliente al vendedor Vendedor Uno'),
+    )
+
+    expect(mockUpdateMutate).toHaveBeenCalledWith({
+      id: 'user-1',
+      sellerId: 's-1',
+    })
+  })
+
+  it('desasigna el vendedor mandando null, no ""', () => {
+    mockUsers.mockReturnValue({
+      data: [adminUser({ sellerId: 's-1' }), roster[1]],
+      isPending: false,
+      isRefetching: false,
+      refetch: jest.fn(),
+    } as unknown as ReturnType<typeof useAdminUsers>)
+    renderWithProviders(<SuperUsersScreen />)
+
+    fireEvent.press(screen.getByLabelText('Dejar a Ana Cliente sin vendedor'))
+
+    expect(mockUpdateMutate).toHaveBeenCalledWith({
+      id: 'user-1',
+      sellerId: null,
+    })
+  })
+
+  it('le pasa un cliente a un promotor', () => {
+    renderWithProviders(<SuperUsersScreen />)
+
+    fireEvent.press(
+      screen.getByLabelText('Atribuir Ana Cliente al promotor Promotor Uno'),
+    )
+
+    expect(mockUpdateMutate).toHaveBeenCalledWith({
+      id: 'user-1',
+      referredById: 'p-1',
+    })
+  })
+
+  it('le quita el promotor mandando null, no ""', () => {
+    mockUsers.mockReturnValue({
+      data: [adminUser({ referredById: 'p-1' }), roster[2]],
+      isPending: false,
+      isRefetching: false,
+      refetch: jest.fn(),
+    } as unknown as ReturnType<typeof useAdminUsers>)
+    renderWithProviders(<SuperUsersScreen />)
+
+    fireEvent.press(screen.getByLabelText('Dejar a Ana Cliente sin promotor'))
+
+    expect(mockUpdateMutate).toHaveBeenCalledWith({
+      id: 'user-1',
+      referredById: null,
+    })
+  })
+
+  it('no ofrece promotor para las filas de promotor ni de vendedor', () => {
+    renderWithProviders(<SuperUsersScreen />)
+
+    expect(
+      screen.queryByLabelText('Dejar a Promotor Uno sin promotor'),
+    ).toBeNull()
+    expect(
+      screen.queryByLabelText('Dejar a Vendedor Uno sin promotor'),
+    ).toBeNull()
+  })
+
+  it('dice "Asignado (fuera de la lista)" en vez de pintarlo como libre', () => {
+    // Si el promotor atribuido no está en el padrón, se dice — mostrarlo como
+    // "Sin promotor" es dato falso: ese cliente ya le genera comisión a alguien.
+    mockUsers.mockReturnValue({
+      data: [adminUser({ referredById: 'fantasma' }), roster[2]],
+      isPending: false,
+      isRefetching: false,
+      refetch: jest.fn(),
+    } as unknown as ReturnType<typeof useAdminUsers>)
+    renderWithProviders(<SuperUsersScreen />)
+
+    expect(screen.getAllByText('Asignado (fuera de la lista)').length).toBe(1)
   })
 })

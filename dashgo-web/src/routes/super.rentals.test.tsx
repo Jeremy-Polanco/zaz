@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { renderWithProviders } from '../test/test-utils'
-import type { AdminRentalResponse } from '../lib/types'
+import type { AdminRentalResponse, AdminRentalsSummary } from '../lib/types'
 
 // ── Module mocks ───────────────────────────────────────────────────────────────
 // `createFileRoute` runs at import time and needs a generated route tree; stub
@@ -19,6 +19,7 @@ vi.mock('@tanstack/react-router', async (importOriginal) => {
 
 vi.mock('../lib/queries', () => ({
   useAdminRentals: vi.fn(),
+  useAdminRentalsSummary: vi.fn(),
   useChargeLateFee: vi.fn(),
   useChargeTheftFee: vi.fn(),
   useCancelRental: vi.fn(),
@@ -33,6 +34,7 @@ vi.mock('../lib/api', () => ({
 
 import {
   useAdminRentals,
+  useAdminRentalsSummary,
   useChargeLateFee,
   useChargeTheftFee,
   useCancelRental,
@@ -42,6 +44,7 @@ import {
 import { SuperRentalsPage } from './super.rentals'
 
 const mockUseAdminRentals = vi.mocked(useAdminRentals)
+const mockUseAdminRentalsSummary = vi.mocked(useAdminRentalsSummary)
 const mockUseChargeLateFee = vi.mocked(useChargeLateFee)
 const mockUseChargeTheftFee = vi.mocked(useChargeTheftFee)
 const mockUseCancelRental = vi.mocked(useCancelRental)
@@ -99,18 +102,49 @@ type Mutations = {
   resetMaintenance?: ReturnType<typeof mutationMock>
 }
 
+function makeSummary(
+  overrides: Partial<AdminRentalsSummary> = {},
+): AdminRentalsSummary {
+  return {
+    total: 0,
+    byStatus: {
+      active: 0,
+      past_due: 0,
+      unpaid: 0,
+      pending_setup: 0,
+      canceled: 0,
+    },
+    rentAtRiskCents: 0,
+    ...overrides,
+  }
+}
+
 function setup(
   opts: {
     rentals?: AdminRentalResponse[]
+    /** Server-side count for the current filter. Defaults to the page length. */
+    total?: number
     isPending?: boolean
+    summary?: AdminRentalsSummary
+    summaryPending?: boolean
   } & Mutations = {},
 ) {
+  const items = opts.rentals ?? []
   mockUseAdminRentals.mockReturnValue({
-    data: opts.isPending ? undefined : (opts.rentals ?? []),
+    data: opts.isPending
+      ? undefined
+      : { items, total: opts.total ?? items.length },
     isPending: opts.isPending ?? false,
     isError: false,
     error: null,
   } as unknown as ReturnType<typeof useAdminRentals>)
+
+  mockUseAdminRentalsSummary.mockReturnValue({
+    data: opts.summaryPending ? undefined : (opts.summary ?? makeSummary()),
+    isPending: opts.summaryPending ?? false,
+    isError: false,
+    error: null,
+  } as unknown as ReturnType<typeof useAdminRentalsSummary>)
 
   const wire = <T,>(m: ReturnType<typeof mutationMock> | undefined) =>
     (m ?? mutationMock()) as unknown as T
@@ -195,8 +229,9 @@ describe('SuperRentalsPage — list rendering', () => {
 })
 
 // ---------------------------------------------------------------------------
-// The summary is real business math (`useMemo` over the fetched list) and was
-// entirely absent from the old driver.
+// The KPI cards describe the WHOLE dataset. They used to be a useMemo over the
+// fetched page, so a 25-row window reported itself as the entire business
+// ("25 resultados / Al día 23" no matter how many rentals existed).
 // ---------------------------------------------------------------------------
 
 describe('SuperRentalsPage — summary cards', () => {
@@ -204,16 +239,25 @@ describe('SuperRentalsPage — summary cards', () => {
     vi.clearAllMocks()
   })
 
-  it('counts active vs delinquent rentals and sums the rent at risk', () => {
+  it('reads the cards from the summary endpoint, not from the fetched page', () => {
     setup({
+      // The page shows two cancelled rentals; the cards must ignore them.
       rentals: [
-        makeRental({ id: 'r1', status: 'active', monthlyRentCents: 2000 }),
-        makeRental({ id: 'r2', status: 'active', monthlyRentCents: 3000 }),
-        makeRental({ id: 'r3', status: 'past_due', monthlyRentCents: 2500 }),
-        makeRental({ id: 'r4', status: 'unpaid', monthlyRentCents: 1500 }),
-        // Cancelled rentals are neither "al día" nor at risk.
-        makeRental({ id: 'r5', status: 'canceled', monthlyRentCents: 9900 }),
+        makeRental({ id: 'r1', status: 'canceled', monthlyRentCents: 9900 }),
+        makeRental({ id: 'r2', status: 'canceled', monthlyRentCents: 9900 }),
       ],
+      total: 2,
+      summary: makeSummary({
+        total: 52,
+        byStatus: {
+          active: 40,
+          past_due: 3,
+          unpaid: 2,
+          pending_setup: 0,
+          canceled: 7,
+        },
+        rentAtRiskCents: 12500,
+      }),
     })
     renderWithProviders(<SuperRentalsPage />)
 
@@ -221,10 +265,109 @@ describe('SuperRentalsPage — summary cards', () => {
     const debiendo = screen.getByText('Debiendo').parentElement!
     const atRisk = screen.getByText('Renta mensual en riesgo').parentElement!
 
-    expect(within(alDia).getByText('2')).toBeInTheDocument()
-    expect(within(debiendo).getByText('2')).toBeInTheDocument()
-    // 2500 + 1500 — the cancelled 9900 must not count.
-    expect(within(atRisk).getByText('$40.00')).toBeInTheDocument()
+    expect(within(alDia).getByText('40')).toBeInTheDocument()
+    // past_due + unpaid.
+    expect(within(debiendo).getByText('5')).toBeInTheDocument()
+    expect(within(atRisk).getByText('$125.00')).toBeInTheDocument()
+  })
+
+  it('shows a placeholder instead of a wrong number while the summary loads', () => {
+    setup({ rentals: [makeRental()], summaryPending: true })
+    renderWithProviders(<SuperRentalsPage />)
+
+    const alDia = screen.getByText('Al día').parentElement!
+    expect(within(alDia).getByText('—')).toBeInTheDocument()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Truncation: the API returns one page, so the header count and the cards must
+// come from the server — never from `items.length`.
+// ---------------------------------------------------------------------------
+
+describe('SuperRentalsPage — truncated first page', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  const page = Array.from({ length: 25 }, (_, i) =>
+    makeRental({ id: `r${i}`, userName: `Cliente ${i}` }),
+  )
+
+  it('reports the server total, not the 25 rows it rendered', () => {
+    setup({
+      rentals: page,
+      total: 40,
+      summary: makeSummary({
+        total: 40,
+        byStatus: {
+          active: 31,
+          past_due: 4,
+          unpaid: 1,
+          pending_setup: 2,
+          canceled: 2,
+        },
+        rentAtRiskCents: 7500,
+      }),
+    })
+    renderWithProviders(<SuperRentalsPage />)
+
+    expect(screen.getByText('40 resultados.')).toBeInTheDocument()
+  })
+
+  it('renders pagination controls with the right page count', () => {
+    setup({ rentals: page, total: 40 })
+    renderWithProviders(<SuperRentalsPage />)
+
+    // 40 rentals / 25 per page = 2 pages.
+    expect(screen.getByText('Página 1 de 2')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Anterior' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Siguiente' })).toBeEnabled()
+  })
+
+  it('asks the API for the next page when "Siguiente" is pressed', async () => {
+    setup({ rentals: page, total: 40 })
+    renderWithProviders(<SuperRentalsPage />)
+
+    await userEvent.click(screen.getByRole('button', { name: 'Siguiente' }))
+
+    await waitFor(() =>
+      expect(mockUseAdminRentals).toHaveBeenLastCalledWith(
+        expect.objectContaining({ page: 2, pageSize: 25 }),
+      ),
+    )
+  })
+
+  it('hides the pagination when everything fits on one page', () => {
+    setup({ rentals: [makeRental()], total: 1 })
+    renderWithProviders(<SuperRentalsPage />)
+
+    expect(
+      screen.queryByRole('button', { name: 'Siguiente' }),
+    ).not.toBeInTheDocument()
+  })
+
+  it('keeps the cards global even while a status chip narrows the list', () => {
+    setup({
+      rentals: page,
+      total: 25,
+      summary: makeSummary({
+        total: 40,
+        byStatus: {
+          active: 31,
+          past_due: 4,
+          unpaid: 1,
+          pending_setup: 2,
+          canceled: 2,
+        },
+        rentAtRiskCents: 7500,
+      }),
+    })
+    renderWithProviders(<SuperRentalsPage />)
+
+    const alDia = screen.getByText('Al día').parentElement!
+    // 31, not the 25 active rows on screen.
+    expect(within(alDia).getByText('31')).toBeInTheDocument()
   })
 })
 

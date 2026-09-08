@@ -1,8 +1,9 @@
 import { createFileRoute, isRedirect, redirect } from '@tanstack/react-router'
-import { useMemo, useState } from 'react'
+import { useState } from 'react'
 import { Button, SectionHeading } from '../components/ui'
 import {
   useAdminRentals,
+  useAdminRentalsSummary,
   useChargeLateFee,
   useChargeTheftFee,
   useCancelRental,
@@ -300,7 +301,24 @@ export function SuperRentalsPage() {
   const [filters, setFilters] = useState<RentalFilter>({ page: 1, pageSize: 25 })
   const [pendingAction, setPendingAction] = useState<ModalAction | null>(null)
 
-  const { data: rentals, isPending } = useAdminRentals(filters)
+  const { data, isPending } = useAdminRentals(filters)
+  const rentals = data?.items
+  // Server-side count for the current filter. `rentals.length` is only the size
+  // of the 25-row window, so using it made "N resultados" describe the page.
+  const total = data?.total ?? 0
+  const pageSize = filters.pageSize ?? 25
+  const page = filters.page ?? 1
+  const pageCount = Math.max(1, Math.ceil(total / pageSize))
+
+  // KPI cards read the GLOBAL summary: they must describe every rental, not the
+  // page the operator happens to be on, and not the active chip filter either.
+  const { data: summary, isPending: summaryPending } = useAdminRentalsSummary()
+  const alDiaCount = summary?.byStatus.active
+  const debiendoCount =
+    summary === undefined
+      ? undefined
+      : summary.byStatus.past_due + summary.byStatus.unpaid
+
   const chargeMutation = useChargeLateFee()
   const theftMutation = useChargeTheftFee()
   const cancelMutation = useCancelRental()
@@ -313,24 +331,6 @@ export function SuperRentalsPage() {
     cancelMutation.isPending ||
     retryMutation.isPending ||
     resetMaintenanceMutation.isPending
-
-  // Summary computed from the already-fetched rentals — no extra request.
-  const summary = useMemo(() => {
-    const list = rentals ?? []
-    const alDia = list.filter((r) => r.status === 'active')
-    const debiendo = list.filter(
-      (r) => r.status === 'past_due' || r.status === 'unpaid',
-    )
-    const rentAtRiskCents = debiendo.reduce(
-      (sum, r) => sum + r.monthlyRentCents,
-      0,
-    )
-    return {
-      alDiaCount: alDia.length,
-      debiendoCount: debiendo.length,
-      rentAtRiskCents,
-    }
-  }, [rentals])
 
   const handleStatusChange = (value: string) => {
     setStatusFilter(value)
@@ -388,33 +388,41 @@ export function SuperRentalsPage() {
               Alquileres <span className="italic text-brand">activos.</span>
             </>
           }
-          subtitle={`${rentals?.length ?? 0} resultado${rentals?.length === 1 ? '' : 's'}.`}
+          subtitle={`${total} resultado${total === 1 ? '' : 's'}.`}
         />
 
-        {/* Summary — derived from the fetched rentals, no extra request */}
+        {/* Summary — GLOBAL numbers from /admin/rentals/summary. Never derived
+            from the fetched page, which is a 25-row window. "—" while loading
+            or on error: a placeholder beats a number that is quietly wrong. */}
         <div className="mb-6 grid grid-cols-1 gap-3 sm:grid-cols-3">
           <div className="border border-ink/10 bg-paper p-4">
             <p className="text-[0.6rem] uppercase tracking-[0.14em] text-ink-muted">
               Al día
             </p>
-            <p className="display nums mt-1 text-2xl font-semibold text-ok">
-              {summary.alDiaCount}
+            <p
+              className={`display nums mt-1 text-2xl font-semibold text-ok${summaryPending ? ' opacity-40' : ''}`}
+            >
+              {alDiaCount ?? '—'}
             </p>
           </div>
           <div className="border border-ink/10 bg-paper p-4">
             <p className="text-[0.6rem] uppercase tracking-[0.14em] text-ink-muted">
               Debiendo
             </p>
-            <p className="display nums mt-1 text-2xl font-semibold text-bad">
-              {summary.debiendoCount}
+            <p
+              className={`display nums mt-1 text-2xl font-semibold text-bad${summaryPending ? ' opacity-40' : ''}`}
+            >
+              {debiendoCount ?? '—'}
             </p>
           </div>
           <div className="border border-ink/10 bg-paper p-4">
             <p className="text-[0.6rem] uppercase tracking-[0.14em] text-ink-muted">
               Renta mensual en riesgo
             </p>
-            <p className="display nums mt-1 text-2xl font-semibold text-ink">
-              {formatCents(summary.rentAtRiskCents)}
+            <p
+              className={`display nums mt-1 text-2xl font-semibold text-ink${summaryPending ? ' opacity-40' : ''}`}
+            >
+              {summary ? formatCents(summary.rentAtRiskCents) : '—'}
             </p>
           </div>
         </div>
@@ -475,6 +483,36 @@ export function SuperRentalsPage() {
             ))}
           </div>
         )}
+
+        {/* Pagination — the list is one server page; without this there was no
+            way to reach rental #26. Hidden when everything fits on one page. */}
+        {total > pageSize ? (
+          <div className="mt-6 flex items-center justify-center gap-4">
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={page <= 1}
+              onClick={() =>
+                setFilters((f) => ({ ...f, page: Math.max(1, page - 1) }))
+              }
+            >
+              Anterior
+            </Button>
+            <span className="nums text-[0.7rem] uppercase tracking-[0.12em] text-ink-muted">
+              Página {page} de {pageCount}
+            </span>
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={page >= pageCount}
+              onClick={() =>
+                setFilters((f) => ({ ...f, page: Math.min(pageCount, page + 1) }))
+              }
+            >
+              Siguiente
+            </Button>
+          </div>
+        ) : null}
       </div>
 
       {/* Confirmation modal — rendered outside .page-rise to avoid transform containing-block */}

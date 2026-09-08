@@ -436,6 +436,108 @@ describe('UsersService.updateByAdmin', () => {
     expect(userRepo.update).toHaveBeenCalledWith('target-1', { sellerId: null });
     expect(result.sellerId).toBeNull();
   });
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // Asignación de promotor — el super admin le pasa un cliente a un promotor
+  // ───────────────────────────────────────────────────────────────────────────
+
+  it('assigns a promoter to a customer', async () => {
+    userRepo.findOne
+      .mockResolvedValueOnce(fakeUser({ id: 'target-1' })) // target
+      .mockResolvedValueOnce(
+        fakeUser({ id: 'promo-1', role: UserRole.PROMOTER }),
+      )
+      .mockResolvedValueOnce(
+        fakeUser({ id: 'target-1', referredById: 'promo-1' }),
+      );
+
+    const result = await service.updateByAdmin(admin, 'target-1', {
+      referredById: 'promo-1',
+    });
+
+    expect(userRepo.update).toHaveBeenCalledWith('target-1', {
+      referredById: 'promo-1',
+    });
+    expect(result.referredById).toBe('promo-1');
+  });
+
+  it('rejects assigning a user who is NOT a promoter', async () => {
+    userRepo.findOne
+      .mockResolvedValueOnce(fakeUser({ id: 'target-1' }))
+      .mockResolvedValueOnce(fakeUser({ id: 'other-1', role: UserRole.SELLER }));
+
+    await expect(
+      service.updateByAdmin(admin, 'target-1', { referredById: 'other-1' }),
+    ).rejects.toThrow('El usuario asignado no tiene rol de promotor');
+    expect(userRepo.update).not.toHaveBeenCalled();
+  });
+
+  it('rejects assigning a promoter id that does not exist', async () => {
+    userRepo.findOne
+      .mockResolvedValueOnce(fakeUser({ id: 'target-1' }))
+      .mockResolvedValueOnce(null);
+
+    await expect(
+      service.updateByAdmin(admin, 'target-1', { referredById: 'ghost' }),
+    ).rejects.toThrow('El usuario asignado no tiene rol de promotor');
+    expect(userRepo.update).not.toHaveBeenCalled();
+  });
+
+  it('rejects making a user their own promoter', async () => {
+    // Auto-referido: `creditCommissionsForOrder` ya lo esquiva, pero dejarlo
+    // entrar guarda un dato que miente en el panel.
+    userRepo.findOne
+      .mockResolvedValueOnce(
+        fakeUser({ id: 'target-1', role: UserRole.PROMOTER }),
+      )
+      .mockResolvedValueOnce(
+        fakeUser({ id: 'target-1', role: UserRole.PROMOTER }),
+      );
+
+    await expect(
+      service.updateByAdmin(admin, 'target-1', { referredById: 'target-1' }),
+    ).rejects.toThrow('Un usuario no puede ser su propio promotor');
+    expect(userRepo.update).not.toHaveBeenCalled();
+  });
+
+  it('unassigns a promoter with an explicit null (no promoter lookup)', async () => {
+    userRepo.findOne
+      .mockResolvedValueOnce(
+        fakeUser({ id: 'target-1', referredById: 'promo-1' }),
+      )
+      .mockResolvedValueOnce(fakeUser({ id: 'target-1', referredById: null }));
+
+    const result = await service.updateByAdmin(admin, 'target-1', {
+      referredById: null,
+    });
+
+    expect(userRepo.update).toHaveBeenCalledWith('target-1', {
+      referredById: null,
+    });
+    expect(result.referredById).toBeNull();
+  });
+
+  it('demoting a promoter does NOT wipe the attribution of their referidos', async () => {
+    // Decisión deliberada, distinta a la del vendedor: la cartera de un
+    // vendedor SE DESASIGNA al degradarlo porque un `seller_id` que ya no es
+    // vendedor esconde al cliente del panel de todos. La atribución de
+    // promotor no rompe nada: `PromotersService.creditCommissionsForOrder`
+    // ya verifica `promoter.role !== PROMOTER` y no acredita. Borrarla sería
+    // destruir historial irrecuperable ante un cambio de rol accidental.
+    userRepo.findOne
+      .mockResolvedValueOnce(
+        fakeUser({ id: 'promo-1', role: UserRole.PROMOTER }),
+      )
+      .mockResolvedValueOnce(fakeUser({ id: 'promo-1', role: UserRole.CLIENT }));
+
+    await service.updateByAdmin(admin, 'promo-1', { role: UserRole.CLIENT });
+
+    const wiped = userRepo.update.mock.calls.some(
+      (c: unknown[]) =>
+        typeof c[0] === 'object' && c[0] !== null && 'referredById' in c[0],
+    );
+    expect(wiped).toBe(false);
+  });
 });
 
 describe('UsersService.deleteByAdmin', () => {

@@ -71,6 +71,8 @@ function UserRow({
   onChangeRole,
   sellers,
   onAssignSeller,
+  promoters,
+  onAssignPromoter,
   pendingUpdate,
 }: {
   item: AdminUser
@@ -81,6 +83,8 @@ function UserRow({
   onChangeRole: (user: AdminUser, role: UserRole) => void
   sellers: AdminUser[]
   onAssignSeller: (user: AdminUser, sellerId: string | null) => void
+  promoters: AdminUser[]
+  onAssignPromoter: (user: AdminUser, referredById: string | null) => void
   pendingUpdate: boolean
 }) {
   const [expanded, setExpanded] = useState(false)
@@ -194,6 +198,8 @@ function UserRow({
               <Pressable
                 onPress={() => onAssignSeller(item, null)}
                 disabled={pendingUpdate || item.sellerId == null}
+                accessibilityRole="button"
+                accessibilityLabel={`Dejar a ${item.fullName} sin vendedor`}
                 className={`border px-2 py-1 ${
                   item.sellerId == null
                     ? 'border-brand bg-brand/10'
@@ -213,6 +219,8 @@ function UserRow({
                   key={sel.id}
                   onPress={() => onAssignSeller(item, sel.id)}
                   disabled={pendingUpdate || item.sellerId === sel.id}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Asignarle ${item.fullName} al vendedor ${sel.fullName}`}
                   className={`border px-2 py-1 ${
                     item.sellerId === sel.id
                       ? 'border-brand bg-brand/10'
@@ -225,6 +233,74 @@ function UserRow({
                     }`}
                   >
                     {sel.fullName}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+          ) : null}
+
+          {/* Atribución de comisiones. Hasta ahora `referredById` solo se
+              escribía UNA vez, en el alta, desde el link de referido del
+              promotor: a un cliente ya registrado no había forma de pasárselo
+              a nadie. Espejo de la web. */}
+          {item.role !== 'seller' &&
+          item.role !== 'promoter' &&
+          promoters.length > 0 ? (
+            <View className="flex-row flex-wrap items-center gap-2">
+              <Text className="font-sans text-[10px] uppercase tracking-label text-ink-muted">
+                Promotor
+              </Text>
+              {/* "Sin promotor" y "tiene uno que no puedo nombrar" son estados
+                  distintos: pintar como libre a un cliente que ya le genera
+                  comisión a alguien es dato falso, no una limitación. */}
+              {item.referredById != null &&
+              !promoters.some((p) => p.id === item.referredById) ? (
+                <View className="border border-accent-dark bg-accent-light px-2 py-1">
+                  <Text className="font-sans text-[11px] text-ink">
+                    Asignado (fuera de la lista)
+                  </Text>
+                </View>
+              ) : null}
+              <Pressable
+                onPress={() => onAssignPromoter(item, null)}
+                disabled={pendingUpdate || item.referredById == null}
+                accessibilityRole="button"
+                accessibilityLabel={`Dejar a ${item.fullName} sin promotor`}
+                className={`border px-2 py-1 ${
+                  item.referredById == null
+                    ? 'border-brand bg-brand/10'
+                    : 'border-ink/15 bg-paper'
+                }`}
+              >
+                <Text
+                  className={`font-sans text-[11px] ${
+                    item.referredById == null ? 'text-brand' : 'text-ink-muted'
+                  }`}
+                >
+                  Sin promotor
+                </Text>
+              </Pressable>
+              {promoters.map((pro) => (
+                <Pressable
+                  key={pro.id}
+                  onPress={() => onAssignPromoter(item, pro.id)}
+                  disabled={pendingUpdate || item.referredById === pro.id}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Atribuir ${item.fullName} al promotor ${pro.fullName}`}
+                  className={`border px-2 py-1 ${
+                    item.referredById === pro.id
+                      ? 'border-brand bg-brand/10'
+                      : 'border-ink/15 bg-paper'
+                  }`}
+                >
+                  <Text
+                    className={`font-sans text-[11px] ${
+                      item.referredById === pro.id
+                        ? 'text-brand'
+                        : 'text-ink-muted'
+                    }`}
+                  >
+                    {pro.fullName}
                   </Text>
                 </Pressable>
               ))}
@@ -265,6 +341,11 @@ export default function SuperUsersScreen() {
   const { data: allUsers } = useAdminUsers(undefined)
   const sellers = useMemo(
     () => (allUsers ?? []).filter((u) => u.role === 'seller'),
+    [allUsers],
+  )
+  // Mismo motivo: el padrón de promotores también sale de la lista sin filtrar.
+  const promoters = useMemo(
+    () => (allUsers ?? []).filter((u) => u.role === 'promoter'),
     [allUsers],
   )
   const [deletingId, setDeletingId] = useState<string | null>(null)
@@ -404,6 +485,10 @@ export default function SuperUsersScreen() {
             sellers={sellers}
             onAssignSeller={(u, sellerId) =>
               updateUser.mutate({ id: u.id, sellerId })
+            }
+            promoters={promoters}
+            onAssignPromoter={(u, referredById) =>
+              updateUser.mutate({ id: u.id, referredById })
             }
             pendingUpdate={updateUser.isPending}
           />

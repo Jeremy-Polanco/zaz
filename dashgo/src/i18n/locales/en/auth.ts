@@ -25,6 +25,17 @@ export default {
     eyebrowCode: 'Code',
   },
   referralBadge: 'Signing up with:',
+  // Manual promoter-code entry — for people who installed from the store and
+  // opened the app cold, so the /r/CODE link never reached the app.
+  promoterCode: {
+    toggle: 'I have a promoter code',
+    label: 'Promoter code',
+    placeholder: 'ABC23456',
+    paste: 'Paste',
+    valid: '{{name}} invited you',
+    invalid: 'Invalid code',
+    helper: 'Only applies when creating a new account.',
+  },
   firstLogin: {
     detected: 'First sign-in detected — tell us your name to create your account.',
     nameLabel: 'Your name',

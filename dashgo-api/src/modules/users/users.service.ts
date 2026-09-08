@@ -45,10 +45,11 @@ export class UsersService {
   }
 
   /**
-   * Admin patch of another user: timer de mantenimiento, rol y asignación de
-   * vendedor. SUPER_ADMIN_DELIVERY only — que la asignación de cartera sea
-   * exclusiva del super admin es la regla que impide que un vendedor se lleve
-   * los clientes de otro.
+   * Admin patch of another user: timer de mantenimiento, rol y asignaciones de
+   * vendedor y promotor. SUPER_ADMIN_DELIVERY only — que la asignación de
+   * cartera sea exclusiva del super admin es la regla que impide que un
+   * vendedor se lleve los clientes de otro, y que un promotor se atribuya
+   * clientes ajenos para cobrar comisión por ellos.
    */
   async updateByAdmin(
     actor: AuthenticatedUser,
@@ -82,6 +83,28 @@ export class UsersService {
       }
     }
 
+    if (dto.referredById !== undefined && dto.referredById !== null) {
+      // Espejo de la regla del vendedor. Sin esta validación quedaría un
+      // cliente atribuido a alguien que no cobra comisión: el dato se ve en el
+      // panel pero `creditCommissionsForOrder` lo descarta por rol, y nadie
+      // entiende por qué el promotor no gana nada.
+      const promoter = await this.users.findOne({
+        where: { id: dto.referredById },
+      });
+      if (!promoter || promoter.role !== UserRole.PROMOTER) {
+        throw new BadRequestException({
+          code: 'NOT_A_PROMOTER',
+          message: 'El usuario asignado no tiene rol de promotor',
+        });
+      }
+      if (dto.referredById === id) {
+        throw new BadRequestException({
+          code: 'SELF_ASSIGNMENT',
+          message: 'Un usuario no puede ser su propio promotor',
+        });
+      }
+    }
+
     if (dto.role !== undefined && dto.role !== target.role) {
       // Escalada de privilegios: el super admin NO se reparte por HTTP. Se
       // provisiona por bootstrap/consola a propósito, así una sesión de admin
@@ -106,6 +129,12 @@ export class UsersService {
     // no es vendedor: esos clientes desaparecen del panel de todos (el scope
     // busca `seller_id` de un seller). Se desasignan en la misma transacción
     // que el cambio de rol — nunca en dos pasos.
+    //
+    // Degradar a un PROMOTOR es a propósito el caso opuesto: NO se toca
+    // `referred_by_id`. `PromotersService.creditCommissionsForOrder` ya
+    // verifica el rol del referidor antes de acreditar, así que la atribución
+    // colgada no paga de más ni esconde a nadie — y borrarla destruiría
+    // historial irrecuperable cada vez que alguien se equivoca de chip.
     const losesSellerRole =
       target.role === UserRole.SELLER &&
       dto.role !== undefined &&

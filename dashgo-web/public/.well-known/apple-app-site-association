@@ -1,0 +1,15 @@
+{
+  "applinks": {
+    "details": [
+      {
+        "appIDs": ["3K7TM3DZBB.com.dashgo.app"],
+        "components": [
+          {
+            "/": "/r/*",
+            "comment": "Referral deep links open the Udash app when installed."
+          }
+        ]
+      }
+    ]
+  }
+}

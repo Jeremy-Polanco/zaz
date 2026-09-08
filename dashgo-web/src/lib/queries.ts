@@ -3,6 +3,7 @@ import { api } from './api'
 import type {
   AdminPlanResponse,
   AdminRentalResponse,
+  AdminRentalsSummary,
   AdminUser,
   AdminUsersSubscriptionFilter,
   AuthorizedIntent,
@@ -357,11 +358,12 @@ export function useCurrentUser() {
 
 /**
  * Super-admin: PATCH /users/:id — asigna (o desasigna, con `null`) el vendedor
- * de un cliente, o cambia su rol.
+ * o el promotor de un cliente, o cambia su rol.
  *
  * Solo el super admin. El servidor lo vuelve a validar: rechaza asignar a un
- * usuario que no tenga rol `seller` y rechaza que alguien sea su propio
- * vendedor. Este hook no es el permiso — el permiso está en la API.
+ * usuario que no tenga el rol correcto (`seller` / `promoter`) y rechaza que
+ * alguien sea su propio vendedor o promotor. Este hook no es el permiso — el
+ * permiso está en la API.
  */
 export function useUpdateUserAdmin() {
   const qc = useQueryClient()
@@ -372,6 +374,8 @@ export function useUpdateUserAdmin() {
     }: {
       id: string
       sellerId?: string | null
+      /** Promotor atribuido. `null` lo desasigna. */
+      referredById?: string | null
       role?: UserRole
       maintenanceTimerDisabled?: boolean
     }) => {
@@ -1333,16 +1337,32 @@ export function useAdminRentals(filters: RentalFilter) {
   if (filters.page) q.set('page', String(filters.page))
   if (filters.pageSize) q.set('pageSize', String(filters.pageSize))
   const qs = q.toString()
-  return useQuery<AdminRentalResponse[]>({
+  // Keeps the server `total` alongside the page's items — the panel needs it for
+  // "N resultados" and for the pagination controls. Discarding it made the page
+  // report its own 25-row window as the whole dataset.
+  return useQuery<{ items: AdminRentalResponse[]; total: number }>({
     queryKey: ['admin', 'rentals', filters],
-    // /admin/rentals returns a paginated { items, page, ... } wrapper — unwrap to
-    // the items array the page maps over (matches the AdminRentalResponse[] type).
     queryFn: async () =>
       (
-        await api.get<{ items: AdminRentalResponse[] }>(
+        await api.get<{ items: AdminRentalResponse[]; total: number }>(
           qs ? `/admin/rentals?${qs}` : '/admin/rentals',
         )
-      ).data.items,
+      ).data,
+  })
+}
+
+/**
+ * Super-admin: GET /admin/rentals/summary — global KPI counts.
+ *
+ * Deliberately unfiltered and unpaginated: the panel cards describe every
+ * rental, not the page being shown. The existing rental mutations invalidate
+ * the ['admin', 'rentals'] prefix, which covers this key too.
+ */
+export function useAdminRentalsSummary() {
+  return useQuery<AdminRentalsSummary>({
+    queryKey: ['admin', 'rentals', 'summary'],
+    queryFn: async () =>
+      (await api.get<AdminRentalsSummary>('/admin/rentals/summary')).data,
   })
 }
 

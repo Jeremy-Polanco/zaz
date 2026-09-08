@@ -67,6 +67,10 @@ function makeRepoMock<T>() {
     setLock: jest.fn().mockReturnThis(),
     getOne: jest.fn().mockResolvedValue(null),
     select: jest.fn().mockReturnThis(),
+    addSelect: jest.fn().mockReturnThis(),
+    groupBy: jest.fn().mockReturnThis(),
+    getRawMany: jest.fn().mockResolvedValue([]),
+    getRawOne: jest.fn().mockResolvedValue(undefined),
   } as unknown as jest.Mocked<SelectQueryBuilder<T>>;
 
   return {
@@ -767,6 +771,82 @@ describe('RentalsService', () => {
 
       expect(qb.skip).toHaveBeenCalledWith(10); // page=2, pageSize=10 → skip=10
       expect(qb.take).toHaveBeenCalledWith(10);
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // summarizeAdmin — global KPIs, independent of the list's page/filters.
+  //
+  // The admin screens used to compute "Al día / Debiendo / En riesgo" from the
+  // 25-row page listAdmin returned, so the numbers described the window, not
+  // the dataset. These specs pin the summary to the WHOLE table.
+  // ─────────────────────────────────────────────────────────────────────────
+
+  describe('summarizeAdmin', () => {
+    it('counts every status over the whole table and sums the rent at risk', async () => {
+      const qb = rentalRepo._qb;
+      (qb.getRawMany as jest.Mock).mockResolvedValueOnce([
+        { status: RentalStatus.ACTIVE, count: '40' },
+        { status: RentalStatus.PAST_DUE, count: '3' },
+        { status: RentalStatus.UNPAID, count: '2' },
+        { status: RentalStatus.CANCELED, count: '7' },
+      ]);
+      (qb.getRawOne as jest.Mock).mockResolvedValueOnce({ sum: '12500' });
+
+      const result = await service.summarizeAdmin();
+
+      expect(result.total).toBe(52);
+      expect(result.byStatus[RentalStatus.ACTIVE]).toBe(40);
+      expect(result.byStatus[RentalStatus.PAST_DUE]).toBe(3);
+      expect(result.byStatus[RentalStatus.UNPAID]).toBe(2);
+      expect(result.byStatus[RentalStatus.CANCELED]).toBe(7);
+      expect(result.rentAtRiskCents).toBe(12500);
+    });
+
+    it('returns 0 for statuses absent from the GROUP BY (every key present)', async () => {
+      const qb = rentalRepo._qb;
+      (qb.getRawMany as jest.Mock).mockResolvedValueOnce([
+        { status: RentalStatus.ACTIVE, count: '5' },
+      ]);
+      (qb.getRawOne as jest.Mock).mockResolvedValueOnce({ sum: null });
+
+      const result = await service.summarizeAdmin();
+
+      for (const status of Object.values(RentalStatus)) {
+        expect(result.byStatus[status]).toBeDefined();
+      }
+      expect(result.byStatus[RentalStatus.PENDING_SETUP]).toBe(0);
+      expect(result.byStatus[RentalStatus.CANCELED]).toBe(0);
+      expect(result.total).toBe(5);
+      // No delinquent rows → SUM is NULL, which must not leak as NaN.
+      expect(result.rentAtRiskCents).toBe(0);
+    });
+
+    it('applies no status/user/product filter and no pagination to the counts', async () => {
+      const qb = rentalRepo._qb;
+      (qb.getRawMany as jest.Mock).mockResolvedValueOnce([]);
+      (qb.getRawOne as jest.Mock).mockResolvedValueOnce({ sum: '0' });
+
+      await service.summarizeAdmin();
+
+      expect(qb.groupBy).toHaveBeenCalledWith('rental.status');
+      expect(qb.skip).not.toHaveBeenCalled();
+      expect(qb.take).not.toHaveBeenCalled();
+    });
+
+    it('scopes the rent-at-risk sum to past_due + unpaid only', async () => {
+      const qb = rentalRepo._qb;
+      (qb.getRawMany as jest.Mock).mockResolvedValueOnce([]);
+      (qb.getRawOne as jest.Mock).mockResolvedValueOnce({ sum: '900' });
+
+      await service.summarizeAdmin();
+
+      expect(qb.where).toHaveBeenCalledWith(
+        expect.stringContaining('status'),
+        expect.objectContaining({
+          statuses: [RentalStatus.PAST_DUE, RentalStatus.UNPAID],
+        }),
+      );
     });
   });
 

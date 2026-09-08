@@ -186,6 +186,17 @@ export type RentalFilter = {
   pageSize?: number
 }
 
+/**
+ * GET /admin/rentals/summary — global KPIs over ALL rentals, unaffected by the
+ * list's filters or pagination. The panel cards read from here; deriving them
+ * from the fetched page described the 25-row window, not the dataset.
+ */
+export type AdminRentalsSummary = {
+  total: number
+  byStatus: Record<RentalStatus, number>
+  rentAtRiskCents: number
+}
+
 export type ChargeLateFeeResponse = {
   chargedCents: number
   paymentIntentId: string
@@ -538,6 +549,12 @@ export interface AdminUser {
   subscriptionStatus: string | null
   /** Vendedor asignado. null = sin vendedor. Solo el super admin lo escribe. */
   sellerId?: string | null
+  /**
+   * Promotor al que se le atribuye este cliente (comisiones). null = sin
+   * promotor. Se sembraba en el alta con el link de referido; ahora el super
+   * admin también lo asigna a mano desde el panel.
+   */
+  referredById?: string | null
 }
 
 

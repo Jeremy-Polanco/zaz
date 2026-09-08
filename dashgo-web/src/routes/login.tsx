@@ -11,6 +11,7 @@ import {
   type VerifyOtpInput,
 } from '../lib/schemas'
 import { useLogin, useSendOtp, useVerifyOtp } from '../lib/auth'
+import { usePromoterByCode } from '../lib/queries'
 import { Button, FieldError, Input, Label, PhoneField } from '../components/ui'
 import { isStaff } from '../lib/roles'
 import type { UserRole } from '../lib/types'
@@ -31,6 +32,12 @@ function serverMessage(err: unknown, fallback: string) {
     (err as Error & { response?: { data?: { message?: string } } })?.response?.data
       ?.message ?? fallback
   )
+}
+
+/** An empty/partial typed code must never reach the API as ''. */
+function typedReferralCode(raw: string | undefined): string | undefined {
+  const code = normalizeReferralCode(raw?.trim() ?? '')
+  return code.length === REFERRAL_CODE_LENGTH ? code : undefined
 }
 
 export function isFirstLoginError(err: unknown): boolean {
@@ -56,6 +63,108 @@ export function destForRole(role: string, next?: string): string {
 const OTP_ENABLED =
   import.meta.env.VITE_AUTH_OTP_MODE === 'whatsapp' ||
   import.meta.env.VITE_AUTH_OTP_MODE === 'sandbox'
+
+// Promoter codes are 8 chars from an ambiguity-free alphabet (no I/O/0/1) —
+// same set the backend validates. Typing is filtered so a mis-keyed "O" never
+// becomes a "código no válido".
+const REFERRAL_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
+const REFERRAL_CODE_LENGTH = 8
+
+export function normalizeReferralCode(raw: string): string {
+  return raw
+    .toUpperCase()
+    .split('')
+    .filter((c) => REFERRAL_ALPHABET.includes(c))
+    .join('')
+    .slice(0, REFERRAL_CODE_LENGTH)
+}
+
+function ReferralBadge({ code }: { code: string }) {
+  return (
+    <div className="mt-6 inline-flex items-center gap-2 border border-accent/30 bg-accent/10 px-3 py-1.5">
+      <span className="h-1.5 w-1.5 rounded-full bg-accent" />
+      <span className="text-[0.7rem] uppercase tracking-[0.2em] text-accent-dark">
+        Registrándote con código:{' '}
+        <span className="text-brand">{code}</span>
+      </span>
+    </div>
+  )
+}
+
+// Manual entry for people who installed the app / opened the web WITHOUT the
+// /r/<code> deep link. Collapsed by default so it never distracts the 99% who
+// just want to log in. Web ↔ mobile parity: same wording as the app.
+function PromoterCodeField({
+  value,
+  onChange,
+  error,
+}: {
+  value: string
+  onChange: (code: string) => void
+  error?: string
+}) {
+  const [open, setOpen] = useState(false)
+  const complete = value.length === REFERRAL_CODE_LENGTH
+  const lookup = usePromoterByCode(complete ? value : undefined)
+  const promoter = complete ? lookup.data : undefined
+  const unknown = complete && lookup.isError
+  const statusId = 'referralCode-status'
+
+  return (
+    <div>
+      <button
+        type="button"
+        aria-expanded={open}
+        aria-controls="referralCode-panel"
+        onClick={() => {
+          if (open) onChange('')
+          setOpen((v) => !v)
+        }}
+        className="text-[0.72rem] uppercase tracking-[0.18em] text-ink-muted underline-offset-4 hover:text-ink hover:underline"
+      >
+        Tengo un código de promotor
+      </button>
+
+      <div id="referralCode-panel" hidden={!open}>
+        {open ? (
+          <div className="mt-4">
+            <Label htmlFor="referralCode">Código de promotor</Label>
+            <Input
+              id="referralCode"
+              type="text"
+              inputMode="text"
+              autoComplete="off"
+              autoCapitalize="characters"
+              spellCheck={false}
+              maxLength={REFERRAL_CODE_LENGTH}
+              placeholder="ABCD2345"
+              aria-invalid={Boolean(unknown)}
+              aria-describedby={statusId}
+              className="nums uppercase tracking-[0.3em]"
+              value={value}
+              onChange={(e) => onChange(normalizeReferralCode(e.target.value))}
+            />
+            <div id={statusId}>
+              {promoter ? (
+                <p className="mt-2 text-xs font-medium text-ok">
+                  Te invitó {promoter.fullName}
+                </p>
+              ) : unknown ? (
+                <p className="mt-2 text-xs font-medium text-bad">
+                  Código no válido
+                </p>
+              ) : null}
+              <p className="mt-2 text-xs text-ink-muted">
+                Solo aplica al crear una cuenta nueva.
+              </p>
+            </div>
+            <FieldError message={error} />
+          </div>
+        ) : null}
+      </div>
+    </div>
+  )
+}
 
 function LoginPoster({ tagline }: { tagline: string }) {
   return (
@@ -101,6 +210,9 @@ function LoginPage() {
   const [step, setStep] = useState<'phone' | 'code'>('phone')
   const [phone, setPhone] = useState('')
   const [expiresAt, setExpiresAt] = useState<string | null>(null)
+  // A code typed by hand on the phone step must survive into the OTP step the
+  // same way ?ref does — CodeStep only ever sees a single `referralCode` prop.
+  const [typedRef, setTypedRef] = useState<string | undefined>(undefined)
 
   const handleVerified = (role: string) => {
     window.location.assign(destForRole(role, next))
@@ -127,9 +239,11 @@ function LoginPage() {
           {step === 'phone' ? (
             <PhoneStep
               next={next}
-              onSent={(p, exp) => {
+              referralCode={ref}
+              onSent={(p, exp, code) => {
                 setPhone(p)
                 setExpiresAt(exp)
+                setTypedRef(code)
                 setStep('code')
               }}
             />
@@ -137,7 +251,7 @@ function LoginPage() {
             <CodeStep
               phone={phone}
               expiresAt={expiresAt}
-              referralCode={ref}
+              referralCode={ref ?? typedRef}
               onBack={() => setStep('phone')}
               onResent={(exp) => setExpiresAt(exp)}
               onVerified={handleVerified}
@@ -192,7 +306,7 @@ export function PhoneOnlyLogin({
       const res = await login.mutateAsync({
         phone: values.phone,
         fullName: trimmedName ? trimmedName : undefined,
-        referralCode: referralCode ?? values.referralCode ?? undefined,
+        referralCode: referralCode ?? typedReferralCode(values.referralCode),
         dateOfBirth: values.dateOfBirth ? values.dateOfBirth : undefined,
       })
       onAuthenticated(res.user.role)
@@ -216,15 +330,7 @@ export function PhoneOnlyLogin({
         Poné tu teléfono y entrás al toque.
       </p>
 
-      {referralCode ? (
-        <div className="mt-6 inline-flex items-center gap-2 border border-accent/30 bg-accent/10 px-3 py-1.5">
-          <span className="h-1.5 w-1.5 rounded-full bg-accent" />
-          <span className="text-[0.7rem] uppercase tracking-[0.2em] text-accent-dark">
-            Registrándote con código:{' '}
-            <span className="text-brand">{referralCode}</span>
-          </span>
-        </div>
-      ) : null}
+      {referralCode ? <ReferralBadge code={referralCode} /> : null}
 
       <form onSubmit={onSubmit} className="mt-10 flex flex-col gap-6">
         <PhoneField
@@ -232,6 +338,15 @@ export function PhoneOnlyLogin({
           name="phone"
           error={form.formState.errors.phone?.message}
         />
+        {referralCode ? null : (
+          <PromoterCodeField
+            value={form.watch('referralCode') ?? ''}
+            onChange={(code) =>
+              form.setValue('referralCode', code, { shouldValidate: false })
+            }
+            error={form.formState.errors.referralCode?.message}
+          />
+        )}
         {needsName && (
           <div>
             <p className="mb-2 border-l-2 border-accent pl-3 text-sm font-medium text-ink">
@@ -295,12 +410,21 @@ export function PhoneOnlyLogin({
 // ─────────────────────────────────────────────────────────────────────────
 function PhoneStep({
   next: _next,
+  referralCode,
   onSent,
 }: {
   next: string | undefined
-  onSent: (phone: string, expiresAt: string) => void
+  referralCode: string | undefined
+  onSent: (
+    phone: string,
+    expiresAt: string,
+    referralCode: string | undefined,
+  ) => void
 }) {
   const sendOtp = useSendOtp()
+  // sendOtpSchema carries no referralCode (the backend only reads it on
+  // verify), so a manually typed code is held here and handed to CodeStep.
+  const [typedRef, setTypedRef] = useState('')
   const form = useForm<SendOtpInput>({
     resolver: zodResolver(sendOtpSchema),
     defaultValues: { phone: '' },
@@ -308,7 +432,7 @@ function PhoneStep({
 
   const onSubmit = form.handleSubmit(async (values) => {
     const res = await sendOtp.mutateAsync(values)
-    onSent(values.phone, res.expiresAt)
+    onSent(values.phone, res.expiresAt, typedReferralCode(typedRef))
   })
 
   return (
@@ -321,12 +445,17 @@ function PhoneStep({
         Poné tu teléfono y te mandamos un código por WhatsApp.
       </p>
 
+      {referralCode ? <ReferralBadge code={referralCode} /> : null}
+
       <form onSubmit={onSubmit} className="mt-10 flex flex-col gap-6">
         <PhoneField
           control={form.control}
           name="phone"
           error={form.formState.errors.phone?.message}
         />
+        {referralCode ? null : (
+          <PromoterCodeField value={typedRef} onChange={setTypedRef} />
+        )}
         {sendOtp.isError && (
           <p className="border-l-2 border-bad pl-3 text-sm font-medium text-bad">
             {serverMessage(sendOtp.error, 'No pudimos mandar el código')}
@@ -406,7 +535,7 @@ function CodeStep({
         phone: values.phone,
         code: values.code,
         fullName: trimmedName ? trimmedName : undefined,
-        referralCode: referralCode ?? values.referralCode ?? undefined,
+        referralCode: referralCode ?? typedReferralCode(values.referralCode),
       }
       try {
         const res = await verifyOtp.mutateAsync(payload)
@@ -451,15 +580,7 @@ function CodeStep({
         ← Usar otro número
       </button>
 
-      {referralCode ? (
-        <div className="mt-6 inline-flex items-center gap-2 border border-accent/30 bg-accent/10 px-3 py-1.5">
-          <span className="h-1.5 w-1.5 rounded-full bg-accent" />
-          <span className="text-[0.7rem] uppercase tracking-[0.2em] text-accent-dark">
-            Registrándote con código:{' '}
-            <span className="text-brand">{referralCode}</span>
-          </span>
-        </div>
-      ) : null}
+      {referralCode ? <ReferralBadge code={referralCode} /> : null}
 
       <form onSubmit={onSubmit} className="mt-10 flex flex-col gap-6">
         <div>

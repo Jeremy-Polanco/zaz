@@ -14,7 +14,13 @@ import {
   type SendOtpInput,
   type VerifyOtpInput,
 } from '../../lib/schemas'
-import { useLogin, useSendOtp, useVerifyOtp } from '../../lib/queries'
+import * as Clipboard from 'expo-clipboard'
+import {
+  useLogin,
+  usePromoterByCode,
+  useSendOtp,
+  useVerifyOtp,
+} from '../../lib/queries'
 import type { UserRole } from '../../lib/types'
 import { Button, Eyebrow, FieldLabel, FieldError, PhoneField, DashGoMark, BoltIcon } from '../../components/ui'
 import { isStaff } from '../../lib/roles'
@@ -168,6 +174,126 @@ const ESCALATED_COPY: WhatsAppFailureCopy = {
   retryCooldownSeconds: 5,
 }
 
+/**
+ * Promoter-code entry — attribution rescue for store installs.
+ *
+ * A promoter shares https://dashgo.dev/r/CODE. When the person taps that link
+ * WITHOUT the app installed, they land on the web, install from the store and
+ * open the app cold: there is no `ref` param anymore and the promoter loses
+ * the referral. The phone step therefore offers a collapsed "Tengo un código
+ * de promotor" toggle so the code can still be typed (or pasted) by hand.
+ *
+ * The alphabet is the backend's — it deliberately drops the glyphs that get
+ * misread out loud or over WhatsApp (I/O/0/1).
+ */
+export const PROMOTER_CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
+export const PROMOTER_CODE_LENGTH = 8
+
+/** Upper-cases and strips anything outside the promoter alphabet. */
+export function normalizePromoterCode(raw: string): string {
+  const out: string[] = []
+  for (const char of raw.toUpperCase()) {
+    if (PROMOTER_CODE_ALPHABET.includes(char)) out.push(char)
+    if (out.length === PROMOTER_CODE_LENGTH) break
+  }
+  return out.join('')
+}
+
+function PromoterCodeField({
+  value,
+  onChange,
+}: {
+  value: string
+  onChange: (code: string) => void
+}) {
+  const { t } = useTranslation('auth')
+  const [open, setOpen] = useState(false)
+  // Only hit the public lookup once the code is complete — a partial code is
+  // always a 404 and would just flash "Código no válido" while typing.
+  const complete = value.length === PROMOTER_CODE_LENGTH
+  const { data, isError } = usePromoterByCode(complete ? value : undefined)
+
+  const handlePaste = async () => {
+    try {
+      const raw = await Clipboard.getStringAsync()
+      onChange(normalizePromoterCode(raw ?? ''))
+    } catch {
+      // Clipboard unavailable (simulator / permission) — typing still works.
+    }
+  }
+
+  if (!open) {
+    return (
+      <Pressable
+        testID="promoter-code-toggle"
+        accessibilityRole="button"
+        accessibilityLabel={t('promoterCode.toggle')}
+        onPress={() => setOpen(true)}
+        className="mb-6 min-h-[44px] justify-center self-start"
+      >
+        <Text className="font-sans text-[13px] uppercase tracking-label text-ink-muted underline">
+          {t('promoterCode.toggle')}
+        </Text>
+      </Pressable>
+    )
+  }
+
+  return (
+    <View className="mb-6">
+      <FieldLabel>{t('promoterCode.label')}</FieldLabel>
+      <View className="flex-row items-end gap-3">
+        <TextInput
+          testID="promoter-code-input"
+          accessibilityLabel={t('promoterCode.label')}
+          className="h-11 flex-1 border-b border-ink/25 pb-1 font-sans text-[18px] tracking-[4px] text-ink"
+          autoCapitalize="characters"
+          autoCorrect={false}
+          autoComplete="off"
+          maxLength={PROMOTER_CODE_LENGTH}
+          placeholder={t('promoterCode.placeholder')}
+          placeholderTextColor="#6B6488"
+          value={value}
+          onChangeText={(raw) => onChange(normalizePromoterCode(raw))}
+        />
+        <Pressable
+          testID="promoter-code-paste-btn"
+          accessibilityRole="button"
+          accessibilityLabel={t('promoterCode.paste')}
+          onPress={handlePaste}
+          className="min-h-[44px] justify-center border border-ink px-4"
+        >
+          <Text className="font-sans-medium text-[13px] uppercase tracking-label text-ink">
+            {t('promoterCode.paste')}
+          </Text>
+        </Pressable>
+      </View>
+
+      {complete && data ? (
+        <Text
+          testID="promoter-code-status"
+          className="mt-2 font-sans text-[13px] text-ok"
+        >
+          {t('promoterCode.valid', { name: data.fullName })}
+        </Text>
+      ) : complete && isError ? (
+        <Text
+          testID="promoter-code-status"
+          className="mt-2 font-sans text-[13px] text-bad"
+        >
+          {t('promoterCode.invalid')}
+        </Text>
+      ) : null}
+
+      <Text
+        testID="promoter-code-helper"
+        className="mt-1.5 font-sans text-[12px] text-ink-muted"
+      >
+        {t('promoterCode.helper')}
+      </Text>
+    </View>
+  )
+}
+
 function computeSecondsLeft(expiresAt: string | null): number {
   if (!expiresAt) return 0
   const expires = new Date(expiresAt).getTime()
@@ -181,10 +307,19 @@ function computeSecondsLeft(expiresAt: string | null): number {
 export default function LoginScreen() {
   const { t } = useTranslation('auth')
   const params = useLocalSearchParams<{ ref?: string; next?: string }>()
-  const referralCode =
+  const linkReferralCode =
     typeof params.ref === 'string' && params.ref.length === 8
       ? params.ref.toUpperCase()
       : undefined
+  // Manually typed promoter code (store installs lose the ?ref= param). It
+  // lives HERE, in the parent, so the phone step and the OTP step read one
+  // single value — exactly how the link-provided code has always worked.
+  const [typedReferralCode, setTypedReferralCode] = useState('')
+  const referralCode =
+    linkReferralCode ??
+    (typedReferralCode.length === PROMOTER_CODE_LENGTH
+      ? typedReferralCode
+      : undefined)
   // Guest flows (Apple 5.1.1) pass the screen to return to after login —
   // e.g. /checkout. Only same-app absolute paths are honored.
   const next =
@@ -284,10 +419,16 @@ export default function LoginScreen() {
           {!otpEnabled ? (
             <PhoneOnlyStep
               referralCode={referralCode}
+              linkReferralCode={linkReferralCode}
+              typedReferralCode={typedReferralCode}
+              onTypedReferralCodeChange={setTypedReferralCode}
               onVerified={handleVerified}
             />
           ) : step === 'phone' ? (
             <PhoneStep
+              linkReferralCode={linkReferralCode}
+              typedReferralCode={typedReferralCode}
+              onTypedReferralCodeChange={setTypedReferralCode}
               onSent={(p, exp) => {
                 setPhone(p)
                 setExpiresAt(exp)
@@ -505,9 +646,17 @@ function WhatsAppFailureBlock({
  */
 export function PhoneOnlyStep({
   referralCode,
+  linkReferralCode,
+  typedReferralCode,
+  onTypedReferralCodeChange,
   onVerified,
 }: {
+  /** Effective code sent to the API: the link's code, else the typed one. */
   referralCode: string | undefined
+  /** Code that arrived via ?ref= — renders the read-only badge. */
+  linkReferralCode: string | undefined
+  typedReferralCode: string
+  onTypedReferralCodeChange: (code: string) => void
   onVerified: (role: UserRole) => void
 }) {
   const { t } = useTranslation('auth')
@@ -562,15 +711,20 @@ export function PhoneOnlyStep({
     <>
       <Eyebrow className="mb-6">{t('form.eyebrowSignIn')}</Eyebrow>
 
-      {referralCode ? (
+      {linkReferralCode ? (
         <View className="mb-6 flex-row items-center gap-2 self-start bg-brand-light px-2.5 py-1.5">
           <BoltIcon size={11} color="#1A1530" />
           <Text className="font-sans-medium text-[13px] uppercase tracking-label text-brand">
             {t('referralBadge')}{' '}
-            <Text className="text-brand">{referralCode}</Text>
+            <Text className="text-brand">{linkReferralCode}</Text>
           </Text>
         </View>
-      ) : null}
+      ) : (
+        <PromoterCodeField
+          value={typedReferralCode}
+          onChange={onTypedReferralCodeChange}
+        />
+      )}
 
       <View className="mb-8">
         <PhoneField
@@ -665,8 +819,14 @@ export function PhoneOnlyStep({
 }
 
 function PhoneStep({
+  linkReferralCode,
+  typedReferralCode,
+  onTypedReferralCodeChange,
   onSent,
 }: {
+  linkReferralCode: string | undefined
+  typedReferralCode: string
+  onTypedReferralCodeChange: (code: string) => void
   onSent: (phone: string, expiresAt: string) => void
 }) {
   const { t } = useTranslation('auth')
@@ -720,6 +880,13 @@ function PhoneStep({
   return (
     <>
       <Eyebrow className="mb-6">{t('form.eyebrowSignIn')}</Eyebrow>
+
+      {linkReferralCode ? null : (
+        <PromoterCodeField
+          value={typedReferralCode}
+          onChange={onTypedReferralCodeChange}
+        />
+      )}
 
       <View className="mb-8">
         <PhoneField

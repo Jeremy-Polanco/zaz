@@ -33,7 +33,7 @@ vi.mock('../components/UserAddressesPanel', () => ({
   UserAddressesPanel: () => null,
 }))
 
-import { RoleCell, SellerCell } from './super.users'
+import { PromoterCell, RoleCell, SellerCell } from './super.users'
 
 function mkUser(o: Partial<AdminUser> = {}): AdminUser {
   return {
@@ -52,6 +52,7 @@ function mkUser(o: Partial<AdminUser> = {}): AdminUser {
 }
 
 const SELLER = mkUser({ id: 's-1', fullName: 'Vendedor Uno', role: 'seller' })
+const PROMOTER = mkUser({ id: 'p-1', fullName: 'Promotor Uno', role: 'promoter' })
 
 describe('SellerCell', () => {
   it('shows the assigned seller name to a non-admin viewer', () => {
@@ -228,5 +229,140 @@ describe('RoleCell', () => {
     )
     expect(screen.queryByRole('combobox')).not.toBeInTheDocument()
     expect(screen.getByText('Cliente')).toBeInTheDocument()
+  })
+})
+
+
+describe('PromoterCell', () => {
+  it('shows the assigned promoter name to a non-admin viewer', () => {
+    renderWithProviders(
+      <PromoterCell
+        user={mkUser({ referredById: 'p-1' })}
+        promoters={[PROMOTER]}
+        canAssign={false}
+        onAssign={vi.fn()}
+        pending={false}
+      />,
+    )
+    expect(screen.getByText('Promotor Uno')).toBeInTheDocument()
+  })
+
+  it('renders a picker for the super admin, with the current promoter selected', () => {
+    renderWithProviders(
+      <PromoterCell
+        user={mkUser({ referredById: 'p-1' })}
+        promoters={[PROMOTER]}
+        canAssign
+        onAssign={vi.fn()}
+        pending={false}
+      />,
+    )
+    const select = screen.getByLabelText('Promotor de Cliente Uno')
+    expect((select as HTMLSelectElement).value).toBe('p-1')
+  })
+
+  it('hands a customer to a promoter', async () => {
+    // Lo que pidió el dueño: hasta ahora la única forma era el link de
+    // referido en el alta, y para un cliente ya registrado no había ninguna.
+    const onAssign = vi.fn()
+    renderWithProviders(
+      <PromoterCell
+        user={mkUser()}
+        promoters={[PROMOTER]}
+        canAssign
+        onAssign={onAssign}
+        pending={false}
+      />,
+    )
+    await userEvent.selectOptions(
+      screen.getByLabelText('Promotor de Cliente Uno'),
+      'p-1',
+    )
+    expect(onAssign).toHaveBeenCalledWith('p-1')
+  })
+
+  it('unassigns with the empty option, sending null (not "")', async () => {
+    const onAssign = vi.fn()
+    renderWithProviders(
+      <PromoterCell
+        user={mkUser({ referredById: 'p-1' })}
+        promoters={[PROMOTER]}
+        canAssign
+        onAssign={onAssign}
+        pending={false}
+      />,
+    )
+    await userEvent.selectOptions(
+      screen.getByLabelText('Promotor de Cliente Uno'),
+      '',
+    )
+    expect(onAssign).toHaveBeenCalledWith(null)
+  })
+
+  it('the column does not apply to promoters, sellers or admins', () => {
+    const { rerender } = renderWithProviders(
+      <PromoterCell
+        user={mkUser({ role: 'promoter' })}
+        promoters={[PROMOTER]}
+        canAssign
+        onAssign={vi.fn()}
+        pending={false}
+      />,
+    )
+    expect(screen.queryByRole('combobox')).not.toBeInTheDocument()
+
+    rerender(
+      <PromoterCell
+        user={mkUser({ role: 'seller' })}
+        promoters={[PROMOTER]}
+        canAssign
+        onAssign={vi.fn()}
+        pending={false}
+      />,
+    )
+    expect(screen.queryByRole('combobox')).not.toBeInTheDocument()
+
+    rerender(
+      <PromoterCell
+        user={mkUser({ role: 'super_admin_delivery' })}
+        promoters={[PROMOTER]}
+        canAssign
+        onAssign={vi.fn()}
+        pending={false}
+      />,
+    )
+    expect(screen.queryByRole('combobox')).not.toBeInTheDocument()
+  })
+
+  it('an assigned promoter missing from the roster must not read as "Sin promotor"', () => {
+    renderWithProviders(
+      <PromoterCell
+        user={mkUser({ referredById: 'p-1' })}
+        promoters={[]} // padrón incompleto
+        canAssign={false}
+        onAssign={vi.fn()}
+        pending={false}
+      />,
+    )
+    expect(screen.queryByText('Sin promotor')).not.toBeInTheDocument()
+    expect(screen.getByText('Asignado')).toBeInTheDocument()
+  })
+
+  it('the picker keeps an unresolvable promoter selected, never silently unassigns', () => {
+    const onAssign = vi.fn()
+    renderWithProviders(
+      <PromoterCell
+        user={mkUser({ referredById: 'p-1' })}
+        promoters={[]}
+        canAssign
+        onAssign={onAssign}
+        pending={false}
+      />,
+    )
+    const select = screen.getByLabelText(
+      'Promotor de Cliente Uno',
+    ) as HTMLSelectElement
+    expect(select.value).toBe('p-1')
+    expect(onAssign).not.toHaveBeenCalled()
   })
 })

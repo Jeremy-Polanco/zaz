@@ -30,6 +30,12 @@ jest.mock('../../lib/queries', () => ({
   useSendOtp: jest.fn(),
   useVerifyOtp: jest.fn(),
   useLogin: jest.fn(),
+  usePromoterByCode: jest.fn(),
+}))
+
+// The promoter-code field reads the system clipboard for its "Pegar" button.
+jest.mock('expo-clipboard', () => ({
+  getStringAsync: jest.fn().mockResolvedValue(''),
 }))
 
 jest.mock('expo-router', () => {
@@ -141,7 +147,14 @@ jest.mock('../../components/ui', () => {
 
 // ── imports after mocks ───────────────────────────────────────────────────────
 
-import { useLogin, useSendOtp, useVerifyOtp } from '../../lib/queries'
+import * as Clipboard from 'expo-clipboard'
+import { useLocalSearchParams } from 'expo-router'
+import {
+  useLogin,
+  usePromoterByCode,
+  useSendOtp,
+  useVerifyOtp,
+} from '../../lib/queries'
 import LoginScreen, {
   isWhatsAppSendFailure,
   WHATSAPP_RETRY_COOLDOWN_SECONDS,
@@ -156,6 +169,20 @@ import {
 const mockUseSendOtp = useSendOtp as jest.MockedFunction<typeof useSendOtp>
 const mockUseVerifyOtp = useVerifyOtp as jest.MockedFunction<typeof useVerifyOtp>
 const mockUseLogin = useLogin as jest.MockedFunction<typeof useLogin>
+const mockUsePromoterByCode = usePromoterByCode as jest.MockedFunction<
+  typeof usePromoterByCode
+>
+const mockUseLocalSearchParams = useLocalSearchParams as jest.MockedFunction<
+  typeof useLocalSearchParams
+>
+const mockGetStringAsync = Clipboard.getStringAsync as jest.MockedFunction<
+  typeof Clipboard.getStringAsync
+>
+
+/** Idle state of usePromoterByCode: nothing looked up yet. */
+function promoterIdle() {
+  return { data: undefined, isPending: true, isError: false }
+}
 
 type SendOtpMutationState = {
   mutateAsync: jest.Mock
@@ -225,6 +252,13 @@ function whatsappFailureWithCode(
 // phone-only suite at the bottom disables it again in its own beforeEach.
 beforeEach(() => {
   process.env.EXPO_PUBLIC_AUTH_OTP_MODE = 'whatsapp'
+  // The promoter-code field renders on every phone step, so the lookup hook
+  // must always return a usable state.
+  mockUsePromoterByCode.mockReturnValue(
+    promoterIdle() as unknown as ReturnType<typeof usePromoterByCode>,
+  )
+  mockUseLocalSearchParams.mockReturnValue({})
+  mockGetStringAsync.mockResolvedValue('')
 })
 
 afterEach(() => {
@@ -707,6 +741,197 @@ describe('LoginScreen — phone-only default flow', () => {
       phone: '+18095551111',
       fullName: 'Juan Pérez',
       referralCode: undefined,
+    })
+  })
+})
+
+// ── Promoter code typed on the login screen ───────────────────────────────────
+//
+// A promoter shares https://dashgo.dev/r/CODE. If the person installs from the
+// store and opens the app cold, there is no `ref` param — the attribution used
+// to be lost because the login screen had nowhere to type the code. The phone
+// step now offers a collapsed "Tengo un código de promotor" toggle.
+
+describe('LoginScreen — typed promoter code', () => {
+  const VALID_CODE = 'ABC23456'
+
+  function promoterFound(fullName: string) {
+    return { data: { fullName }, isPending: false, isError: false }
+  }
+
+  function promoterNotFound() {
+    return { data: undefined, isPending: false, isError: true }
+  }
+
+  beforeEach(() => {
+    mockUseSendOtp.mockReturnValue(
+      makeSendOtpMock() as unknown as ReturnType<typeof useSendOtp>,
+    )
+    mockUseVerifyOtp.mockReturnValue(
+      makeVerifyOtpMock() as unknown as ReturnType<typeof useVerifyOtp>,
+    )
+    mockUseLogin.mockReturnValue({
+      mutateAsync: jest.fn(),
+      isPending: false,
+      isError: false,
+      error: null,
+    } as unknown as ReturnType<typeof useLogin>)
+  })
+
+  it('hides the toggle when the screen already carries a ?ref= code', () => {
+    delete process.env.EXPO_PUBLIC_AUTH_OTP_MODE
+    mockUseLocalSearchParams.mockReturnValue({ ref: VALID_CODE })
+
+    const { queryByTestId, getByText } = renderWithProviders(<LoginScreen />)
+
+    // The read-only badge stays; the manual-entry affordance must not appear.
+    expect(getByText(/Registrándote con:/i)).toBeTruthy()
+    expect(queryByTestId('promoter-code-toggle')).toBeNull()
+    expect(queryByTestId('promoter-code-input')).toBeNull()
+  })
+
+  it('reveals the code input when the toggle is pressed', () => {
+    delete process.env.EXPO_PUBLIC_AUTH_OTP_MODE
+
+    const { getByTestId, queryByTestId } = renderWithProviders(<LoginScreen />)
+
+    expect(queryByTestId('promoter-code-input')).toBeNull()
+    fireEvent.press(getByTestId('promoter-code-toggle'))
+    expect(getByTestId('promoter-code-input')).toBeTruthy()
+    expect(getByTestId('promoter-code-paste-btn')).toBeTruthy()
+    // Helper copy sets the expectation that this only applies to new accounts.
+    expect(
+      getByTestId('promoter-code-helper').props.children,
+    ).toMatch(/Solo aplica al crear una cuenta nueva/i)
+  })
+
+  it('resolves the promoter and shows "Te invitó …" once 8 characters are typed', async () => {
+    delete process.env.EXPO_PUBLIC_AUTH_OTP_MODE
+    mockUsePromoterByCode.mockImplementation(
+      (code?: string) =>
+        (code === VALID_CODE
+          ? promoterFound('María Reyes')
+          : promoterIdle()) as unknown as ReturnType<typeof usePromoterByCode>,
+    )
+
+    const { getByTestId, getByText } = renderWithProviders(<LoginScreen />)
+    fireEvent.press(getByTestId('promoter-code-toggle'))
+    fireEvent.changeText(getByTestId('promoter-code-input'), VALID_CODE)
+
+    await waitFor(() => expect(getByText(/Te invitó María Reyes/i)).toBeTruthy())
+  })
+
+  it('shows "Código no válido" when the lookup fails', async () => {
+    delete process.env.EXPO_PUBLIC_AUTH_OTP_MODE
+    mockUsePromoterByCode.mockImplementation(
+      (code?: string) =>
+        (code === VALID_CODE
+          ? promoterNotFound()
+          : promoterIdle()) as unknown as ReturnType<typeof usePromoterByCode>,
+    )
+
+    const { getByTestId, getByText } = renderWithProviders(<LoginScreen />)
+    fireEvent.press(getByTestId('promoter-code-toggle'))
+    fireEvent.changeText(getByTestId('promoter-code-input'), VALID_CODE)
+
+    await waitFor(() => expect(getByText(/Código no válido/i)).toBeTruthy())
+  })
+
+  it('normalizes lowercase + spaces when pasting from the clipboard', async () => {
+    delete process.env.EXPO_PUBLIC_AUTH_OTP_MODE
+    mockGetStringAsync.mockResolvedValue('  abc 234-56 ')
+
+    const { getByTestId } = renderWithProviders(<LoginScreen />)
+    fireEvent.press(getByTestId('promoter-code-toggle'))
+
+    await act(async () => {
+      fireEvent.press(getByTestId('promoter-code-paste-btn'))
+    })
+
+    await waitFor(() =>
+      expect(getByTestId('promoter-code-input').props.value).toBe(VALID_CODE),
+    )
+  })
+
+  it('typing the code filters characters outside the promoter alphabet', () => {
+    delete process.env.EXPO_PUBLIC_AUTH_OTP_MODE
+
+    const { getByTestId } = renderWithProviders(<LoginScreen />)
+    fireEvent.press(getByTestId('promoter-code-toggle'))
+    // I, O, 0 and 1 are not in the alphabet; lowercase is upper-cased.
+    fireEvent.changeText(getByTestId('promoter-code-input'), 'aio01bc234567')
+
+    expect(getByTestId('promoter-code-input').props.value).toBe('ABC23456')
+  })
+
+  it('forwards the typed code to the phone-only login mutation', async () => {
+    delete process.env.EXPO_PUBLIC_AUTH_OTP_MODE
+    const mutateAsync = jest.fn().mockResolvedValue({
+      accessToken: 'a',
+      refreshToken: 'r',
+      user: { role: 'client' },
+      isNewUser: true,
+    })
+    mockUseLogin.mockReturnValue({
+      mutateAsync,
+      isPending: false,
+      isError: false,
+      error: null,
+    } as unknown as ReturnType<typeof useLogin>)
+
+    const { getByTestId } = renderWithProviders(<LoginScreen />)
+    fireEvent.press(getByTestId('promoter-code-toggle'))
+    fireEvent.changeText(getByTestId('promoter-code-input'), VALID_CODE)
+
+    await act(async () => {
+      fireEvent.changeText(getByTestId('login-phone-input'), '+18095550000')
+      fireEvent.press(getByTestId('login-submit-btn'))
+    })
+
+    await waitFor(() => expect(mutateAsync).toHaveBeenCalledTimes(1))
+    expect(mutateAsync).toHaveBeenCalledWith({
+      phone: '+18095550000',
+      fullName: undefined,
+      referralCode: VALID_CODE,
+    })
+  })
+
+  it('forwards the typed code from the phone step to the OTP verify mutation', async () => {
+    process.env.EXPO_PUBLIC_AUTH_OTP_MODE = 'whatsapp'
+    const verifyMutateAsync = jest
+      .fn()
+      .mockResolvedValue({ user: { role: 'client' } })
+    mockUseVerifyOtp.mockReturnValue({
+      mutateAsync: verifyMutateAsync,
+      isPending: false,
+      isError: false,
+      error: null,
+    } as unknown as ReturnType<typeof useVerifyOtp>)
+
+    const { getByTestId } = renderWithProviders(<LoginScreen />)
+
+    // Step 01 — type the promoter code, then send the OTP.
+    fireEvent.press(getByTestId('promoter-code-toggle'))
+    fireEvent.changeText(getByTestId('promoter-code-input'), VALID_CODE)
+
+    await act(async () => {
+      fireEvent.changeText(getByTestId('login-phone-input'), '+18095550000')
+      fireEvent.press(getByTestId('login-send-code-btn'))
+    })
+
+    // Step 02 — the typed code must survive the step transition.
+    await waitFor(() => expect(getByTestId('login-code-input')).toBeTruthy())
+    await act(async () => {
+      fireEvent.changeText(getByTestId('login-code-input'), '123456')
+      fireEvent.press(getByTestId('login-verify-btn'))
+    })
+
+    await waitFor(() => expect(verifyMutateAsync).toHaveBeenCalledTimes(1))
+    expect(verifyMutateAsync).toHaveBeenCalledWith({
+      phone: '+18095550000',
+      code: '123456',
+      fullName: undefined,
+      referralCode: VALID_CODE,
     })
   })
 })

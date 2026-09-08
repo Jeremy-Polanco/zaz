@@ -271,6 +271,79 @@ export function SellerCell({
   )
 }
 
+/**
+ * Celda "Promotor". Espejo de `SellerCell`, pero para la ATRIBUCIÓN de
+ * comisiones: el promotor cobra sobre los pedidos entregados de sus referidos.
+ *
+ * Hasta ahora `referredById` se sembraba UNA sola vez, en el alta, desde el
+ * link de referido del promotor — para un cliente ya registrado no había forma
+ * de hacerlo. Esto es esa forma.
+ *
+ * Esconder el selector NO es el permiso: `UsersService.updateByAdmin` rechaza a
+ * cualquiera que no sea super admin y valida que el id tenga rol `promoter`.
+ */
+export function PromoterCell({
+  user,
+  promoters,
+  canAssign,
+  onAssign,
+  pending,
+}: {
+  user: AdminUser
+  promoters: AdminUser[]
+  canAssign: boolean
+  onAssign: (referredById: string | null) => void
+  pending: boolean
+}) {
+  // Un promotor no se refiere a sí mismo, y vendedor/reparto no generan
+  // comisión de promotor — la columna no aplica.
+  if (
+    user.role === 'promoter' ||
+    user.role === 'seller' ||
+    user.role === 'super_admin_delivery'
+  ) {
+    return <span className="text-ink-muted/50">—</span>
+  }
+
+  const current = promoters.find((p) => p.id === user.referredById)
+  // "Sin promotor" y "tiene promotor pero no lo puedo nombrar" son estados
+  // DISTINTOS: colapsarlos muestra como libre a un cliente que ya le está
+  // generando comisión a alguien.
+  const assignedButUnknown = user.referredById != null && current == null
+
+  if (!canAssign) {
+    return (
+      <span className="text-ink-muted">
+        {current?.fullName ?? (assignedButUnknown ? 'Asignado' : 'Sin promotor')}
+      </span>
+    )
+  }
+
+  return (
+    <select
+      value={user.referredById ?? ''}
+      disabled={pending}
+      onChange={(e) => onAssign(e.target.value === '' ? null : e.target.value)}
+      aria-label={`Promotor de ${user.fullName}`}
+      className="w-full max-w-40 border border-ink/15 bg-paper px-2 py-1.5 text-[0.7rem] text-ink outline-none focus:border-ink disabled:opacity-50"
+    >
+      <option value="">Sin promotor</option>
+      {/* Sin esta opción el select cae a "" y el próximo cambio en otro campo
+          le sacaría la atribución al promotor sin que nadie lo pidiera. */}
+      {assignedButUnknown ? (
+        <option value={user.referredById ?? ''}>
+          Asignado (fuera de la lista)
+        </option>
+      ) : null}
+      {promoters.map((p) => (
+        <option key={p.id} value={p.id}>
+          {p.fullName}
+        </option>
+      ))}
+    </select>
+  )
+}
+
 // ── Main page ──────────────────────────────────────────────────────────────────
 
 function SuperUsersPage() {
@@ -299,6 +372,13 @@ function SuperUsersPage() {
   const { data: allUsers } = useAdminUsers(undefined)
   const sellers = useMemo(
     () => (allUsers ?? []).filter((u) => u.role === 'seller'),
+    [allUsers],
+  )
+  // Mismo motivo que arriba: el padrón de promotores sale de la lista SIN
+  // filtrar, o con "Con suscripción activa" puesto un promotor no suscripto
+  // desaparecería del desplegable y su cliente se leería "Sin promotor".
+  const promoters = useMemo(
+    () => (allUsers ?? []).filter((u) => u.role === 'promoter'),
     [allUsers],
   )
 
@@ -416,6 +496,9 @@ function SuperUsersPage() {
                 <th className="p-4 text-left text-[10px] font-medium uppercase tracking-wide text-ink-muted">
                   Vendedor
                 </th>
+                <th className="p-4 text-left text-[10px] font-medium uppercase tracking-wide text-ink-muted">
+                  Promotor
+                </th>
                 <th className="p-4 text-right text-[10px] font-medium uppercase tracking-wide text-ink-muted">
                   Direcciones
                 </th>
@@ -427,7 +510,7 @@ function SuperUsersPage() {
             <tbody>
               {filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="py-12 text-center text-ink-muted">
+                  <td colSpan={10} className="py-12 text-center text-ink-muted">
                     Sin usuarios que coincidan
                   </td>
                 </tr>
@@ -479,6 +562,17 @@ function SuperUsersPage() {
                             pending={updateUser.isPending}
                           />
                         </td>
+                        <td className="p-4">
+                          <PromoterCell
+                            user={u}
+                            promoters={promoters}
+                            canAssign={canAssign}
+                            onAssign={(referredById) =>
+                              updateUser.mutate({ id: u.id, referredById })
+                            }
+                            pending={updateUser.isPending}
+                          />
+                        </td>
                         <td className="p-4 text-right">
                           <button
                             type="button"
@@ -521,14 +615,14 @@ function SuperUsersPage() {
                       </tr>
                       {expanded && (
                         <tr className="border-b border-ink/10 bg-ink/3">
-                          <td colSpan={9} className="p-4">
+                          <td colSpan={10} className="p-4">
                             <UserAddressesPanel userId={u.id} />
                           </td>
                         </tr>
                       )}
                       {catalogId === u.id && (
                         <tr className="border-b border-ink/10 bg-ink/3">
-                          <td colSpan={9} className="p-4">
+                          <td colSpan={10} className="p-4">
                             <SellerCatalogPanel
                               sellerId={u.id}
                               sellerName={u.fullName}

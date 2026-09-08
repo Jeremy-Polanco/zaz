@@ -19,6 +19,7 @@ import { CustomerRentalResponseDto } from './dto/customer-rental-response.dto';
 import { AdminRentalResponseDto } from './dto/admin-rental-response.dto';
 import { ChargeLateFeeResponseDto } from './dto/charge-late-fee-response.dto';
 import { ChargeTheftFeeResponseDto } from './dto/charge-theft-fee-response.dto';
+import { RentalsSummaryResponseDto } from './dto/rentals-summary-response.dto';
 import { assertStripeProductionConfig } from '../../common/stripe/stripe-runtime-guard';
 import { PREMIUM_BEBEDERO_CATALOG_SURCHARGE_CENTS } from '../products/pricing';
 
@@ -834,6 +835,53 @@ export class RentalsService implements OnModuleInit {
     return {
       items: rows.map((r) => this.toAdminDto(r)),
       total,
+    };
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // summarizeAdmin — global KPIs for the admin panel
+  //
+  // Deliberately ignores every list filter and pagination: the cards must
+  // describe the whole dataset, not the page the operator happens to be on.
+  // ─────────────────────────────────────────────────────────────────────────
+
+  async summarizeAdmin(): Promise<RentalsSummaryResponseDto> {
+    const rows = await this.rentals
+      .createQueryBuilder('rental')
+      .select('rental.status', 'status')
+      .addSelect('COUNT(*)', 'count')
+      .groupBy('rental.status')
+      .getRawMany<{ status: RentalStatus; count: string }>();
+
+    // Seed every status at 0 so the response shape is stable for the UI.
+    const byStatus = Object.values(RentalStatus).reduce(
+      (acc, status) => {
+        acc[status] = 0;
+        return acc;
+      },
+      {} as Record<RentalStatus, number>,
+    );
+
+    let total = 0;
+    for (const row of rows) {
+      // COUNT(*) comes back as a string from pg.
+      const count = Number(row.count) || 0;
+      byStatus[row.status] = count;
+      total += count;
+    }
+
+    const risk = await this.rentals
+      .createQueryBuilder('rental')
+      .select('COALESCE(SUM(rental.monthlyRentCents), 0)', 'sum')
+      .where('rental.status IN (:...statuses)', {
+        statuses: [RentalStatus.PAST_DUE, RentalStatus.UNPAID],
+      })
+      .getRawOne<{ sum: string | null }>();
+
+    return {
+      total,
+      byStatus,
+      rentAtRiskCents: Number(risk?.sum ?? 0) || 0,
     };
   }
 

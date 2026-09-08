@@ -6,6 +6,7 @@ import type {
   AdminCreditDetail,
   AdminPlanResponse,
   AdminRentalResponse,
+  AdminRentalsSummary,
   AdminUser,
   UserRole,
   SellerCatalogItem,
@@ -1090,7 +1091,7 @@ export function useDeleteUser() {
 
 /**
  * Super-admin: PATCH /users/:id — cambia el rol de un usuario, o asigna /
- * desasigna (con `null`) su vendedor.
+ * desasigna (con `null`) su vendedor o su promotor.
  *
  * Acá es donde se "registra" un vendedor: la persona se da de alta como cliente
  * normal y el super admin la pasa a rol seller. El backend rechaza otorgar
@@ -1106,6 +1107,8 @@ export function useUpdateUserAdmin() {
       id: string
       role?: UserRole
       sellerId?: string | null
+      /** Promotor atribuido. `null` lo desasigna. */
+      referredById?: string | null
       maintenanceTimerDisabled?: boolean
     }) => {
       const { data } = await api.patch<AdminUser>(`/users/${id}`, patch)
@@ -1341,9 +1344,15 @@ export function useMyRentals() {
 
 // ── Admin rentals ───────────────────────────────────────────────────────────────
 
-/** Super-admin: GET /admin/rentals — paginated, filterable rental list. */
+/**
+ * Super-admin: GET /admin/rentals — paginated, filterable rental list.
+ *
+ * Keeps the server `total` alongside the page's items: the screen needs it for
+ * "N resultados" and for the pagination controls. Discarding it made the screen
+ * report its own 25-row window as the whole dataset.
+ */
 export function useAdminRentals(filters: RentalFilter) {
-  return useQuery<AdminRentalResponse[]>({
+  return useQuery<{ items: AdminRentalResponse[]; total: number }>({
     queryKey: ['admin', 'rentals', filters],
     queryFn: async () => {
       const q = new URLSearchParams()
@@ -1353,10 +1362,31 @@ export function useAdminRentals(filters: RentalFilter) {
       if (filters.page) q.set('page', String(filters.page))
       if (filters.pageSize) q.set('pageSize', String(filters.pageSize))
       const qs = q.toString()
-      const { data } = await api.get<{ items: AdminRentalResponse[] }>(
-        qs ? `/admin/rentals?${qs}` : '/admin/rentals',
+      const { data } = await api.get<{
+        items: AdminRentalResponse[]
+        total: number
+      }>(qs ? `/admin/rentals?${qs}` : '/admin/rentals')
+      return data
+    },
+    staleTime: 10_000,
+  })
+}
+
+/**
+ * Super-admin: GET /admin/rentals/summary — global KPI counts.
+ *
+ * Deliberately unfiltered and unpaginated: the KPI cards describe every rental,
+ * not the page being shown. The existing rental mutations invalidate the
+ * ['admin', 'rentals'] prefix, which covers this key too.
+ */
+export function useAdminRentalsSummary() {
+  return useQuery<AdminRentalsSummary>({
+    queryKey: ['admin', 'rentals', 'summary'],
+    queryFn: async () => {
+      const { data } = await api.get<AdminRentalsSummary>(
+        '/admin/rentals/summary',
       )
-      return data.items
+      return data
     },
     staleTime: 10_000,
   })

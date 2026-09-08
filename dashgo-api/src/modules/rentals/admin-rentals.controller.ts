@@ -19,6 +19,7 @@ import { ChargeLateFeeDto } from './dto/charge-late-fee.dto';
 import { AdminRentalResponseDto } from './dto/admin-rental-response.dto';
 import { ChargeLateFeeResponseDto } from './dto/charge-late-fee-response.dto';
 import { ChargeTheftFeeResponseDto } from './dto/charge-theft-fee-response.dto';
+import { RentalsSummaryResponseDto } from './dto/rentals-summary-response.dto';
 
 /**
  * Admin endpoints for rental management.
@@ -27,12 +28,13 @@ import { ChargeTheftFeeResponseDto } from './dto/charge-theft-fee-response.dto';
  * Routes:
  *   GET  /admin/rentals             — list rentals with optional filters
  *   GET  /admin/rentals/delinquent  — list overdue / stale rentals
+ *   GET  /admin/rentals/summary     — global KPI counts over ALL rentals
  *   POST /admin/rentals/:id/charge-late-fee  — charge late fee off-session
  *   POST /admin/rentals/:id/cancel           — cancel rental + Stripe sub
  *   POST /admin/rentals/:id/retry-setup      — retry Stripe Subscription creation
  *
- * NOTE: static sub-route GET /admin/rentals/delinquent MUST be declared before
- * any dynamic :id route (would conflict if GET /:id existed). Currently no such
+ * NOTE: static sub-routes GET /admin/rentals/delinquent and /summary MUST be
+ * declared before any dynamic :id route (would conflict if GET /:id existed). Currently no such
  * conflict exists — only POSTs use :id.
  */
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -67,6 +69,17 @@ export class AdminRentalsController {
   @Get('delinquent')
   async delinquent(): Promise<AdminRentalResponseDto[]> {
     return this.rentals.listDelinquent();
+  }
+
+  /**
+   * GET /admin/rentals/summary
+   * Global KPI counts over ALL rentals — no filter, no pagination. The panel
+   * cards read from here so they describe the dataset rather than the 25-row
+   * page GET /admin/rentals returns.
+   */
+  @Get('summary')
+  async summary(): Promise<RentalsSummaryResponseDto> {
+    return this.rentals.summarizeAdmin();
   }
 
   /**
