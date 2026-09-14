@@ -324,11 +324,12 @@ describe('OrdersService (integration)', () => {
   });
 
   // -------------------------------------------------------------------------
-  // Subscriber orders get free shipping (override admin-quoted amount to 0)
+  // El suscriptor paga el envío cotizado: la suscripción cubre el bebedero, no
+  // el viaje (regla del dueño, 2026-09-14). Antes acá se forzaba $0.
   // -------------------------------------------------------------------------
 
-  describe('setQuote — free-shipping override for active subscribers', () => {
-    it('subscriber order has shippingCents overridden to 0 regardless of admin-quoted amount', async () => {
+  describe('setQuote — el suscriptor paga el envío cotizado', () => {
+    it('el envío cotizado se cobra al suscriptor igual que a cualquiera, y la orden recuerda que era suscriptor', async () => {
       // Arrange: create user with active subscription
       const userData = makeUser({ role: UserRole.CLIENT, stripeCustomerId: 'cus_fs_test' });
       const user = await dataSource.getRepository(User).save(userData as unknown as User);
@@ -384,9 +385,11 @@ describe('OrdersService (integration)', () => {
       const superAdmin = { id: user.id, role: UserRole.SUPER_ADMIN_DELIVERY, email: null };
       const result = await ordersService.setQuote(order.id, providedShippingCents, superAdmin);
 
-      // Assert: shipping is overridden to 0 because the user is an active subscriber
-      expect(result.shipping).toBe('0.00');
+      // Assert: nada de override — se cobra lo que tipeó el admin. Sin líneas
+      // en la orden todo es gravable: (1000 + 750) * 0.08887 = 156 → 19.06.
+      expect(result.shipping).toBe('7.50');
       expect(result.wasSubscriberAtQuote).toBe(true);
+      expect(result.totalAmount).toBe('19.06');
 
       // Cleanup
       await subRepo.delete({ id: sub.id });
@@ -631,8 +634,8 @@ describe('OrdersService (integration)', () => {
 
     it('mixed cart is rejected even for an active subscriber (guard not bypassed)', async () => {
       // Regression: the mixed-cart guard must fire regardless of subscription status.
-      // Free shipping for subscribers on a valid, non-mixed cart is covered by the
-      // "setQuote — free-shipping override for active subscribers" test above.
+      // El cobro del envío al suscriptor en un carrito válido lo cubre el test
+      // "setQuote — el suscriptor paga el envío cotizado" de más arriba.
       const userData = makeUser({ role: UserRole.CLIENT, stripeCustomerId: 'cus_fs_rental_test' });
       const user = await dataSource.getRepository(User).save(userData as unknown as User);
       mixedCartUserIds.push(user.id);
