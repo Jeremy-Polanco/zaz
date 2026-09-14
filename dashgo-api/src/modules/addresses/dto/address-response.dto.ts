@@ -9,6 +9,10 @@ export class AddressResponseDto {
   lat!: number;
   lng!: number;
   instructions!: string | null;
+  /** Código postal de 5 dígitos que escribió el cliente; null en las viejas. */
+  postalCode!: string | null;
+  /** Zona de reparto RESUELTA a partir del ZIP; null si no matchea ninguna. */
+  zoneId!: string | null;
   isDefault!: boolean;
   createdAt!: Date;
   updatedAt!: Date;

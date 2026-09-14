@@ -54,17 +54,29 @@ export class UserAddress {
   instructions!: string | null;
 
   /**
-   * Código postal y ciudad derivados de la geocodificación INVERSA en el
-   * backend, nunca de lo que manda el cliente. Hasta ahora la dirección era
-   * texto libre + lat/lng: no había forma de responder "¿cuántos clientes
-   * tengo en el Bronx?" porque el dato no existía como dato.
+   * Código postal que ESCRIBE el cliente en el formulario de la dirección
+   * (pedido del dueño: "en la dirección también quiere ver el zip code, y que
+   * el usuario lo ingrese"). No sale de geocodificación inversa: el cliente
+   * sabe su ZIP y escribirlo cuesta menos que adivinarlo desde la lat/lng.
+   * Validado como 5 dígitos en el DTO; se guarda como texto porque Elizabeth NJ
+   * es 072xx y como número el cero de adelante se pierde.
    *
-   * Nullable porque las direcciones viejas nacen sin esto — el backfill las
-   * completa a partir de la lat/lng que ya tienen guardada.
+   * Hasta ahora la dirección era texto libre + lat/lng: no había forma de
+   * responder "¿cuántos clientes tengo en el Bronx?" porque el dato no existía
+   * como dato.
+   *
+   * Nullable porque las direcciones viejas nacen sin esto y NO se backfillean:
+   * se completan cuando el cliente edita la dirección. La chincheta del admin y
+   * las versiones viejas de la app también pueden guardar sin ZIP.
    */
   @Column({ name: 'postal_code', type: 'varchar', length: 12, nullable: true })
   postalCode!: string | null;
 
+  /**
+   * Ciudad. Todavía no se pide ni se deriva en ningún lado — la columna existe
+   * desde la migración de zonas y queda en null hasta que haya un pedido
+   * concreto que la use.
+   */
   @Column({ type: 'varchar', length: 120, nullable: true })
   city!: string | null;
 

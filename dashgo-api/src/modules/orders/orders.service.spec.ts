@@ -19,6 +19,7 @@ import { DataSource, EntityManager, Repository } from 'typeorm';
 import { OrdersService } from './orders.service';
 import { Order, OrderItem, Product } from '../../entities';
 import { UserAddress } from '../../entities/user-address.entity';
+import { DeliveryZone } from '../../entities/delivery-zone.entity';
 import { OrderStatus, PaymentMethod, UserRole } from '../../entities/enums';
 import { AuthenticatedUser } from '../../common/types/authenticated-user';
 import { PaymentsService } from '../payments/payments.service';
@@ -145,6 +146,7 @@ describe('OrdersService', () => {
   let itemsRepo: jest.Mocked<Repository<OrderItem>>;
   let productsRepo: jest.Mocked<Repository<Product>>;
   let userAddressesRepo: jest.Mocked<Repository<UserAddress>>;
+  let deliveryZonesRepo: jest.Mocked<Repository<DeliveryZone>>;
   let dataSource: jest.Mocked<DataSource>;
   let paymentsService: jest.Mocked<PaymentsService>;
   let pointsService: jest.Mocked<PointsService>;
@@ -167,6 +169,8 @@ describe('OrdersService', () => {
     itemsRepo = makeRepoMock<OrderItem>();
     productsRepo = makeRepoMock<Product>();
     userAddressesRepo = makeRepoMock<UserAddress>();
+    deliveryZonesRepo = makeRepoMock<DeliveryZone>();
+    deliveryZonesRepo.find.mockResolvedValue([]);
 
     paymentsService = {
       createAuthorizationIntent: jest.fn(),
@@ -269,6 +273,10 @@ describe('OrdersService', () => {
         {
           provide: getRepositoryToken(UserAddress),
           useValue: userAddressesRepo,
+        },
+        {
+          provide: getRepositoryToken(DeliveryZone),
+          useValue: deliveryZonesRepo,
         },
         { provide: DataSource, useValue: dataSource },
         { provide: PaymentsService, useValue: paymentsService },
@@ -2061,6 +2069,85 @@ describe('OrdersService', () => {
       expect(userAddressesRepo.save).toHaveBeenCalledTimes(1);
     });
 
+    it('la primera dirección auto-guardada lleva el ZIP de la chincheta y su zona resuelta', async () => {
+      // En la web el cliente NO carga direcciones: el admin fija la chincheta
+      // en el primer pedido y esa se vuelve su dirección principal. Si acá no
+      // viajara el ZIP, la libreta del cliente quedaría sin código postal ni
+      // zona aunque el admin lo haya escrito.
+      ordersRepo.findOne.mockResolvedValue(fakeOrder({ customerId: 'cust-9' }));
+      ordersRepo.update.mockResolvedValue({ affected: 1 } as never);
+      userAddressesRepo.count.mockResolvedValue(0);
+      userAddressesRepo.save.mockResolvedValue({} as never);
+      deliveryZonesRepo.find.mockResolvedValue([
+        { id: 'zone-bronx', zipPrefixes: ['104'], isActive: true },
+        { id: 'zone-bk', zipPrefixes: ['112'], isActive: true },
+      ] as DeliveryZone[]);
+
+      await service.setDeliveryAddress(
+        'order-1',
+        { ...address, postalCode: '10451' },
+        admin,
+      );
+
+      expect(deliveryZonesRepo.find).toHaveBeenCalledWith({
+        where: { isActive: true },
+      });
+      expect(userAddressesRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({ postalCode: '10451', zoneId: 'zone-bronx' }),
+      );
+    });
+
+    it('sin ZIP en la chincheta la dirección auto-guardada queda sin ZIP ni zona y no consulta zonas', async () => {
+      ordersRepo.findOne.mockResolvedValue(fakeOrder({ customerId: 'cust-9' }));
+      ordersRepo.update.mockResolvedValue({ affected: 1 } as never);
+      userAddressesRepo.count.mockResolvedValue(0);
+      userAddressesRepo.save.mockResolvedValue({} as never);
+
+      await service.setDeliveryAddress('order-1', address, admin);
+
+      expect(deliveryZonesRepo.find).not.toHaveBeenCalled();
+      expect(userAddressesRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({ postalCode: null, zoneId: null }),
+      );
+    });
+
+    it('guarda el código postal de la chincheta en el snapshot de la orden', async () => {
+      // La chincheta del admin es la otra puerta por la que entra una
+      // dirección: si no copiara el ZIP, la orden quedaría sin él aunque el
+      // admin lo haya escrito.
+      ordersRepo.findOne.mockResolvedValue(fakeOrder({ customerId: 'cust-9' }));
+      ordersRepo.update.mockResolvedValue({ affected: 1 } as never);
+      userAddressesRepo.count.mockResolvedValue(3);
+
+      await service.setDeliveryAddress(
+        'order-1',
+        { ...address, postalCode: '11201' },
+        admin,
+      );
+
+      expect(ordersRepo.update).toHaveBeenCalledWith(
+        'order-1',
+        expect.objectContaining({
+          deliveryAddress: expect.objectContaining({ postalCode: '11201' }),
+        }),
+      );
+    });
+
+    it('sin código postal en la chincheta el snapshot lo guarda en null', async () => {
+      ordersRepo.findOne.mockResolvedValue(fakeOrder({ customerId: 'cust-9' }));
+      ordersRepo.update.mockResolvedValue({ affected: 1 } as never);
+      userAddressesRepo.count.mockResolvedValue(3);
+
+      await service.setDeliveryAddress('order-1', address, admin);
+
+      expect(ordersRepo.update).toHaveBeenCalledWith(
+        'order-1',
+        expect.objectContaining({
+          deliveryAddress: expect.objectContaining({ postalCode: null }),
+        }),
+      );
+    });
+
     it('does NOT auto-save when the customer already has saved addresses', async () => {
       ordersRepo.findOne.mockResolvedValue(fakeOrder({ customerId: 'cust-9' }));
       ordersRepo.update.mockResolvedValue({ affected: 1 } as never);
@@ -2104,6 +2191,7 @@ describe('OrdersService', () => {
         lat: 18.47,
         lng: -69.9,
         instructions: 'frente al colmado',
+        postalCode: '10451',
         isDefault: true,
         createdAt: new Date(),
         updatedAt: new Date(),
@@ -2143,6 +2231,8 @@ describe('OrdersService', () => {
         await txCallback(mgr as unknown as EntityManager);
       })();
 
+      // El ZIP viaja al snapshot de la orden: el admin lo ve en la ruta sin
+      // tener que abrir la libreta de direcciones del cliente.
       expect(capturedAddress).toEqual({
         text: 'Calle Duarte 100, Apto 3B',
         lat: 18.47,
@@ -2151,6 +2241,7 @@ describe('OrdersService', () => {
         houseNumber: null,
         unit: null,
         reference: 'frente al colmado',
+        postalCode: '10451',
       });
     });
 

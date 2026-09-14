@@ -48,6 +48,7 @@ import { createTestingApp } from '../../src/test-utils/testing-app';
 import { makeUser } from '../../src/test-utils/fixtures';
 import { User } from '../../src/entities/user.entity';
 import { UserAddress } from '../../src/entities/user-address.entity';
+import { DeliveryZone } from '../../src/entities/delivery-zone.entity';
 import { UserRole } from '../../src/entities/enums';
 import { AddressesService } from '../../src/modules/addresses/addresses.service';
 
@@ -494,6 +495,78 @@ describe('AddressesService (integration)', () => {
       expect(typeof fromDb.lng).toBe('number');
       expect(fromDb.lat).toBeCloseTo(18.4861);
       expect(fromDb.lng).toBeCloseTo(-69.9312);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Test 9: código postal del cliente → zona de reparto, contra las zonas que
+  // SIEMBRA la migración. Es el único lugar donde se prueba que el prefijo se
+  // lee bien desde una columna varchar[] real: con mocks el array siempre sale
+  // perfecto.
+  // ---------------------------------------------------------------------------
+
+  describe('9. postalCode del cliente resuelve la zona sembrada', () => {
+    let bronxId: string;
+    let brooklynId: string;
+
+    beforeAll(async () => {
+      const zones = dataSource.getRepository(DeliveryZone);
+      bronxId = (await zones.findOneOrFail({ where: { name: 'Bronx' } })).id;
+      brooklynId = (await zones.findOneOrFail({ where: { name: 'Brooklyn' } }))
+        .id;
+    });
+
+    it('guarda el ZIP y resuelve la zona al crear', async () => {
+      const created = await service.create(user1.id, {
+        label: 'Casa',
+        line1: '1000 Grand Concourse',
+        lat: 40.8267,
+        lng: -73.9226,
+        postalCode: '10451',
+      });
+
+      expect(created.postalCode).toBe('10451');
+      expect(created.zoneId).toBe(bronxId);
+
+      const fromDb = await dataSource.getRepository(UserAddress).findOneOrFail({
+        where: { id: created.id },
+      });
+      expect(fromDb.postalCode).toBe('10451');
+      expect(fromDb.zoneId).toBe(bronxId);
+    });
+
+    it('cambiar el ZIP vuelve a resolver la zona; un ZIP sin zona la deja null', async () => {
+      const created = await service.create(user1.id, {
+        label: 'Casa',
+        line1: '1000 Grand Concourse',
+        lat: 40.8267,
+        lng: -73.9226,
+        postalCode: '10451',
+      });
+
+      const moved = await service.update(user1.id, created.id, {
+        postalCode: '11201',
+      });
+      expect(moved.zoneId).toBe(brooklynId);
+
+      // Beverly Hills: el negocio no reparte ahí, pero el dato del cliente no
+      // se tira — mañana el dueño carga la zona y ya hay con qué resolver.
+      const faraway = await service.update(user1.id, created.id, {
+        postalCode: '90210',
+      });
+      expect(faraway.postalCode).toBe('90210');
+      expect(faraway.zoneId).toBeNull();
+    });
+
+    it('sin código postal la dirección queda sin zona', async () => {
+      const created = await service.create(user1.id, {
+        label: 'Sin ZIP',
+        line1: 'Calle 1',
+        lat: 40.8,
+        lng: -73.9,
+      });
+      expect(created.postalCode).toBeNull();
+      expect(created.zoneId).toBeNull();
     });
   });
 });

@@ -11,6 +11,8 @@ import * as Sentry from '@sentry/node';
 import { DataSource, FindOptionsWhere, In, Not, Repository } from 'typeorm';
 import { Order, OrderItem, Product } from '../../entities';
 import { UserAddress } from '../../entities/user-address.entity';
+import { DeliveryZone } from '../../entities/delivery-zone.entity';
+import { resolveZoneId } from '../addresses/resolve-zone';
 import {
   OrderStatus,
   PaymentMethod,
@@ -83,6 +85,8 @@ export class OrdersService {
     @InjectRepository(Product) private readonly products: Repository<Product>,
     @InjectRepository(UserAddress)
     private readonly userAddresses: Repository<UserAddress>,
+    @InjectRepository(DeliveryZone)
+    private readonly deliveryZones: Repository<DeliveryZone>,
     private readonly dataSource: DataSource,
     private readonly payments: PaymentsService,
     private readonly points: PointsService,
@@ -980,6 +984,10 @@ export class OrdersService {
       houseNumber: null,
       unit: null,
       reference: reference || null,
+      // El ZIP viaja al snapshot para que la ruta del día lo muestre sin tener
+      // que abrir la libreta del cliente. Las direcciones viejas todavía no lo
+      // tienen: null es un valor esperado, no un faltante.
+      postalCode: a.postalCode ?? null,
     };
   }
 
@@ -1009,6 +1017,7 @@ export class OrdersService {
         houseNumber: address.houseNumber ?? null,
         unit: address.unit ?? null,
         reference: address.reference ?? null,
+        postalCode: address.postalCode ?? null,
       },
     });
 
@@ -1025,6 +1034,17 @@ export class OrdersService {
         const line1 =
           address.text?.trim() ||
           (houseNumber ? `Casa ${houseNumber}` : 'Ubicación');
+        // En la web el cliente no carga direcciones: esta chincheta ES su
+        // libreta. Si no viajara el ZIP (y la zona que se deriva de él), el
+        // cliente quedaría sin código postal aunque el admin lo haya escrito.
+        // Misma regla que AddressesService: sin ZIP no se consultan zonas.
+        const postalCode = address.postalCode?.trim() || null;
+        const zoneId = postalCode
+          ? resolveZoneId(
+              postalCode,
+              await this.deliveryZones.find({ where: { isActive: true } }),
+            )
+          : null;
         await this.userAddresses.save(
           this.userAddresses.create({
             userId: order.customerId,
@@ -1035,6 +1055,8 @@ export class OrdersService {
             instructions: address.reference?.trim() || null,
             lat: address.lat,
             lng: address.lng,
+            postalCode,
+            zoneId,
             isDefault: true,
           }),
         );

@@ -1,4 +1,4 @@
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import {
   ArrayMinSize,
   IsArray,
@@ -12,6 +12,7 @@ import {
   IsPositive,
   IsString,
   IsUUID,
+  Matches,
   MaxLength,
   ValidateNested,
 } from 'class-validator';
@@ -46,6 +47,19 @@ export class DeliveryAddressDto {
   @IsString()
   @MaxLength(200)
   reference?: string;
+
+  /**
+   * Código postal que escribe el admin al pinchar la ubicación. Misma regla que
+   * en la libreta del cliente (5 dígitos): las dos puertas alimentan la misma
+   * resolución de zona por prefijo, y una regla distinta por puerta sería un
+   * dato que a veces resuelve y a veces no.
+   */
+  @IsOptional()
+  @Transform(({ value }: { value: unknown }) =>
+    typeof value === 'string' ? value.trim() : value,
+  )
+  @Matches(/^\d{5}$/, { message: 'El código postal debe tener 5 dígitos' })
+  postalCode?: string;
 }
 
 export class OrderItemInput {

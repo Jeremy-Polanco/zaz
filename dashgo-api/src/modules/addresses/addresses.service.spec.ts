@@ -13,6 +13,7 @@ import { DataSource, Repository } from 'typeorm';
 import { AddressesService } from './addresses.service';
 import { UserAddress } from '../../entities/user-address.entity';
 import { User } from '../../entities/user.entity';
+import { DeliveryZone } from '../../entities/delivery-zone.entity';
 import { CreateAddressDto } from './dto/create-address.dto';
 import { UpdateAddressDto } from './dto/update-address.dto';
 
@@ -37,6 +38,16 @@ function makeUserRepoMock(): jest.Mocked<Repository<User>> {
     update: jest.fn(),
     findOne: jest.fn(),
   } as unknown as jest.Mocked<Repository<User>>;
+}
+
+// Las zonas se leen enteras y se resuelven en memoria: son cuatro filas y el
+// prefijo más largo no se puede pedir en SQL sin un LIKE por fila.
+function makeZonesRepoMock(
+  zones: Array<Partial<DeliveryZone>> = [],
+): jest.Mocked<Repository<DeliveryZone>> {
+  return {
+    find: jest.fn().mockResolvedValue(zones),
+  } as unknown as jest.Mocked<Repository<DeliveryZone>>;
 }
 
 function makeDataSourceMock(
@@ -92,6 +103,7 @@ describe('AddressesService — list', () => {
         AddressesService,
         { provide: getRepositoryToken(UserAddress), useValue: repo },
         { provide: getRepositoryToken(User), useValue: makeUserRepoMock() },
+        { provide: getRepositoryToken(DeliveryZone), useValue: makeZonesRepoMock() },
         { provide: DataSource, useValue: ds },
       ],
     }).compile();
@@ -138,6 +150,7 @@ describe('AddressesService — create', () => {
         AddressesService,
         { provide: getRepositoryToken(UserAddress), useValue: repo },
         { provide: getRepositoryToken(User), useValue: makeUserRepoMock() },
+        { provide: getRepositoryToken(DeliveryZone), useValue: makeZonesRepoMock() },
         { provide: DataSource, useValue: ds },
       ],
     }).compile();
@@ -229,6 +242,7 @@ describe('AddressesService — update', () => {
         AddressesService,
         { provide: getRepositoryToken(UserAddress), useValue: repo },
         { provide: getRepositoryToken(User), useValue: makeUserRepoMock() },
+        { provide: getRepositoryToken(DeliveryZone), useValue: makeZonesRepoMock() },
         { provide: DataSource, useValue: ds },
       ],
     }).compile();
@@ -309,6 +323,7 @@ describe('AddressesService — delete', () => {
         AddressesService,
         { provide: getRepositoryToken(UserAddress), useValue: repo },
         { provide: getRepositoryToken(User), useValue: makeUserRepoMock() },
+        { provide: getRepositoryToken(DeliveryZone), useValue: makeZonesRepoMock() },
         { provide: DataSource, useValue: { transaction: dsTransactionMock } },
       ],
     }).compile();
@@ -399,6 +414,7 @@ describe('AddressesService — setDefault', () => {
         AddressesService,
         { provide: getRepositoryToken(UserAddress), useValue: repo },
         { provide: getRepositoryToken(User), useValue: makeUserRepoMock() },
+        { provide: getRepositoryToken(DeliveryZone), useValue: makeZonesRepoMock() },
         { provide: DataSource, useValue: { transaction: dsTransactionMock } },
       ],
     }).compile();
@@ -482,6 +498,7 @@ describe('AddressesService — listByUserId', () => {
         AddressesService,
         { provide: getRepositoryToken(UserAddress), useValue: repo },
         { provide: getRepositoryToken(User), useValue: makeUserRepoMock() },
+        { provide: getRepositoryToken(DeliveryZone), useValue: makeZonesRepoMock() },
         { provide: DataSource, useValue: ds },
       ],
     }).compile();
@@ -531,6 +548,7 @@ describe('AddressesService — setActiveLocation', () => {
         AddressesService,
         { provide: getRepositoryToken(UserAddress), useValue: repo },
         { provide: getRepositoryToken(User), useValue: userRepo },
+        { provide: getRepositoryToken(DeliveryZone), useValue: makeZonesRepoMock() },
         { provide: DataSource, useValue: ds },
       ],
     }).compile();
@@ -568,5 +586,192 @@ describe('AddressesService — setActiveLocation', () => {
       service.setActiveLocation('user-1', 'addr-1'),
     ).rejects.toThrow(NotFoundException);
     expect(userRepo.update).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// AddressesService — código postal y zona de reparto
+//
+// El cliente escribe el ZIP; la zona NO se le pregunta, se resuelve y se guarda
+// resuelta (agrupar clientes por zona es una pantalla que pagina: recalcular
+// prefijos por fila la haría inútil).
+// ---------------------------------------------------------------------------
+
+describe('AddressesService — postalCode y zoneId', () => {
+  let service: AddressesService;
+  let repo: jest.Mocked<Repository<UserAddress>>;
+  let zonesRepo: jest.Mocked<Repository<DeliveryZone>>;
+
+  const ZONES: Array<Partial<DeliveryZone>> = [
+    { id: 'zone-bronx', zipPrefixes: ['104'], isActive: true },
+    { id: 'zone-brooklyn', zipPrefixes: ['112'], isActive: true },
+    { id: 'zone-elizabeth', zipPrefixes: ['0720'], isActive: true },
+  ];
+
+  beforeEach(async () => {
+    repo = makeRepoMock();
+    zonesRepo = makeZonesRepoMock(ZONES);
+    const ds = makeDataSourceMock(repo);
+
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        AddressesService,
+        { provide: getRepositoryToken(UserAddress), useValue: repo },
+        { provide: getRepositoryToken(User), useValue: makeUserRepoMock() },
+        { provide: getRepositoryToken(DeliveryZone), useValue: zonesRepo },
+        { provide: DataSource, useValue: ds },
+      ],
+    }).compile();
+
+    service = module.get<AddressesService>(AddressesService);
+  });
+
+  it('create guarda el ZIP y resuelve la zona contra las zonas ACTIVAS', async () => {
+    repo.count.mockResolvedValue(0);
+    repo.save.mockImplementation(async (e) => e as UserAddress);
+
+    const dto: CreateAddressDto = {
+      label: 'Casa',
+      line1: '1000 Grand Concourse',
+      lat: 40.82,
+      lng: -73.92,
+      postalCode: '10451',
+    };
+    await service.create('user-1', dto);
+
+    expect(zonesRepo.find).toHaveBeenCalledWith({ where: { isActive: true } });
+    expect(repo.create).toHaveBeenCalledWith(
+      expect.objectContaining({ postalCode: '10451', zoneId: 'zone-bronx' }),
+    );
+  });
+
+  it('create sin ZIP deja zona en null y NO va a buscar zonas', async () => {
+    // La chincheta del admin guarda direcciones sin código postal: pedirle la
+    // tabla de zonas a Postgres para no resolver nada es una consulta al pedo.
+    repo.count.mockResolvedValue(0);
+    repo.save.mockImplementation(async (e) => e as UserAddress);
+
+    const dto: CreateAddressDto = {
+      label: 'Casa',
+      line1: 'Calle 1',
+      lat: 40.82,
+      lng: -73.92,
+    };
+    await service.create('user-1', dto);
+
+    expect(zonesRepo.find).not.toHaveBeenCalled();
+    expect(repo.create).toHaveBeenCalledWith(
+      expect.objectContaining({ postalCode: null, zoneId: null }),
+    );
+  });
+
+  it('create con un ZIP fuera de todas las zonas guarda el ZIP igual', async () => {
+    // El dato del cliente no se tira porque el negocio todavía no reparte ahí:
+    // mañana el dueño carga la zona y la dirección ya tiene con qué resolver.
+    repo.count.mockResolvedValue(0);
+    repo.save.mockImplementation(async (e) => e as UserAddress);
+
+    await service.create('user-1', {
+      label: 'Casa',
+      line1: 'Beverly Hills',
+      lat: 34.09,
+      lng: -118.4,
+      postalCode: '90210',
+    });
+
+    expect(repo.create).toHaveBeenCalledWith(
+      expect.objectContaining({ postalCode: '90210', zoneId: null }),
+    );
+  });
+
+  it('update con un ZIP nuevo vuelve a resolver la zona', async () => {
+    const existing = fakeAddress({
+      userId: 'user-1',
+      postalCode: '10451',
+      zoneId: 'zone-bronx',
+    });
+    repo.findOne.mockResolvedValue(existing);
+    repo.save.mockImplementation(async (e) => e as UserAddress);
+
+    // El cliente se mudó del Bronx a Brooklyn.
+    const result = await service.update('user-1', 'addr-1', {
+      postalCode: '11201',
+    } as UpdateAddressDto);
+
+    expect(result.postalCode).toBe('11201');
+    expect(result.zoneId).toBe('zone-brooklyn');
+  });
+
+  it('update SIN postalCode no toca ni el ZIP ni la zona', async () => {
+    const existing = fakeAddress({
+      userId: 'user-1',
+      postalCode: '10451',
+      zoneId: 'zone-bronx',
+    });
+    repo.findOne.mockResolvedValue(existing);
+    repo.save.mockImplementation(async (e) => e as UserAddress);
+
+    const result = await service.update('user-1', 'addr-1', {
+      label: 'Oficina',
+    } as UpdateAddressDto);
+
+    expect(zonesRepo.find).not.toHaveBeenCalled();
+    expect(result.postalCode).toBe('10451');
+    expect(result.zoneId).toBe('zone-bronx');
+  });
+
+  it('update con el MISMO ZIP tampoco vuelve a consultar zonas', async () => {
+    // Guardar el formulario entero sin haber tocado el código postal es el caso
+    // normal: no tiene por qué pegarle a la tabla de zonas.
+    const existing = fakeAddress({
+      userId: 'user-1',
+      postalCode: '10451',
+      zoneId: 'zone-bronx',
+    });
+    repo.findOne.mockResolvedValue(existing);
+    repo.save.mockImplementation(async (e) => e as UserAddress);
+
+    const result = await service.update('user-1', 'addr-1', {
+      label: 'Casa',
+      postalCode: '10451',
+    } as UpdateAddressDto);
+
+    expect(zonesRepo.find).not.toHaveBeenCalled();
+    expect(result.zoneId).toBe('zone-bronx');
+  });
+
+  it('update que BORRA el ZIP (null) borra también la zona', async () => {
+    const existing = fakeAddress({
+      userId: 'user-1',
+      postalCode: '10451',
+      zoneId: 'zone-bronx',
+    });
+    repo.findOne.mockResolvedValue(existing);
+    repo.save.mockImplementation(async (e) => e as UserAddress);
+
+    const result = await service.update('user-1', 'addr-1', {
+      postalCode: null,
+    } as unknown as UpdateAddressDto);
+
+    expect(result.postalCode).toBeNull();
+    expect(result.zoneId).toBeNull();
+  });
+
+  it('una zona APAGADA no clasifica — la dirección queda sin zona', async () => {
+    zonesRepo.find.mockResolvedValue([]); // el where isActive:true no la trae
+    repo.count.mockResolvedValue(0);
+    repo.save.mockImplementation(async (e) => e as UserAddress);
+
+    await service.create('user-1', {
+      label: 'Casa',
+      line1: 'Calle 1',
+      lat: 40.82,
+      lng: -73.92,
+      postalCode: '10451',
+    });
+
+    expect(repo.create).toHaveBeenCalledWith(
+      expect.objectContaining({ postalCode: '10451', zoneId: null }),
+    );
   });
 });

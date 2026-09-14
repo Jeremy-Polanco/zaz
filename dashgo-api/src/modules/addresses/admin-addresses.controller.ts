@@ -79,7 +79,8 @@ export class AdminAddressesController {
   /**
    * PATCH /admin/users/:userId/addresses/:id
    * Updates whitelisted fields (label, line1, line2, building, lat, lng,
-   * instructions). isDefault cannot be changed here. Returns 200.
+   * instructions, postalCode — cambiar el ZIP vuelve a resolver la zona).
+   * isDefault cannot be changed here. Returns 200.
    */
   @Patch(':userId/addresses/:id')
   updateForUser(

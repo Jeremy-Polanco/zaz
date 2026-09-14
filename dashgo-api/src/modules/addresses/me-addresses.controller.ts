@@ -24,7 +24,7 @@ import { UpdateAddressDto } from './dto/update-address.dto';
  * Routes:
  *   GET    /me/addresses              — list own addresses
  *   POST   /me/addresses              — create a new address
- *   PATCH  /me/addresses/:id          — update label/line1/line2/lat/lng/instructions
+ *   PATCH  /me/addresses/:id          — update label/line1/line2/lat/lng/instructions/postalCode
  *   DELETE /me/addresses/:id          — delete address (promotes default if needed)
  *   PATCH  /me/addresses/:id/set-default — promote address to default
  */
@@ -87,7 +87,8 @@ export class MeAddressesController {
 
   /**
    * PATCH /me/addresses/:id
-   * Updates whitelisted fields (label, line1, line2, lat, lng, instructions).
+   * Updates whitelisted fields (label, line1, line2, lat, lng, instructions,
+   * postalCode — cambiar el ZIP vuelve a resolver la zona de reparto).
    * isDefault cannot be changed via this endpoint.
    * Returns 200 with the updated address.
    */

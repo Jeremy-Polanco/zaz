@@ -1,8 +1,10 @@
+import { Transform } from 'class-transformer';
 import {
   IsNumber,
   IsOptional,
   IsString,
   Length,
+  Matches,
   Max,
   MaxLength,
   Min,
@@ -41,4 +43,20 @@ export class CreateAddressDto {
   @IsString()
   @MaxLength(500)
   instructions?: string;
+
+  /**
+   * Código postal que ESCRIBE el cliente. String y no number porque Elizabeth
+   * NJ es 072xx: tipado como número el cero de adelante se pierde y la zona
+   * deja de resolver.
+   *
+   * Opcional en la API aunque los formularios lo pidan obligatorio: la
+   * chincheta del admin y las versiones viejas de la app siguen guardando
+   * direcciones sin ZIP, y romperlas no le sirve a nadie.
+   */
+  @IsOptional()
+  @Transform(({ value }: { value: unknown }) =>
+    typeof value === 'string' ? value.trim() : value,
+  )
+  @Matches(/^\d{5}$/, { message: 'El código postal debe tener 5 dígitos' })
+  postalCode?: string;
 }

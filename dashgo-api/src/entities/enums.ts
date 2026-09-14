@@ -41,4 +41,10 @@ export interface GeoAddress {
   unit?: string | null;
   /** Visible landmark to find the drop-off ("frente al colmado"). */
   reference?: string | null;
+  /**
+   * Código postal de 5 dígitos. Snapshot: se congela con la orden igual que el
+   * resto de la dirección. Opcional y nullable porque las órdenes viejas
+   * (JSONB, sin migración) nacieron sin él y siguen siendo válidas.
+   */
+  postalCode?: string | null;
 }

@@ -7,8 +7,10 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
 import { UserAddress } from '../../entities/user-address.entity';
 import { User } from '../../entities/user.entity';
+import { DeliveryZone } from '../../entities/delivery-zone.entity';
 import { CreateAddressDto } from './dto/create-address.dto';
 import { UpdateAddressDto } from './dto/update-address.dto';
+import { resolveZoneId } from './resolve-zone';
 
 @Injectable()
 export class AddressesService {
@@ -17,6 +19,8 @@ export class AddressesService {
     private readonly addresses: Repository<UserAddress>,
     @InjectRepository(User)
     private readonly users: Repository<User>,
+    @InjectRepository(DeliveryZone)
+    private readonly zones: Repository<DeliveryZone>,
     private readonly dataSource: DataSource,
   ) {}
 
@@ -45,10 +49,16 @@ export class AddressesService {
       });
     }
     const isFirst = count === 0;
+    const postalCode = normalizeZip(dto.postalCode);
     const entity = this.addresses.create({
       ...dto,
       userId,
       isDefault: isFirst,
+      postalCode,
+      // La zona se guarda RESUELTA, no se calcula al vuelo: agrupar clientes
+      // por zona es una pantalla que pagina y recalcular prefijos por fila la
+      // haría inútil.
+      zoneId: await this.resolveZone(postalCode),
     });
     return this.addresses.save(entity);
   }
@@ -79,6 +89,16 @@ export class AddressesService {
     if (dto.lat !== undefined) addr.lat = dto.lat;
     if (dto.lng !== undefined) addr.lng = dto.lng;
     if (dto.instructions !== undefined) addr.instructions = dto.instructions ?? null;
+    // El ZIP sólo se re-resuelve cuando CAMBIA: guardar el formulario entero sin
+    // haber tocado el código postal es el caso normal y no tiene por qué pegarle
+    // a la tabla de zonas.
+    if (dto.postalCode !== undefined) {
+      const postalCode = normalizeZip(dto.postalCode);
+      if (postalCode !== addr.postalCode) {
+        addr.postalCode = postalCode;
+        addr.zoneId = await this.resolveZone(postalCode);
+      }
+    }
     return this.addresses.save(addr);
   }
 
@@ -169,4 +189,26 @@ export class AddressesService {
   async listByUserId(targetUserId: string): Promise<UserAddress[]> {
     return this.list(targetUserId);
   }
+
+  /**
+   * Zona de reparto que le corresponde a un código postal. Se traen TODAS las
+   * zonas activas y se resuelve en memoria: son un puñado de filas y el
+   * "prefijo más largo que matchea" no se puede pedir en SQL sin un LIKE por
+   * fila. Sin ZIP no hay consulta — no habría nada que resolver.
+   */
+  private async resolveZone(postalCode: string | null): Promise<string | null> {
+    if (!postalCode) return null;
+    const zones = await this.zones.find({ where: { isActive: true } });
+    return resolveZoneId(postalCode, zones);
+  }
+}
+
+/**
+ * El ZIP llega ya validado como 5 dígitos por el DTO; acá sólo se normaliza el
+ * borde: ausente, vacío o null son todos "sin código postal" (null), para que
+ * el UPDATE no escriba un string vacío que después no matchea ningún prefijo.
+ */
+function normalizeZip(value: string | null | undefined): string | null {
+  const zip = (value ?? '').trim();
+  return zip || null;
 }
