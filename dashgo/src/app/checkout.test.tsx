@@ -25,6 +25,7 @@ jest.mock('../lib/queries', () => ({
   usePointsBalance: jest.fn(),
   useProducts: jest.fn(),
   useMyAddresses: jest.fn(),
+  useShippingRate: jest.fn(),
 }))
 
 jest.mock('@stripe/stripe-react-native', () => ({
@@ -83,6 +84,7 @@ import {
   usePointsBalance,
   useProducts,
   useMyAddresses,
+  useShippingRate,
 } from '../lib/queries'
 import { router } from 'expo-router'
 import CheckoutScreen from './checkout'
@@ -99,6 +101,7 @@ const mockUseMySubscription = useMySubscription as jest.MockedFunction<typeof us
 const mockUsePointsBalance = usePointsBalance as jest.MockedFunction<typeof usePointsBalance>
 const mockUseProducts = useProducts as jest.MockedFunction<typeof useProducts>
 const mockUseMyAddresses = useMyAddresses as jest.MockedFunction<typeof useMyAddresses>
+const mockUseShippingRate = useShippingRate as jest.MockedFunction<typeof useShippingRate>
 
 const mockRouter = router as jest.Mocked<typeof router>
 
@@ -202,6 +205,13 @@ function setupCheckoutMocks(
   mockUseMySubscription.mockReturnValue({ data: null } as unknown as ReturnType<typeof useMySubscription>)
   mockUsePointsBalance.mockReturnValue({ data: null } as unknown as ReturnType<typeof usePointsBalance>)
   mockUseMyAddresses.mockReturnValue({ data: [] } as unknown as ReturnType<typeof useMyAddresses>)
+
+  // Default: rate resolved at the $5 default — most tests don't care about
+  // the shipping-rate loading/error states, covered separately below.
+  mockUseShippingRate.mockReturnValue({
+    data: { shippingCents: 500 },
+    isError: false,
+  } as unknown as ReturnType<typeof useShippingRate>)
 }
 
 let alertSpy: jest.SpyInstance
@@ -425,34 +435,55 @@ describe('Skip-cotización — checkout preview shows real tax and final total',
 
     const { getByText, queryByText } = renderWithProviders(<CheckoutScreen />)
 
-    // tax = round(4500 × 0.08887) = 400 → "$4"
+    // taxable = 4500 (subtotal) + 500 (flat shipping) = 5000
+    // tax = round(5000 × 0.08887) = 444 → "$4.44"
     await waitFor(() => {
-      expect(getByText('$4')).toBeTruthy()
+      expect(getByText('$4.44')).toBeTruthy()
     })
     expect(queryByText('Al cotizar')).toBeNull()
   })
 
-  it('labels the total band "Total" and shows subtotal + tax', async () => {
+  it('labels the total band "Total" and shows subtotal + shipping + tax', async () => {
     setupCheckoutMocks([WATER_PRODUCT as unknown as typeof MOCK_PRODUCT], { 'product-water': 1 })
 
     const { getByText } = renderWithProviders(<CheckoutScreen />)
 
-    // total = 4500 + 400 = 4900 → "$49"
+    // total = 4500 (subtotal) + 500 (flat shipping) + 444 (tax) = 5444 → "$54.44"
     await waitFor(() => {
       expect(getByText('Total')).toBeTruthy()
-      expect(getByText('$49')).toBeTruthy()
+      expect(getByText('$54.44')).toBeTruthy()
     })
   })
 
-  it('shows "Gratis" shipping for a skip-quote cart', async () => {
+  it('shows the flat $5 shipping fee (not "Gratis") for a non-subscriber, even on a skip-quote cart', async () => {
     setupCheckoutMocks([WATER_PRODUCT as unknown as typeof MOCK_PRODUCT], { 'product-water': 1 })
 
     const { getByText, queryByText } = renderWithProviders(<CheckoutScreen />)
 
+    // Envío line: mocked useShippingRate rate is 500¢ → "$5" (whole dollar amount)
     await waitFor(() => {
-      expect(getByText('Gratis')).toBeTruthy()
+      expect(getByText('$5')).toBeTruthy()
     })
+    expect(queryByText('Gratis')).toBeNull()
     expect(queryByText('A cotizar')).toBeNull()
+  })
+
+  it('charges the flat $5 shipping to an active subscriber too (subscription no longer includes free shipping)', async () => {
+    setupCheckoutMocks([WATER_PRODUCT as unknown as typeof MOCK_PRODUCT], { 'product-water': 1 })
+    mockUseMySubscription.mockReturnValue({
+      data: { status: 'active' },
+    } as unknown as ReturnType<typeof useMySubscription>)
+
+    const { getByText, queryByText } = renderWithProviders(<CheckoutScreen />)
+
+    // Same numbers as a non-subscriber: shipping $5, tax $4.44, total $54.44.
+    await waitFor(() => {
+      expect(getByText('$4.44')).toBeTruthy()
+    })
+    expect(getByText('Total')).toBeTruthy()
+    expect(getByText('$54.44')).toBeTruthy()
+    expect(queryByText('Gratis con tu suscripción')).toBeNull()
+    expect(queryByText('Gratis')).toBeNull()
   })
 
   it('swaps the "repartidor cotiza" copy for the final-total copy', async () => {
@@ -466,16 +497,19 @@ describe('Skip-cotización — checkout preview shows real tax and final total',
     expect(queryByText(/El repartidor cotiza el envío/i)).toBeNull()
   })
 
-  it('keeps the "a cotizar" placeholders when items require a quote (regression)', async () => {
+  it('keeps the "al cotizar" tax placeholder when items require a quote, but still charges flat shipping (regression)', async () => {
     // SINGLE_PRODUCT has no requiresQuote flag → not skip-quote
     setupCheckoutMocks([SINGLE_PRODUCT as unknown as typeof MOCK_PRODUCT], { 'product-single': 1 })
 
-    const { getByText, queryByText } = renderWithProviders(<CheckoutScreen />)
+    const { getByText, getAllByText, queryByText } = renderWithProviders(<CheckoutScreen />)
 
     await waitFor(() => {
       expect(getByText('Al cotizar')).toBeTruthy()
-      expect(getByText('A cotizar')).toBeTruthy()
     })
+    // SINGLE_PRODUCT subtotal (500¢) and the flat shipping fee (500¢) both
+    // render as "$5" — two separate rows, not a single "A cotizar" placeholder.
+    expect(getAllByText('$5').length).toBeGreaterThanOrEqual(2)
+    expect(queryByText('A cotizar')).toBeNull()
     expect(queryByText('Total')).toBeNull()
   })
 
@@ -556,5 +590,61 @@ describe('Propina — solo pago digital', () => {
     expect(mockCreateOrderMutateAsync.mock.calls[0][0]).not.toHaveProperty(
       'tipPercent',
     )
+  })
+})
+
+// ── Tarifa de envío — GET /shipping/rate ──────────────────────────────────────
+
+describe('Tarifa de envío (admin-configurable, GET /shipping/rate)', () => {
+  it('shows "…" for Envío and the total, and disables the submit button, while the rate is loading', async () => {
+    setupCheckoutMocks([SINGLE_PRODUCT as unknown as typeof MOCK_PRODUCT], { 'product-single': 1 })
+    // Loading: neither data nor error yet.
+    mockUseShippingRate.mockReturnValue({
+      data: undefined,
+      isError: false,
+    } as unknown as ReturnType<typeof useShippingRate>)
+
+    const { getAllByText, getByText } = renderWithProviders(<CheckoutScreen />)
+
+    await waitFor(() => {
+      expect(getAllByText('…').length).toBeGreaterThan(0)
+    })
+
+    // Submit is disabled — pressing it must not create an order.
+    fireEvent.press(getByText(/Confirmar pedido/i))
+    expect(mockCreateOrderMutateAsync).not.toHaveBeenCalled()
+  })
+
+  it('falls back to the $5 default when the rate fetch errors', async () => {
+    setupCheckoutMocks([SINGLE_PRODUCT as unknown as typeof MOCK_PRODUCT], { 'product-single': 1 })
+    mockUseShippingRate.mockReturnValue({
+      data: undefined,
+      isError: true,
+    } as unknown as ReturnType<typeof useShippingRate>)
+
+    const { getAllByText, queryAllByText } = renderWithProviders(<CheckoutScreen />)
+
+    // subtotal 500 (SINGLE_PRODUCT) + default shipping 500 both render "$5".
+    await waitFor(() => {
+      expect(getAllByText('$5').length).toBeGreaterThanOrEqual(2)
+    })
+    expect(queryAllByText('…').length).toBe(0)
+  })
+
+  it('shows a non-default rate ($6.50) in the Envío line and adds it to the total', async () => {
+    setupCheckoutMocks([SINGLE_PRODUCT as unknown as typeof MOCK_PRODUCT], { 'product-single': 1 })
+    mockUseShippingRate.mockReturnValue({
+      data: { shippingCents: 650 },
+      isError: false,
+    } as unknown as ReturnType<typeof useShippingRate>)
+
+    const { getByText } = renderWithProviders(<CheckoutScreen />)
+
+    await waitFor(() => {
+      expect(getByText('$6.50')).toBeTruthy()
+    })
+    // subtotal 500 + shipping 650 = 1150 → "$11.50" (not skip-quote: "Al
+    // cotizar" tax placeholder, but the shown total already adds shipping).
+    expect(getByText('$11.50')).toBeTruthy()
   })
 })

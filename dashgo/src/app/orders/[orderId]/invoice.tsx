@@ -207,6 +207,19 @@ export default function InvoiceScreen() {
                 : t('invoice.free')}
             </Text>
           </View>
+          {parseFloat(invoice.deliverySurcharge ?? '0') > 0 && (
+            <View className="mb-2 flex-row items-baseline justify-between">
+              <Text className="font-sans text-[11px] uppercase tracking-label text-ink-muted">
+                {t('summary.surcharge')}
+              </Text>
+              <Text
+                className="font-sans text-[14px] text-ink"
+                style={{ fontVariant: ['tabular-nums'] }}
+              >
+                {formatMoney(invoice.deliverySurcharge!)}
+              </Text>
+            </View>
+          )}
           <View className="mb-3 flex-row items-baseline justify-between">
             <Text className="font-sans text-[11px] uppercase tracking-label text-ink-muted">
               {t('invoice.taxesWithRate', { rate: taxRatePct })}

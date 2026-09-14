@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   View,
   Text,
@@ -13,7 +13,11 @@ import { router, useLocalSearchParams } from 'expo-router'
 import { useQuery } from '@tanstack/react-query'
 import { ScreenHeader } from '../../../components/ScreenHeader'
 import { api } from '../../../lib/api'
-import { useDeleteOrder, useUpdateOrderStatus } from '../../../lib/queries'
+import {
+  useDeleteOrder,
+  useSetDeliveryDate,
+  useUpdateOrderStatus,
+} from '../../../lib/queries'
 import { formatDate, formatMoney } from '../../../lib/format'
 import type { GeoAddress, Order, OrderStatus } from '../../../lib/types'
 import { formatAddressShort, addressDetailParts } from '../../../lib/address'
@@ -28,6 +32,7 @@ import {
 import { SuscriptorBadge } from '../../../components/SuscriptorBadge'
 import { QuoteBottomSheet } from '../../../components/QuoteBottomSheet'
 import { LocationBottomSheet } from '../../../components/LocationBottomSheet'
+import { DeliveryDayPicker } from '../../../components/DeliveryDayPicker'
 
 const LIVE_STATUSES = [
   'pending_quote',
@@ -94,8 +99,19 @@ export default function SuperOrderDetailScreen() {
   const { data: order, isPending, error } = useOrder(orderId)
   const updateStatus = useUpdateOrderStatus()
   const deleteOrder = useDeleteOrder()
+  const setDeliveryDate = useSetDeliveryDate()
   const [quoting, setQuoting] = useState(false)
   const [pinningLocation, setPinningLocation] = useState(false)
+  // "Guardado" es efímero — confirma el toque sin quedar pegado en pantalla.
+  const [justSavedDeliveryDate, setJustSavedDeliveryDate] = useState(false)
+  const savedBadgeTimeout = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // Limpieza al desmontar — sin esto el timer queda vivo después de salir de
+  // la pantalla (y en tests, un handle abierto que Jest no puede cerrar).
+  useEffect(() => {
+    return () => {
+      if (savedBadgeTimeout.current) clearTimeout(savedBadgeTimeout.current)
+    }
+  }, [])
 
   if (isPending) {
     return (
@@ -161,6 +177,30 @@ export default function SuperOrderDetailScreen() {
         onPress: () => handleAdvance('cancelled'),
       },
     ])
+  }
+
+  // Independiente de la cotización — se puede asignar/cambiar el día de
+  // entrega en cualquier estado no terminal, tocando un chip del picker.
+  const handleSetDeliveryDate = (iso: string | null) => {
+    setDeliveryDate.mutate(
+      { id: order.id, scheduledDeliveryDate: iso },
+      {
+        onSuccess: () => {
+          setJustSavedDeliveryDate(true)
+          if (savedBadgeTimeout.current) clearTimeout(savedBadgeTimeout.current)
+          savedBadgeTimeout.current = setTimeout(
+            () => setJustSavedDeliveryDate(false),
+            2000,
+          )
+        },
+        onError: (e) => {
+          const msg =
+            (e as { response?: { data?: { message?: string } } })?.response
+              ?.data?.message ?? 'No se pudo guardar el día de entrega'
+          Alert.alert('Error', msg)
+        },
+      },
+    )
   }
 
   // Hard-delete — only offered on CANCELLED orders (server enforces the same).
@@ -339,6 +379,28 @@ export default function SuperOrderDetailScreen() {
           )}
         </View>
 
+        {/*
+          Día de entrega — independiente de la cotización, editable en
+          cualquier estado no terminal (delivered/cancelled lo bloquea el
+          backend). El chip tocado guarda al toque, sin botón "Guardar".
+        */}
+        {!isTerminal && (
+          <View className="mt-5 px-5">
+            <View className="mb-3 flex-row items-baseline justify-between">
+              <Eyebrow>Día de entrega</Eyebrow>
+              {justSavedDeliveryDate && (
+                <Text className="font-sans text-[11px] uppercase tracking-label text-ok">
+                  Guardado
+                </Text>
+              )}
+            </View>
+            <DeliveryDayPicker
+              value={order.scheduledDeliveryDate ?? null}
+              onChange={handleSetDeliveryDate}
+            />
+          </View>
+        )}
+
         <Hairline className="mx-5 mt-7" />
 
         {/* Items list */}
@@ -405,37 +467,35 @@ export default function SuperOrderDetailScreen() {
           {order.wasSubscriberAtQuote && isQuoted && (
             <View className="my-1 flex-row items-center gap-2">
               <SuscriptorBadge wasSubscriber />
-              <Text className="font-sans text-[11px] text-ink-muted">
-                Envío gratis aplicado
-              </Text>
             </View>
           )}
+          {/* El envío nace con la orden (tarifa vigente vía GET
+              /shipping/rate, $5 por defecto, para todos — suscriptores
+              incluidos, la suscripción ya no exime del envío), así que se
+              muestra siempre — al cotizar el admin lo confirma o lo ajusta.
+              El impuesto sí espera a la cotización. */}
+          <BreakdownRow
+            label="Envío"
+            value={formatMoney(order.shipping)}
+          />
+          {order.deliverySurcharge && Number(order.deliverySurcharge) > 0 && (
+            <BreakdownRow
+              label="Recargo por distancia"
+              value={formatMoney(order.deliverySurcharge)}
+            />
+          )}
           {isQuoted ? (
-            <>
-              <BreakdownRow
-                label="Envío"
-                value={formatMoney(order.shipping)}
-              />
-              <BreakdownRow
-                label={`Tax (${(Number(order.taxRate) * 100).toFixed(3)}%)`}
-                value={formatMoney(order.tax)}
-              />
-            </>
+            <BreakdownRow
+              label={`Tax (${(Number(order.taxRate) * 100).toFixed(3)}%)`}
+              value={formatMoney(order.tax)}
+            />
           ) : (
-            <>
-              <BreakdownRow
-                label="Envío"
-                value="A cotizar"
-                emphasis="muted"
-                italic
-              />
-              <BreakdownRow
-                label="Tax"
-                value="A calcular"
-                emphasis="muted"
-                italic
-              />
-            </>
+            <BreakdownRow
+              label="Tax"
+              value="A calcular"
+              emphasis="muted"
+              italic
+            />
           )}
           {Number(order.tip ?? 0) > 0 && (
             <BreakdownRow

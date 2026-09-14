@@ -1,8 +1,19 @@
-import { TAX_RATE, computeGrossCents, computeQuotePreviewCents } from './tax'
+import {
+  TAX_RATE,
+  DEFAULT_FLAT_SHIPPING_CENTS,
+  computeGrossCents,
+  computeQuotePreviewCents,
+} from './tax'
 
 describe('TAX_RATE', () => {
   it('matches the backend rate in dashgo-api/src/common/tax.ts', () => {
     expect(TAX_RATE).toBe(0.08887)
+  })
+})
+
+describe('DEFAULT_FLAT_SHIPPING_CENTS', () => {
+  it('is the $5 fallback used only when GET /shipping/rate cannot be fetched', () => {
+    expect(DEFAULT_FLAT_SHIPPING_CENTS).toBe(500)
   })
 })
 
@@ -83,6 +94,30 @@ describe('computeQuotePreviewCents', () => {
       })
       expect(Number.isNaN(r.taxCents)).toBe(false)
       expect(r.taxCents).toBe(0)
+    })
+  })
+
+  describe('con DEFAULT_FLAT_SHIPPING_CENTS (envío fijo $5 por defecto)', () => {
+    it('a $10 standard line taxes the shipping too: taxCents 133, totalCents 1633', () => {
+      const r = computeQuotePreviewCents({
+        subtotalCents: 1000,
+        shippingCents: DEFAULT_FLAT_SHIPPING_CENTS,
+        pointsRedeemedCents: 0,
+      })
+      // taxable = 1000 + 500 = 1500; tax = round(1500 * 0.08887) = 133
+      expect(r.taxCents).toBe(133)
+      expect(r.totalCents).toBe(1633)
+    })
+
+    it('a $10 exempt line owes no tax but still pays the flat shipping: taxCents 0, totalCents 1500', () => {
+      const r = computeQuotePreviewCents({
+        subtotalCents: 1000,
+        shippingCents: DEFAULT_FLAT_SHIPPING_CENTS,
+        pointsRedeemedCents: 0,
+        taxableSubtotalCents: 0,
+      })
+      expect(r.taxCents).toBe(0)
+      expect(r.totalCents).toBe(1500)
     })
   })
 })

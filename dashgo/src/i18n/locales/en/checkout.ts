@@ -55,8 +55,6 @@ export default {
     pointsDiscount: 'Points discount',
     creditApplied: 'Credit applied',
     shipping: 'Shipping',
-    free: 'Free',
-    freeWithSubscription: 'Free with your subscription',
     toQuote: 'To be quoted',
     taxes: 'Taxes',
     atQuote: 'When quoted',
@@ -64,7 +62,7 @@ export default {
     total: 'Total',
     partialTotal: 'Partial total',
     finalNote: 'No quote needed — this is the final total. Confirm and pay.',
-    quoteNote: "The courier quotes the delivery fee and we'll let you know to confirm the total.",
+    quoteNote: "The driver confirms your order and we'll let you know the final total.",
   },
   monthly: {
     title: 'Monthly recurring charge',

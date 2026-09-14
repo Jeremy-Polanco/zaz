@@ -15,6 +15,7 @@ import { useSetOrderQuote } from '../lib/queries'
 import { computeQuotePreviewCents } from '../lib/tax'
 import { formatCents } from '../lib/format'
 import { Button, Eyebrow, FieldLabel } from './ui'
+import { DeliveryDayPicker } from './DeliveryDayPicker'
 
 function openMaps(order: Order) {
   const addr = order.deliveryAddress
@@ -49,17 +50,33 @@ export function QuoteBottomSheet({
   const [shippingDollars, setShippingDollars] = useState<string>(
     order.shipping && parseFloat(order.shipping) > 0 ? order.shipping : '',
   )
+  const [surchargeDollars, setSurchargeDollars] = useState<string>(
+    order.deliverySurcharge && parseFloat(order.deliverySurcharge) > 0
+      ? order.deliverySurcharge
+      : '',
+  )
+  const [deliveryDate, setDeliveryDate] = useState<string | null>(
+    order.scheduledDeliveryDate ?? null,
+  )
   const [formError, setFormError] = useState<string | null>(null)
 
   const parsed = parseFloat(shippingDollars)
   const shippingCents = Number.isFinite(parsed) ? Math.round(parsed * 100) : 0
+  // Recargo por distancia: opcional, vacío o inválido = 0 (no bloquea el envío).
+  const parsedSurcharge = parseFloat(surchargeDollars)
+  const surchargeCents =
+    Number.isFinite(parsedSurcharge) && parsedSurcharge > 0
+      ? Math.round(parsedSurcharge * 100)
+      : 0
   const subtotalCents = Math.round(parseFloat(order.subtotal) * 100)
   const pointsRedeemedCents = Math.round(
     parseFloat(order.pointsRedeemed) * 100,
   )
+  // El recargo se prorratea para impuestos igual que el envío (mismo
+  // tratamiento en el backend — ver common/tax.ts).
   const preview = computeQuotePreviewCents({
     subtotalCents,
-    shippingCents,
+    shippingCents: shippingCents + surchargeCents,
     pointsRedeemedCents,
   })
   // Propina elegida en checkout (solo digital) — sin impuestos, va sobre el total.
@@ -72,7 +89,12 @@ export function QuoteBottomSheet({
       return
     }
     try {
-      await setQuote.mutateAsync({ id: order.id, shippingCents })
+      await setQuote.mutateAsync({
+        id: order.id,
+        shippingCents,
+        surchargeCents,
+        scheduledDeliveryDate: deliveryDate,
+      })
       onClose()
     } catch (err) {
       setFormError(
@@ -178,7 +200,41 @@ export function QuoteBottomSheet({
           )}
         </View>
 
+        <View className="mt-4">
+          <FieldLabel>Recargo por distancia (USD)</FieldLabel>
+          <TextInput
+            className="h-11 border-b border-ink/25 pb-1 font-sans text-[18px] text-ink"
+            keyboardType="decimal-pad"
+            placeholder="0.00"
+            placeholderTextColor="#6B6488"
+            value={surchargeDollars}
+            onChangeText={setSurchargeDollars}
+          />
+          <Text className="mt-2 font-sans text-[11px] text-ink-muted">
+            Se cobra también a suscriptores — la suscripción cubre el envío,
+            no la distancia.
+          </Text>
+        </View>
+
+        <View className="mt-4">
+          <FieldLabel>Día de entrega</FieldLabel>
+          <DeliveryDayPicker value={deliveryDate} onChange={setDeliveryDate} />
+        </View>
+
         <View className="mt-5 gap-1 border-t border-ink/10 pt-3">
+          {surchargeCents > 0 && (
+            <View className="flex-row justify-between">
+              <Text className="font-sans text-[12px] uppercase tracking-label text-ink-muted">
+                Recargo por distancia
+              </Text>
+              <Text
+                className="font-sans text-[13px] text-ink"
+                style={{ fontVariant: ['tabular-nums'] }}
+              >
+                {formatCents(surchargeCents)}
+              </Text>
+            </View>
+          )}
           <View className="flex-row justify-between">
             <Text className="font-sans text-[12px] uppercase tracking-label text-ink-muted">
               Impuestos (8.887%)

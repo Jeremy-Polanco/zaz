@@ -3,12 +3,12 @@ import { SafeAreaView } from 'react-native-safe-area-context'
 import { router } from 'expo-router'
 import { useTranslation } from 'react-i18next'
 import { useCurrentUser, useOrders } from '../../lib/queries'
-import { formatDate, formatMoney } from '../../lib/format'
+import { formatDate, formatDeliveryDay, formatMoney } from '../../lib/format'
 import type { Order } from '../../lib/types'
 import { Button, Eyebrow, Hairline, StatusBadge } from '../../components/ui'
 
 function OrderCard({ order }: { order: Order }) {
-  const { t } = useTranslation('orders')
+  const { t, i18n } = useTranslation('orders')
   const itemCount = order.items?.length ?? 0
   return (
     <Pressable
@@ -31,6 +31,13 @@ function OrderCard({ order }: { order: Order }) {
           <Text className="mt-0.5 text-[13px] text-ink-soft">
             {order.deliveryAddress?.text ?? t('toCoordinate')}
           </Text>
+          {order.scheduledDeliveryDate && (
+            <Text className="mt-0.5 font-sans text-[13px] text-brand">
+              {t('card.scheduledDelivery', {
+                day: formatDeliveryDay(order.scheduledDeliveryDate, i18n.language),
+              })}
+            </Text>
+          )}
         </View>
         <StatusBadge status={order.status} />
       </View>

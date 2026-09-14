@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ActivityIndicator,
   Alert,
@@ -13,10 +13,11 @@ import {
   useAdminUsers,
   useCurrentUser,
   useDeleteUser,
+  useTransferSellerPortfolio,
   useUpdateUserAdmin,
 } from '../../lib/queries'
 import type { AdminUser, AdminUsersSubscriptionFilter, UserRole } from '../../lib/types'
-import { Eyebrow, Hairline, SectionHead } from '../../components/ui'
+import { Button, Eyebrow, Hairline, SectionHead } from '../../components/ui'
 import { UserAddressesPanel } from '../../components/UserAddressesPanel'
 import { SellerCatalogPanel } from '../../components/SellerCatalogPanel'
 import { isSuperAdmin } from '../../lib/roles'
@@ -327,11 +328,18 @@ export default function SuperUsersScreen() {
     AdminUsersSubscriptionFilter | undefined
   >(undefined)
   const [search, setSearch] = useState('')
+  // Filtro por vendedor: 'all' (todos), 'none' (sin vendedor) o el id de un
+  // vendedor concreto. Solo lo ve/usa el super admin — mismo gate que los
+  // chips de asignación por fila.
+  const [sellerFilter, setSellerFilter] = useState<'all' | 'none' | string>(
+    'all',
+  )
 
   const { data: users, isPending, refetch, isRefetching } = useAdminUsers(subFilter)
   const { data: me } = useCurrentUser()
   const deleteUser = useDeleteUser()
   const updateUser = useUpdateUserAdmin()
+  const transferPortfolio = useTransferSellerPortfolio()
   // Solo el super admin toca roles y cartera. Un vendedor entra a esta pantalla
   // (ve sus clientes) pero no puede reasignar. La API lo rechaza igual.
   const canEditRole = isSuperAdmin(me?.role)
@@ -349,6 +357,100 @@ export default function SuperUsersScreen() {
     [allUsers],
   )
   const [deletingId, setDeletingId] = useState<string | null>(null)
+
+  // Cartera COMPLETA del vendedor filtrado — ignora `search` a propósito. El
+  // endpoint de transferencia mueve TODOS los clientes de ese vendedor en el
+  // server (no una lista de ids elegida a mano), así que "Pasar N clientes"
+  // no puede depender de lo que haya tipeado en el buscador.
+  const sellerPortfolio = useMemo(() => {
+    if (sellerFilter === 'all' || sellerFilter === 'none') return []
+    return (users ?? []).filter((u) => u.sellerId === sellerFilter)
+  }, [users, sellerFilter])
+  const activeSeller = useMemo(
+    () => sellers.find((s) => s.id === sellerFilter) ?? null,
+    [sellers, sellerFilter],
+  )
+  // undefined = todavía no eligió destino (no se muestra el botón de
+  // confirmar); null = "Sin vendedor" es el destino elegido.
+  const [transferDestination, setTransferDestination] = useState<
+    string | null | undefined
+  >(undefined)
+  const transferDestinationLabel =
+    transferDestination === undefined
+      ? null
+      : transferDestination === null
+        ? 'Sin vendedor'
+        : sellers.find((s) => s.id === transferDestination)?.fullName ??
+          'otro vendedor'
+  const [transferError, setTransferError] = useState<string | null>(null)
+  const [transferSuccessMessage, setTransferSuccessMessage] = useState<
+    string | null
+  >(null)
+  const transferMessageTimeout = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  )
+  useEffect(() => {
+    return () => {
+      if (transferMessageTimeout.current)
+        clearTimeout(transferMessageTimeout.current)
+    }
+  }, [])
+  // Cambiar de vendedor filtrado arranca la elección de destino de cero.
+  useEffect(() => {
+    setTransferDestination(undefined)
+    setTransferError(null)
+  }, [sellerFilter])
+
+  const handleTransferPortfolio = useCallback(() => {
+    if (sellerFilter === 'all' || sellerFilter === 'none') return
+    if (transferDestination === undefined || !transferDestinationLabel) return
+    const fromName = activeSeller?.fullName ?? 'este vendedor'
+    const n = sellerPortfolio.length
+    Alert.alert(
+      'Reasignar cartera',
+      `¿Pasar ${n} cliente${n === 1 ? '' : 's'} de ${fromName} a ${transferDestinationLabel}?`,
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Confirmar',
+          onPress: () =>
+            transferPortfolio.mutate(
+              { sellerId: sellerFilter, toSellerId: transferDestination },
+              {
+                onSuccess: (data) => {
+                  setTransferError(null)
+                  const moved = data.moved
+                  setTransferSuccessMessage(
+                    `Se pasaron ${moved} cliente${moved === 1 ? '' : 's'} a ${transferDestinationLabel}`,
+                  )
+                  if (transferMessageTimeout.current)
+                    clearTimeout(transferMessageTimeout.current)
+                  transferMessageTimeout.current = setTimeout(
+                    () => setTransferSuccessMessage(null),
+                    2000,
+                  )
+                  setSellerFilter(transferDestination ?? 'none')
+                },
+                onError: (e) => {
+                  const msg =
+                    (e as { response?: { data?: { message?: string } } })
+                      ?.response?.data?.message ??
+                    'No se pudo reasignar la cartera.'
+                  setTransferError(msg)
+                },
+              },
+            ),
+        },
+      ],
+    )
+  }, [
+    sellerFilter,
+    transferDestination,
+    transferDestinationLabel,
+    activeSeller,
+    sellerPortfolio,
+    transferPortfolio,
+  ])
 
   /**
    * Two-step confirmation before an irreversible delete. The web panel puts
@@ -401,16 +503,26 @@ export default function SuperUsersScreen() {
     [deleteUser],
   )
 
+  // Lista chica y sin paginar (igual que `search`, ya filtrado en cliente):
+  // el filtro por vendedor se resuelve acá también — solo la transferencia
+  // en sí pega contra el server (POST /users/sellers/:id/transfer).
   const filtered = useMemo(() => {
     const list = users ?? []
     const q = search.trim().toLowerCase()
-    if (!q) return list
-    return list.filter(
-      (u) =>
-        u.fullName.toLowerCase().includes(q) ||
-        (u.phone?.toLowerCase().includes(q) ?? false),
-    )
-  }, [users, search])
+    return list.filter((u) => {
+      if (
+        q &&
+        !(
+          u.fullName.toLowerCase().includes(q) ||
+          (u.phone?.toLowerCase().includes(q) ?? false)
+        )
+      )
+        return false
+      if (sellerFilter === 'none') return u.sellerId == null
+      if (sellerFilter !== 'all') return u.sellerId === sellerFilter
+      return true
+    })
+  }, [users, search, sellerFilter])
 
   if (isPending) {
     return (
@@ -467,6 +579,162 @@ export default function SuperUsersScreen() {
                 </Pressable>
               ))}
             </View>
+
+            {/* Filtro por vendedor — solo el super admin lo ve/usa, mismo
+                gate que los chips de asignación por fila. */}
+            {canEditRole ? (
+              <View className="mb-4">
+                <Text className="mb-2 font-sans text-[10px] uppercase tracking-label text-ink-muted">
+                  Vendedor
+                </Text>
+                <View className="flex-row flex-wrap gap-2">
+                  <Pressable
+                    onPress={() => setSellerFilter('all')}
+                    accessibilityRole="button"
+                    accessibilityLabel="Ver clientes de todos los vendedores"
+                    className={`border px-3 py-1.5 ${
+                      sellerFilter === 'all'
+                        ? 'border-ink bg-ink'
+                        : 'border-ink/20 bg-paper'
+                    }`}
+                  >
+                    <Text
+                      className={`font-sans text-[10px] uppercase tracking-label ${
+                        sellerFilter === 'all' ? 'text-paper' : 'text-ink-muted'
+                      }`}
+                    >
+                      Todos
+                    </Text>
+                  </Pressable>
+                  <Pressable
+                    onPress={() => setSellerFilter('none')}
+                    accessibilityRole="button"
+                    accessibilityLabel="Ver clientes sin vendedor"
+                    className={`border px-3 py-1.5 ${
+                      sellerFilter === 'none'
+                        ? 'border-ink bg-ink'
+                        : 'border-ink/20 bg-paper'
+                    }`}
+                  >
+                    <Text
+                      className={`font-sans text-[10px] uppercase tracking-label ${
+                        sellerFilter === 'none' ? 'text-paper' : 'text-ink-muted'
+                      }`}
+                    >
+                      Sin vendedor
+                    </Text>
+                  </Pressable>
+                  {sellers.map((s) => (
+                    <Pressable
+                      key={s.id}
+                      onPress={() => setSellerFilter(s.id)}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Ver cartera de ${s.fullName}`}
+                      className={`border px-3 py-1.5 ${
+                        sellerFilter === s.id
+                          ? 'border-ink bg-ink'
+                          : 'border-ink/20 bg-paper'
+                      }`}
+                    >
+                      <Text
+                        className={`font-sans text-[10px] uppercase tracking-label ${
+                          sellerFilter === s.id ? 'text-paper' : 'text-ink-muted'
+                        }`}
+                      >
+                        {s.fullName}
+                      </Text>
+                    </Pressable>
+                  ))}
+                </View>
+              </View>
+            ) : null}
+
+            {/* Reasignar cartera: mueve TODOS los clientes de un vendedor a
+                otro (o los deja sin vendedor) de un tiro. Solo aparece
+                filtrando por un vendedor concreto y con cartera para mover. */}
+            {canEditRole &&
+            sellerFilter !== 'all' &&
+            sellerFilter !== 'none' &&
+            sellerPortfolio.length > 0 ? (
+              <View className="mb-4 border border-ink/15 bg-paper-deep p-4">
+                <Text className="font-sans-semibold text-[15px] text-ink">
+                  {`${sellerPortfolio.length} cliente${sellerPortfolio.length === 1 ? '' : 's'} de ${activeSeller?.fullName ?? 'este vendedor'}`}
+                </Text>
+                <Text className="mb-3 mt-1 font-sans text-[10px] uppercase tracking-label text-ink-muted">
+                  Reasignar cartera a
+                </Text>
+                <View className="flex-row flex-wrap gap-2">
+                  <Pressable
+                    onPress={() => setTransferDestination(null)}
+                    accessibilityRole="button"
+                    accessibilityLabel="Elegir sin vendedor como destino"
+                    className={`border px-3 py-1.5 ${
+                      transferDestination === null
+                        ? 'border-brand bg-brand/10'
+                        : 'border-ink/15 bg-paper'
+                    }`}
+                  >
+                    <Text
+                      className={`font-sans text-[11px] ${
+                        transferDestination === null
+                          ? 'text-brand'
+                          : 'text-ink-muted'
+                      }`}
+                    >
+                      Sin vendedor
+                    </Text>
+                  </Pressable>
+                  {sellers
+                    .filter((s) => s.id !== sellerFilter)
+                    .map((s) => (
+                      <Pressable
+                        key={s.id}
+                        onPress={() => setTransferDestination(s.id)}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Elegir a ${s.fullName} como destino`}
+                        className={`border px-3 py-1.5 ${
+                          transferDestination === s.id
+                            ? 'border-brand bg-brand/10'
+                            : 'border-ink/15 bg-paper'
+                        }`}
+                      >
+                        <Text
+                          className={`font-sans text-[11px] ${
+                            transferDestination === s.id
+                              ? 'text-brand'
+                              : 'text-ink-muted'
+                          }`}
+                        >
+                          {s.fullName}
+                        </Text>
+                      </Pressable>
+                    ))}
+                </View>
+                {transferDestination !== undefined && transferDestinationLabel ? (
+                  <View className="mt-3">
+                    <Button
+                      onPress={handleTransferPortfolio}
+                      loading={transferPortfolio.isPending}
+                    >
+                      {`Pasar ${sellerPortfolio.length} cliente${sellerPortfolio.length === 1 ? '' : 's'} a ${transferDestinationLabel}`}
+                    </Button>
+                  </View>
+                ) : null}
+              </View>
+            ) : null}
+
+            {/* El éxito/error persiste incluso si el destino elegido ("Sin
+                vendedor") hace que la card de arriba deje de mostrarse. */}
+            {canEditRole && transferSuccessMessage ? (
+              <Text className="mb-4 font-sans text-[11px] uppercase tracking-label text-ok">
+                {transferSuccessMessage}
+              </Text>
+            ) : null}
+            {canEditRole && transferError ? (
+              <Text className="mb-4 font-sans text-[11px] uppercase tracking-label text-bad">
+                {transferError}
+              </Text>
+            ) : null}
 
             <Text className="mb-2 font-sans text-[10px] uppercase tracking-label text-ink-muted">
               {filtered.length} usuario{filtered.length !== 1 ? 's' : ''}

@@ -55,8 +55,6 @@ export default {
     pointsDiscount: 'Descuento por puntos',
     creditApplied: 'Crédito aplicado',
     shipping: 'Envío',
-    free: 'Gratis',
-    freeWithSubscription: 'Gratis con tu suscripción',
     toQuote: 'A cotizar',
     taxes: 'Impuestos',
     atQuote: 'Al cotizar',
@@ -64,7 +62,7 @@ export default {
     total: 'Total',
     partialTotal: 'Total parcial',
     finalNote: 'Sin cotización — este es el total final. Confirmás y pagás.',
-    quoteNote: 'El repartidor cotiza el envío y te avisamos para confirmar el total.',
+    quoteNote: 'El repartidor confirma tu pedido y te avisamos con el total final.',
   },
   monthly: {
     title: 'Cargo recurrente mensual',

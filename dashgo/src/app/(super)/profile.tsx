@@ -1,12 +1,70 @@
-import { View, Text, ActivityIndicator, ScrollView } from 'react-native'
+import { useEffect, useRef, useState } from 'react'
+import { View, Text, TextInput, ActivityIndicator, ScrollView } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { router } from 'expo-router'
-import { useCurrentUser, useLogout } from '../../lib/queries'
-import { Button, Eyebrow, Hairline, DashGoMark } from '../../components/ui'
+import {
+  useCurrentUser,
+  useLogout,
+  useShippingRate,
+  useUpdateShippingRate,
+} from '../../lib/queries'
+import { Button, Eyebrow, FieldError, Hairline, DashGoMark } from '../../components/ui'
 
 export default function SuperProfileScreen() {
   const { data: user, isPending } = useCurrentUser()
   const logout = useLogout()
+
+  // ── Tarifa de envío ───────────────────────────────────────────────────────
+  const { data: shippingRate } = useShippingRate()
+  const updateShippingRate = useUpdateShippingRate()
+  const [rateInput, setRateInput] = useState('')
+  const [rateInitialized, setRateInitialized] = useState(false)
+  const [rateError, setRateError] = useState<string | null>(null)
+  // "Tarifa actualizada" es efímero — mismo patrón que "Guardado" en
+  // (super)/orders/[orderId].tsx.
+  const [justSavedRate, setJustSavedRate] = useState(false)
+  const savedRateTimeout = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(() => {
+    return () => {
+      if (savedRateTimeout.current) clearTimeout(savedRateTimeout.current)
+    }
+  }, [])
+  useEffect(() => {
+    if (shippingRate && !rateInitialized) {
+      setRateInput((shippingRate.shippingCents / 100).toFixed(2))
+      setRateInitialized(true)
+    }
+  }, [shippingRate, rateInitialized])
+
+  const parsedRateDollars = Number(rateInput)
+  const rateFormatValid = /^\d+(\.\d{1,2})?$/.test(rateInput)
+  const rateValid =
+    rateFormatValid &&
+    Number.isFinite(parsedRateDollars) &&
+    parsedRateDollars >= 0 &&
+    parsedRateDollars <= 100
+  const rateCents = rateValid ? Math.round(parsedRateDollars * 100) : 0
+  const rateUnchanged = rateValid && shippingRate?.shippingCents === rateCents
+  const rateValidationError =
+    rateInput === '' || rateValid
+      ? undefined
+      : 'Ingresá un monto entre $0 y $100.'
+
+  const handleSaveRate = async () => {
+    setRateError(null)
+    if (!rateValid) return
+    try {
+      await updateShippingRate.mutateAsync({ shippingCents: rateCents })
+      setJustSavedRate(true)
+      if (savedRateTimeout.current) clearTimeout(savedRateTimeout.current)
+      savedRateTimeout.current = setTimeout(() => setJustSavedRate(false), 2000)
+    } catch (e) {
+      setRateError(
+        (e as { response?: { data?: { message?: string } } })?.response?.data
+          ?.message ?? 'No se pudo actualizar la tarifa.',
+      )
+    }
+  }
 
   if (isPending) {
     return (
@@ -102,6 +160,54 @@ export default function SuperProfileScreen() {
               </Text>
             </View>
           )}
+
+          <View className="mt-6">
+            <View className="flex-row items-baseline justify-between">
+              <Eyebrow>Tarifa de envío</Eyebrow>
+              {justSavedRate && (
+                <Text className="font-sans text-[11px] uppercase tracking-label text-ok">
+                  Tarifa actualizada
+                </Text>
+              )}
+            </View>
+            <Text className="mt-1.5 font-sans-semibold text-[18px] text-ink">
+              {shippingRate
+                ? `$${(shippingRate.shippingCents / 100).toFixed(2)} por pedido`
+                : '—'}
+            </Text>
+            <View className="mt-3 flex-row items-center gap-3">
+              <TextInput
+                className="h-12 flex-1 border-b border-ink/25 pb-1 font-sans text-[18px] text-ink"
+                keyboardType="decimal-pad"
+                placeholder="5.00"
+                placeholderTextColor="#6B6488"
+                value={rateInput}
+                onChangeText={(t) => {
+                  setRateInput(t)
+                  setRateError(null)
+                  setJustSavedRate(false)
+                }}
+              />
+              <Button
+                variant="outline"
+                onPress={handleSaveRate}
+                loading={updateShippingRate.isPending}
+                disabled={!rateValid || rateUnchanged}
+              >
+                Guardar tarifa
+              </Button>
+            </View>
+            <FieldError message={rateValidationError} />
+            {rateError && (
+              <Text className="mt-1.5 font-sans text-[13px] text-bad">
+                {rateError}
+              </Text>
+            )}
+            <Text className="mt-2 font-sans text-[12px] text-ink-muted">
+              Se aplica a todos los pedidos nuevos, suscriptores incluidos.
+              Los pedidos ya creados no cambian.
+            </Text>
+          </View>
 
           <Hairline className="mt-10" />
 

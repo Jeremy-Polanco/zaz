@@ -22,6 +22,7 @@ export default {
     digital: 'Digital',
     viewInvoice: 'Ver factura →',
     trackOrder: 'Seguir pedido →',
+    scheduledDelivery: 'Entrega: {{day}}',
   },
   status: {
     pendingQuote: 'Por cotizar',
@@ -32,6 +33,9 @@ export default {
     inRoute: 'En ruta',
     delivered: 'Entregado',
     cancelled: 'Cancelado',
+  },
+  scheduled: {
+    eyebrow: 'Entrega programada',
   },
   detail: {
     headerTitle: 'Pedido',
@@ -83,8 +87,8 @@ export default {
     subtotal: 'Subtotal',
     points: 'Puntos',
     credit: 'Crédito',
-    freeShippingApplied: 'Envío gratis aplicado',
     shipping: 'Envío',
+    surcharge: 'Recargo por distancia',
     toQuote: 'A cotizar',
     taxes: 'Impuestos',
     uponQuote: 'Al cotizar',

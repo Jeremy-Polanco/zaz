@@ -4,7 +4,7 @@ export default {
     lead: 'My',
     accent: 'subscription.',
   },
-  perks: 'Free water dispenser, free delivery and free maintenance.',
+  perks: 'Free bebedero and maintenance at no cost.',
   toast: {
     activated: 'Subscription activated! {{perks}}',
   },
@@ -27,13 +27,13 @@ export default {
   },
   cancelPending: {
     title: 'Active until {{date}}, will not renew.',
-    body: 'You still have free delivery and free maintenance until that date.',
+    body: 'You still have your bebedero and free maintenance until that date.',
     reactivating: 'Reactivating…',
     reactivate: 'Reactivate',
   },
   pastDue: {
     title: 'Your payment is pending.',
-    body: 'Update your payment method to keep your free delivery and free maintenance.',
+    body: 'Update your payment method to keep your bebedero and free maintenance.',
   },
   canceled: {
     title: 'Your subscription has ended.',

@@ -872,7 +872,7 @@ function ProductForm({
               sub={
                 state.requiresQuote
                   ? 'El pedido pasa por cotización de envío antes de pagar.'
-                  : 'El cliente pide y paga directo, sin cotización (ej: agua). Envío $0.'
+                  : 'El cliente pide y paga directo, sin cotización (ej: agua). Envío fijo (tarifa configurable en tu perfil).'
               }
               on={state.requiresQuote}
               onChange={(v) => setState((s) => ({ ...s, requiresQuote: v }))}

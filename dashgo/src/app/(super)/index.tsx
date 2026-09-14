@@ -26,6 +26,20 @@ import { SuscriptorBadge } from '../../components/SuscriptorBadge'
 import { QuoteBottomSheet } from '../../components/QuoteBottomSheet'
 import { LocationSelector } from '../../components/LocationSelector'
 
+// Corto para la card del panel: "mié 16 sep". Recortamos el mes a 3 letras a
+// mano porque Intl da "sept" (4) en es-ES, no "sep". Construido a partir de
+// las partes numéricas (no `new Date(isoDay)`) para no correr el día por
+// timezone — mismo criterio que formatDeliveryDay en lib/format.
+function shortDeliveryDay(isoDay: string): string {
+  const [y, m, d] = isoDay.split('-').map(Number)
+  const date = new Date(y, m - 1, d)
+  const weekday = new Intl.DateTimeFormat('es-ES', { weekday: 'short' }).format(date)
+  const month = new Intl.DateTimeFormat('es-ES', { month: 'short' })
+    .format(date)
+    .slice(0, 3)
+  return `${weekday} ${date.getDate()} ${month}`
+}
+
 function nextStatus(current: OrderStatus): OrderStatus | null {
   if (current === 'pending_validation') return 'confirmed_by_colmado'
   if (current === 'confirmed_by_colmado') return 'in_delivery_route'
@@ -109,6 +123,22 @@ function OrderCard({
                 ? formatAddressLine(order.deliveryAddress)
                 : 'A coordinar'}
             </Text>
+            {/*
+              La API ya devuelve `distanceMiles` (millas del repartidor a la
+              dirección de entrega) y la lista llega ORDENADA por ella —
+              activos más cerca primero, historial más reciente primero. Acá
+              solo la mostramos; nunca re-ordenamos en el cliente.
+            */}
+            {typeof order.distanceMiles === 'number' && (
+              <Text className="mt-0.5 font-sans text-[12px] uppercase tracking-label text-ink-muted">
+                {order.distanceMiles.toFixed(1)} mi
+              </Text>
+            )}
+            {order.scheduledDeliveryDate && (
+              <Text className="mt-0.5 font-sans text-[12px] uppercase tracking-label text-brand">
+                Entrega: {shortDeliveryDay(order.scheduledDeliveryDate)}
+              </Text>
+            )}
           </View>
           <View className="items-end gap-2">
             {isTerminal && <StatusBadge status={order.status} />}

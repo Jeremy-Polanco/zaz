@@ -6,7 +6,7 @@ export default {
   },
   // Copy canónico también exportado como SUBSCRIPTION_PERKS en
   // src/app/(tabs)/subscription.tsx (web↔mobile parity) — mantener idénticos.
-  perks: 'Bebedero gratis, envío gratis y mantenimiento sin costo.',
+  perks: 'Bebedero gratis y mantenimiento sin costo.',
   toast: {
     activated: '¡Suscripción activada! {{perks}}',
   },
@@ -29,13 +29,13 @@ export default {
   },
   cancelPending: {
     title: 'Activo hasta {{date}}, no se renovará.',
-    body: 'Aún tienes envío gratis y mantenimiento sin costo hasta esa fecha.',
+    body: 'Aún tienes tu bebedero y el mantenimiento sin costo hasta esa fecha.',
     reactivating: 'Reactivando…',
     reactivate: 'Reactivar',
   },
   pastDue: {
     title: 'Tu pago está pendiente.',
-    body: 'Actualizá tu medio de pago para seguir con el envío gratis y el mantenimiento sin costo.',
+    body: 'Actualizá tu medio de pago para seguir con tu bebedero y el mantenimiento sin costo.',
   },
   canceled: {
     title: 'Tu suscripción terminó.',

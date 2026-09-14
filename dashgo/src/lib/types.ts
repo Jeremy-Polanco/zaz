@@ -227,6 +227,14 @@ export interface Order {
   totalAmount: string
   /** Propina (digital-only, sin impuestos) — ya incluida en totalAmount. */
   tip?: string
+  /**
+   * Recargo por distancia — cargo APARTE del envío para clientes lejanos, ya
+   * incluido en `totalAmount`. Decimal string (ej. "3.00"), 0 en la mayoría
+   * de los pedidos. Columna separada de `shipping` a propósito: el envío
+   * gratis de suscriptor cubre el ENVÍO, no la DISTANCIA — si viviera dentro
+   * de `shipping` el cliente lejano viajaría gratis al suscribirse.
+   */
+  deliverySurcharge?: string
   paymentMethod: PaymentMethod
   stripePaymentIntentId: string | null
   paidAt: string | null
@@ -245,6 +253,20 @@ export interface Order {
   skipQuote?: boolean
   items: OrderItem[]
   createdAt: string
+  /**
+   * Miles from the driver's active location to the delivery address, 1
+   * decimal. Staff-only (GET /orders as super admin), null when unknown (no
+   * coords on the address, or no active driver location). Computed by the
+   * API — the app only displays it, never re-sorts by it (the list already
+   * arrives ordered: active orders nearest-first, history newest-first).
+   */
+  distanceMiles?: number | null
+  /**
+   * Día de reparto que el super admin le asigna a la orden, 'YYYY-MM-DD'
+   * (sin hora, sin zona horaria — es un DÍA, no un instante). null = sin
+   * asignar todavía. Editable en cualquier estado salvo delivered/cancelled.
+   */
+  scheduledDeliveryDate?: string | null
 }
 
 /** Admin dashboard — customer activity buckets (hoy / 7d / 30d). */
@@ -276,6 +298,16 @@ export interface AuthorizedIntent {
 export interface ShippingQuote {
   shippingCents: number
   miles: number | null
+}
+
+/**
+ * GET/PUT /shipping/rate — the flat shipping the API charges every order.
+ * Super-admin editable; GET is public (logged-out checkout preview needs it
+ * too). See DEFAULT_FLAT_SHIPPING_CENTS in lib/tax.ts for the client-side
+ * fallback used only when this can't be fetched.
+ */
+export interface ShippingRate {
+  shippingCents: number
 }
 
 export type PointsEntryType = 'earned' | 'redeemed' | 'expired'
@@ -330,6 +362,8 @@ export interface Invoice {
   subtotal: string
   pointsRedeemed: string
   shipping: string
+  /** Recargo por distancia — ya incluido en total. Decimal string, e.g. "3.00". */
+  deliverySurcharge?: string
   tax: string
   taxRate: string
   /** Propina snapshot — ya incluida en total. */

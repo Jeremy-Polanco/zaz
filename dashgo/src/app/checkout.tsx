@@ -16,12 +16,13 @@ import {
   useOrders,
   usePointsBalance,
   useProducts,
+  useShippingRate,
   useUpdateOrderStatus,
 } from '../lib/queries'
 import { userAddressToGeoAddress } from '../lib/address'
 import { formatCents } from '../lib/format'
 import { effectivePriceCentsFor, subscriberPriceWins } from '../lib/pricing'
-import { computeQuotePreviewCents } from '../lib/tax'
+import { computeQuotePreviewCents, DEFAULT_FLAT_SHIPPING_CENTS } from '../lib/tax'
 import type { PaymentMethod } from '../lib/types'
 import { Button, Eyebrow, Hairline } from '../components/ui'
 
@@ -178,9 +179,29 @@ export default function CheckoutScreen() {
       ? Math.round((subtotalCents * tipPercent) / 100)
       : 0
 
+  // Envío: la API cobra la tarifa vigente (GET /shipping/rate, $5 por
+  // defecto) en TODAS las órdenes, suscriptores incluidos — la suscripción
+  // ya no incluye envío gratis (mantiene el bebedero gratis, el
+  // mantenimiento sin costo y los precios de suscriptor). Aplica tanto a
+  // órdenes skip-quote (agua, auto-cotizadas) como a las que esperan
+  // cotización del repartidor.
+  //
+  // Pública (no gateada por sesión) — mientras carga (ni data ni error)
+  // shippingCents queda en null y la UI muestra "…" en vez de un total que
+  // después cambiaría. Si falla, caemos al default local en vez de trabar
+  // el checkout.
+  const { data: shippingRateData, isError: shippingRateIsError } =
+    useShippingRate()
+  const shippingCents =
+    shippingRateData?.shippingCents ??
+    (shippingRateIsError ? DEFAULT_FLAT_SHIPPING_CENTS : null)
+  const shippingLoading = shippingCents === null
+  const shippingCentsSafe = shippingCents ?? 0
+
   // Skip-cotización: when EVERY cart item has requiresQuote=false (e.g. water),
-  // the order is auto-quoted at creation — shipping $0, tax computed now. Show
-  // the real numbers instead of the "a cotizar" placeholders.
+  // the order is auto-quoted at creation — the flat shipping rate is charged
+  // (no free shipping for subscribers), tax computed now. Show the real
+  // numbers instead of the "a cotizar" placeholders.
   const allSkipQuote =
     lineItems.length > 0 &&
     lineItems.every((li) => li.product?.requiresQuote === false)
@@ -192,15 +213,18 @@ export default function CheckoutScreen() {
       sum + effectivePriceCentsFor(li.product, isActiveSubscriber) * li.quantity
     )
   }, 0)
+  // Usa shippingCentsSafe (0 mientras carga) para no trabar el cálculo — el
+  // número no se muestra hasta que shippingLoading sea false (ver JSX).
   const skipQuoteTaxCents = allSkipQuote
     ? computeQuotePreviewCents({
         subtotalCents,
-        shippingCents: 0,
+        shippingCents: shippingCentsSafe,
         pointsRedeemedCents: redeemCents,
         taxableSubtotalCents,
       }).taxCents
     : 0
-  const skipQuoteTotalCents = previewTotalCents + skipQuoteTaxCents + tipCents
+  const skipQuoteTotalCents =
+    previewTotalCents + shippingCentsSafe + skipQuoteTaxCents + tipCents
 
   // Section numbering: Propina appears only for digital, shifting later sections.
   const pagoNo = hasAddresses ? 3 : 2
@@ -808,20 +832,12 @@ export default function CheckoutScreen() {
             <Text className="font-sans text-[13px] uppercase tracking-label text-ink-muted">
               {t('totals.shipping')}
             </Text>
-            {allSkipQuote ? (
-              <Text className="font-sans text-[14px] text-green-700">{t('totals.free')}</Text>
-            ) : isActiveSubscriber ? (
-              <Text className="font-sans text-[14px] text-green-700">
-                {t('totals.freeWithSubscription')}
-              </Text>
-            ) : (
-              <Text
-                className="font-sans text-[14px] italic text-ink-muted"
-                style={{ fontVariant: ['tabular-nums'] }}
-              >
-                {t('totals.toQuote')}
-              </Text>
-            )}
+            <Text
+              className="font-sans text-[14px] text-ink"
+              style={{ fontVariant: ['tabular-nums'] }}
+            >
+              {shippingLoading ? '…' : formatCents(shippingCentsSafe)}
+            </Text>
           </View>
           <View className="mb-3 flex-row items-baseline justify-between">
             <Text className="font-sans text-[13px] uppercase tracking-label text-ink-muted">
@@ -832,7 +848,7 @@ export default function CheckoutScreen() {
                 className="font-sans text-[14px] text-ink"
                 style={{ fontVariant: ['tabular-nums'] }}
               >
-                {formatCents(skipQuoteTaxCents)}
+                {shippingLoading ? '…' : formatCents(skipQuoteTaxCents)}
               </Text>
             ) : (
               <Text
@@ -868,9 +884,13 @@ export default function CheckoutScreen() {
               className="font-sans-semibold text-[36px] text-brand"
               style={{ fontVariant: ['tabular-nums'] }}
             >
-              {formatCents(
-                allSkipQuote ? skipQuoteTotalCents : previewTotalCents + tipCents,
-              )}
+              {shippingLoading
+                ? '…'
+                : formatCents(
+                    allSkipQuote
+                      ? skipQuoteTotalCents
+                      : previewTotalCents + shippingCentsSafe + tipCents,
+                  )}
             </Text>
           </View>
           <Text className="mt-3 font-sans text-[13px] text-ink-muted">
@@ -921,7 +941,7 @@ export default function CheckoutScreen() {
             variant="accent"
             size="lg"
             loading={createOrder.isPending || confirmOrder.isPending}
-            disabled={hasMixedCart}
+            disabled={hasMixedCart || shippingLoading}
             onPress={onSubmit}
           >
             {t('submit')}

@@ -179,6 +179,14 @@ describe('subscription perks copy', () => {
     expect(SUBSCRIPTION_PERKS).toMatch(/bebedero/i)
     expect(SUBSCRIPTION_PERKS).toMatch(/gratis/i)
   })
+
+  // Owner decision 2026-09-14: the subscription no longer includes free
+  // shipping — only the free bebedero rental + maintenance + subscriber
+  // prices. Regression guard against reintroducing shipping-related perks
+  // copy here.
+  it('does NOT mention free shipping/delivery as a perk', () => {
+    expect(SUBSCRIPTION_PERKS).not.toMatch(/env[ií]o gratis|free (delivery|shipping)/i)
+  })
 })
 
 describe('SubscriptionTab — state: none (no subscription)', () => {

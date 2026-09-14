@@ -25,12 +25,15 @@ const CANCEL_URL = 'dashgo://subscription?cancel=1'
  * dashgo-web/src/routes/subscription.tsx). The free bebedero is a real benefit:
  * the API auto-provisions a $0 order for the product flagged
  * isDefaultSubscriberBebedero when a subscription activates, so we advertise it.
+ * The subscription no longer includes free shipping (owner decision,
+ * 2026-09-14) — every order pays the flat shipping rate ($5 default, admin-
+ * configurable via GET/PUT /shipping/rate), subscribers included.
  *
  * i18n: the screen renders t('subscription:perks'); the `es` locale value MUST
  * stay identical to this constant (tests assert both).
  */
 export const SUBSCRIPTION_PERKS =
-  'Bebedero gratis, envío gratis y mantenimiento sin costo.'
+  'Bebedero gratis y mantenimiento sin costo.'
 
 export default function SubscriptionTab() {
   const { t } = useTranslation('subscription')

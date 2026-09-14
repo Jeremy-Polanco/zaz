@@ -22,6 +22,7 @@ export default {
     digital: 'Digital',
     viewInvoice: 'View invoice →',
     trackOrder: 'Track order →',
+    scheduledDelivery: 'Delivery: {{day}}',
   },
   status: {
     pendingQuote: 'Awaiting quote',
@@ -32,6 +33,9 @@ export default {
     inRoute: 'On the way',
     delivered: 'Delivered',
     cancelled: 'Canceled',
+  },
+  scheduled: {
+    eyebrow: 'Scheduled delivery',
   },
   detail: {
     headerTitle: 'Order',
@@ -83,8 +87,8 @@ export default {
     subtotal: 'Subtotal',
     points: 'Points',
     credit: 'Credit',
-    freeShippingApplied: 'Free shipping applied',
     shipping: 'Shipping',
+    surcharge: 'Distance surcharge',
     toQuote: 'To be quoted',
     taxes: 'Taxes',
     uponQuote: 'Once quoted',

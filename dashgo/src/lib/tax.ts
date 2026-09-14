@@ -6,6 +6,17 @@
 export const TAX_RATE = 0.08887
 
 /**
+ * Fallback ONLY — used when the general delivery rate can't be fetched from
+ * the API (GET /shipping/rate). The super admin now controls the real rate
+ * from the app; this constant is just what we show if that call fails, so
+ * the checkout preview never blanks out. Every customer order ships for a
+ * flat fee — subscribers included. The subscription no longer implies free
+ * shipping (owner decision, 2026-09-14); it keeps the free bebedero rental,
+ * maintenance at no cost, and subscriber prices.
+ */
+export const DEFAULT_FLAT_SHIPPING_CENTS = 500
+
+/**
  * Gross (tax-inclusive) cents for a net amount: net + tax. Mirrors
  * computeGrossCents in dashgo-api/src/common/tax.ts. The subscription price
  * shown to the customer is gross; the backend already returns it tax-inclusive.

@@ -12,7 +12,7 @@ import {
   useConfirmNonStripeOrder,
 } from '../../../lib/queries'
 import type { Order } from '../../../lib/types'
-import { formatCents } from '../../../lib/format'
+import { formatCents, formatDeliveryDay } from '../../../lib/format'
 import { BreakdownRow, Button, Eyebrow, Hairline, StatusStepper } from '../../../components/ui'
 import { SuscriptorBadge } from '../../../components/SuscriptorBadge'
 import { ScreenHeader } from '../../../components/ScreenHeader'
@@ -77,7 +77,7 @@ function StatusLabel({
 }
 
 export default function OrderDetailScreen() {
-  const { t } = useTranslation('orders')
+  const { t, i18n } = useTranslation('orders')
   const { orderId, paid } = useLocalSearchParams<{
     orderId: string
     paid?: string
@@ -126,6 +126,9 @@ export default function OrderDetailScreen() {
 
   const subtotalCents = Math.round(parseFloat(order.subtotal) * 100)
   const shippingCents = Math.round(parseFloat(order.shipping) * 100)
+  const surchargeCents = Math.round(
+    parseFloat(order.deliverySurcharge ?? '0') * 100,
+  )
   const taxCents = Math.round(parseFloat(order.tax) * 100)
   const tipCents = Math.round(parseFloat(order.tip ?? '0') * 100)
   const pointsCents = Math.round(parseFloat(order.pointsRedeemed) * 100)
@@ -211,6 +214,14 @@ export default function OrderDetailScreen() {
               paymentMethod={order.paymentMethod}
             />
           </View>
+          {order.scheduledDeliveryDate && (
+            <View className="mt-4 border-l-4 border-brand bg-brand/10 p-4">
+              <Eyebrow tone="accent">{t('scheduled.eyebrow')}</Eyebrow>
+              <Text className="mt-1 font-sans-semibold text-[18px] text-ink">
+                {formatDeliveryDay(order.scheduledDeliveryDate, i18n.language)}
+              </Text>
+            </View>
+          )}
           {order.status !== 'cancelled' && (
             <View className="mb-6 mt-5">
               <StatusStepper status={order.status} variant="customer" />
@@ -454,39 +465,41 @@ export default function OrderDetailScreen() {
             {order.wasSubscriberAtQuote && order.status !== 'pending_quote' && (
               <View className="my-1 flex-row items-center gap-2">
                 <SuscriptorBadge wasSubscriber />
-                <Text className="font-sans text-[11px] text-ink-muted">
-                  {t('summary.freeShippingApplied')}
-                </Text>
               </View>
             )}
+            {/*
+              El envío ya viene fijo desde la creación de la orden (tarifa
+              vigente vía GET /shipping/rate, $5 por defecto, para TODOS,
+              suscriptores incluidos — la suscripción ya no exime del envío)
+              — incluso en pending_quote, así que ya no hay "A cotizar" para
+              el envío. Los impuestos SÍ dependen de la cotización del
+              repartidor, así que esa fila sigue mostrando el placeholder
+              hasta que haya cotización.
+            */}
+            <BreakdownRow
+              label={t('summary.shipping')}
+              value={formatCents(shippingCents)}
+            />
+            {surchargeCents > 0 && (
+              <BreakdownRow
+                label={t('summary.surcharge')}
+                value={formatCents(surchargeCents)}
+              />
+            )}
             {order.status === 'pending_quote' ? (
-              <>
-                <BreakdownRow
-                  label={t('summary.shipping')}
-                  value={t('summary.toQuote')}
-                  emphasis="muted"
-                  italic
-                />
-                <BreakdownRow
-                  label={t('summary.taxes')}
-                  value={t('summary.uponQuote')}
-                  emphasis="muted"
-                  italic
-                />
-              </>
+              <BreakdownRow
+                label={t('summary.taxes')}
+                value={t('summary.uponQuote')}
+                emphasis="muted"
+                italic
+              />
             ) : (
-              <>
-                <BreakdownRow
-                  label={t('summary.shipping')}
-                  value={formatCents(shippingCents)}
-                />
-                <BreakdownRow
-                  label={t('summary.taxesWithRate', {
-                    rate: (Number(order.taxRate) * 100).toFixed(3),
-                  })}
-                  value={formatCents(taxCents)}
-                />
-              </>
+              <BreakdownRow
+                label={t('summary.taxesWithRate', {
+                  rate: (Number(order.taxRate) * 100).toFixed(3),
+                })}
+                value={formatCents(taxCents)}
+              />
             )}
             {tipCents > 0 && (
               <BreakdownRow

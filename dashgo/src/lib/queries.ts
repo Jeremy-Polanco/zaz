@@ -40,6 +40,7 @@ import type {
   Rental,
   RentalFilter,
   ShippingQuote,
+  ShippingRate,
   Subscription,
   SubscriptionPlan,
   SubscriptionTier,
@@ -397,14 +398,49 @@ export function useUpdateOrderStatus() {
 export function useSetOrderQuote() {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: async (input: { id: string; shippingCents: number }) => {
-      const { data } = await api.patch<Order>(
-        `/orders/${input.id}/quote`,
-        { shippingCents: input.shippingCents },
-      )
+    mutationFn: async (input: {
+      id: string
+      shippingCents: number
+      /** Recargo por distancia. Omitirlo deja el que la orden ya tenga. */
+      surchargeCents?: number
+      /**
+       * Día de reparto 'YYYY-MM-DD'. `null` lo desasigna, omitirlo lo deja
+       * como está.
+       */
+      scheduledDeliveryDate?: string | null
+    }) => {
+      const { id, ...body } = input
+      const { data } = await api.patch<Order>(`/orders/${id}/quote`, body)
       return data
     },
     onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['orders'] })
+    },
+  })
+}
+
+/**
+ * Super-admin: PATCH /orders/:id/delivery-date — asigna o desasigna (`null`)
+ * el DÍA de reparto de una orden, INDEPENDIENTE de la cotización (a
+ * diferencia de useSetOrderQuote, funciona en cualquier estado salvo
+ * delivered/cancelled — lo valida el backend).
+ */
+export function useSetDeliveryDate() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (input: { id: string; scheduledDeliveryDate: string | null }) => {
+      const { data } = await api.patch<Order>(
+        `/orders/${input.id}/delivery-date`,
+        { scheduledDeliveryDate: input.scheduledDeliveryDate },
+      )
+      return data
+    },
+    // Igual que useUpdateOrderStatus: escribe la orden actualizada derecho en
+    // la cache de detalle para que el chip tocado quede seleccionado al toque,
+    // sin esperar el próximo refetch.
+    onSuccess: (order, vars) => {
+      qc.setQueryData(['order', vars.id], order)
+      qc.invalidateQueries({ queryKey: ['order', vars.id] })
       qc.invalidateQueries({ queryKey: ['orders'] })
     },
   })
@@ -853,6 +889,35 @@ export function useComputeShipping(input: ComputeShippingInput | null) {
   })
 }
 
+/**
+ * GET /shipping/rate — the general delivery rate in force. PUBLIC (works
+ * logged out): the checkout preview needs it before/without a session, so
+ * this is NOT gated on useCurrentUser.
+ */
+export function useShippingRate() {
+  return useQuery<ShippingRate>({
+    queryKey: ['shipping', 'rate'],
+    queryFn: async () =>
+      (await api.get<ShippingRate>('/shipping/rate')).data,
+    staleTime: 5 * 60_000,
+  })
+}
+
+/** Super-admin: PUT /shipping/rate — set the general delivery rate. */
+export function useUpdateShippingRate() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (input: ShippingRate) => {
+      const { data } = await api.put<ShippingRate>('/shipping/rate', input)
+      return data
+    },
+    onSuccess: (data) => {
+      qc.setQueryData(['shipping', 'rate'], data)
+      qc.invalidateQueries({ queryKey: ['shipping', 'rate'] })
+    },
+  })
+}
+
 export function useCreatePayout() {
   const qc = useQueryClient()
   return useMutation({
@@ -1082,6 +1147,34 @@ export function useDeleteUser() {
   return useMutation({
     mutationFn: async (id: string) => {
       await api.delete(`/users/${id}`)
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['users'] })
+    },
+  })
+}
+
+/**
+ * Super-admin: POST /users/sellers/:sellerId/transfer — mueve TODA la
+ * cartera de un vendedor a otro de una vez (en vez de reasignar cliente por
+ * cliente con useUpdateUserAdmin). `toSellerId: null` deja a esos clientes
+ * sin vendedor.
+ */
+export function useTransferSellerPortfolio() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async ({
+      sellerId,
+      toSellerId,
+    }: {
+      sellerId: string
+      toSellerId: string | null
+    }) => {
+      const { data } = await api.post<{ moved: number }>(
+        `/users/sellers/${sellerId}/transfer`,
+        { toSellerId },
+      )
+      return data
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['users'] })
