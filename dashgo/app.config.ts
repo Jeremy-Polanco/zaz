@@ -92,11 +92,12 @@ function resolveIosBuildNumber(): string {
   // Apple: error 90186 "train version '1.0.5' is closed" + 90062 "must contain
   // a higher version than the previously approved version". Una vez que Apple
   // APRUEBA una versión, su tren se cierra: subir sólo el buildNumber no
-  // alcanza, hay que subir `version`. Por eso 1.0.6, y 1.0.7 (build 19) el
-  // 2026-09-08 cuando la 1.0.6 (18) ya estaba aprobada.
+  // alcanza, hay que subir `version`. Por eso 1.0.6, 1.0.7 (build 19) el
+  // 2026-09-08 cuando la 1.0.6 (18) ya estaba aprobada, y 1.0.8 (build 20)
+  // el 2026-09-14 con envío fijo, día de entrega y traspaso de cartera.
   const fromEas = process.env.EAS_BUILD_NUMBER
   if (fromEas && fromEas.length > 0) return fromEas
-  return '19'
+  return '20'
 }
 
 function resolveAndroidVersionCode(): number {
@@ -109,7 +110,7 @@ function resolveAndroidVersionCode(): number {
   }
   // appVersionSource is 'local' — BUMP THIS by 1 before each Play upload,
   // same ritual as the iOS buildNumber above.
-  return 5
+  return 6
 }
 
 export default ({ config }: ConfigContext): ExpoConfig => {
@@ -123,7 +124,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     // EAS Update + App Store both require strict semver here. Apple closes a
     // version train once it's approved (error 90186), so every App Store
     // upload after a release MUST carry a higher version than the live one.
-    version: '1.0.7',
+    version: '1.0.8',
     orientation: 'portrait',
     icon: './assets/images/icon.png',
     scheme: 'dashgo',
