@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
 import { PushService } from '../notifications/push.service';
 import { OrderStatus } from '../../entities/enums';
+import { formatDeliveryDay } from '../../common/delivery-day';
 import type { Order } from '../../entities/order.entity';
 
 /**
@@ -83,6 +84,57 @@ export class OrderNotificationsService {
       .catch((err) =>
         this.logger.error(
           `order ${order.id} WhatsApp status notification (${order.status}) failed: ${
+            (err as Error).message
+          }`,
+        ),
+      );
+  }
+
+  /**
+   * "Te toca el miércoles": el admin le asignó un DÍA de reparto al pedido y el
+   * cliente se tiene que enterar. Pedido del dueño (2026-09-14), para el
+   * cliente lejano que no entra en el reparto de todos los días.
+   *
+   * Mismos dos canales y la misma política de no-tirar-nunca que notifyStatus:
+   * esto se llama al costado de un update ya commiteado, así que una caída de
+   * Expo o de Meta no puede voltear la operación del admin.
+   */
+  notifyScheduledDelivery(order: Order): void {
+    // Desasignar el día no notifica — no hay nada que avisarle al cliente
+    // todavía, y un "tu entrega quedó programada para null" sería peor.
+    if (!order.scheduledDeliveryDate) return;
+
+    const day = formatDeliveryDay(order.scheduledDeliveryDate);
+    // Frase en minúscula porque el template de WhatsApp la mete después de
+    // "Hola {{1}}, "; el push la capitaliza igual que en notifyStatus.
+    const phrase = `tu entrega quedó programada para el ${day}.`;
+
+    if (order.customerId) {
+      const body = phrase.charAt(0).toUpperCase() + phrase.slice(1);
+      void this.push
+        .sendToUser(order.customerId, 'Tu pedido Udash', body, {
+          orderId: order.id,
+          scheduledDeliveryDate: order.scheduledDeliveryDate,
+        })
+        .catch((err) =>
+          this.logger.error(
+            `order ${order.id} push notification (scheduled delivery) failed: ${
+              (err as Error).message
+            }`,
+          ),
+        );
+    }
+
+    const phone = order.customer?.phone;
+    if (!phone) return;
+    const firstName =
+      (order.customer?.fullName ?? '').trim().split(/\s+/)[0] || 'Hola';
+
+    void this.whatsapp
+      .sendTemplate(phone, this.templateName, [firstName, phrase])
+      .catch((err) =>
+        this.logger.error(
+          `order ${order.id} WhatsApp scheduled-delivery notification failed: ${
             (err as Error).message
           }`,
         ),

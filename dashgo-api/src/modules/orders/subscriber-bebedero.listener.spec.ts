@@ -42,6 +42,11 @@ describe('SubscriberBebederoListener', () => {
     await listener.handleSubscriptionActivated({ userId: 'user-9' });
 
     expect(rentals.findActiveByUserAndProduct).toHaveBeenCalledWith('user-9', 'prod-beb');
+    // `provisioned: true` es lo que deja la orden en $0: el envío fijo de $5 lo
+    // paga toda orden de cliente —el suscriptor tambien—, pero esta orden no la
+    // pidió nadie por checkout, la entrega ES el beneficio. Sin el flag la
+    // orden saldría $5 y deliverProvisionedOrder la rechazaría: el alquiler
+    // nunca se activaría.
     expect(orders.create).toHaveBeenCalledWith(
       { id: 'user-9', role: UserRole.CLIENT, email: null },
       {
@@ -50,6 +55,7 @@ describe('SubscriberBebederoListener', () => {
         usePoints: false,
         useCredit: false,
       },
+      { provisioned: true },
     );
   });
 
@@ -122,6 +128,8 @@ describe('SubscriberBebederoListener', () => {
           usePoints: false,
           useCredit: false,
         },
+        // El backfill provisiona igual que el evento: sin envío.
+        { provisioned: true },
       );
     });
 

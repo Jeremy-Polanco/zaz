@@ -92,6 +92,26 @@ export class Order {
   })
   shipping!: string;
 
+  /**
+   * Recargo por distancia — el "delivery aparte del envío" que el dueño le
+   * cobra al cliente lejano. Columna SEPARADA de `shipping` a propósito y por
+   * una razón de plata, no de estética: son DOS cargos distintos — el envío es
+   * el VIAJE (la tarifa plana que fija el super admin y paga toda orden de
+   * cliente) y el recargo es la DISTANCIA, que el admin tipea al cotizar. Si
+   * compartieran columna, perdonar el envío perdonaría también el recargo y el
+   * cliente lejano viajaría gratis.
+   *
+   * Se prorratea igual que el envío para el impuesto (ver common/tax.ts).
+   */
+  @Column({
+    name: 'delivery_surcharge',
+    type: 'numeric',
+    precision: 10,
+    scale: 2,
+    default: 0,
+  })
+  deliverySurcharge!: string;
+
   @Column({
     type: 'numeric',
     precision: 10,
@@ -177,6 +197,15 @@ export class Order {
   @Column({ name: 'quoted_at', type: 'timestamptz', nullable: true })
   quotedAt!: Date | null;
 
+  /**
+   * Día de entrega que el super-admin le asigna a la orden. `date` y no
+   * `timestamptz`: es un DÍA de reparto ("te toca el martes"), no un instante —
+   * guardarlo con hora arrastraría zona horaria y correría el día en el borde.
+   * Null = sin día asignado todavía.
+   */
+  @Column({ name: 'scheduled_delivery_date', type: 'date', nullable: true })
+  scheduledDeliveryDate!: string | null;
+
   @Column({ name: 'authorized_at', type: 'timestamptz', nullable: true })
   authorizedAt!: Date | null;
 
@@ -187,10 +216,14 @@ export class Order {
   wasSubscriberAtQuote!: boolean;
 
   // True when the order was created as skip-cotización (every item
-  // requiresQuote=false → auto-quoted, $0 shipping). Drives auto-confirm:
-  // such orders advance PENDING_VALIDATION → CONFIRMED_BY_COLMADO without an
-  // admin review step once paid/confirmed. NOT inferred from shipping=0
-  // (subscribers also get $0 shipping on normal orders).
+  // requiresQuote=false → se auto-cotiza al crearse, con el envío fijo ya
+  // cargado). Drives auto-confirm: such orders advance PENDING_VALIDATION →
+  // CONFIRMED_BY_COLMADO without an admin review step once paid/confirmed.
+  //
+  // NO se infiere de shipping=0 — es un flag persistido a propósito: el envío
+  // puede quedar en $0 por otros motivos (la orden que provisiona el sistema,
+  // o un envío que el admin perdona al cotizar) y eso no la vuelve
+  // skip-cotización.
   @Column({ name: 'skip_quote', type: 'boolean', default: false })
   skipQuote!: boolean;
 

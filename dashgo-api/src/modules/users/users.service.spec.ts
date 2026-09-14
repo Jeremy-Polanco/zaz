@@ -12,7 +12,11 @@
  * Repositories are injected as jest mocks. No real DB.
  */
 
-import { ForbiddenException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { UsersService } from './users.service';
@@ -590,5 +594,138 @@ describe('UsersService.deleteByAdmin', () => {
       NotFoundException,
     );
     expect(auth.deleteAccount).not.toHaveBeenCalled();
+  });
+});
+
+describe('UsersService.transferSellerPortfolio', () => {
+  let service: UsersService;
+  let userRepo: ReturnType<typeof makeUserRepoMock>;
+
+  beforeEach(async () => {
+    userRepo = makeUserRepoMock();
+    // El UPDATE masivo devuelve el `affected` de Postgres: es EL dato que el
+    // panel le muestra al dueño ("se movieron N clientes"), no un detalle.
+    userRepo.update.mockResolvedValue({ affected: 0 });
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        UsersService,
+        { provide: getRepositoryToken(User), useValue: userRepo },
+        { provide: AuthService, useValue: { deleteAccount: jest.fn() } },
+      ],
+    }).compile();
+    service = module.get<UsersService>(UsersService);
+  });
+
+  const seller = (id: string) => fakeUser({ id, role: UserRole.SELLER });
+
+  it('moves the whole book to the destination seller and returns the count', async () => {
+    userRepo.findOne
+      .mockResolvedValueOnce(seller('seller-1')) // origen
+      .mockResolvedValueOnce(seller('seller-2')); // destino
+    userRepo.update.mockResolvedValueOnce({ affected: 7 });
+
+    const result = await service.transferSellerPortfolio(
+      'seller-1',
+      'seller-2',
+    );
+
+    expect(result).toEqual({ moved: 7 });
+  });
+
+  it('moves the book in ONE single UPDATE (no per-row loop)', async () => {
+    // Una cartera son cientos de clientes: iterando, un corte a mitad de camino
+    // deja media cartera con cada vendedor y nadie sabe cuál es cuál.
+    userRepo.findOne
+      .mockResolvedValueOnce(seller('seller-1'))
+      .mockResolvedValueOnce(seller('seller-2'));
+    userRepo.update.mockResolvedValueOnce({ affected: 3 });
+
+    await service.transferSellerPortfolio('seller-1', 'seller-2');
+
+    expect(userRepo.update).toHaveBeenCalledTimes(1);
+    expect(userRepo.update).toHaveBeenCalledWith(
+      { sellerId: 'seller-1' },
+      { sellerId: 'seller-2' },
+    );
+  });
+
+  it('with toSellerId null it unassigns the whole book (no destination lookup)', async () => {
+    userRepo.findOne.mockResolvedValueOnce(seller('seller-1'));
+    userRepo.update.mockResolvedValueOnce({ affected: 4 });
+
+    const result = await service.transferSellerPortfolio('seller-1', null);
+
+    expect(result).toEqual({ moved: 4 });
+    expect(userRepo.findOne).toHaveBeenCalledTimes(1); // solo el origen
+    expect(userRepo.update).toHaveBeenCalledWith(
+      { sellerId: 'seller-1' },
+      { sellerId: null },
+    );
+  });
+
+  it('reports 0 when the seller had no customers', async () => {
+    // Postgres puede devolver `affected` undefined; 0 es lo que el panel
+    // entiende, no un NaN ni un "undefined clientes movidos".
+    userRepo.findOne
+      .mockResolvedValueOnce(seller('seller-1'))
+      .mockResolvedValueOnce(seller('seller-2'));
+    userRepo.update.mockResolvedValueOnce({ affected: undefined });
+
+    await expect(
+      service.transferSellerPortfolio('seller-1', 'seller-2'),
+    ).resolves.toEqual({ moved: 0 });
+  });
+
+  it('rejects transferring a seller to themselves', async () => {
+    userRepo.findOne.mockResolvedValueOnce(seller('seller-1'));
+
+    await expect(
+      service.transferSellerPortfolio('seller-1', 'seller-1'),
+    ).rejects.toThrow('El vendedor de origen y destino son el mismo');
+    expect(userRepo.update).not.toHaveBeenCalled();
+  });
+
+  it('rejects a destination that is NOT a seller', async () => {
+    userRepo.findOne
+      .mockResolvedValueOnce(seller('seller-1'))
+      .mockResolvedValueOnce(fakeUser({ id: 'other-1', role: UserRole.CLIENT }));
+
+    await expect(
+      service.transferSellerPortfolio('seller-1', 'other-1'),
+    ).rejects.toThrow(BadRequestException);
+    expect(userRepo.update).not.toHaveBeenCalled();
+  });
+
+  it('rejects a destination that does not exist', async () => {
+    userRepo.findOne
+      .mockResolvedValueOnce(seller('seller-1'))
+      .mockResolvedValueOnce(null);
+
+    await expect(
+      service.transferSellerPortfolio('seller-1', 'ghost'),
+    ).rejects.toThrow(BadRequestException);
+    expect(userRepo.update).not.toHaveBeenCalled();
+  });
+
+  it('throws NotFound when the origin does not exist', async () => {
+    userRepo.findOne.mockResolvedValueOnce(null);
+
+    await expect(
+      service.transferSellerPortfolio('ghost', null),
+    ).rejects.toThrow('Vendedor no encontrado');
+    expect(userRepo.update).not.toHaveBeenCalled();
+  });
+
+  it('throws NotFound when the origin exists but is NOT a seller', async () => {
+    // Mover "la cartera" de un cliente no es un no-op inofensivo: si alguien se
+    // equivoca de id, el UPDATE tocaría filas que nadie quiso tocar.
+    userRepo.findOne.mockResolvedValueOnce(
+      fakeUser({ id: 'client-1', role: UserRole.CLIENT }),
+    );
+
+    await expect(
+      service.transferSellerPortfolio('client-1', 'seller-2'),
+    ).rejects.toThrow(NotFoundException);
+    expect(userRepo.update).not.toHaveBeenCalled();
   });
 });

@@ -136,6 +136,11 @@ export class SubscriberBebederoListener implements OnApplicationBootstrap {
           usePoints: false,
           useCredit: false,
         },
+        // Sin envío: el envío fijo lo paga toda orden de cliente —el suscriptor
+        // también—, pero ésta no la pidió nadie por checkout, la entrega ES el
+        // beneficio. Con $5 encima la orden dejaría de ser de $0 y
+        // deliverProvisionedOrder la rechazaría.
+        { provisioned: true },
       );
       this.logger.log(
         `Auto-created free bebedero order for subscriber ${userId}`,

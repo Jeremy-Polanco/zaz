@@ -28,6 +28,7 @@ import { PromotersService } from '../promoters/promoters.service';
 import { SellersService } from '../sellers/sellers.service';
 import { SubscriptionTier } from '../../entities/subscription-plan.entity';
 import { ShippingService } from '../shipping/shipping.service';
+import { ShippingRateService } from '../shipping/shipping-rate.service';
 import { CreditService } from '../credit/credit.service';
 import { SubscriptionService } from '../subscription/subscription.service';
 import { TwilioService } from '../twilio/twilio.service';
@@ -63,9 +64,9 @@ function fakeProduct(overrides: Partial<Product> = {}): Product {
     name: 'Test Product',
     isAvailable: true,
     stock: 10,
-    requiresQuote: true,         // default — orders need a manual cotización
-    priceToPublic: '5.00',       // getEffectivePrice reads this; 5.00 → 500 cents
-    priceCents: 500,             // legacy field used in tests that cast to unknown
+    requiresQuote: true, // default — orders need a manual cotización
+    priceToPublic: '5.00', // getEffectivePrice reads this; 5.00 → 500 cents
+    priceCents: 500, // legacy field used in tests that cast to unknown
     salePrice: null,
     salePriceStart: null,
     salePriceEnd: null,
@@ -111,6 +112,8 @@ function fakeOrder(overrides: Partial<Order> = {}): Order {
     subtotal: '10.00',
     pointsRedeemed: '0.00',
     shipping: '0.00',
+    deliverySurcharge: '0.00',
+    scheduledDeliveryDate: null,
     tax: '0.00',
     taxRate: '0.08887',
     taxableSubtotal: '0.00',
@@ -149,11 +152,15 @@ describe('OrdersService', () => {
   let promotersService: jest.Mocked<PromotersService>;
   let sellersService: jest.Mocked<SellersService>;
   let shippingService: jest.Mocked<ShippingService>;
+  let shippingRateService: jest.Mocked<ShippingRateService>;
   let creditService: jest.Mocked<CreditService>;
   let subscriptionService: jest.Mocked<SubscriptionService>;
   let twilioService: jest.Mocked<TwilioService>;
   let rentalsService: jest.Mocked<RentalsService>;
-  let orderNotifications: { notifyStatus: jest.Mock };
+  let orderNotifications: {
+    notifyStatus: jest.Mock;
+    notifyScheduledDelivery: jest.Mock;
+  };
 
   beforeEach(async () => {
     ordersRepo = makeRepoMock<Order>();
@@ -182,11 +189,8 @@ describe('OrdersService', () => {
     } as unknown as jest.Mocked<InvoicesService>;
 
     sellersService = {
-
       creditCommissionsForOrder: jest.fn().mockResolvedValue(undefined),
-
     } as unknown as jest.Mocked<SellersService>;
-
 
     promotersService = {
       creditCommissionsForOrder: jest.fn(),
@@ -194,7 +198,16 @@ describe('OrdersService', () => {
 
     shippingService = {
       computeQuote: jest.fn().mockResolvedValue({ shippingCents: 0 }),
+      getOrigin: jest.fn().mockResolvedValue(null),
     } as unknown as jest.Mocked<ShippingService>;
+
+    // La tarifa plana ya no es una constante: la lee OrdersService en cada
+    // create(). Se mockea en 500 (el default) para que los tests viejos sigan
+    // hablando de los $5 de siempre.
+    shippingRateService = {
+      getFlatShippingCents: jest.fn().mockResolvedValue(500),
+      setFlatShippingCents: jest.fn((cents: number) => Promise.resolve(cents)),
+    } as unknown as jest.Mocked<ShippingRateService>;
 
     creditService = {
       assertNotOverdue: jest.fn().mockResolvedValue(undefined),
@@ -206,7 +219,9 @@ describe('OrdersService', () => {
 
     subscriptionService = {
       isActiveSubscriber: jest.fn().mockResolvedValue(false),
-      getOrCreateStripeCustomer: jest.fn().mockResolvedValue('cus_test_default'),
+      getOrCreateStripeCustomer: jest
+        .fn()
+        .mockResolvedValue('cus_test_default'),
       getPlanNetCents: jest.fn().mockResolvedValue(699),
       getActiveTier: jest.fn().mockResolvedValue(null),
     } as unknown as jest.Mocked<SubscriptionService>;
@@ -218,7 +233,7 @@ describe('OrdersService', () => {
     rentalsService = {
       findActiveByUserAndProduct: jest.fn().mockResolvedValue(null),
       activateRentalsForOrder: jest.fn().mockResolvedValue([]),
-      activateForOrder: jest.fn().mockResolvedValue({} as never),
+      activateForOrder: jest.fn().mockResolvedValue({}),
       createForOrder: jest.fn().mockResolvedValue({}),
       cancelPendingForOrder: jest.fn().mockResolvedValue(undefined),
       getOrderIdsWithRentals: jest.fn().mockResolvedValue([]),
@@ -240,7 +255,10 @@ describe('OrdersService', () => {
       query: jest.fn(),
     } as unknown as jest.Mocked<DataSource>;
 
-    orderNotifications = { notifyStatus: jest.fn() };
+    orderNotifications = {
+      notifyStatus: jest.fn(),
+      notifyScheduledDelivery: jest.fn(),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -248,7 +266,10 @@ describe('OrdersService', () => {
         { provide: getRepositoryToken(Order), useValue: ordersRepo },
         { provide: getRepositoryToken(OrderItem), useValue: itemsRepo },
         { provide: getRepositoryToken(Product), useValue: productsRepo },
-        { provide: getRepositoryToken(UserAddress), useValue: userAddressesRepo },
+        {
+          provide: getRepositoryToken(UserAddress),
+          useValue: userAddressesRepo,
+        },
         { provide: DataSource, useValue: dataSource },
         { provide: PaymentsService, useValue: paymentsService },
         { provide: PointsService, useValue: pointsService },
@@ -256,6 +277,7 @@ describe('OrdersService', () => {
         { provide: PromotersService, useValue: promotersService },
         { provide: SellersService, useValue: sellersService },
         { provide: ShippingService, useValue: shippingService },
+        { provide: ShippingRateService, useValue: shippingRateService },
         { provide: CreditService, useValue: creditService },
         { provide: SubscriptionService, useValue: subscriptionService },
         { provide: TwilioService, useValue: twilioService },
@@ -289,9 +311,9 @@ describe('OrdersService', () => {
     tryAutoConfirmFreeOrder(orderId: string): Promise<void>;
   };
   const callAutoConfirmFree = (orderId: string) =>
-    (
-      service as unknown as AutoConfirmFreeTarget
-    ).tryAutoConfirmFreeOrder(orderId);
+    (service as unknown as AutoConfirmFreeTarget).tryAutoConfirmFreeOrder(
+      orderId,
+    );
   const spyAutoConfirmFree = () =>
     jest
       .spyOn(
@@ -312,7 +334,9 @@ describe('OrdersService', () => {
       });
 
     it('auto-confirms a skip-quote order after cash confirm (decrements stock)', async () => {
-      ordersRepo.findOne.mockResolvedValue(quotedCashOrder({ skipQuote: true }));
+      ordersRepo.findOne.mockResolvedValue(
+        quotedCashOrder({ skipQuote: true }),
+      );
       ordersRepo.update.mockResolvedValue({} as never);
       const confirmSpy = spyConfirmStock();
 
@@ -340,7 +364,9 @@ describe('OrdersService', () => {
     });
 
     it('is non-blocking: insufficient stock leaves the order in PENDING_VALIDATION', async () => {
-      ordersRepo.findOne.mockResolvedValue(quotedCashOrder({ skipQuote: true }));
+      ordersRepo.findOne.mockResolvedValue(
+        quotedCashOrder({ skipQuote: true }),
+      );
       ordersRepo.update.mockResolvedValue({} as never);
       jest
         .spyOn(
@@ -453,6 +479,28 @@ describe('OrdersService', () => {
       expect(confirmSpy).not.toHaveBeenCalled();
     });
 
+    it('auto-confirma una orden skip_quote cash con envío fijo $5', async () => {
+      // En skip-cotización el cliente ya aceptó el total FINAL (envío incluido)
+      // en el checkout. El guard de envío protege a la orden cotizada por el
+      // admin, que el cliente todavía no vio — no a ésta.
+      ordersRepo.findOne.mockResolvedValue(
+        freeQuotedCash({
+          skipQuote: true,
+          shipping: '5.00',
+          totalAmount: '16.33',
+        }),
+      );
+      ordersRepo.update.mockResolvedValue({} as never);
+      const confirmSpy = spyConfirmStock();
+
+      await callAutoConfirmFree('order-1');
+
+      expect(ordersRepo.update).toHaveBeenCalledWith('order-1', {
+        status: OrderStatus.PENDING_VALIDATION,
+      });
+      expect(confirmSpy).toHaveBeenCalledWith('order-1');
+    });
+
     it('does NOT auto-confirm a digital order that still owes a card charge', async () => {
       ordersRepo.findOne.mockResolvedValue(
         freeQuotedCash({
@@ -470,7 +518,10 @@ describe('OrdersService', () => {
 
     it('auto-confirms a $0 digital order (nothing owed by card)', async () => {
       ordersRepo.findOne.mockResolvedValue(
-        freeQuotedCash({ paymentMethod: PaymentMethod.DIGITAL, totalAmount: '0.00' }),
+        freeQuotedCash({
+          paymentMethod: PaymentMethod.DIGITAL,
+          totalAmount: '0.00',
+        }),
       );
       ordersRepo.update.mockResolvedValue({} as never);
       const confirmSpy = spyConfirmStock();
@@ -556,7 +607,9 @@ describe('OrdersService', () => {
         .mockResolvedValueOnce(
           fakeOrder({ id: 'o1', status: OrderStatus.CONFIRMED_BY_COLMADO }),
         )
-        .mockResolvedValueOnce(fakeOrder({ id: 'o2', status: OrderStatus.QUOTED }));
+        .mockResolvedValueOnce(
+          fakeOrder({ id: 'o2', status: OrderStatus.QUOTED }),
+        );
 
       const result = await service.backfillAutoConfirmFreeShippingOrders();
 
@@ -677,9 +730,9 @@ describe('OrdersService', () => {
         ),
       );
 
-      await expect(service.create(fakeUser(UserRole.CLIENT), dto)).rejects.toThrow(
-        HttpException,
-      );
+      await expect(
+        service.create(fakeUser(UserRole.CLIENT), dto),
+      ).rejects.toThrow(HttpException);
 
       // Verify assertNotOverdue was called before any product fetch
       expect(creditService.assertNotOverdue).toHaveBeenCalledWith('user-1');
@@ -703,12 +756,17 @@ describe('OrdersService', () => {
       productsRepo.find.mockResolvedValue([fakeProduct()]);
 
       const savedOrder = fakeOrder({});
-      const orderWithItems = fakeOrder({ customer: fakeUser() as never, items: [] });
+      const orderWithItems = fakeOrder({
+        customer: fakeUser() as never,
+        items: [],
+      });
       (dataSource.transaction as jest.Mock).mockImplementation(
         async (cb: (mgr: EntityManager) => Promise<unknown>) => {
           const orderRepo = makeRepoMock<Order>();
           const itemRepo = makeRepoMock<OrderItem>();
-          orderRepo.create.mockImplementation((d) => ({ ...d, id: 'order-1' }) as Order);
+          orderRepo.create.mockImplementation(
+            (d) => ({ ...d, id: 'order-1' }) as Order,
+          );
           orderRepo.save.mockResolvedValue(savedOrder);
           orderRepo.update.mockResolvedValue({ affected: 1 } as never);
           itemRepo.save.mockResolvedValue({} as never);
@@ -739,8 +797,12 @@ describe('OrdersService', () => {
         creditLimitCents: 200,
         userId: 'user-1',
       };
-      creditService.getAccountWithLock.mockResolvedValue(creditAccount as never);
-      creditService.applyCharge.mockResolvedValue({ amountCents: 500 } as never);
+      creditService.getAccountWithLock.mockResolvedValue(
+        creditAccount as never,
+      );
+      creditService.applyCharge.mockResolvedValue({
+        amountCents: 500,
+      } as never);
 
       const savedOrder = fakeOrder({ creditApplied: '5.00' });
       const orderWithItems = fakeOrder({
@@ -750,24 +812,28 @@ describe('OrdersService', () => {
       });
 
       // Simulate transaction: call the callback with a mock entity manager
-      (dataSource.transaction as jest.Mock).mockImplementation(async (cb: (mgr: EntityManager) => Promise<unknown>) => {
-        const orderRepo = makeRepoMock<Order>();
-        const itemRepo = makeRepoMock<OrderItem>();
-        orderRepo.create.mockImplementation((dto) => ({ ...dto, id: 'order-1' }) as Order);
-        orderRepo.save.mockResolvedValue(savedOrder);
-        orderRepo.update.mockResolvedValue({ affected: 1 } as never);
-        itemRepo.save.mockResolvedValue({} as never);
-        itemRepo.create.mockImplementation((dto) => dto as OrderItem);
+      (dataSource.transaction as jest.Mock).mockImplementation(
+        async (cb: (mgr: EntityManager) => Promise<unknown>) => {
+          const orderRepo = makeRepoMock<Order>();
+          const itemRepo = makeRepoMock<OrderItem>();
+          orderRepo.create.mockImplementation(
+            (dto) => ({ ...dto, id: 'order-1' }) as Order,
+          );
+          orderRepo.save.mockResolvedValue(savedOrder);
+          orderRepo.update.mockResolvedValue({ affected: 1 } as never);
+          itemRepo.save.mockResolvedValue({} as never);
+          itemRepo.create.mockImplementation((dto) => dto as OrderItem);
 
-        const mgr = {
-          getRepository: (entity: unknown) => {
-            if (entity === Order) return orderRepo;
-            if (entity === OrderItem) return itemRepo;
-            return makeRepoMock();
-          },
-        };
-        return cb(mgr as unknown as EntityManager);
-      });
+          const mgr = {
+            getRepository: (entity: unknown) => {
+              if (entity === Order) return orderRepo;
+              if (entity === OrderItem) return itemRepo;
+              return makeRepoMock();
+            },
+          };
+          return cb(mgr as unknown as EntityManager);
+        },
+      );
 
       // findOne returns the order with customer relation
       ordersRepo.findOne.mockResolvedValue(orderWithItems);
@@ -784,26 +850,32 @@ describe('OrdersService', () => {
       productsRepo.find.mockResolvedValue([fakeProduct()]);
 
       const savedOrder = fakeOrder({ creditApplied: '0.00' });
-      (dataSource.transaction as jest.Mock).mockImplementation(async (cb: (mgr: EntityManager) => Promise<unknown>) => {
-        const orderRepo = makeRepoMock<Order>();
-        const itemRepo = makeRepoMock<OrderItem>();
-        orderRepo.create.mockImplementation((d) => ({ ...d, id: 'order-1' }) as Order);
-        orderRepo.save.mockResolvedValue(savedOrder);
-        orderRepo.update.mockResolvedValue({ affected: 1 } as never);
-        itemRepo.save.mockResolvedValue({} as never);
-        itemRepo.create.mockImplementation((d) => d as OrderItem);
+      (dataSource.transaction as jest.Mock).mockImplementation(
+        async (cb: (mgr: EntityManager) => Promise<unknown>) => {
+          const orderRepo = makeRepoMock<Order>();
+          const itemRepo = makeRepoMock<OrderItem>();
+          orderRepo.create.mockImplementation(
+            (d) => ({ ...d, id: 'order-1' }) as Order,
+          );
+          orderRepo.save.mockResolvedValue(savedOrder);
+          orderRepo.update.mockResolvedValue({ affected: 1 } as never);
+          itemRepo.save.mockResolvedValue({} as never);
+          itemRepo.create.mockImplementation((d) => d as OrderItem);
 
-        const mgr = {
-          getRepository: (entity: unknown) => {
-            if (entity === Order) return orderRepo;
-            if (entity === OrderItem) return itemRepo;
-            return makeRepoMock();
-          },
-        };
-        return cb(mgr as unknown as EntityManager);
-      });
+          const mgr = {
+            getRepository: (entity: unknown) => {
+              if (entity === Order) return orderRepo;
+              if (entity === OrderItem) return itemRepo;
+              return makeRepoMock();
+            },
+          };
+          return cb(mgr as unknown as EntityManager);
+        },
+      );
 
-      ordersRepo.findOne.mockResolvedValue(fakeOrder({ customer: fakeUser() as never }));
+      ordersRepo.findOne.mockResolvedValue(
+        fakeOrder({ customer: fakeUser() as never }),
+      );
 
       await service.create(fakeUser(UserRole.PROMOTER), {
         ...dto,
@@ -843,7 +915,9 @@ describe('OrdersService', () => {
         async (cb: (mgr: EntityManager) => Promise<unknown>) => {
           const orderRepo = makeRepoMock<Order>();
           const itemRepo = makeRepoMock<OrderItem>();
-          orderRepo.create.mockImplementation((d) => ({ ...d, id: 'order-1' }) as Order);
+          orderRepo.create.mockImplementation(
+            (d) => ({ ...d, id: 'order-1' }) as Order,
+          );
           orderRepo.save.mockResolvedValue(savedOrder);
           orderRepo.update.mockResolvedValue({ affected: 1 } as never);
           itemRepo.save.mockResolvedValue({} as never);
@@ -880,7 +954,11 @@ describe('OrdersService', () => {
       setupSuccessfulCreate();
 
       // sendOrderNotificationSms hangs forever — create() must still resolve
-      twilioService.sendOrderNotificationSms.mockReturnValue(new Promise(() => {/* never resolves */}));
+      twilioService.sendOrderNotificationSms.mockReturnValue(
+        new Promise(() => {
+          /* never resolves */
+        }),
+      );
 
       const resultPromise = service.create(fakeUser(UserRole.CLIENT), dto);
 
@@ -889,7 +967,10 @@ describe('OrdersService', () => {
       const result = await Promise.race([
         resultPromise,
         new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error('create() was blocked by SMS')), 500),
+          setTimeout(
+            () => reject(new Error('create() was blocked by SMS')),
+            500,
+          ),
         ),
       ]);
 
@@ -904,7 +985,9 @@ describe('OrdersService', () => {
       );
 
       // create() must resolve (not reject) despite SMS failure
-      await expect(service.create(fakeUser(UserRole.CLIENT), dto)).resolves.toBeDefined();
+      await expect(
+        service.create(fakeUser(UserRole.CLIENT), dto),
+      ).resolves.toBeDefined();
     });
   });
 
@@ -919,7 +1002,9 @@ describe('OrdersService', () => {
         creditApplied: '5.00',
         customer: fakeUser() as never,
       });
-      creditService.reverseCharge.mockResolvedValue({ amountCents: 500 } as never);
+      creditService.reverseCharge.mockResolvedValue({
+        amountCents: 500,
+      } as never);
 
       const cancelledOrder = fakeOrder({
         status: OrderStatus.CANCELLED,
@@ -927,18 +1012,20 @@ describe('OrdersService', () => {
       });
 
       // Transaction mock for the cancel branch
-      (dataSource.transaction as jest.Mock).mockImplementation(async (cb: (mgr: EntityManager) => Promise<unknown>) => {
-        const orderRepo = makeRepoMock<Order>();
-        orderRepo.update.mockResolvedValue({ affected: 1 } as never);
+      (dataSource.transaction as jest.Mock).mockImplementation(
+        async (cb: (mgr: EntityManager) => Promise<unknown>) => {
+          const orderRepo = makeRepoMock<Order>();
+          orderRepo.update.mockResolvedValue({ affected: 1 } as never);
 
-        const mgr = {
-          getRepository: (entity: unknown) => {
-            if (entity === Order) return orderRepo;
-            return makeRepoMock();
-          },
-        };
-        return cb(mgr as unknown as EntityManager);
-      });
+          const mgr = {
+            getRepository: (entity: unknown) => {
+              if (entity === Order) return orderRepo;
+              return makeRepoMock();
+            },
+          };
+          return cb(mgr as unknown as EntityManager);
+        },
+      );
 
       // Set up findOne responses in order: first for the lookup, second for the final read
       ordersRepo.findOne
@@ -965,25 +1052,30 @@ describe('OrdersService', () => {
         creditApplied: '0.00',
         customer: fakeUser() as never,
       });
-      const cancelledOrder = fakeOrder({ status: OrderStatus.CANCELLED, customer: fakeUser() as never });
+      const cancelledOrder = fakeOrder({
+        status: OrderStatus.CANCELLED,
+        customer: fakeUser() as never,
+      });
 
       // Reset findOne to return fresh values for this test
       ordersRepo.findOne
         .mockReset()
-        .mockResolvedValueOnce(order)      // first call inside updateStatus → findOne
+        .mockResolvedValueOnce(order) // first call inside updateStatus → findOne
         .mockResolvedValueOnce(cancelledOrder); // second call at end of updateStatus
 
-      (dataSource.transaction as jest.Mock).mockImplementation(async (cb: (mgr: EntityManager) => Promise<unknown>) => {
-        const orderRepo = makeRepoMock<Order>();
-        orderRepo.update.mockResolvedValue({ affected: 1 } as never);
-        const mgr = {
-          getRepository: (entity: unknown) => {
-            if (entity === Order) return orderRepo;
-            return makeRepoMock();
-          },
-        };
-        return cb(mgr as unknown as EntityManager);
-      });
+      (dataSource.transaction as jest.Mock).mockImplementation(
+        async (cb: (mgr: EntityManager) => Promise<unknown>) => {
+          const orderRepo = makeRepoMock<Order>();
+          orderRepo.update.mockResolvedValue({ affected: 1 } as never);
+          const mgr = {
+            getRepository: (entity: unknown) => {
+              if (entity === Order) return orderRepo;
+              return makeRepoMock();
+            },
+          };
+          return cb(mgr as unknown as EntityManager);
+        },
+      );
 
       await service.updateStatus(
         'order-1',
@@ -996,13 +1088,17 @@ describe('OrdersService', () => {
   });
 
   // -------------------------------------------------------------------------
-  // setQuote — subscription shipping override
+  // setQuote — el envío que tipea el admin se cobra a todos
+  //
+  // Regla del dueño (2026-09-14): "los suscriptores tampoco van a tener el
+  // envío gratis". La suscripción ya no perdona el viaje, así que setQuote ya
+  // no pisa el monto cotizado: `wasSubscriberAtQuote` queda sólo como dato.
   // -------------------------------------------------------------------------
 
   describe('setQuote', () => {
     const superUser = fakeUser(UserRole.SUPER_ADMIN_DELIVERY);
 
-    it('active subscriber gets free shipping (override to 0) and wasSubscriberAtQuote=true', async () => {
+    it('el suscriptor paga el envío que cotiza el admin; wasSubscriberAtQuote sigue en true', async () => {
       const order = fakeOrder({
         status: OrderStatus.PENDING_QUOTE,
         customerId: 'user-1',
@@ -1012,7 +1108,11 @@ describe('OrdersService', () => {
       });
       ordersRepo.findOne
         .mockResolvedValueOnce(order) // inside findOne called by setQuote
-        .mockResolvedValueOnce({ ...order, shipping: '0.00', wasSubscriberAtQuote: true } as never);
+        .mockResolvedValueOnce({
+          ...order,
+          shipping: '3.00',
+          wasSubscriberAtQuote: true,
+        });
 
       subscriptionService.isActiveSubscriber.mockResolvedValue(true);
       ordersRepo.update.mockResolvedValue({ affected: 1 } as never);
@@ -1022,9 +1122,15 @@ describe('OrdersService', () => {
 
       await service.setQuote('order-1', 300 /* admin quoted 3.00 */, superUser);
 
-      const updateCall = ordersRepo.update.mock.calls[0][1] as Record<string, unknown>;
-      // Free-shipping override: subscribers pay 0 regardless of admin-quoted amount
-      expect(updateCall.shipping).toBe('0.00');
+      const updateCall = ordersRepo.update.mock.calls[0][1] as Record<
+        string,
+        unknown
+      >;
+      // Sin override: el suscriptor paga exactamente lo que cotizó el admin.
+      expect(updateCall.shipping).toBe('3.00');
+      // 1000 + 300 = 1300 gravable → round(1300 * 0.08887) = 116
+      expect(updateCall.tax).toBe('1.16');
+      expect(updateCall.totalAmount).toBe('14.16');
       expect(ordersRepo.update).toHaveBeenCalledWith(
         'order-1',
         expect.objectContaining({
@@ -1041,9 +1147,11 @@ describe('OrdersService', () => {
         subtotal: '10.00',
         pointsRedeemed: '0.00',
       });
-      ordersRepo.findOne
-        .mockResolvedValueOnce(order)
-        .mockResolvedValueOnce({ ...order, shipping: '3.00', wasSubscriberAtQuote: false } as never);
+      ordersRepo.findOne.mockResolvedValueOnce(order).mockResolvedValueOnce({
+        ...order,
+        shipping: '3.00',
+        wasSubscriberAtQuote: false,
+      });
 
       subscriptionService.isActiveSubscriber.mockResolvedValue(false);
       ordersRepo.update.mockResolvedValue({ affected: 1 } as never);
@@ -1057,11 +1165,14 @@ describe('OrdersService', () => {
         }),
       );
       // Shipping should be non-zero
-      const updateCall = ordersRepo.update.mock.calls[0][1] as Record<string, unknown>;
+      const updateCall = ordersRepo.update.mock.calls[0][1] as Record<
+        string,
+        unknown
+      >;
       expect(updateCall.shipping).not.toBe('0.00');
     });
 
-    it('auto-confirms after quoting when shipping is free (subscriber benefit)', async () => {
+    it('auto-confirms after quoting when the admin quotes $0 shipping', async () => {
       const order = fakeOrder({
         status: OrderStatus.PENDING_QUOTE,
         customerId: 'user-1',
@@ -1071,12 +1182,14 @@ describe('OrdersService', () => {
       });
       ordersRepo.findOne
         .mockResolvedValueOnce(order)
-        .mockResolvedValueOnce({ ...order, shipping: '0.00' } as never);
-      subscriptionService.isActiveSubscriber.mockResolvedValue(true);
+        .mockResolvedValueOnce({ ...order, shipping: '0.00' });
+      // Ya no hay envío gratis por suscripción: el único envío $0 es el que
+      // el admin decide perdonar al cotizar.
+      subscriptionService.isActiveSubscriber.mockResolvedValue(false);
       ordersRepo.update.mockResolvedValue({ affected: 1 } as never);
       const autoSpy = spyAutoConfirmFree();
 
-      await service.setQuote('order-1', 300, superUser);
+      await service.setQuote('order-1', 0, superUser);
 
       expect(autoSpy).toHaveBeenCalledWith('order-1');
     });
@@ -1091,7 +1204,7 @@ describe('OrdersService', () => {
       });
       ordersRepo.findOne
         .mockResolvedValueOnce(order)
-        .mockResolvedValueOnce({ ...order, shipping: '3.00' } as never);
+        .mockResolvedValueOnce({ ...order, shipping: '3.00' });
       subscriptionService.isActiveSubscriber.mockResolvedValue(false);
       ordersRepo.update.mockResolvedValue({ affected: 1 } as never);
       const autoSpy = spyAutoConfirmFree();
@@ -1099,6 +1212,371 @@ describe('OrdersService', () => {
       await service.setQuote('order-1', 300, superUser);
 
       expect(autoSpy).not.toHaveBeenCalled();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // setQuote — recargo por distancia y día de entrega asignado
+  //
+  // El dueño quiere dos cosas para el cliente lejano: asignarle el día que le
+  // toca el reparto, y cobrarle un delivery APARTE del envío ("un pago
+  // ajustado"). El recargo es una tercera fuente de plata en la orden, y estos
+  // tests fijan las tres reglas que la hacen no perder dinero.
+  // -------------------------------------------------------------------------
+
+  describe('setQuote — recargo por distancia', () => {
+    const superUser = fakeUser(UserRole.SUPER_ADMIN_DELIVERY);
+
+    const quotableOrder = () =>
+      fakeOrder({
+        status: OrderStatus.PENDING_QUOTE,
+        customerId: 'user-1',
+        customer: fakeUser() as never,
+        subtotal: '10.00',
+        pointsRedeemed: '0.00',
+      });
+
+    it('el suscriptor paga el envío Y el recargo — la suscripción no cubre el viaje', async () => {
+      // Antes la suscripción perdonaba el envío y este test fijaba que el
+      // recargo igual sobrevivía. Desde 2026-09-14 no perdona nada: el
+      // suscriptor lejano paga las dos cosas, cada una en su columna.
+      const order = quotableOrder();
+      ordersRepo.findOne
+        .mockResolvedValueOnce(order)
+        .mockResolvedValueOnce({ ...order, shipping: '3.00' });
+      subscriptionService.isActiveSubscriber.mockResolvedValue(true);
+      ordersRepo.update.mockResolvedValue({ affected: 1 } as never);
+      spyAutoConfirmFree();
+
+      await service.setQuote('order-1', 300, superUser, {
+        surchargeCents: 1000,
+      });
+
+      const call = ordersRepo.update.mock.calls[0][1] as Record<
+        string,
+        unknown
+      >;
+      expect(call.shipping).toBe('3.00');
+      expect(call.deliverySurcharge).toBe('10.00');
+      // subtotal 1000 + envío 300 + recargo 1000 = base gravable 2300
+      // impuesto = round(2300 * 0.08887) = 204
+      expect(call.tax).toBe('2.04');
+      expect(call.totalAmount).toBe('25.04');
+    });
+
+    it('el recargo se prorratea en el impuesto igual que el envío', async () => {
+      const order = quotableOrder();
+      ordersRepo.findOne
+        .mockResolvedValueOnce(order)
+        .mockResolvedValueOnce({ ...order });
+      subscriptionService.isActiveSubscriber.mockResolvedValue(false);
+      ordersRepo.update.mockResolvedValue({ affected: 1 } as never);
+
+      await service.setQuote('order-1', 300, superUser, {
+        surchargeCents: 1000,
+      });
+
+      const call = ordersRepo.update.mock.calls[0][1] as Record<
+        string,
+        unknown
+      >;
+      expect(call.shipping).toBe('3.00');
+      expect(call.deliverySurcharge).toBe('10.00');
+      // 1000 + 300 + 1000 = 2300 gravable → round(2300 * 0.08887) = 204
+      expect(call.taxableSubtotal).toBe('23.00');
+      expect(call.tax).toBe('2.04');
+      expect(call.totalAmount).toBe('25.04');
+    });
+
+    it('NO auto-confirma cuando el envío es 0 pero hay recargo pendiente', async () => {
+      // La trampa: el admin perdona el envío pero le cobra la distancia. Si el
+      // guard sigue mirando sólo el envío, la orden auto-confirma como
+      // "gratis" y el recargo NUNCA se cobra por tarjeta.
+      const order = quotableOrder();
+      ordersRepo.findOne
+        .mockResolvedValueOnce(order)
+        .mockResolvedValueOnce({ ...order });
+      subscriptionService.isActiveSubscriber.mockResolvedValue(false);
+      ordersRepo.update.mockResolvedValue({ affected: 1 } as never);
+      const autoSpy = spyAutoConfirmFree();
+
+      await service.setQuote('order-1', 0, superUser, {
+        surchargeCents: 1000,
+      });
+
+      expect(autoSpy).not.toHaveBeenCalled();
+    });
+
+    it('sigue auto-confirmando cuando no hay ni envío ni recargo', async () => {
+      const order = quotableOrder();
+      ordersRepo.findOne
+        .mockResolvedValueOnce(order)
+        .mockResolvedValueOnce({ ...order });
+      subscriptionService.isActiveSubscriber.mockResolvedValue(false);
+      ordersRepo.update.mockResolvedValue({ affected: 1 } as never);
+      const autoSpy = spyAutoConfirmFree();
+
+      await service.setQuote('order-1', 0, superUser, { surchargeCents: 0 });
+
+      expect(autoSpy).toHaveBeenCalled();
+    });
+
+    it('guarda el día de entrega que le asigna el admin', async () => {
+      const order = quotableOrder();
+      ordersRepo.findOne
+        .mockResolvedValueOnce(order)
+        .mockResolvedValueOnce({ ...order });
+      subscriptionService.isActiveSubscriber.mockResolvedValue(false);
+      ordersRepo.update.mockResolvedValue({ affected: 1 } as never);
+
+      await service.setQuote('order-1', 300, superUser, {
+        scheduledDeliveryDate: '2026-09-15',
+      });
+
+      expect(ordersRepo.update).toHaveBeenCalledWith(
+        'order-1',
+        expect.objectContaining({ scheduledDeliveryDate: '2026-09-15' }),
+      );
+    });
+
+    it('rechaza un recargo negativo o no entero', async () => {
+      await expect(
+        service.setQuote('order-1', 300, superUser, { surchargeCents: -1 }),
+      ).rejects.toThrow(BadRequestException);
+      await expect(
+        service.setQuote('order-1', 300, superUser, { surchargeCents: 12.5 }),
+      ).rejects.toThrow(BadRequestException);
+      expect(ordersRepo.update).not.toHaveBeenCalled();
+    });
+
+    it('sin recargo se comporta exactamente como antes (recargo 0)', async () => {
+      const order = quotableOrder();
+      ordersRepo.findOne
+        .mockResolvedValueOnce(order)
+        .mockResolvedValueOnce({ ...order });
+      subscriptionService.isActiveSubscriber.mockResolvedValue(false);
+      ordersRepo.update.mockResolvedValue({ affected: 1 } as never);
+
+      await service.setQuote('order-1', 300, superUser);
+
+      const call = ordersRepo.update.mock.calls[0][1] as Record<
+        string,
+        unknown
+      >;
+      expect(call.deliverySurcharge).toBe('0.00');
+      // 1000 + 300 = 1300 gravable → round(1300 * 0.08887) = 116
+      expect(call.tax).toBe('1.16');
+      expect(call.totalAmount).toBe('14.16');
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // setScheduledDeliveryDate — el admin le pone el día al reparto
+  //
+  // Pedido del dueño (2026-09-14): "que me deje ponerles el día que les toca el
+  // delivery" y que el cliente se entere. El día se asigna solo, sin re-cotizar
+  // (re-cotizar toca plata y manda la orden a QUOTED).
+  // -------------------------------------------------------------------------
+
+  describe('setScheduledDeliveryDate', () => {
+    const superUser = fakeUser(UserRole.SUPER_ADMIN_DELIVERY);
+
+    const schedulableOrder = (overrides: Partial<Order> = {}) =>
+      fakeOrder({
+        status: OrderStatus.QUOTED,
+        customerId: 'user-1',
+        customer: fakeUser() as never,
+        ...overrides,
+      });
+
+    it('guarda el día y devuelve el pedido fresco', async () => {
+      const order = schedulableOrder();
+      const fresh = { ...order, scheduledDeliveryDate: '2026-09-16' };
+      ordersRepo.findOne
+        .mockResolvedValueOnce(order)
+        .mockResolvedValueOnce(fresh);
+      ordersRepo.update.mockResolvedValue({ affected: 1 } as never);
+
+      const result = await service.setScheduledDeliveryDate(
+        'order-1',
+        '2026-09-16',
+        superUser,
+      );
+
+      expect(ordersRepo.update).toHaveBeenCalledWith('order-1', {
+        scheduledDeliveryDate: '2026-09-16',
+      });
+      expect(result).toBe(fresh);
+    });
+
+    it('avisa al cliente cuando el día es nuevo', async () => {
+      const order = schedulableOrder({ scheduledDeliveryDate: null });
+      const fresh = { ...order, scheduledDeliveryDate: '2026-09-16' };
+      ordersRepo.findOne
+        .mockResolvedValueOnce(order)
+        .mockResolvedValueOnce(fresh);
+      ordersRepo.update.mockResolvedValue({ affected: 1 } as never);
+
+      await service.setScheduledDeliveryDate('order-1', '2026-09-16', superUser);
+
+      expect(orderNotifications.notifyScheduledDelivery).toHaveBeenCalledWith(
+        fresh,
+      );
+    });
+
+    it('NO avisa cuando el día es el mismo que ya tenía', async () => {
+      // Guardar dos veces la misma fecha (el admin vuelve a tocar Guardar) no
+      // puede spamear al cliente con el mismo aviso.
+      const order = schedulableOrder({ scheduledDeliveryDate: '2026-09-16' });
+      ordersRepo.findOne
+        .mockResolvedValueOnce(order)
+        .mockResolvedValueOnce(order);
+      ordersRepo.update.mockResolvedValue({ affected: 1 } as never);
+
+      await service.setScheduledDeliveryDate('order-1', '2026-09-16', superUser);
+
+      expect(orderNotifications.notifyScheduledDelivery).not.toHaveBeenCalled();
+    });
+
+    it('desasignar (null) guarda pero no avisa', async () => {
+      const order = schedulableOrder({ scheduledDeliveryDate: '2026-09-16' });
+      const fresh = { ...order, scheduledDeliveryDate: null };
+      ordersRepo.findOne
+        .mockResolvedValueOnce(order)
+        .mockResolvedValueOnce(fresh);
+      ordersRepo.update.mockResolvedValue({ affected: 1 } as never);
+
+      await service.setScheduledDeliveryDate('order-1', null, superUser);
+
+      expect(ordersRepo.update).toHaveBeenCalledWith('order-1', {
+        scheduledDeliveryDate: null,
+      });
+      expect(orderNotifications.notifyScheduledDelivery).not.toHaveBeenCalled();
+    });
+
+    it('no cambia el estado del pedido', async () => {
+      // Asignar el día no es cotizar: un pedido CONFIRMED sigue CONFIRMED.
+      const order = schedulableOrder({
+        status: OrderStatus.CONFIRMED_BY_COLMADO,
+      });
+      ordersRepo.findOne
+        .mockResolvedValueOnce(order)
+        .mockResolvedValueOnce(order);
+      ordersRepo.update.mockResolvedValue({ affected: 1 } as never);
+
+      await service.setScheduledDeliveryDate('order-1', '2026-09-16', superUser);
+
+      const call = ordersRepo.update.mock.calls[0][1] as Record<
+        string,
+        unknown
+      >;
+      expect(call.status).toBeUndefined();
+    });
+
+    it.each([OrderStatus.DELIVERED, OrderStatus.CANCELLED])(
+      'rechaza un pedido en estado %s',
+      async (status) => {
+        // Ya se entregó o se canceló: programar el reparto no significa nada y
+        // el aviso al cliente sería absurdo.
+        ordersRepo.findOne.mockResolvedValue(schedulableOrder({ status }));
+
+        await expect(
+          service.setScheduledDeliveryDate('order-1', '2026-09-16', superUser),
+        ).rejects.toThrow(BadRequestException);
+        expect(ordersRepo.update).not.toHaveBeenCalled();
+      },
+    );
+
+    it('rechaza a un CLIENT y a un PROMOTER', async () => {
+      await expect(
+        service.setScheduledDeliveryDate(
+          'order-1',
+          '2026-09-16',
+          fakeUser(UserRole.CLIENT),
+        ),
+      ).rejects.toThrow(ForbiddenException);
+      await expect(
+        service.setScheduledDeliveryDate(
+          'order-1',
+          '2026-09-16',
+          fakeUser(UserRole.PROMOTER),
+        ),
+      ).rejects.toThrow(ForbiddenException);
+      expect(ordersRepo.update).not.toHaveBeenCalled();
+    });
+
+    it('un SELLER pasa el guard de rol — lo limita el scope de findOne', async () => {
+      ordersRepo.findOne.mockResolvedValue(null);
+
+      await expect(
+        service.setScheduledDeliveryDate(
+          'order-1',
+          '2026-09-16',
+          fakeUser(UserRole.SELLER),
+        ),
+      ).rejects.toThrow(NotFoundException);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // setQuote — el día asignado al cotizar también avisa
+  // -------------------------------------------------------------------------
+
+  describe('setQuote — aviso del día de entrega', () => {
+    const superUser = fakeUser(UserRole.SUPER_ADMIN_DELIVERY);
+
+    const quotable = (overrides: Partial<Order> = {}) =>
+      fakeOrder({
+        status: OrderStatus.PENDING_QUOTE,
+        customerId: 'user-1',
+        customer: fakeUser() as never,
+        ...overrides,
+      });
+
+    it('avisa cuando la cotización estrena día de entrega', async () => {
+      const order = quotable({ scheduledDeliveryDate: null });
+      const fresh = { ...order, scheduledDeliveryDate: '2026-09-16' };
+      ordersRepo.findOne
+        .mockResolvedValueOnce(order)
+        .mockResolvedValueOnce(fresh);
+      subscriptionService.isActiveSubscriber.mockResolvedValue(false);
+      ordersRepo.update.mockResolvedValue({ affected: 1 } as never);
+
+      await service.setQuote('order-1', 300, superUser, {
+        scheduledDeliveryDate: '2026-09-16',
+      });
+
+      expect(orderNotifications.notifyScheduledDelivery).toHaveBeenCalledWith(
+        fresh,
+      );
+    });
+
+    it('NO avisa cuando re-cotiza con el mismo día', async () => {
+      const order = quotable({ scheduledDeliveryDate: '2026-09-16' });
+      ordersRepo.findOne
+        .mockResolvedValueOnce(order)
+        .mockResolvedValueOnce(order);
+      subscriptionService.isActiveSubscriber.mockResolvedValue(false);
+      ordersRepo.update.mockResolvedValue({ affected: 1 } as never);
+
+      await service.setQuote('order-1', 300, superUser, {
+        scheduledDeliveryDate: '2026-09-16',
+      });
+
+      expect(orderNotifications.notifyScheduledDelivery).not.toHaveBeenCalled();
+    });
+
+    it('NO avisa cuando la cotización no toca el día', async () => {
+      const order = quotable({ scheduledDeliveryDate: '2026-09-16' });
+      ordersRepo.findOne
+        .mockResolvedValueOnce(order)
+        .mockResolvedValueOnce(order);
+      subscriptionService.isActiveSubscriber.mockResolvedValue(false);
+      ordersRepo.update.mockResolvedValue({ affected: 1 } as never);
+
+      await service.setQuote('order-1', 300, superUser);
+
+      expect(orderNotifications.notifyScheduledDelivery).not.toHaveBeenCalled();
     });
   });
 
@@ -1162,10 +1640,20 @@ describe('OrdersService', () => {
 
     it('returns today / 7d-inactive / 30d-inactive buckets with counts', async () => {
       const today = [
-        { id: 'u1', fullName: 'Ana', phone: '+15550001', lastOrderAt: new Date() },
+        {
+          id: 'u1',
+          fullName: 'Ana',
+          phone: '+15550001',
+          lastOrderAt: new Date(),
+        },
       ];
       const inactive7 = [
-        { id: 'u2', fullName: 'Beto', phone: '+15550002', lastOrderAt: new Date('2026-07-10') },
+        {
+          id: 'u2',
+          fullName: 'Beto',
+          phone: '+15550002',
+          lastOrderAt: new Date('2026-07-10'),
+        },
         { id: 'u3', fullName: 'Caro', phone: null, lastOrderAt: null },
       ];
       const inactive30 = [
@@ -1232,36 +1720,41 @@ describe('OrdersService', () => {
         fakeOrder({ customer: fakeUser() as never, items: [] }),
       );
       await service.create(fakeUser(UserRole.CLIENT), dto);
-      return captured!;
+      return captured;
     };
 
     it('digital skip-quote: tip = % of subtotal, added AFTER tax (untaxed)', async () => {
-      // subtotal 500 → tip 18% = 90; taxable 500, tax = round(500*0.08887) = 44
-      productsRepo.find.mockResolvedValue([fakeProduct({ requiresQuote: false })]);
+      // subtotal 500 → tip 18% = 90 (la propina NO mira el envío);
+      // gravable 500 + 500 de envío fijo = 1000, tax = round(1000*0.08887) = 89
+      productsRepo.find.mockResolvedValue([
+        fakeProduct({ requiresQuote: false }),
+      ]);
 
       const captured = await runCreate({
         ...baseDto,
         paymentMethod: PaymentMethod.DIGITAL,
         tipPercent: 18,
-      } as never);
+      });
 
       expect(captured.tip).toBe('0.90');
-      expect(captured.tax).toBe('0.44');
-      expect(captured.totalAmount).toBe('6.34'); // 500 + 44 + 90
+      expect(captured.tax).toBe('0.89');
+      expect(captured.totalAmount).toBe('11.79'); // 500 + 500 envío + 89 + 90
     });
 
     it('digital quote-required: tip stored at creation, total = subtotal + tip (tax pending)', async () => {
       // Normal flow: tax=0 until setQuote; tip 15% of 500 = 75
-      productsRepo.find.mockResolvedValue([fakeProduct({ requiresQuote: true })]);
+      productsRepo.find.mockResolvedValue([
+        fakeProduct({ requiresQuote: true }),
+      ]);
 
       const captured = await runCreate({
         ...baseDto,
         paymentMethod: PaymentMethod.DIGITAL,
         tipPercent: 15,
-      } as never);
+      });
 
       expect(captured.tip).toBe('0.75');
-      expect(captured.totalAmount).toBe('5.75');
+      expect(captured.totalAmount).toBe('10.75'); // 500 + 500 envío + 75
       expect(captured.status).toBe(OrderStatus.PENDING_QUOTE);
     });
 
@@ -1271,22 +1764,24 @@ describe('OrdersService', () => {
           ...baseDto,
           paymentMethod: PaymentMethod.CASH,
           tipPercent: 15,
-        } as never),
+        }),
       ).rejects.toMatchObject({ response: { code: 'TIP_DIGITAL_ONLY' } });
 
       expect(productsRepo.find).not.toHaveBeenCalled();
     });
 
     it('no tipPercent → tip 0.00 and total unchanged', async () => {
-      productsRepo.find.mockResolvedValue([fakeProduct({ requiresQuote: false })]);
+      productsRepo.find.mockResolvedValue([
+        fakeProduct({ requiresQuote: false }),
+      ]);
 
       const captured = await runCreate({
         ...baseDto,
         paymentMethod: PaymentMethod.DIGITAL,
-      } as never);
+      });
 
       expect(captured.tip).toBe('0.00');
-      expect(captured.totalAmount).toBe('5.44'); // 500 + 44 tax
+      expect(captured.totalAmount).toBe('10.89'); // 500 + 500 envío + 89 tax
     });
 
     it('setQuote preserves the stored tip in the recomputed total (untaxed)', async () => {
@@ -1302,7 +1797,7 @@ describe('OrdersService', () => {
       });
       ordersRepo.findOne
         .mockResolvedValueOnce(order)
-        .mockResolvedValueOnce({ ...order, shipping: '3.00' } as never);
+        .mockResolvedValueOnce({ ...order, shipping: '3.00' });
       subscriptionService.isActiveSubscriber.mockResolvedValue(false);
       ordersRepo.update.mockResolvedValue({ affected: 1 } as never);
 
@@ -1364,16 +1859,20 @@ describe('OrdersService', () => {
    * Helper: builds a transaction mock that simulates the create() TX.
    * Returns the savedOrder from the TX callback.
    */
-  function setupMixedCartCreateTx(products: Product[], savedOrderOverride: Partial<Order> = {}) {
+  function setupMixedCartCreateTx(
+    products: Product[],
+    savedOrderOverride: Partial<Order> = {},
+  ) {
     const savedOrder = fakeOrder({ ...savedOrderOverride });
     const orderWithRelations = fakeOrder({
       customer: fakeUser() as never,
       items: products.map((p) => ({
         productId: p.id,
         quantity: 1,
-        priceAtOrder: p.pricingMode === 'rental'
-          ? (p.monthlyRentCents / 100).toFixed(2)
-          : p.priceToPublic,
+        priceAtOrder:
+          p.pricingMode === 'rental'
+            ? (p.monthlyRentCents / 100).toFixed(2)
+            : p.priceToPublic,
         product: p,
       })) as never,
       ...savedOrderOverride,
@@ -1383,7 +1882,9 @@ describe('OrdersService', () => {
       async (cb: (mgr: EntityManager) => Promise<unknown>) => {
         const orderRepo = makeRepoMock<Order>();
         const itemRepo = makeRepoMock<OrderItem>();
-        orderRepo.create.mockImplementation((d) => ({ ...d, id: 'order-1' }) as Order);
+        orderRepo.create.mockImplementation(
+          (d) => ({ ...d, id: 'order-1' }) as Order,
+        );
         orderRepo.save.mockResolvedValue(savedOrder);
         orderRepo.update.mockResolvedValue({ affected: 1 } as never);
         itemRepo.save.mockResolvedValue({} as never);
@@ -1416,7 +1917,7 @@ describe('OrdersService', () => {
   describe('create — Phase 6 rental pricing', () => {
     const singlePaymentProduct = fakeProduct({
       id: 'prod-water',
-      priceToPublic: '5.00',   // 500 cents
+      priceToPublic: '5.00', // 500 cents
       pricingMode: 'single_payment',
     });
     const rentalProduct = fakeRentalProduct({
@@ -1443,7 +1944,8 @@ describe('OrdersService', () => {
       expect(dataSource.transaction).toHaveBeenCalledTimes(1);
 
       // The order passed to save() inside the TX should have subtotal = '20.00'
-      const txCallback = (dataSource.transaction as jest.Mock).mock.calls[0][0] as (mgr: EntityManager) => Promise<unknown>;
+      const txCallback = (dataSource.transaction as jest.Mock).mock
+        .calls[0][0] as (mgr: EntityManager) => Promise<unknown>;
       let capturedSubtotal: string | undefined;
 
       // Re-run the callback with a spy to capture the create() call
@@ -1487,7 +1989,8 @@ describe('OrdersService', () => {
 
       await service.create(fakeUser(UserRole.CLIENT), singleDto);
 
-      const txCallback = (dataSource.transaction as jest.Mock).mock.calls[0][0] as (mgr: EntityManager) => Promise<unknown>;
+      const txCallback = (dataSource.transaction as jest.Mock).mock
+        .calls[0][0] as (mgr: EntityManager) => Promise<unknown>;
       let capturedSubtotal: string | undefined;
 
       await (async () => {
@@ -1708,7 +2211,10 @@ describe('OrdersService', () => {
         productId: 'prod-dispenser',
         quantity: 1,
         priceAtOrder: '20.00',
-        product: fakeRentalProduct({ id: 'prod-dispenser', pricingMode: 'rental' }),
+        product: fakeRentalProduct({
+          id: 'prod-dispenser',
+          pricingMode: 'rental',
+        }),
       } as unknown as OrderItem;
 
       const mixedOrder = fakeOrder({
@@ -1726,7 +2232,9 @@ describe('OrdersService', () => {
       ordersRepo.findOne.mockResolvedValue(mixedOrder);
 
       // subscriptionService.getOrCreateStripeCustomer returns customerId for rental orders
-      subscriptionService.getOrCreateStripeCustomer.mockResolvedValue('cus_test_123');
+      subscriptionService.getOrCreateStripeCustomer.mockResolvedValue(
+        'cus_test_123',
+      );
 
       paymentsService.createAuthorizationIntent.mockResolvedValue({
         paymentIntentId: 'pi_test_123',
@@ -1753,7 +2261,10 @@ describe('OrdersService', () => {
         productId: 'prod-water',
         quantity: 1,
         priceAtOrder: '5.00',
-        product: fakeProduct({ id: 'prod-water', pricingMode: 'single_payment' }),
+        product: fakeProduct({
+          id: 'prod-water',
+          pricingMode: 'single_payment',
+        }),
       } as unknown as OrderItem;
 
       const singleOrder = fakeOrder({
@@ -1822,7 +2333,10 @@ describe('OrdersService', () => {
       // Pre-check must be BEFORE TX
       expect(dataSource.transaction).not.toHaveBeenCalled();
       // Verify the pre-check was called with correct args
-      expect(rentalsService.findActiveByUserAndProduct).toHaveBeenCalledWith('user-1', 'prod-dispenser');
+      expect(rentalsService.findActiveByUserAndProduct).toHaveBeenCalledWith(
+        'user-1',
+        'prod-dispenser',
+      );
     });
 
     it('T62: Stripe NOT called, no DB writes when duplicate rental pre-check triggers', async () => {
@@ -1850,7 +2364,7 @@ describe('OrdersService', () => {
         paymentMethod: PaymentMethod.CASH,
         usePoints: false,
         useCredit: false,
-      } as import('./dto/create-order.dto').CreateOrderDto);
+      });
 
       // findActiveByUserAndProduct should NOT have been called for single-payment items
       expect(rentalsService.findActiveByUserAndProduct).not.toHaveBeenCalled();
@@ -1876,7 +2390,11 @@ describe('OrdersService', () => {
       productsRepo.find.mockResolvedValue([rentalProduct]);
 
       const savedOrder = fakeOrder({ id: 'order-created-1' });
-      const orderWithRelations = fakeOrder({ id: 'order-created-1', customer: fakeUser() as never, items: [] });
+      const orderWithRelations = fakeOrder({
+        id: 'order-created-1',
+        customer: fakeUser() as never,
+        items: [],
+      });
 
       let capturedTx: EntityManager | undefined;
 
@@ -1884,7 +2402,9 @@ describe('OrdersService', () => {
         async (cb: (mgr: EntityManager) => Promise<unknown>) => {
           const orderRepo = makeRepoMock<Order>();
           const itemRepo = makeRepoMock<OrderItem>();
-          orderRepo.create.mockImplementation((d) => ({ ...d, id: 'order-created-1' }) as Order);
+          orderRepo.create.mockImplementation(
+            (d) => ({ ...d, id: 'order-created-1' }) as Order,
+          );
           orderRepo.save.mockResolvedValue(savedOrder);
           orderRepo.update.mockResolvedValue({ affected: 1 } as never);
           itemRepo.save.mockResolvedValue({} as never);
@@ -1930,7 +2450,7 @@ describe('OrdersService', () => {
         paymentMethod: PaymentMethod.CASH,
         usePoints: false,
         useCredit: false,
-      } as import('./dto/create-order.dto').CreateOrderDto);
+      });
 
       expect(rentalsService.createForOrder).not.toHaveBeenCalled();
     });
@@ -2036,7 +2556,11 @@ describe('OrdersService', () => {
         },
       );
       ordersRepo.findOne.mockResolvedValue(
-        fakeOrder({ id: 'order-bebedero-1', customer: fakeUser() as never, items: [] }),
+        fakeOrder({
+          id: 'order-bebedero-1',
+          customer: fakeUser() as never,
+          items: [],
+        }),
       );
     }
 
@@ -2095,7 +2619,9 @@ describe('OrdersService', () => {
 
       await service.create(fakeUser(UserRole.CLIENT), bebederoCart);
 
-      expect(rentalsService.ensureBebederoRatePrices).toHaveBeenCalledWith(1299);
+      expect(rentalsService.ensureBebederoRatePrices).toHaveBeenCalledWith(
+        1299,
+      );
       expect(savedOrderArg?.subtotal).toBe('12.99');
       expect(rentalsService.createForOrder).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -2175,7 +2701,11 @@ describe('OrdersService', () => {
         },
       );
       ordersRepo.findOne.mockResolvedValue(
-        fakeOrder({ id: 'order-water-1', customer: fakeUser() as never, items: [] }),
+        fakeOrder({
+          id: 'order-water-1',
+          customer: fakeUser() as never,
+          items: [],
+        }),
       );
     }
 
@@ -2254,7 +2784,10 @@ describe('OrdersService', () => {
       );
     });
 
-    it('does NOT query the subscription when no item has a subscriber price', async () => {
+    it('consulta la suscripción aunque ningún ítem tenga precio de suscriptor', async () => {
+      // La consulta ya no se puede diferir a los carritos "de suscriptor":
+      // `wasSubscriberAtQuote` se guarda en toda orden, así que corre
+      // siempre, una sola vez.
       productsRepo.find.mockResolvedValue([
         fakeProduct({ id: 'prod-water', subscriberPriceCents: null }),
       ]);
@@ -2262,7 +2795,9 @@ describe('OrdersService', () => {
 
       await service.create(fakeUser(UserRole.CLIENT), waterCart);
 
-      expect(subscriptionService.isActiveSubscriber).not.toHaveBeenCalled();
+      expect(subscriptionService.isActiveSubscriber).toHaveBeenCalledWith(
+        'user-1',
+      );
     });
 
     // ───────────────────────────────────────────────────────────────────────
@@ -2286,11 +2821,12 @@ describe('OrdersService', () => {
       expect(savedOrderArg?.subtotal).toBe('10.00');
       expect(savedOrderArg?.tax).toBe('0.00');
       expect(savedOrderArg?.taxableSubtotal).toBe('0.00');
-      // Sin impuesto, el total es el subtotal pelado.
-      expect(savedOrderArg?.totalAmount).toBe('10.00');
+      // El envío fijo se cobra igual, pero no conjura base gravable.
+      expect(savedOrderArg?.shipping).toBe('5.00');
+      expect(savedOrderArg?.totalAmount).toBe('15.00');
     });
 
-    it('a skip-quote order of STANDARD items is taxed as before', async () => {
+    it('a skip-quote order of STANDARD items is taxed on goods + shipping', async () => {
       productsRepo.find.mockResolvedValue([
         fakeProduct({
           id: 'prod-water',
@@ -2304,10 +2840,10 @@ describe('OrdersService', () => {
 
       await service.create(fakeUser(UserRole.CLIENT), waterCart);
 
-      // 1000 gravable → round(1000 * 0.08887) = 89
-      expect(savedOrderArg?.tax).toBe('0.89');
-      expect(savedOrderArg?.taxableSubtotal).toBe('10.00');
-      expect(savedOrderArg?.totalAmount).toBe('10.89');
+      // 1000 + 500 de envío = 1500 gravable → round(1500 * 0.08887) = 133
+      expect(savedOrderArg?.tax).toBe('1.33');
+      expect(savedOrderArg?.taxableSubtotal).toBe('15.00');
+      expect(savedOrderArg?.totalAmount).toBe('16.33');
     });
 
     it('a MIXED skip-quote order taxes only the standard half', async () => {
@@ -2335,13 +2871,14 @@ describe('OrdersService', () => {
           { productId: 'prod-water', quantity: 2 }, // $10 exento
           { productId: 'prod-soda', quantity: 1 }, // $3 gravado
         ],
-      } as import('./dto/create-order.dto').CreateOrderDto);
+      });
 
       expect(savedOrderArg?.subtotal).toBe('13.00');
-      // Solo los $3 pagan: round(300 * 0.08887) = 27
-      expect(savedOrderArg?.tax).toBe('0.27');
-      expect(savedOrderArg?.taxableSubtotal).toBe('3.00');
-      expect(savedOrderArg?.totalAmount).toBe('13.27');
+      // Solo la mitad gravada paga, y el envío se prorratea por esa parte:
+      // 300/1300 × 500 = 115 → base 415 → round(415 * 0.08887) = 37
+      expect(savedOrderArg?.tax).toBe('0.37');
+      expect(savedOrderArg?.taxableSubtotal).toBe('4.15');
+      expect(savedOrderArg?.totalAmount).toBe('18.37');
     });
   });
 
@@ -2364,7 +2901,10 @@ describe('OrdersService', () => {
       // Second findOne: at end of updateStatus for final return
       ordersRepo.findOne
         .mockResolvedValueOnce(deliveredOrder)
-        .mockResolvedValueOnce({ ...deliveredOrder, status: OrderStatus.DELIVERED } as Order);
+        .mockResolvedValueOnce({
+          ...deliveredOrder,
+          status: OrderStatus.DELIVERED,
+        });
 
       paymentsService.captureIntent.mockResolvedValue({} as never);
 
@@ -2373,7 +2913,10 @@ describe('OrdersService', () => {
       (dataSource.transaction as jest.Mock).mockImplementation(
         async (cb: (mgr: EntityManager) => Promise<unknown>) => {
           const orderRepo = makeRepoMock<Order>();
-          orderRepo.findOne.mockResolvedValue({ ...deliveredOrder, id: 'order-1' } as never);
+          orderRepo.findOne.mockResolvedValue({
+            ...deliveredOrder,
+            id: 'order-1',
+          });
           orderRepo.update.mockResolvedValue({ affected: 1 } as never);
 
           const mgr = {
@@ -2393,7 +2936,9 @@ describe('OrdersService', () => {
       );
 
       // activateRentalsForOrder should have been called with the orderId
-      expect(rentalsService.activateRentalsForOrder).toHaveBeenCalledWith('order-1');
+      expect(rentalsService.activateRentalsForOrder).toHaveBeenCalledWith(
+        'order-1',
+      );
     });
 
     it('T64: markDelivered activation failure does NOT fail the delivery (best-effort)', async () => {
@@ -2408,17 +2953,25 @@ describe('OrdersService', () => {
 
       ordersRepo.findOne
         .mockResolvedValueOnce(deliveredOrder)
-        .mockResolvedValueOnce({ ...deliveredOrder, status: OrderStatus.DELIVERED } as Order);
+        .mockResolvedValueOnce({
+          ...deliveredOrder,
+          status: OrderStatus.DELIVERED,
+        });
 
       paymentsService.captureIntent.mockResolvedValue({} as never);
 
       // activateRentalsForOrder throws — should NOT propagate
-      rentalsService.activateRentalsForOrder.mockRejectedValue(new Error('Stripe failed'));
+      rentalsService.activateRentalsForOrder.mockRejectedValue(
+        new Error('Stripe failed'),
+      );
 
       (dataSource.transaction as jest.Mock).mockImplementation(
         async (cb: (mgr: EntityManager) => Promise<unknown>) => {
           const orderRepo = makeRepoMock<Order>();
-          orderRepo.findOne.mockResolvedValue({ ...deliveredOrder, id: 'order-1' } as never);
+          orderRepo.findOne.mockResolvedValue({
+            ...deliveredOrder,
+            id: 'order-1',
+          });
           orderRepo.update.mockResolvedValue({ affected: 1 } as never);
 
           const mgr = {
@@ -2474,9 +3027,12 @@ describe('OrdersService', () => {
 
       ordersRepo.findOne
         .mockResolvedValueOnce(pendingOrder)
-        .mockResolvedValueOnce({ ...pendingOrder, status: OrderStatus.CONFIRMED_BY_COLMADO } as Order);
+        .mockResolvedValueOnce({
+          ...pendingOrder,
+          status: OrderStatus.CONFIRMED_BY_COLMADO,
+        });
 
-      let stockUpdates: Record<string, number> = {};
+      const stockUpdates: Record<string, number> = {};
 
       (dataSource.transaction as jest.Mock).mockImplementation(
         async (cb: (mgr: EntityManager) => Promise<unknown>) => {
@@ -2484,21 +3040,29 @@ describe('OrdersService', () => {
           const itemRepo = makeRepoMock<OrderItem>();
           const productRepo = makeRepoMock<Product>();
 
-          orderRepo.findOne.mockResolvedValue({ ...pendingOrder, id: 'order-1', status: OrderStatus.PENDING_VALIDATION } as never);
+          orderRepo.findOne.mockResolvedValue({
+            ...pendingOrder,
+            id: 'order-1',
+            status: OrderStatus.PENDING_VALIDATION,
+          });
           orderRepo.update.mockResolvedValue({ affected: 1 } as never);
           itemRepo.find.mockResolvedValue([singleItem, rentalItem]);
 
           // Each product.findOne returns appropriate product
           productRepo.findOne
             .mockResolvedValueOnce(fakeProduct({ id: 'prod-water', stock: 10 }))
-            .mockResolvedValueOnce(fakeRentalProduct({ id: 'prod-dispenser', stock: 5 }));
+            .mockResolvedValueOnce(
+              fakeRentalProduct({ id: 'prod-dispenser', stock: 5 }),
+            );
 
-          productRepo.update.mockImplementation((id: string, data: Partial<Product>) => {
-            if (data.stock !== undefined) {
-              stockUpdates[id as string] = data.stock as number;
-            }
-            return Promise.resolve({ affected: 1 }) as never;
-          });
+          productRepo.update.mockImplementation(
+            (id: string, data: Partial<Product>) => {
+              if (data.stock !== undefined) {
+                stockUpdates[id] = data.stock;
+              }
+              return Promise.resolve({ affected: 1 }) as never;
+            },
+          );
 
           const mgr = {
             getRepository: (entity: unknown) => {
@@ -2519,8 +3083,8 @@ describe('OrdersService', () => {
       );
 
       // Both items should have had stock decremented
-      expect(stockUpdates['prod-water']).toBe(8);      // 10 - 2
-      expect(stockUpdates['prod-dispenser']).toBe(4);  // 5 - 1
+      expect(stockUpdates['prod-water']).toBe(8); // 10 - 2
+      expect(stockUpdates['prod-dispenser']).toBe(4); // 5 - 1
     });
 
     it('T66: existing single-payment stock decrement still works (regression guard)', async () => {
@@ -2541,7 +3105,10 @@ describe('OrdersService', () => {
 
       ordersRepo.findOne
         .mockResolvedValueOnce(pendingOrder)
-        .mockResolvedValueOnce({ ...pendingOrder, status: OrderStatus.CONFIRMED_BY_COLMADO } as Order);
+        .mockResolvedValueOnce({
+          ...pendingOrder,
+          status: OrderStatus.CONFIRMED_BY_COLMADO,
+        });
 
       let stockUpdate: number | undefined;
 
@@ -2551,14 +3118,22 @@ describe('OrdersService', () => {
           const itemRepo = makeRepoMock<OrderItem>();
           const productRepo = makeRepoMock<Product>();
 
-          orderRepo.findOne.mockResolvedValue({ ...pendingOrder, id: 'order-1', status: OrderStatus.PENDING_VALIDATION } as never);
+          orderRepo.findOne.mockResolvedValue({
+            ...pendingOrder,
+            id: 'order-1',
+            status: OrderStatus.PENDING_VALIDATION,
+          });
           orderRepo.update.mockResolvedValue({ affected: 1 } as never);
           itemRepo.find.mockResolvedValue([singleItem]);
-          productRepo.findOne.mockResolvedValue(fakeProduct({ id: 'prod-water', stock: 10 }));
-          productRepo.update.mockImplementation((_id: string, data: Partial<Product>) => {
-            if (data.stock !== undefined) stockUpdate = data.stock as number;
-            return Promise.resolve({ affected: 1 }) as never;
-          });
+          productRepo.findOne.mockResolvedValue(
+            fakeProduct({ id: 'prod-water', stock: 10 }),
+          );
+          productRepo.update.mockImplementation(
+            (_id: string, data: Partial<Product>) => {
+              if (data.stock !== undefined) stockUpdate = data.stock;
+              return Promise.resolve({ affected: 1 }) as never;
+            },
+          );
 
           const mgr = {
             getRepository: (entity: unknown) => {
@@ -2638,13 +3213,16 @@ describe('OrdersService', () => {
       }
 
       expect(thrown).toBeInstanceOf(BadRequestException);
-      const responseBody = thrown!.getResponse() as Record<string, unknown>;
+      const responseBody = thrown.getResponse() as Record<string, unknown>;
       expect(responseBody.code).toBe('MIXED_CART_NOT_ALLOWED');
     });
 
     // T6.2 — all-rental cart MUST succeed (no error)
     it('T6.2: accepts all-rental cart (no BadRequestException thrown)', async () => {
-      const rentalProduct2 = fakeRentalProduct({ id: 'prod-dispenser-2', name: 'Dispenser B' });
+      const rentalProduct2 = fakeRentalProduct({
+        id: 'prod-dispenser-2',
+        name: 'Dispenser B',
+      });
       productsRepo.find.mockResolvedValue([rentalProduct, rentalProduct2]);
 
       setupMixedCartCreateTx([rentalProduct, rentalProduct2]);
@@ -2698,7 +3276,8 @@ describe('OrdersService', () => {
   //
   // A product with requiresQuote=false (e.g. water) skips the manual quote
   // step. An order whose items are ALL skip-eligible is auto-quoted at
-  // creation: shipping = $0, tax computed now, status = QUOTED, quotedAt set.
+  // creation: envío fijo de $5 (lo paga todo el mundo), tax computed now,
+  // status = QUOTED, quotedAt set.
   // If ANY item requires a quote, the whole order stays PENDING_QUOTE.
   // ─────────────────────────────────────────────────────────────────────────
 
@@ -2758,18 +3337,18 @@ describe('OrdersService', () => {
       return captured;
     }
 
-    it('all-skip cart → order created in QUOTED with shipping $0 and tax computed', async () => {
+    it('all-skip cart → order created in QUOTED with the flat $5 shipping and tax computed', async () => {
       const created = await captureCreatedOrder(
         [skipProduct],
         [{ productId: 'prod-water', quantity: 1 }],
       );
 
       expect(created.status).toBe(OrderStatus.QUOTED);
-      expect(created.shipping).toBe('0.00');
+      expect(created.shipping).toBe('5.00');
       expect(created.subtotal).toBe('5.00');
-      // tax = round(500 * 0.08887) = 44 cents
-      expect(created.tax).toBe('0.44');
-      expect(created.totalAmount).toBe('5.44');
+      // tax = round((500 + 500) * 0.08887) = 89 cents
+      expect(created.tax).toBe('0.89');
+      expect(created.totalAmount).toBe('10.89');
       expect(created.quotedAt).toBeInstanceOf(Date);
     });
 
@@ -2779,11 +3358,11 @@ describe('OrdersService', () => {
         [{ productId: 'prod-water', quantity: 3 }],
       );
 
-      // 3 × 5.00 = 15.00 → tax = round(1500 * 0.08887) = 133 cents
+      // 3 × 5.00 = 15.00 + 5.00 de envío → round(2000 * 0.08887) = 178 cents
       expect(created.status).toBe(OrderStatus.QUOTED);
       expect(created.subtotal).toBe('15.00');
-      expect(created.tax).toBe('1.33');
-      expect(created.totalAmount).toBe('16.33');
+      expect(created.tax).toBe('1.78');
+      expect(created.totalAmount).toBe('21.78');
     });
 
     it('mixed cart (any requires_quote item) stays PENDING_QUOTE with tax 0', async () => {
@@ -2796,9 +3375,11 @@ describe('OrdersService', () => {
       );
 
       expect(created.status).toBe(OrderStatus.PENDING_QUOTE);
-      expect(created.shipping).toBe('0.00');
+      // El envío fijo ya viaja en la orden: el formulario del admin lo
+      // pre-carga y él sólo confirma o ajusta.
+      expect(created.shipping).toBe('5.00');
       expect(created.tax).toBe('0.00');
-      expect(created.totalAmount).toBe('10.00');
+      expect(created.totalAmount).toBe('15.00');
       expect(created.quotedAt).toBeNull();
     });
 
@@ -2815,7 +3396,8 @@ describe('OrdersService', () => {
 
     // Subscriber benefit: bebedero maintenance is free. The maintenance-service
     // line is zeroed at creation for active subscribers, regardless of the
-    // product's list price — mirrors the free-shipping benefit in setQuote().
+    // product's list price. OJO: es la LÍNEA la que sale gratis, no la orden —
+    // el viaje se cobra igual desde que el envío dejó de ser un beneficio.
     const maintenanceProduct = fakeProduct({
       id: 'prod-maint',
       name: 'Mantenimiento de Bebedero',
@@ -2824,7 +3406,7 @@ describe('OrdersService', () => {
       priceToPublic: '10.00',
     });
 
-    it('active subscriber → maintenance line is free (total $0, wasSubscriberAtQuote=true)', async () => {
+    it('active subscriber → maintenance line is free, pero la orden paga el envío ($5)', async () => {
       subscriptionService.isActiveSubscriber.mockResolvedValue(true);
 
       const created = await captureCreatedOrder(
@@ -2834,8 +3416,13 @@ describe('OrdersService', () => {
 
       expect(created.status).toBe(OrderStatus.QUOTED);
       expect(created.subtotal).toBe('0.00');
+      expect(created.shipping).toBe('5.00');
+      // Con subtotal 0 la parte gravable es 0, así que el envío tampoco se
+      // grava (computeTaxableBase prorratea por la parte gravable): impuesto 0
+      // y el cliente paga sólo el viaje.
+      expect(created.taxableSubtotal).toBe('0.00');
       expect(created.tax).toBe('0.00');
-      expect(created.totalAmount).toBe('0.00');
+      expect(created.totalAmount).toBe('5.00');
       expect(created.wasSubscriberAtQuote).toBe(true);
     });
 
@@ -2847,11 +3434,231 @@ describe('OrdersService', () => {
         [{ productId: 'prod-maint', quantity: 1 }],
       );
 
-      // 10.00 → tax = round(1000 * 0.08887) = 89 cents
+      // 10.00 + 5.00 de envío → tax = round(1500 * 0.08887) = 133 cents
       expect(created.subtotal).toBe('10.00');
-      expect(created.tax).toBe('0.89');
-      expect(created.totalAmount).toBe('10.89');
+      expect(created.shipping).toBe('5.00');
+      expect(created.tax).toBe('1.33');
+      expect(created.totalAmount).toBe('16.33');
       expect(created.wasSubscriberAtQuote).toBe(false);
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Envío fijo — toda orden de cliente paga el viaje al crearse
+  //
+  // Regla del dueño (2026-09-14): "todos los pedidos salen con un envío de 5
+  // dólares" y "los suscriptores tampoco van a tener el envío gratis". La
+  // suscripción paga el bebedero, no el viaje. La única orden sin envío es la
+  // que provisiona el sistema (`provisioned`), que ningún cliente pidió.
+  //
+  // Los $5 son sólo el DEFAULT: el mismo día el dueño pidió poder "modificar la
+  // tasa general del delivery", así que el monto sale de ShippingRateService
+  // (app_settings.flat_shipping_cents). Acá el mock lo deja en 500 salvo donde
+  // el test diga otra cosa.
+  // ─────────────────────────────────────────────────────────────────────────
+
+  describe('create — envío fijo (tarifa vigente)', () => {
+    /** Corre create() y devuelve el objeto que recibió orderRepo.create(). */
+    async function captureFlatShippingOrder(
+      products: Product[],
+      opts: { provisioned?: boolean } = {},
+    ): Promise<Partial<Order>> {
+      productsRepo.find.mockResolvedValue(products);
+      let captured: Partial<Order> = {};
+
+      (dataSource.transaction as jest.Mock).mockImplementation(
+        async (cb: (mgr: EntityManager) => Promise<unknown>) => {
+          const orderRepo = makeRepoMock<Order>();
+          const itemRepo = makeRepoMock<OrderItem>();
+          orderRepo.create.mockImplementation((d) => {
+            captured = d as Partial<Order>;
+            return { ...d, id: 'order-1' } as Order;
+          });
+          orderRepo.save.mockResolvedValue(fakeOrder());
+          orderRepo.update.mockResolvedValue({ affected: 1 } as never);
+          itemRepo.save.mockResolvedValue({} as never);
+          itemRepo.create.mockImplementation((d) => d as OrderItem);
+
+          const mgr = {
+            getRepository: (entity: unknown) => {
+              if (entity === Order) return orderRepo;
+              if (entity === OrderItem) return itemRepo;
+              return makeRepoMock();
+            },
+          };
+          return cb(mgr as unknown as EntityManager);
+        },
+      );
+
+      ordersRepo.findOne.mockResolvedValue(
+        fakeOrder({ customer: fakeUser() as never, items: [] }),
+      );
+
+      await service.create(
+        fakeUser(UserRole.CLIENT),
+        {
+          items: products.map((p) => ({ productId: p.id, quantity: 1 })),
+          deliveryAddress: { text: '123 Test', lat: 18.4861, lng: -69.9312 },
+          paymentMethod: PaymentMethod.CASH,
+          usePoints: false,
+          useCredit: false,
+        },
+        opts,
+      );
+      return captured;
+    }
+
+    const standardSkipProduct = fakeProduct({
+      id: 'prod-std',
+      requiresQuote: false,
+      taxCategory: 'standard',
+      priceToPublic: '10.00',
+    });
+
+    it('no suscriptor, skip-cotización → envío $5 gravado junto al producto', async () => {
+      subscriptionService.isActiveSubscriber.mockResolvedValue(false);
+
+      const created = await captureFlatShippingOrder([standardSkipProduct]);
+
+      expect(created.shipping).toBe('5.00');
+      // base = 1000 + 500 de envío = 1500 → round(1500 * 0.08887) = 133
+      expect(created.tax).toBe('1.33');
+      expect(created.taxableSubtotal).toBe('15.00');
+      expect(created.totalAmount).toBe('16.33');
+      expect(created.status).toBe(OrderStatus.QUOTED);
+    });
+
+    it('el suscriptor paga el envío fijo igual que cualquiera', async () => {
+      // La suscripción le da el bebedero, el precio de suscriptor y el
+      // mantenimiento — el viaje no. `wasSubscriberAtQuote` sigue guardándose
+      // porque es el dato que explica los PRECIOS congelados en la orden.
+      subscriptionService.isActiveSubscriber.mockResolvedValue(true);
+
+      const created = await captureFlatShippingOrder([standardSkipProduct]);
+
+      expect(created.shipping).toBe('5.00');
+      // base = 1000 + 500 de envío = 1500 → round(1500 * 0.08887) = 133
+      expect(created.tax).toBe('1.33');
+      expect(created.totalAmount).toBe('16.33');
+      expect(created.wasSubscriberAtQuote).toBe(true);
+    });
+
+    it('una orden provisionada por el sistema no paga envío (total $0)', async () => {
+      // La excepción: el bebedero gratis y la instalación premium las crea el
+      // sistema, no el cliente. Tienen que quedar en $0 porque
+      // deliverProvisionedOrder rechaza cualquier otra cosa — con envío el
+      // alquiler nunca se activaría.
+      subscriptionService.isActiveSubscriber.mockResolvedValue(true);
+
+      const created = await captureFlatShippingOrder(
+        [
+          fakeProduct({
+            id: 'prod-free',
+            requiresQuote: false,
+            priceToPublic: '0.00',
+          }),
+        ],
+        { provisioned: true },
+      );
+
+      expect(created.shipping).toBe('0.00');
+      expect(created.tax).toBe('0.00');
+      expect(created.totalAmount).toBe('0.00');
+    });
+
+    it('usa la tarifa vigente configurada por el admin', async () => {
+      // El dueño subió el delivery a $7 desde el panel: la orden que se crea
+      // después tiene que nacer con ESE envío, sin deploy de por medio, y con
+      // el impuesto y el total recalculados sobre él.
+      subscriptionService.isActiveSubscriber.mockResolvedValue(false);
+      shippingRateService.getFlatShippingCents.mockResolvedValue(700);
+
+      const created = await captureFlatShippingOrder([standardSkipProduct]);
+
+      expect(created.shipping).toBe('7.00');
+      // base = 1000 + 700 de envío = 1700 → round(1700 * 0.08887) = 151
+      expect(created.tax).toBe('1.51');
+      expect(created.taxableSubtotal).toBe('17.00');
+      expect(created.totalAmount).toBe('18.51');
+      // Una sola lectura por pedido: es un lookup por PK, no hace falta caché,
+      // pero tampoco hay que pegarle una vez por ítem.
+      expect(shippingRateService.getFlatShippingCents).toHaveBeenCalledTimes(1);
+    });
+
+    it('la orden provisionada ignora la tarifa vigente y sigue en $0', async () => {
+      // Aunque el admin ponga el delivery en $7, el bebedero que provisiona el
+      // sistema tiene que nacer en $0: deliverProvisionedOrder no acepta otra
+      // cosa y con envío el alquiler nunca se activaría.
+      subscriptionService.isActiveSubscriber.mockResolvedValue(true);
+      shippingRateService.getFlatShippingCents.mockResolvedValue(700);
+
+      const created = await captureFlatShippingOrder(
+        [
+          fakeProduct({
+            id: 'prod-free',
+            requiresQuote: false,
+            priceToPublic: '0.00',
+          }),
+        ],
+        { provisioned: true },
+      );
+
+      expect(created.shipping).toBe('0.00');
+      expect(created.tax).toBe('0.00');
+      expect(created.totalAmount).toBe('0.00');
+    });
+
+    it('no suscriptor, pendiente de cotización → envío $5 ya cargado, impuesto en setQuote', async () => {
+      subscriptionService.isActiveSubscriber.mockResolvedValue(false);
+
+      const created = await captureFlatShippingOrder([
+        fakeProduct({
+          id: 'prod-quote',
+          requiresQuote: true,
+          priceToPublic: '10.00',
+        }),
+      ]);
+
+      expect(created.status).toBe(OrderStatus.PENDING_QUOTE);
+      expect(created.shipping).toBe('5.00');
+      // El impuesto y la base gravable se congelan recién en setQuote.
+      expect(created.tax).toBe('0.00');
+      expect(created.taxableSubtotal).toBe('0.00');
+      // Total parcial: neto (producto + envío) + propina.
+      expect(created.totalAmount).toBe('15.00');
+    });
+
+    it('agua exenta → el viaje se cobra pero no conjura impuesto', async () => {
+      subscriptionService.isActiveSubscriber.mockResolvedValue(false);
+
+      const created = await captureFlatShippingOrder([
+        fakeProduct({
+          id: 'prod-water',
+          requiresQuote: false,
+          taxCategory: 'exempt',
+          priceToPublic: '5.00',
+        }),
+      ]);
+
+      expect(created.shipping).toBe('5.00');
+      expect(created.tax).toBe('0.00');
+      expect(created.taxableSubtotal).toBe('0.00');
+      expect(created.totalAmount).toBe('10.00');
+    });
+
+    it('consulta la suscripción aunque el carrito no tenga ítem de suscriptor', async () => {
+      // Antes se resolvía perezosamente (solo con mantenimiento / bebedero /
+      // precio de suscriptor / premium). Ahora corre siempre: aunque el envío
+      // ya no dependa de ella, `wasSubscriberAtQuote` se guarda en TODA orden.
+      subscriptionService.isActiveSubscriber.mockResolvedValue(false);
+
+      await captureFlatShippingOrder([
+        fakeProduct({ id: 'prod-plain', requiresQuote: true }),
+      ]);
+
+      expect(subscriptionService.isActiveSubscriber).toHaveBeenCalledWith(
+        'user-1',
+      );
     });
   });
 
@@ -2859,7 +3666,60 @@ describe('OrdersService', () => {
   // findAll / findOne — scope + not-found branches
   // ─────────────────────────────────────────────────────────────────────────
 
+  describe('findAll — orden de despacho para el staff', () => {
+    const ORIGIN = { lat: 40, lng: -74 };
+    // 1 grado de latitud ≈ 69.09 millas.
+    const nearOrder = fakeOrder({
+      id: 'near',
+      status: OrderStatus.QUOTED,
+      deliveryAddress: { text: 'cerca', lat: 40.01, lng: -74 },
+      createdAt: new Date('2026-09-10T10:00:00Z'),
+    });
+    const farOrder = fakeOrder({
+      id: 'far',
+      status: OrderStatus.QUOTED,
+      deliveryAddress: { text: 'lejos', lat: 40.2, lng: -74 },
+      createdAt: new Date('2026-09-14T10:00:00Z'),
+    });
 
+    it('super admin → pide el origen del repartidor y ordena por distancia', async () => {
+      // El dueño reportaba la lista "por más reciente": el pedido nuevo y lejos
+      // salía antes que el viejo de la otra cuadra.
+      ordersRepo.find.mockResolvedValue([farOrder, nearOrder]);
+      (shippingService.getOrigin as jest.Mock).mockResolvedValue(ORIGIN);
+
+      const result = await service.findAll(
+        fakeUser(UserRole.SUPER_ADMIN_DELIVERY),
+      );
+
+      expect(shippingService.getOrigin).toHaveBeenCalled();
+      expect(result.map((o) => o.id)).toEqual(['near', 'far']);
+      expect(result[0].distanceMiles).toBe(0.7);
+      expect(result[1].distanceMiles).toBe(13.8);
+    });
+
+    it('vendedor → misma ruta ordenada, dentro de su cartera', async () => {
+      ordersRepo.find.mockResolvedValue([farOrder, nearOrder]);
+      (shippingService.getOrigin as jest.Mock).mockResolvedValue(ORIGIN);
+
+      const result = await service.findAll(fakeUser(UserRole.SELLER));
+
+      expect(shippingService.getOrigin).toHaveBeenCalled();
+      expect(result.map((o) => o.id)).toEqual(['near', 'far']);
+    });
+
+    it('cliente → la lista queda como vino y no se consulta el origen', async () => {
+      // El cliente ve SUS pedidos: la distancia al depósito no le dice nada y
+      // pedir el origen sería una consulta de más en cada apertura de la app.
+      ordersRepo.find.mockResolvedValue([farOrder, nearOrder]);
+
+      const result = await service.findAll(fakeUser(UserRole.CLIENT));
+
+      expect(shippingService.getOrigin).not.toHaveBeenCalled();
+      expect(result.map((o) => o.id)).toEqual(['far', 'near']);
+      expect(result[0].distanceMiles).toBeUndefined();
+    });
+  });
 
   // ─────────────────────────────────────────────────────────────────────────
   // Bebedero Premium — 1 incluido, adicional al precio del plan, sino +$5
@@ -2895,7 +3755,9 @@ describe('OrdersService', () => {
             savedOrderArg = d as Partial<Order>;
             return { ...d, id: 'order-premium-1' } as Order;
           });
-          orderRepo.save.mockResolvedValue(fakeOrder({ id: 'order-premium-1' }));
+          orderRepo.save.mockResolvedValue(
+            fakeOrder({ id: 'order-premium-1' }),
+          );
           orderRepo.update.mockResolvedValue({ affected: 1 } as never);
           itemRepo.create.mockImplementation((d) => d as OrderItem);
           itemRepo.save.mockResolvedValue({} as never);
@@ -2910,7 +3772,11 @@ describe('OrdersService', () => {
         },
       );
       ordersRepo.findOne.mockResolvedValue(
-        fakeOrder({ id: 'order-premium-1', customer: fakeUser() as never, items: [] }),
+        fakeOrder({
+          id: 'order-premium-1',
+          customer: fakeUser() as never,
+          items: [],
+        }),
       );
     }
 
@@ -2925,15 +3791,23 @@ describe('OrdersService', () => {
       // caía en la regla estándar: con un bebedero previo el ordinal daba ≥1 y
       // la orden salía al precio del plan común — no $0 — y
       // deliverProvisionedOrder la rechazaba: instalación trabada para siempre.
+      //
+      // Va con `provisioned: true` porque es exactamente como la crea
+      // premium-product.listener: sin envío, si no el total sería $5 y
+      // deliverProvisionedOrder la rechazaría por el otro lado.
       subscriptionService.getActiveTier.mockResolvedValue(
         SubscriptionTier.PREMIUM,
       );
       rentalsService.countBebederoRentalsForUser.mockResolvedValue(1); // ya tiene el estándar
       rentalsService.countRentalsForUserAndProduct.mockResolvedValue(0); // primer premium
 
-      await service.create(fakeUser(UserRole.CLIENT), premiumCart);
+      await service.create(fakeUser(UserRole.CLIENT), premiumCart, {
+        provisioned: true,
+      });
 
       expect(savedOrderArg?.subtotal).toBe('0.00');
+      expect(savedOrderArg?.shipping).toBe('0.00');
+      expect(savedOrderArg?.totalAmount).toBe('0.00');
       expect(rentalsService.createForOrder).toHaveBeenCalledWith(
         expect.objectContaining({
           productId: 'prod-premium-beb',
@@ -3001,7 +3875,9 @@ describe('OrdersService', () => {
       expect(savedOrderArg?.subtotal).toBe('34.99');
       const call = rentalsService.createForOrder.mock.calls[0][0];
       expect(call.monthlyRentCentsOverride).toBeUndefined();
-      expect(rentalsService.ensurePremiumBebederoRatePrices).not.toHaveBeenCalled();
+      expect(
+        rentalsService.ensurePremiumBebederoRatePrices,
+      ).not.toHaveBeenCalled();
     });
   });
 
@@ -3048,7 +3924,9 @@ describe('OrdersService', () => {
 
     it('una orden inexistente devuelve false sin tirar', async () => {
       ordersRepo.findOne.mockResolvedValueOnce(null);
-      await expect(service.deliverProvisionedOrder('nope')).resolves.toBe(false);
+      await expect(service.deliverProvisionedOrder('nope')).resolves.toBe(
+        false,
+      );
     });
 
     it('nunca tira: un error interno se reporta como false', async () => {
@@ -3065,10 +3943,17 @@ describe('OrdersService', () => {
       const list = [fakeOrder(), fakeOrder({ id: 'order-2' })];
       ordersRepo.find.mockResolvedValue(list);
 
-      const result = await service.findAll(fakeUser(UserRole.SUPER_ADMIN_DELIVERY));
+      const result = await service.findAll(
+        fakeUser(UserRole.SUPER_ADMIN_DELIVERY),
+      );
 
-      expect(result).toBe(list);
-      const callArg = ordersRepo.find.mock.calls[0][0] as Record<string, unknown>;
+      // El staff recibe la lista REORDENADA para despacho, así que ya no es el
+      // mismo array que devolvió el repo — pero sí los mismos pedidos.
+      expect(result.map((o) => o.id).sort()).toEqual(['order-1', 'order-2']);
+      const callArg = ordersRepo.find.mock.calls[0][0] as Record<
+        string,
+        unknown
+      >;
       // SUPER_ADMIN_DELIVERY → unrestricted scope ({})
       expect(callArg.where).toEqual({});
     });
@@ -3078,7 +3963,10 @@ describe('OrdersService', () => {
 
       await service.findAll(fakeUser(UserRole.CLIENT));
 
-      const callArg = ordersRepo.find.mock.calls[0][0] as Record<string, unknown>;
+      const callArg = ordersRepo.find.mock.calls[0][0] as Record<
+        string,
+        unknown
+      >;
       expect(callArg.where).toEqual({ customerId: 'user-1' });
     });
 
@@ -3087,7 +3975,10 @@ describe('OrdersService', () => {
 
       await service.findAll(fakeUser(UserRole.SELLER));
 
-      const callArg = ordersRepo.find.mock.calls[0][0] as Record<string, unknown>;
+      const callArg = ordersRepo.find.mock.calls[0][0] as Record<
+        string,
+        unknown
+      >;
       // Nunca `{}`: un vendedor jamás debe caer en el scope irrestricto.
       expect(callArg.where).toEqual({ customer: { sellerId: 'user-1' } });
       expect(callArg.where).not.toEqual({});
@@ -3099,7 +3990,10 @@ describe('OrdersService', () => {
       const order = fakeOrder();
       ordersRepo.findOne.mockResolvedValue(order);
 
-      const result = await service.findOne('order-1', fakeUser(UserRole.CLIENT));
+      const result = await service.findOne(
+        'order-1',
+        fakeUser(UserRole.CLIENT),
+      );
 
       expect(result).toBe(order);
     });
@@ -3156,7 +4050,7 @@ describe('OrdersService', () => {
         service.create(fakeUser(UserRole.CLIENT), {
           ...baseDto,
           items: [{ productId: 'prod-1', quantity: 5 }],
-        } as import('./dto/create-order.dto').CreateOrderDto),
+        }),
       ).rejects.toThrow('Stock insuficiente');
     });
   });
@@ -3180,7 +4074,9 @@ describe('OrdersService', () => {
         async (cb: (mgr: EntityManager) => Promise<unknown>) => {
           const orderRepo = makeRepoMock<Order>();
           const itemRepo = makeRepoMock<OrderItem>();
-          orderRepo.create.mockImplementation((d) => ({ ...d, id: 'order-1' }) as Order);
+          orderRepo.create.mockImplementation(
+            (d) => ({ ...d, id: 'order-1' }) as Order,
+          );
           orderRepo.save.mockResolvedValue(savedOrder);
           orderRepo.update.mockResolvedValue({ affected: 1 } as never);
           itemRepo.save.mockResolvedValue({} as never);
@@ -3203,8 +4099,10 @@ describe('OrdersService', () => {
 
     it('redeems points when usePoints=true and claimable balance > 0', async () => {
       productsRepo.find.mockResolvedValue([fakeProduct()]);
-      pointsService.getBalance.mockResolvedValue({ claimableCents: 300 } as never);
-      pointsService.redeemAllClaimable.mockResolvedValue(undefined as never);
+      pointsService.getBalance.mockResolvedValue({
+        claimableCents: 300,
+      } as never);
+      pointsService.redeemAllClaimable.mockResolvedValue(undefined);
       setupCreateTx();
 
       await service.create(fakeUser(UserRole.CLIENT), baseDto);
@@ -3220,7 +4118,9 @@ describe('OrdersService', () => {
 
     it('does NOT redeem points when claimable balance is 0', async () => {
       productsRepo.find.mockResolvedValue([fakeProduct()]);
-      pointsService.getBalance.mockResolvedValue({ claimableCents: 0 } as never);
+      pointsService.getBalance.mockResolvedValue({
+        claimableCents: 0,
+      } as never);
       setupCreateTx();
 
       await service.create(fakeUser(UserRole.CLIENT), baseDto);
@@ -3239,7 +4139,7 @@ describe('OrdersService', () => {
         ...baseDto,
         usePoints: false,
         useCredit: true,
-      } as import('./dto/create-order.dto').CreateOrderDto);
+      });
 
       // The catch swallows the error → applyCharge never runs, create() succeeds
       expect(creditService.getAccountWithLock).toHaveBeenCalled();
@@ -3259,7 +4159,7 @@ describe('OrdersService', () => {
         ...baseDto,
         usePoints: false,
         useCredit: true,
-      } as import('./dto/create-order.dto').CreateOrderDto);
+      });
 
       // available = -100 + 100 = 0 → no charge
       expect(creditService.applyCharge).not.toHaveBeenCalled();
@@ -3295,13 +4195,21 @@ describe('OrdersService', () => {
 
     it('throws BadRequest when shippingCents is not an integer', async () => {
       await expect(
-        service.setQuote('order-1', 12.5, fakeUser(UserRole.SUPER_ADMIN_DELIVERY)),
+        service.setQuote(
+          'order-1',
+          12.5,
+          fakeUser(UserRole.SUPER_ADMIN_DELIVERY),
+        ),
       ).rejects.toThrow('shippingCents inválido');
     });
 
     it('throws BadRequest when shippingCents is negative', async () => {
       await expect(
-        service.setQuote('order-1', -1, fakeUser(UserRole.SUPER_ADMIN_DELIVERY)),
+        service.setQuote(
+          'order-1',
+          -1,
+          fakeUser(UserRole.SUPER_ADMIN_DELIVERY),
+        ),
       ).rejects.toThrow('shippingCents inválido');
     });
 
@@ -3313,7 +4221,11 @@ describe('OrdersService', () => {
       ordersRepo.findOne.mockResolvedValue(order);
 
       await expect(
-        service.setQuote('order-1', 300, fakeUser(UserRole.SUPER_ADMIN_DELIVERY)),
+        service.setQuote(
+          'order-1',
+          300,
+          fakeUser(UserRole.SUPER_ADMIN_DELIVERY),
+        ),
       ).rejects.toThrow('No se puede cotizar un pedido en estado');
     });
 
@@ -3330,9 +4242,16 @@ describe('OrdersService', () => {
       subscriptionService.isActiveSubscriber.mockResolvedValue(false);
       ordersRepo.update.mockResolvedValue({ affected: 1 } as never);
 
-      await service.setQuote('order-1', 300, fakeUser(UserRole.SUPER_ADMIN_DELIVERY));
+      await service.setQuote(
+        'order-1',
+        300,
+        fakeUser(UserRole.SUPER_ADMIN_DELIVERY),
+      );
 
-      const updateCall = ordersRepo.update.mock.calls[0][1] as Record<string, unknown>;
+      const updateCall = ordersRepo.update.mock.calls[0][1] as Record<
+        string,
+        unknown
+      >;
       // quotedAt preserved via the ?? fallback
       expect(updateCall.quotedAt).toBe(existingQuotedAt);
     });
@@ -3402,7 +4321,10 @@ describe('OrdersService', () => {
         currency: 'usd',
       } as never);
 
-      const result = await service.authorize('order-1', fakeUser(UserRole.CLIENT));
+      const result = await service.authorize(
+        'order-1',
+        fakeUser(UserRole.CLIENT),
+      );
 
       expect(result).toEqual({
         paymentIntentId: 'pi_existing',
@@ -3432,7 +4354,10 @@ describe('OrdersService', () => {
         currency: 'usd',
       } as never);
 
-      const result = await service.authorize('order-1', fakeUser(UserRole.CLIENT));
+      const result = await service.authorize(
+        'order-1',
+        fakeUser(UserRole.CLIENT),
+      );
 
       expect(result.clientSecret).toBe('');
     });
@@ -3468,7 +4393,9 @@ describe('OrdersService', () => {
       await service.authorize('order-1', fakeUser(UserRole.CLIENT));
 
       // Canceled intent → proceed to create a new one
-      expect(paymentsService.createAuthorizationIntent).toHaveBeenCalledTimes(1);
+      expect(paymentsService.createAuthorizationIntent).toHaveBeenCalledTimes(
+        1,
+      );
       expect(ordersRepo.update).toHaveBeenCalledWith('order-1', {
         stripePaymentIntentId: 'pi_new',
       });
@@ -3500,7 +4427,7 @@ describe('OrdersService', () => {
           status: OrderStatus.QUOTED,
           paymentMethod: PaymentMethod.DIGITAL,
           totalAmount: '10.00',
-          creditApplied: null as never,
+          creditApplied: null,
           stripePaymentIntentId: null,
           items: [],
           customer: fakeUser() as never,
@@ -3514,7 +4441,10 @@ describe('OrdersService', () => {
       });
       ordersRepo.update.mockResolvedValue({ affected: 1 } as never);
 
-      const result = await service.authorize('order-1', fakeUser(UserRole.CLIENT));
+      const result = await service.authorize(
+        'order-1',
+        fakeUser(UserRole.CLIENT),
+      );
 
       // creditApplied null → '0' fallback → full 1000 cents to Stripe
       expect(paymentsService.createAuthorizationIntent).toHaveBeenCalledWith(
@@ -3677,7 +4607,10 @@ describe('OrdersService', () => {
     it('throws BadRequest for a disallowed status transition', async () => {
       // DELIVERED has no allowed transitions
       ordersRepo.findOne.mockResolvedValue(
-        fakeOrder({ status: OrderStatus.DELIVERED, customer: fakeUser() as never }),
+        fakeOrder({
+          status: OrderStatus.DELIVERED,
+          customer: fakeUser() as never,
+        }),
       );
 
       await expect(
@@ -3757,11 +4690,12 @@ describe('OrdersService', () => {
         creditApplied: '0.00',
         customer: fakeUser() as never,
       });
-      ordersRepo.findOne
-        .mockResolvedValueOnce(order)
-        .mockResolvedValueOnce(
-          fakeOrder({ status: OrderStatus.CANCELLED, customer: fakeUser() as never }),
-        );
+      ordersRepo.findOne.mockResolvedValueOnce(order).mockResolvedValueOnce(
+        fakeOrder({
+          status: OrderStatus.CANCELLED,
+          customer: fakeUser() as never,
+        }),
+      );
 
       const incrementCalls: Array<{ id: string; qty: number }> = [];
 
@@ -3774,10 +4708,12 @@ describe('OrdersService', () => {
           itemRepo.find.mockResolvedValue([item1, item2]);
           (productRepo as unknown as { increment: jest.Mock }).increment = jest
             .fn()
-            .mockImplementation((where: { id: string }, _col: string, qty: number) => {
-              incrementCalls.push({ id: where.id, qty });
-              return Promise.resolve({ affected: 1 });
-            });
+            .mockImplementation(
+              (where: { id: string }, _col: string, qty: number) => {
+                incrementCalls.push({ id: where.id, qty });
+                return Promise.resolve({ affected: 1 });
+              },
+            );
 
           const mgr = {
             getRepository: (entity: unknown) => {
@@ -3818,11 +4754,12 @@ describe('OrdersService', () => {
         creditApplied: '0.00',
         customer: fakeUser() as never,
       });
-      ordersRepo.findOne
-        .mockResolvedValueOnce(order)
-        .mockResolvedValueOnce(
-          fakeOrder({ status: OrderStatus.CANCELLED, customer: fakeUser() as never }),
-        );
+      ordersRepo.findOne.mockResolvedValueOnce(order).mockResolvedValueOnce(
+        fakeOrder({
+          status: OrderStatus.CANCELLED,
+          customer: fakeUser() as never,
+        }),
+      );
 
       const incrementSpy = jest.fn();
 
@@ -3831,7 +4768,8 @@ describe('OrdersService', () => {
           const orderRepo = makeRepoMock<Order>();
           const productRepo = makeRepoMock<Product>();
           orderRepo.update.mockResolvedValue({ affected: 1 } as never);
-          (productRepo as unknown as { increment: jest.Mock }).increment = incrementSpy;
+          (productRepo as unknown as { increment: jest.Mock }).increment =
+            incrementSpy;
 
           const mgr = {
             getRepository: (entity: unknown) => {
@@ -3860,14 +4798,18 @@ describe('OrdersService', () => {
 
   describe('updateStatus → markDelivered — capture vs no-capture', () => {
     function setupDeliverTx(order: Order) {
-      ordersRepo.findOne
-        .mockResolvedValueOnce(order)
-        .mockResolvedValueOnce({ ...order, status: OrderStatus.DELIVERED } as Order);
+      ordersRepo.findOne.mockResolvedValueOnce(order).mockResolvedValueOnce({
+        ...order,
+        status: OrderStatus.DELIVERED,
+      });
 
       (dataSource.transaction as jest.Mock).mockImplementation(
         async (cb: (mgr: EntityManager) => Promise<unknown>) => {
           const orderRepo = makeRepoMock<Order>();
-          orderRepo.findOne.mockResolvedValue({ ...order, id: 'order-1' } as never);
+          orderRepo.findOne.mockResolvedValue({
+            ...order,
+            id: 'order-1',
+          });
           orderRepo.update.mockResolvedValue({ affected: 1 } as never);
           const mgr = {
             getRepository: (entity: unknown) =>
@@ -4001,7 +4943,7 @@ describe('OrdersService', () => {
           orderRepo.findOne.mockResolvedValue({
             ...order,
             status: OrderStatus.CONFIRMED_BY_COLMADO,
-          } as never);
+          });
           const mgr = {
             getRepository: (entity: unknown) =>
               entity === Order ? orderRepo : makeRepoMock(),
@@ -4026,12 +4968,10 @@ describe('OrdersService', () => {
         customer: fakeUser() as never,
         items: [],
       });
-      ordersRepo.findOne
-        .mockResolvedValueOnce(order)
-        .mockResolvedValueOnce({
-          ...order,
-          status: OrderStatus.CONFIRMED_BY_COLMADO,
-        } as Order);
+      ordersRepo.findOne.mockResolvedValueOnce(order).mockResolvedValueOnce({
+        ...order,
+        status: OrderStatus.CONFIRMED_BY_COLMADO,
+      });
 
       let productUpdateCalled = false;
 
@@ -4044,7 +4984,7 @@ describe('OrdersService', () => {
             ...order,
             id: 'order-1',
             status: OrderStatus.PENDING_VALIDATION,
-          } as never);
+          });
           orderRepo.update.mockResolvedValue({ affected: 1 } as never);
           itemRepo.find.mockResolvedValue([item]);
           productRepo.findOne.mockResolvedValue(null); // product gone → continue
@@ -4093,7 +5033,7 @@ describe('OrdersService', () => {
             ...order,
             id: 'order-1',
             status: OrderStatus.PENDING_VALIDATION,
-          } as never);
+          });
           itemRepo.find.mockResolvedValue([item]);
           productRepo.findOne.mockResolvedValue(
             fakeProduct({ id: 'prod-low', stock: 2, name: 'Low Stock' }),
@@ -4127,12 +5067,10 @@ describe('OrdersService', () => {
         customer: fakeUser() as never,
         items: [],
       });
-      ordersRepo.findOne
-        .mockResolvedValueOnce(order)
-        .mockResolvedValueOnce({
-          ...order,
-          status: OrderStatus.CONFIRMED_BY_COLMADO,
-        } as Order);
+      ordersRepo.findOne.mockResolvedValueOnce(order).mockResolvedValueOnce({
+        ...order,
+        status: OrderStatus.CONFIRMED_BY_COLMADO,
+      });
 
       let captured: Partial<Product> | undefined;
 
@@ -4145,7 +5083,7 @@ describe('OrdersService', () => {
             ...order,
             id: 'order-1',
             status: OrderStatus.PENDING_VALIDATION,
-          } as never);
+          });
           orderRepo.update.mockResolvedValue({ affected: 1 } as never);
           itemRepo.find.mockResolvedValue([item]);
           // stock exactly equals quantity → nextStock = 0 → isAvailable forced false
@@ -4191,12 +5129,10 @@ describe('OrdersService', () => {
         status: OrderStatus.CONFIRMED_BY_COLMADO,
         customer: fakeUser() as never,
       });
-      ordersRepo.findOne
-        .mockResolvedValueOnce(order)
-        .mockResolvedValueOnce({
-          ...order,
-          status: OrderStatus.IN_DELIVERY_ROUTE,
-        } as Order);
+      ordersRepo.findOne.mockResolvedValueOnce(order).mockResolvedValueOnce({
+        ...order,
+        status: OrderStatus.IN_DELIVERY_ROUTE,
+      });
       ordersRepo.update.mockResolvedValue({ affected: 1 } as never);
 
       await service.updateStatus(
@@ -4246,7 +5182,9 @@ describe('OrdersService', () => {
         service.authorize('order-1', fakeUser(UserRole.CLIENT)),
       ).rejects.toMatchObject({ response: { code: 'ALREADY_AUTHORIZED' } });
 
-      expect(paymentsService.markAuthorizedByIntentId).toHaveBeenCalledWith('pi_held');
+      expect(paymentsService.markAuthorizedByIntentId).toHaveBeenCalledWith(
+        'pi_held',
+      );
       expect(autoSpy).toHaveBeenCalledWith('pi_held');
       expect(paymentsService.createAuthorizationIntent).not.toHaveBeenCalled();
     });
@@ -4263,7 +5201,10 @@ describe('OrdersService', () => {
 
       await expect(
         service.authorize('order-1', fakeUser(UserRole.CLIENT)),
-      ).resolves.toMatchObject({ paymentIntentId: 'pi_held', clientSecret: 'cs_held' });
+      ).resolves.toMatchObject({
+        paymentIntentId: 'pi_held',
+        clientSecret: 'cs_held',
+      });
       expect(paymentsService.markAuthorizedByIntentId).not.toHaveBeenCalled();
     });
   });
@@ -4300,11 +5241,16 @@ describe('OrdersService', () => {
         customer: fakeUser() as never,
       });
       mockCancelTx();
-      ordersRepo.findOne
-        .mockResolvedValueOnce(order)
-        .mockResolvedValueOnce({ ...order, status: OrderStatus.CANCELLED } as never);
+      ordersRepo.findOne.mockResolvedValueOnce(order).mockResolvedValueOnce({
+        ...order,
+        status: OrderStatus.CANCELLED,
+      });
 
-      await service.updateStatus('order-1', { status: OrderStatus.CANCELLED }, superUser);
+      await service.updateStatus(
+        'order-1',
+        { status: OrderStatus.CANCELLED },
+        superUser,
+      );
 
       expect(paymentsService.cancelIntent).toHaveBeenCalledWith('pi_held');
     });
@@ -4318,11 +5264,16 @@ describe('OrdersService', () => {
         customer: fakeUser() as never,
       });
       mockCancelTx();
-      ordersRepo.findOne
-        .mockResolvedValueOnce(order)
-        .mockResolvedValueOnce({ ...order, status: OrderStatus.CANCELLED } as never);
+      ordersRepo.findOne.mockResolvedValueOnce(order).mockResolvedValueOnce({
+        ...order,
+        status: OrderStatus.CANCELLED,
+      });
 
-      await service.updateStatus('order-1', { status: OrderStatus.CANCELLED }, superUser);
+      await service.updateStatus(
+        'order-1',
+        { status: OrderStatus.CANCELLED },
+        superUser,
+      );
 
       expect(paymentsService.cancelIntent).not.toHaveBeenCalled();
     });

@@ -8,6 +8,7 @@ import {
   Param,
   ParseUUIDPipe,
   Patch,
+  Post,
   Query,
   UseGuards,
 } from '@nestjs/common';
@@ -21,6 +22,9 @@ import { UsersService } from './users.service';
 import { UpdateMeDto } from './dto/update-me.dto';
 import { UpdateUserAdminDto } from './dto/update-user-admin.dto';
 import { ListUsersQueryDto } from './dto/list-users-query.dto';
+import {
+  TransferSellerPortfolioDto,
+} from './dto/transfer-seller-portfolio.dto';
 
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('users')
@@ -56,6 +60,27 @@ export class UsersController {
     @Body() dto: UpdateUserAdminDto,
   ) {
     return this.users.updateByAdmin(user, id, dto);
+  }
+
+  /**
+   * Traspaso de cartera completa: todos los clientes de `:sellerId` pasan a
+   * `toSellerId` (o quedan sin vendedor si viene `null`). Devuelve cuántos se
+   * movieron.
+   *
+   * POST y no PATCH porque no edita el recurso de la URL: escribe N filas que
+   * NO son `:sellerId` (su cartera). No choca con el `PATCH :id` / `DELETE :id`
+   * de arriba — otro verbo y otro path, no hay ningún `POST :id` que lo tape.
+   *
+   * Solo el super admin, igual que la asignación de a uno: si un vendedor
+   * pudiera correr esto se llevaría la cartera de otro en un solo request.
+   */
+  @Roles(UserRole.SUPER_ADMIN_DELIVERY)
+  @Post('sellers/:sellerId/transfer')
+  transferSellerPortfolio(
+    @Param('sellerId', ParseUUIDPipe) sellerId: string,
+    @Body() dto: TransferSellerPortfolioDto,
+  ) {
+    return this.users.transferSellerPortfolio(sellerId, dto.toSellerId);
   }
 
   /**

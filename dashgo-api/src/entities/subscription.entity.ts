@@ -20,7 +20,12 @@ export enum SubscriptionStatus {
 }
 
 /**
- * Tracks a user's Stripe subscription (free-shipping monthly plan).
+ * Tracks a user's Stripe subscription (plan mensual).
+ *
+ * Lo que cubre el plan: el bebedero (el primero gratis, los adicionales a la
+ * tarifa de suscriptor), el precio de suscriptor por producto, el producto
+ * premium y el mantenimiento. El ENVÍO no: desde 2026-09-14 el envío fijo lo
+ * paga toda orden de cliente, suscriptor o no.
  */
 @Entity('subscriptions')
 export class Subscription {

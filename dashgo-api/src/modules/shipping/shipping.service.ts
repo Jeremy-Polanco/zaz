@@ -17,7 +17,14 @@ function toRad(deg: number): number {
   return (deg * Math.PI) / 180;
 }
 
-function haversineMiles(
+/**
+ * Distancia en línea recta entre dos puntos, en millas.
+ *
+ * Exportada porque el orden de despacho del admin (orders/dispatch-sort.ts)
+ * mide contra el MISMO origen que la cotización de envío: si cada uno tuviera
+ * su propia fórmula, la lista de ruta y el precio cobrado podrían discrepar.
+ */
+export function haversineMiles(
   a: { lat: number; lng: number },
   b: { lat: number; lng: number },
 ): number {

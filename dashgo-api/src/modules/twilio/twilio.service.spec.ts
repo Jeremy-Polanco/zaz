@@ -27,6 +27,8 @@ function makeOrder(overrides: Partial<Order> = {}): Order {
     subtotal: '35.00',
     pointsRedeemed: '0.00',
     shipping: '0.00',
+    deliverySurcharge: '0.00',
+    scheduledDeliveryDate: null,
     tax: '0.00',
     taxRate: '0.08887',
     totalAmount: '35.50',

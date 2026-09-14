@@ -4,6 +4,7 @@ import {
   AccountDeletion,
   AppSetting,
   SellerProduct,
+  DeliveryZone,
   Category,
   Counter,
   CreditAccount,
@@ -74,6 +75,7 @@ export const buildDatabaseConfig = (
     PushToken,
     AppSetting,
     SellerProduct,
+    DeliveryZone,
   ],
   // Belt-and-suspenders: hard-disable synchronize in production regardless of env var.
   // The env schema also enforces DB_SYNCHRONIZE='false' in production.

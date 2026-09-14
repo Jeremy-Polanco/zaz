@@ -54,6 +54,24 @@ describe('PremiumProductListener', () => {
       expect(orders.create).toHaveBeenCalled();
     });
 
+    it('la orden de instalación se crea SIN envío (provisionada por el sistema)', async () => {
+      // La instalación premium la entrega deliverProvisionedOrder, que sólo
+      // acepta órdenes de $0. El envío fijo de $5 lo paga toda orden de cliente
+      // —el suscriptor también—, pero ésta no la pidió nadie por checkout: la
+      // entrega ES el beneficio. Sin el flag la orden sale $5 y la instalación
+      // queda trabada para siempre.
+      await listener.handleSubscriptionActivated({
+        userId: 'u-1',
+        tier: SubscriptionTier.PREMIUM,
+      });
+
+      expect(orders.create).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.anything(),
+        { provisioned: true },
+      );
+    });
+
     it('NO provisiona para un suscriptor standard', async () => {
       await listener.handleSubscriptionActivated({
         userId: 'u-1',

@@ -20,6 +20,7 @@ import {
 import { AuthenticatedUser } from '../../common/types/authenticated-user';
 import { TAX_RATE, computeTaxableBase } from '../../common/tax';
 import type { TaxableLine } from '../../common/tax';
+import { sortOrdersForDispatch } from './dispatch-sort';
 import { CreateOrderDto, DeliveryAddressDto } from './dto/create-order.dto';
 import { UpdateOrderStatusDto } from './dto/update-order-status.dto';
 import { PaymentsService } from '../payments/payments.service';
@@ -28,6 +29,7 @@ import { InvoicesService } from '../invoices/invoices.service';
 import { PromotersService } from '../promoters/promoters.service';
 import { SellersService } from '../sellers/sellers.service';
 import { ShippingService } from '../shipping/shipping.service';
+import { ShippingRateService } from '../shipping/shipping-rate.service';
 import { CreditService } from '../credit/credit.service';
 import { SubscriptionService } from '../subscription/subscription.service';
 import { TwilioService } from '../twilio/twilio.service';
@@ -52,7 +54,10 @@ const ALLOWED_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
     OrderStatus.IN_DELIVERY_ROUTE,
     OrderStatus.CANCELLED,
   ],
-  [OrderStatus.IN_DELIVERY_ROUTE]: [OrderStatus.DELIVERED, OrderStatus.CANCELLED],
+  [OrderStatus.IN_DELIVERY_ROUTE]: [
+    OrderStatus.DELIVERED,
+    OrderStatus.CANCELLED,
+  ],
   [OrderStatus.DELIVERED]: [],
   [OrderStatus.CANCELLED]: [],
 };
@@ -85,6 +90,7 @@ export class OrdersService {
     private readonly promotersService: PromotersService,
     private readonly sellersService: SellersService,
     private readonly shipping: ShippingService,
+    private readonly shippingRate: ShippingRateService,
     private readonly credit: CreditService,
     private readonly subscriptionService: SubscriptionService,
     private readonly twilio: TwilioService,
@@ -122,12 +128,39 @@ export class OrdersService {
     }
   }
 
-  async findAll(user: AuthenticatedUser) {
-    return this.orders.find({
+  /**
+   * Lista de pedidos con el alcance del rol.
+   *
+   * Para el staff (super admin y vendedor) sale en ORDEN DE DESPACHO: los
+   * pedidos vivos primero, del más cerca al más lejos del origen del
+   * repartidor, y el histórico al final por fecha. El dueño la veía "por más
+   * reciente" y tenía que recorrerla entera para armar el recorrido.
+   *
+   * El cliente la recibe tal cual: la distancia al depósito no le dice nada y
+   * resolver el origen sería una consulta de más en cada apertura de la app.
+   * `distanceMiles` es opcional justamente por eso — sólo viaja para el staff.
+   *
+   * Sin paginar a propósito (así estaba): ordenar en memoria es correcto
+   * mientras la lista completa siga viniendo en una sola consulta. Si algún
+   * día se pagina, el orden tiene que bajar al SQL o la primera página
+   * dejaría de ser la de los pedidos más cercanos.
+   */
+  async findAll(
+    user: AuthenticatedUser,
+  ): Promise<Array<Order & { distanceMiles?: number | null }>> {
+    const orders = await this.orders.find({
       where: this.buildScope(user),
       relations: ['customer', 'items', 'items.product'],
       order: { createdAt: 'DESC' },
     });
+
+    const isStaff =
+      user.role === UserRole.SUPER_ADMIN_DELIVERY ||
+      user.role === UserRole.SELLER;
+    if (!isStaff) return orders;
+
+    const origin = await this.shipping.getOrigin();
+    return sortOrdersForDispatch(orders, origin);
   }
 
   async findOne(id: string, user: AuthenticatedUser) {
@@ -135,14 +168,27 @@ export class OrdersService {
       where: { id, ...this.buildScope(user) },
       relations: ['customer', 'items', 'items.product'],
     });
-    if (!order) throw new NotFoundException('Pedido no encontrado o sin acceso');
+    if (!order)
+      throw new NotFoundException('Pedido no encontrado o sin acceso');
     return order;
   }
 
   async create(
     user: AuthenticatedUser,
     dto: CreateOrderDto,
-    opts: { allowDuplicateRental?: boolean } = {},
+    opts: {
+      allowDuplicateRental?: boolean;
+      /**
+       * Orden creada por el SISTEMA para entregar un beneficio de la
+       * suscripción (bebedero gratis, instalación premium): sin envío, porque
+       * la entrega ES el beneficio; ningún cliente la pidió por checkout.
+       *
+       * No es un descuento al suscriptor —el envío fijo lo paga todo el
+       * mundo—: es que estas órdenes tienen que quedar en $0 o
+       * `deliverProvisionedOrder` las rechaza y el alquiler no se activa nunca.
+       */
+      provisioned?: boolean;
+    } = {},
   ) {
     if (user.role !== UserRole.CLIENT && user.role !== UserRole.PROMOTER) {
       throw new ForbiddenException('Solo clientes pueden crear pedidos');
@@ -226,7 +272,7 @@ export class OrdersService {
     // stack rentals (e.g. a second bebedero, billed at the additional rate).
     if (!opts.allowDuplicateRental) {
       for (const input of dto.items) {
-        const product = byId.get(input.productId)!;
+        const product = byId.get(input.productId);
         if (product.pricingMode === 'rental') {
           const existing = await this.rentalsService.findActiveByUserAndProduct(
             user.id,
@@ -252,13 +298,18 @@ export class OrdersService {
         (input) => byId.get(input.productId)?.requiresQuote === false,
       );
 
-    // Subscriber benefits depend on subscription status. Three benefits ride on
-    // it: (1) free bebedero maintenance, (2) subscriber bebedero pricing — the
-    // first bebedero rents free ($0/mo), each additional at $6.99/mo — and
-    // (3) the per-product subscriber price. A bebedero is a rental product with
-    // requiresMaintenance=true. Resolve the (single) subscription query only
-    // when the cart can actually trigger one of the three, to avoid an extra
-    // query otherwise.
+    // Subscriber benefits depend on subscription status. Tres beneficios
+    // cuelgan de ella: (1) mantenimiento de bebedero gratis, (2) precio de
+    // bebedero de suscriptor — el primero sale gratis ($0/mes), cada adicional
+    // a $6.99/mes — y (3) el precio de suscriptor por producto. Un bebedero es
+    // un producto de alquiler con requiresMaintenance=true.
+    //
+    // El ENVÍO ya no está en la lista: desde 2026-09-14 el dueño lo cobra a
+    // todos ("los suscriptores tampoco van a tener el envío gratis, simplemente
+    // va a ser para que tengan el bebedero").
+    //
+    // Igual la consulta se hace SIEMPRE, una sola vez: toda orden congela
+    // `wasSubscriberAtQuote`, que es lo que después explica sus precios.
     const isBebedero = (p: Product | undefined): boolean =>
       p?.pricingMode === 'rental' && p?.requiresMaintenance === true;
     // El producto exclusivo del premium se excluye del beneficio ESTÁNDAR: si
@@ -268,28 +319,15 @@ export class OrdersService {
     const isStandardBebedero = (p: Product | undefined): boolean =>
       isBebedero(p) && p?.isPremiumSubscriberProduct !== true;
 
-    const hasMaintenanceItem = dto.items.some(
-      (input) => byId.get(input.productId)?.isMaintenanceService === true,
-    );
     const hasBebederoItem = dto.items.some((input) =>
       isStandardBebedero(byId.get(input.productId)),
     );
     const hasPremiumProductItem = dto.items.some(
       (input) => byId.get(input.productId)?.isPremiumSubscriberProduct === true,
     );
-    // Sin esto, un suscriptor que compra SOLO productos con precio de
-    // suscriptor (agua, por ejemplo) nunca dispararía la consulta y terminaría
-    // pagando el precio de catálogo.
-    const hasSubscriberPricedItem = dto.items.some(
-      (input) => byId.get(input.productId)?.subscriberPriceCents != null,
+    const isSubscriber = await this.subscriptionService.isActiveSubscriber(
+      user.id,
     );
-    const isSubscriber =
-      hasMaintenanceItem ||
-      hasBebederoItem ||
-      hasSubscriberPricedItem ||
-      hasPremiumProductItem
-        ? await this.subscriptionService.isActiveSubscriber(user.id)
-        : false;
 
     // Resolve the per-bebedero subscriber rate (rent cents + which recurring
     // Stripe price to snapshot). Keyed by productId. The ordinal across the
@@ -312,7 +350,7 @@ export class OrdersService {
         await this.rentalsService.ensureBebederoRatePrices(subscriberRentCents);
       let ordinal = priorCount;
       for (const input of dto.items) {
-        const product = byId.get(input.productId)!;
+        const product = byId.get(input.productId);
         if (!isStandardBebedero(product)) continue;
         const rent = resolveBebederoRentCents(
           product,
@@ -346,7 +384,7 @@ export class OrdersService {
         SubscriptionTier.PREMIUM,
       );
       for (const input of dto.items) {
-        const product = byId.get(input.productId)!;
+        const product = byId.get(input.productId);
         if (product.isPremiumSubscriberProduct !== true) continue;
         const priorPremium =
           await this.rentalsService.countRentalsForUserAndProduct(
@@ -383,7 +421,7 @@ export class OrdersService {
     const now = new Date();
     let subtotalCents = 0;
     const builtItems = dto.items.map((input) => {
-      const product = byId.get(input.productId)!;
+      const product = byId.get(input.productId);
       let lineCents: number;
       let priceAtOrder: string;
 
@@ -460,24 +498,45 @@ export class OrdersService {
       }
       // Silently skip useCredit for PROMOTER / SUPER_ADMIN_DELIVERY (no error)
 
-      // Cotización. By default, shipping is quoted manually by the super admin
-      // AFTER the order is placed: we start with shipping=0 / tax=0 /
-      // total=(subtotal - points) and the admin transitions PENDING_QUOTE →
-      // QUOTED via setQuote().
+      // Cotización. TODA orden de cliente nace con el envío fijo ya cargado —
+      // el viaje se cobra siempre, suscriptor o no. La única excepción es la
+      // orden que provisiona el sistema (`opts.provisioned`): el bebedero
+      // gratis y la instalación premium NO las pidió nadie por checkout y
+      // tienen que quedar en $0 (ver el doc de `opts`).
       //
-      // When `skipQuote` is true (every item has requiresQuote=false), the
-      // order skips that step entirely: shipping stays $0 (included), we compute
-      // tax now — exactly as setQuote would — and land the order directly in
-      // QUOTED so the customer can pay immediately.
+      // El monto ya no es una constante: lo fija el super admin desde el panel
+      // (`PUT /shipping/rate`) y lo lee ShippingRateService. Se pide UNA vez
+      // por pedido —es un lookup por PK, no vale la pena cachearlo— y el valor
+      // queda congelado en la orden, así que subir la tarifa nunca re-cotiza
+      // pedidos ya creados.
       //
-      // La base gravable sale SOLO de las líneas 'standard'; los puntos se
-      // prorratean por la parte gravable del pedido (ver common/tax.ts). Un
-      // pedido de puro agua exenta no paga impuesto.
-      const base = computeTaxableBase(taxLines, { pointsRedeemedCents });
+      // Con `skipQuote` (todos los ítems con requiresQuote=false) la orden se
+      // auto-cotiza acá: se calcula el impuesto igual que en setQuote y queda
+      // directamente en QUOTED, así el cliente paga el total FINAL en el acto.
+      //
+      // Sin `skipQuote` la orden queda en PENDING_QUOTE con el envío fijo ya
+      // puesto — el formulario del admin pre-carga `order.shipping` cuando es
+      // > 0, así que sólo confirma o ajusta la tarifa vigente. El impuesto y
+      // la base gravable siguen en 0 hasta setQuote, de modo que su
+      // `totalAmount` es un total PARCIAL (neto + propina, sin impuesto).
+      //
+      // La base gravable sale SOLO de las líneas 'standard'; el envío y los
+      // puntos se prorratean por la parte gravable del pedido (ver
+      // common/tax.ts). Un pedido de puro agua exenta no paga impuesto ni
+      // siquiera por el viaje.
+      const flatShippingCents = await this.shippingRate.getFlatShippingCents();
+      const shippingCents = opts.provisioned ? 0 : flatShippingCents;
+      const base = computeTaxableBase(taxLines, {
+        shippingCents,
+        pointsRedeemedCents,
+      });
       // Lo que el cliente termina debiendo sigue descontando TODOS los puntos,
       // no solo la parte prorrateada — el prorrateo es únicamente para repartir
       // el descuento entre la mitad gravada y la exenta.
-      const netCents = Math.max(0, subtotalCents - pointsRedeemedCents);
+      const netCents = Math.max(
+        0,
+        subtotalCents + shippingCents - pointsRedeemedCents,
+      );
       const taxCents = skipQuote ? base.taxCents : 0;
       // Propina: % of the product subtotal (before points/credit), untaxed —
       // it rides on top of the taxed total and flows into the Stripe charge.
@@ -489,12 +548,14 @@ export class OrdersService {
       // When no address is supplied, fall back to the customer's default saved
       // location so subsequent orders auto-inherit it (the colmado can still
       // re-pin at delivery). Mirrors the frontend userAddressToGeoAddress map.
-      let resolvedDeliveryAddress: GeoAddress | null = dto.deliveryAddress ?? null;
+      let resolvedDeliveryAddress: GeoAddress | null =
+        dto.deliveryAddress ?? null;
       if (!resolvedDeliveryAddress) {
         const def = await this.userAddresses.findOne({
           where: { userId: user.id, isDefault: true },
         });
-        if (def) resolvedDeliveryAddress = this.userAddressToDeliveryAddress(def);
+        if (def)
+          resolvedDeliveryAddress = this.userAddressToDeliveryAddress(def);
       }
 
       const order = orderRepo.create({
@@ -505,7 +566,7 @@ export class OrdersService {
         deliveryAddress: resolvedDeliveryAddress,
         subtotal: (subtotalCents / 100).toFixed(2),
         pointsRedeemed: (pointsRedeemedCents / 100).toFixed(2),
-        shipping: '0.00',
+        shipping: (shippingCents / 100).toFixed(2),
         tax: (taxCents / 100).toFixed(2),
         taxRate: TAX_RATE.toFixed(5),
         // Congela la base gravable — sin esto el impuesto de un pedido mixto
@@ -539,7 +600,7 @@ export class OrdersService {
       // This guarantees a Rental row exists at PENDING_SETUP before the order is committed,
       // so activateRentalsForOrder at delivery time always finds the row.
       for (const input of dto.items) {
-        const product = byId.get(input.productId)!;
+        const product = byId.get(input.productId);
         if (product.pricingMode === 'rental') {
           const rate = bebederoRateByProductId.get(product.id);
           await this.rentalsService.createForOrder(
@@ -560,7 +621,11 @@ export class OrdersService {
       // T4.3 (continued): Apply credit charge AFTER order+items persisted, BEFORE points
       if (creditAppliedCents > 0) {
         await this.credit.applyCharge(
-          { userId: user.id, orderId: persisted.id, amountCents: creditAppliedCents },
+          {
+            userId: user.id,
+            orderId: persisted.id,
+            amountCents: creditAppliedCents,
+          },
           tx,
         );
         await orderRepo.update(persisted.id, {
@@ -579,10 +644,10 @@ export class OrdersService {
 
     let order = await this.findOne(saved.id, user);
 
-    // Auto-confirm free-shipping / $0 orders so the customer never taps
-    // "Confirmar pedido" (the free subscriber bebedero, standardized water
-    // deliveries, etc.). Only orders already in QUOTED qualify — the helper
-    // re-checks free shipping + that nothing is owed by card. Non-blocking.
+    // Auto-confirm the orders the customer should never have to tap "Confirmar
+    // pedido" for (the provisioned bebedero, standardized water deliveries,
+    // etc.). Only orders already in QUOTED qualify — the helper re-checks the
+    // shipping guard + that nothing is owed by card. Non-blocking.
     if (order.status === OrderStatus.QUOTED) {
       await this.tryAutoConfirmFreeOrder(order.id);
       order = await this.findOne(saved.id, user);
@@ -616,7 +681,9 @@ export class OrdersService {
     user: AuthenticatedUser,
   ): Promise<{ deleted: true }> {
     if (user.role !== UserRole.SUPER_ADMIN_DELIVERY) {
-      throw new ForbiddenException('Solo el super admin puede eliminar pedidos');
+      throw new ForbiddenException(
+        'Solo el super admin puede eliminar pedidos',
+      );
     }
     const order = await this.orders.findOne({ where: { id } });
     if (!order) throw new NotFoundException('Pedido no encontrado');
@@ -650,8 +717,7 @@ export class OrdersService {
     // ($1 = seller id) y no interpolado: este es SQL crudo y el id viene del
     // token, pero concatenar identificadores acá es cómo se cuela una inyección
     // el día que alguien reutilice el patrón con input del cliente.
-    const sellerId =
-      user.role === UserRole.SELLER ? user.id : null;
+    const sellerId = user.role === UserRole.SELLER ? user.id : null;
     const sellerFilter = sellerId ? 'AND u.seller_id = $1' : '';
     const sellerParams = sellerId ? [sellerId] : [];
 
@@ -707,6 +773,16 @@ export class OrdersService {
     id: string,
     shippingCents: number,
     user: AuthenticatedUser,
+    opts: {
+      /**
+       * Recargo por distancia en centavos. Omitirlo NO borra el recargo que ya
+       * tenga la orden — re-cotizar no puede hacer desaparecer plata en
+       * silencio; para sacarlo hay que mandar 0 explícitamente.
+       */
+      surchargeCents?: number;
+      /** Día de reparto asignado ('YYYY-MM-DD'), o null para desasignarlo. */
+      scheduledDeliveryDate?: string | null;
+    } = {},
   ) {
     // El vendedor puede cotizar los pedidos de SU cartera: `findOne(id, user)`
     // más abajo aplica el scope, así que no alcanza a los demás.
@@ -716,6 +792,12 @@ export class OrdersService {
     );
     if (!Number.isInteger(shippingCents) || shippingCents < 0) {
       throw new BadRequestException('shippingCents inválido');
+    }
+    if (
+      opts.surchargeCents !== undefined &&
+      (!Number.isInteger(opts.surchargeCents) || opts.surchargeCents < 0)
+    ) {
+      throw new BadRequestException('surchargeCents inválido');
     }
 
     const order = await this.findOne(id, user);
@@ -729,12 +811,29 @@ export class OrdersService {
       );
     }
 
-    // Active subscribers get free shipping — override the admin-quoted amount.
-    const isSub = await this.subscriptionService.isActiveSubscriber(order.customerId);
-    let effectiveShippingCents = shippingCents;
-    if (isSub) {
-      effectiveShippingCents = 0;
-    }
+    // La suscripción ya NO perdona el envío (regla del dueño, 2026-09-14: "los
+    // suscriptores tampoco van a tener el envío gratis"). Lo que tipea el admin
+    // se cobra tal cual, sea quien sea el cliente; `isSub` se guarda sólo como
+    // dato de la cotización (`wasSubscriberAtQuote`).
+    const isSub = await this.subscriptionService.isActiveSubscriber(
+      order.customerId,
+    );
+    const effectiveShippingCents = shippingCents;
+
+    // El recargo por distancia vive en su propia columna y no dentro de
+    // `shipping` porque es OTRO cargo: el envío es el viaje, el recargo es la
+    // distancia. Van en renglones separados en la factura del cliente y se
+    // congelan por separado en el invoice, así que meterlos en la misma celda
+    // haría imposible reconstruir después qué se le cobró por cada cosa.
+    const surchargeCents =
+      opts.surchargeCents ??
+      Math.round(parseFloat(order.deliverySurcharge ?? '0') * 100);
+
+    // Para el impuesto, envío y recargo son lo mismo: dos cargos de entrega
+    // que se prorratean por la parte gravable del pedido (ver common/tax.ts).
+    // Sumarlos acá deja la matemática existente intacta — un pedido de agua
+    // exenta sigue sin pagar impuesto por el viaje.
+    const deliveryCents = effectiveShippingCents + surchargeCents;
 
     const subtotalCents = Math.round(parseFloat(order.subtotal) * 100);
     const pointsRedeemedCents = Math.round(
@@ -747,24 +846,28 @@ export class OrdersService {
     // que sea el pedido llegara sin líneas, se cae a "todo gravable", que es
     // el comportamiento histórico — nunca cobrar de menos.
     const taxLines: TaxableLine[] = (order.items ?? []).map((item) => ({
-      lineCents: Math.round(parseFloat(item.priceAtOrder) * 100) * item.quantity,
+      lineCents:
+        Math.round(parseFloat(item.priceAtOrder) * 100) * item.quantity,
       taxCategory: item.product?.taxCategory ?? 'standard',
     }));
     const base = taxLines.length
       ? computeTaxableBase(taxLines, {
-          shippingCents: effectiveShippingCents,
+          shippingCents: deliveryCents,
           pointsRedeemedCents,
         })
-      : computeTaxableBase([{ lineCents: subtotalCents, taxCategory: 'standard' }], {
-          shippingCents: effectiveShippingCents,
-          pointsRedeemedCents,
-        });
+      : computeTaxableBase(
+          [{ lineCents: subtotalCents, taxCategory: 'standard' }],
+          {
+            shippingCents: deliveryCents,
+            pointsRedeemedCents,
+          },
+        );
 
     // El neto que paga el cliente descuenta TODOS los puntos; el prorrateo solo
     // reparte el descuento entre la mitad gravada y la exenta.
     const netCents = Math.max(
       0,
-      subtotalCents + effectiveShippingCents - pointsRedeemedCents,
+      subtotalCents + deliveryCents - pointsRedeemedCents,
     );
     const taxCents = base.taxCents;
     // Preserve the propina chosen at checkout — untaxed, rides on the total.
@@ -773,6 +876,11 @@ export class OrdersService {
 
     await this.orders.update(id, {
       shipping: (effectiveShippingCents / 100).toFixed(2),
+      deliverySurcharge: (surchargeCents / 100).toFixed(2),
+      // `undefined` deja el día como estaba; `null` lo desasigna.
+      ...(opts.scheduledDeliveryDate !== undefined
+        ? { scheduledDeliveryDate: opts.scheduledDeliveryDate }
+        : {}),
       tax: (taxCents / 100).toFixed(2),
       taxableSubtotal: (base.taxableCents / 100).toFixed(2),
       totalAmount: (totalCents / 100).toFixed(2),
@@ -781,16 +889,77 @@ export class OrdersService {
       wasSubscriberAtQuote: isSub,
     });
 
-    // Free shipping (subscriber benefit or admin-quoted $0) means nothing is
-    // owed by card — auto-confirm so the customer skips the manual confirm tap.
-    if (effectiveShippingCents === 0) {
+    // Entrega cotizada en $0 → no queda nada que cobrar por tarjeta:
+    // auto-confirmamos así el cliente se ahorra el tap de confirmar.
+    //
+    // Mira `deliveryCents`, NO sólo el envío: el admin puede perdonar el envío
+    // y aun así cobrar el recargo por distancia. Con el guard viejo esa orden
+    // auto-confirmaba como "gratis" y el recargo no se cobraba nunca.
+    if (deliveryCents === 0) {
       await this.tryAutoConfirmFreeOrder(id);
     }
 
     const quoted = await this.findOne(id, user);
     // "Tu cotización está lista" (or "confirmado" if it auto-confirmed above).
     this.orderNotifications.notifyStatus(quoted);
+    // Si la cotización además ESTRENA día de reparto, va el aviso del día. Se
+    // compara contra el valor previo para no spamear al cliente cada vez que el
+    // admin re-cotiza sin tocar la fecha.
+    if (
+      opts.scheduledDeliveryDate != null &&
+      opts.scheduledDeliveryDate !== order.scheduledDeliveryDate
+    ) {
+      this.orderNotifications.notifyScheduledDelivery(quoted);
+    }
     return quoted;
+  }
+
+  /**
+   * El admin le asigna (o le saca) el DÍA de reparto a un pedido.
+   *
+   * Pedido del dueño (2026-09-14): al cliente lejano hay que poder decirle qué
+   * día le toca el delivery. Va por su propio endpoint y NO por setQuote porque
+   * asignar el día no toca plata ni estado: un pedido ya confirmado se puede
+   * reprogramar sin volver a QUOTED.
+   *
+   * @param date 'YYYY-MM-DD', o `null` para desasignarlo.
+   */
+  async setScheduledDeliveryDate(
+    id: string,
+    date: string | null,
+    user: AuthenticatedUser,
+  ) {
+    // El vendedor puede programar los pedidos de SU cartera: `findOne(id, user)`
+    // aplica el scope, así que no alcanza a los demás.
+    this.assertCanOperateOrders(
+      user,
+      'Solo el super admin o el vendedor asignado pueden programar entregas',
+    );
+
+    const order = await this.findOne(id, user);
+
+    if (
+      order.status === OrderStatus.DELIVERED ||
+      order.status === OrderStatus.CANCELLED
+    ) {
+      // Ya se entregó o se canceló: programar el reparto no significa nada y el
+      // aviso al cliente sería absurdo.
+      throw new BadRequestException(
+        `No se puede programar la entrega de un pedido en estado ${order.status}`,
+      );
+    }
+
+    const changed = date !== order.scheduledDeliveryDate;
+
+    await this.orders.update(id, { scheduledDeliveryDate: date });
+
+    const updated = await this.findOne(id, user);
+    // Sólo se avisa cuando hay día NUEVO. Desasignar (null) no notifica — no
+    // hay nada que contarle al cliente — y re-guardar la misma fecha tampoco.
+    if (date != null && changed) {
+      this.orderNotifications.notifyScheduledDelivery(updated);
+    }
+    return updated;
   }
 
   /**
@@ -919,8 +1088,7 @@ export class OrdersService {
         await this.autoConfirmSkipQuoteByIntentId(existing.id);
         throw new ConflictException({
           code: 'ALREADY_AUTHORIZED',
-          message:
-            'Tu pago ya fue autorizado — el pedido se está confirmando.',
+          message: 'Tu pago ya fue autorizado — el pedido se está confirmando.',
         });
       }
       if (existing.status !== 'canceled') {
@@ -952,17 +1120,20 @@ export class OrdersService {
     // T60: Detect if order has any rental items — if so, include customerId
     // and setup_future_usage='off_session' in the PaymentIntent so the
     // PaymentMethod is saved for recurring Stripe Subscription charges.
-    const hasRentalItems = order.items?.some(
-      (item) => (item.product as Product | undefined)?.pricingMode === 'rental',
-    ) ?? false;
+    const hasRentalItems =
+      order.items?.some((item) => item.product?.pricingMode === 'rental') ??
+      false;
 
     let rentalCustomerId: string | undefined;
     if (hasRentalItems) {
       // Ensure Stripe customer exists (reuse SubscriptionService helper)
-      rentalCustomerId = await this.subscriptionService.getOrCreateStripeCustomer(user.id);
+      rentalCustomerId =
+        await this.subscriptionService.getOrCreateStripeCustomer(user.id);
     }
 
-    const intentInput: Parameters<typeof this.payments.createAuthorizationIntent>[0] = {
+    const intentInput: Parameters<
+      typeof this.payments.createAuthorizationIntent
+    >[0] = {
       userId: user.id,
       orderId: order.id,
       amountCents: stripeAmountCents,
@@ -1071,15 +1242,23 @@ export class OrdersService {
 
   /**
    * Auto-confirm an order the customer should never have to tap "Confirmar
-   * pedido" for: one with FREE SHIPPING and nothing owed upfront by card. Fires
-   * when an order ENTERS the QUOTED state — at creation for skip-cotización
-   * orders (the free subscriber bebedero, standardized water deliveries) and at
-   * setQuote for subscriber free shipping. Advances QUOTED → PENDING_VALIDATION
-   * → CONFIRMED_BY_COLMADO (decrements stock).
+   * pedido" for: one whose total the customer already accepted and with nothing
+   * owed upfront by card. Fires when an order ENTERS the QUOTED state — at
+   * creation for skip-cotización orders (el bebedero que provisiona el
+   * sistema, standardized water deliveries) and at setQuote when the admin
+   * quotes the delivery at $0. Advances QUOTED → PENDING_VALIDATION →
+   * CONFIRMED_BY_COLMADO (decrements stock).
    *
-   * Guardrail: only when there is nothing to charge by card — cash (paid on
-   * delivery), $0 total, or fully covered by credit. A digital order that still
-   * owes a balance is left in QUOTED so the customer authorizes payment.
+   * Guardrail de envío: sólo aplica a las órdenes que NO son skip_quote. En una
+   * skip-cotización el cliente ya aceptó el total FINAL —envío fijo incluido—
+   * en el checkout, así que cobrarle el viaje no es motivo para trabarla. El
+   * guard existe para la orden que cotiza el admin: ésa el cliente todavía no
+   * la vio y tiene que confirmarla a mano.
+   *
+   * Guardrail de plata: only when there is nothing to charge by card — cash
+   * (paid on delivery), $0 total, or fully covered by credit. A digital order
+   * that still owes a balance is left in QUOTED so the customer authorizes
+   * payment.
    *
    * NON-BLOCKING: any failure (e.g. insufficient stock) is swallowed and the
    * order left for manual handling — this must never break order creation or
@@ -1094,7 +1273,8 @@ export class OrdersService {
       if (order.stripePaymentIntentId !== null) return;
 
       const shippingCents = Math.round(parseFloat(order.shipping) * 100);
-      if (shippingCents !== 0) return; // not free shipping → keep manual confirm
+      // Orden cotizada por el admin con envío cobrado → confirmación manual.
+      if (!order.skipQuote && shippingCents !== 0) return;
 
       const totalCents = Math.round(parseFloat(order.totalAmount) * 100);
       const creditAppliedCents = Math.round(
@@ -1120,11 +1300,12 @@ export class OrdersService {
   }
 
   /**
-   * One-time backfill: apply the free-shipping auto-confirm to orders that were
-   * already stuck in QUOTED ("Por confirmar") before auto-confirm shipped. Runs
-   * the same guarded, non-blocking tryAutoConfirmFreeOrder per order, so it only
-   * touches qualifying ones (free shipping, nothing owed by card) and is safe to
-   * re-run (already-confirmed orders are no longer QUOTED, so they're skipped).
+   * One-time backfill: apply the auto-confirm to orders that were already stuck
+   * in QUOTED ("Por confirmar") before auto-confirm shipped. Runs the same
+   * guarded, non-blocking tryAutoConfirmFreeOrder per order, so it only touches
+   * qualifying ones (nada que cobrar por tarjeta y, si no es skip_quote,
+   * envío en $0) y es seguro re-correrlo (already-confirmed orders are no
+   * longer QUOTED, so they're skipped).
    * Invoked from the standalone script src/database/backfill-auto-confirm.ts.
    */
   async backfillAutoConfirmFreeShippingOrders(): Promise<{
@@ -1426,7 +1607,7 @@ export class OrdersService {
           relations: ['product'],
         })) ?? [];
       const isMaintenanceOrder = orderItems.some(
-        (item) => (item.product as Product | undefined)?.isMaintenanceService,
+        (item) => item.product?.isMaintenanceService,
       );
       if (customerId && isMaintenanceOrder) {
         await this.rentalsService.resetMaintenanceForUser(customerId);

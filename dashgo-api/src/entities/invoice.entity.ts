@@ -54,6 +54,23 @@ export class Invoice {
   })
   taxRate!: string;
 
+  /**
+   * Recargo por distancia — snapshot del `delivery_surcharge` de la orden.
+   *
+   * Vive en su propia columna y no dentro de `shipping` por el mismo motivo que
+   * en la orden: es OTRO cargo — el envío es el viaje, el recargo es la
+   * distancia — y va en su propio renglón de la factura. Sin esta columna los
+   * renglones no sumaban el total del cliente lejano: faltaba justo el recargo.
+   */
+  @Column({
+    name: 'delivery_surcharge',
+    type: 'numeric',
+    precision: 10,
+    scale: 2,
+    default: 0,
+  })
+  deliverySurcharge!: string;
+
   // Propina — snapshotted from the order; untaxed, already inside `total`.
   @Column({ type: 'numeric', precision: 10, scale: 2, default: 0 })
   tip!: string;

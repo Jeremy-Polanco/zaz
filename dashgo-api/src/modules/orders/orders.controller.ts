@@ -16,6 +16,7 @@ import { OrdersService } from './orders.service';
 import { CreateOrderDto, DeliveryAddressDto } from './dto/create-order.dto';
 import { UpdateOrderStatusDto } from './dto/update-order-status.dto';
 import { SetQuoteDto } from './dto/set-quote.dto';
+import { SetDeliveryDateDto } from './dto/set-delivery-date.dto';
 
 @UseGuards(JwtAuthGuard)
 @Controller('orders')
@@ -77,7 +78,28 @@ export class OrdersController {
     @Body() dto: SetQuoteDto,
     @CurrentUser() user: AuthenticatedUser,
   ) {
-    return this.orders.setQuote(id, dto.shippingCents, user);
+    return this.orders.setQuote(id, dto.shippingCents, user, {
+      surchargeCents: dto.surchargeCents,
+      scheduledDeliveryDate: dto.scheduledDeliveryDate,
+    });
+  }
+
+  /**
+   * El admin le asigna (o le saca) el DÍA de reparto al pedido. Va aparte de
+   * `:id/quote` porque programar no toca plata ni estado: un pedido ya
+   * confirmado se reprograma sin volver a cotizarlo.
+   */
+  @Patch(':id/delivery-date')
+  setDeliveryDate(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: SetDeliveryDateDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.orders.setScheduledDeliveryDate(
+      id,
+      dto.scheduledDeliveryDate,
+      user,
+    );
   }
 
   /** Super-admin pins the delivery location at delivery time. */

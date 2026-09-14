@@ -15,6 +15,8 @@ export interface InvoiceView {
   subtotal: string;
   pointsRedeemed: string;
   shipping: string;
+  /** Recargo por distancia, aparte del envío (el suscriptor sí lo paga). */
+  deliverySurcharge: string;
   tax: string;
   taxRate: string;
   tip: string;
@@ -102,6 +104,9 @@ export class InvoicesService {
         subtotal: order.subtotal,
         pointsRedeemed: order.pointsRedeemed,
         shipping: order.shipping,
+        // Sin este snapshot los renglones no suman el total de un pedido con
+        // recargo: la factura mostraría de menos justo lo que el cliente pagó.
+        deliverySurcharge: order.deliverySurcharge,
         tax: order.tax,
         taxRate: order.taxRate,
         tip: order.tip,
@@ -152,6 +157,7 @@ export class InvoicesService {
       subtotal: invoice.subtotal,
       pointsRedeemed: invoice.pointsRedeemed,
       shipping: invoice.shipping,
+      deliverySurcharge: invoice.deliverySurcharge,
       tax: invoice.tax,
       taxRate: invoice.taxRate,
       tip: invoice.tip,

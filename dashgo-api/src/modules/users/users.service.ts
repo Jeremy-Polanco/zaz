@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -28,6 +29,8 @@ export type AdminUser = User & {
 
 @Injectable()
 export class UsersService {
+  private readonly logger = new Logger(UsersService.name);
+
   constructor(
     @InjectRepository(User) private readonly users: Repository<User>,
     private readonly auth: AuthService,
@@ -152,6 +155,69 @@ export class UsersService {
     const updated = await this.users.findOne({ where: { id } });
     if (!updated) throw new NotFoundException();
     return updated;
+  }
+
+  /**
+   * Traspaso de cartera: mueve TODOS los clientes de un vendedor a otro (o los
+   * deja sin vendedor con `toSellerId: null`). SUPER_ADMIN_DELIVERY only — el
+   * guard del controller es el que lo impone, misma regla que `updateByAdmin`:
+   * si un vendedor pudiera correr esto se llevaría la cartera de otro de un
+   * solo request.
+   *
+   * Un UNICO `UPDATE ... WHERE seller_id = :from`, nunca un loop fila por fila:
+   * una cartera son cientos de clientes y un corte a mitad de camino dejaría
+   * media cartera con cada vendedor, sin forma de saber cuál quedó dónde.
+   *
+   * Solo toca `seller_id`. La atribución del promotor (`referred_by_id`), el
+   * crédito y las órdenes no se tocan a propósito: las órdenes viejas siguen
+   * siendo del vendedor que las trabajó — la comisión ya cobrada no se
+   * reescribe porque el cliente cambie de manos hoy.
+   */
+  async transferSellerPortfolio(
+    fromSellerId: string,
+    toSellerId: string | null,
+  ): Promise<{ moved: number }> {
+    const from = await this.users.findOne({ where: { id: fromSellerId } });
+    if (!from || from.role !== UserRole.SELLER) {
+      throw new NotFoundException('Vendedor no encontrado');
+    }
+
+    if (toSellerId !== null) {
+      // Primero el mismo-vendedor: es un error de UI (doble click en el select)
+      // y no merece un query extra. Además, sin este corte el UPDATE sería un
+      // no-op que igual reporta "N clientes movidos" y confunde al dueño.
+      if (toSellerId === fromSellerId) {
+        throw new BadRequestException(
+          'El vendedor de origen y destino son el mismo',
+        );
+      }
+      // Misma regla que la asignación individual: la cartera no puede terminar
+      // apuntando a alguien que no es vendedor, porque esos clientes se vuelven
+      // invisibles para todos los paneles (el scope busca un seller_id de un
+      // seller). Y acá serían cientos de golpe.
+      const to = await this.users.findOne({ where: { id: toSellerId } });
+      if (!to || to.role !== UserRole.SELLER) {
+        throw new BadRequestException(
+          'El vendedor de destino no existe o no tiene rol de vendedor',
+        );
+      }
+    }
+
+    const { affected } = await this.users.update(
+      { sellerId: fromSellerId },
+      { sellerId: toSellerId },
+    );
+    // `affected` puede venir undefined según el driver; 0 es lo que el panel
+    // entiende, "undefined clientes movidos" no.
+    const moved = affected ?? 0;
+
+    // Traspaso de cartera = plata (comisiones) cambiando de dueño. Queda en el
+    // log para poder reconstruir quién tenía qué cuando alguien reclame.
+    this.logger.log(
+      `[SELLER_TRANSFER] ${moved} clientes: ${fromSellerId} → ${toSellerId ?? 'sin vendedor'}`,
+    );
+
+    return { moved };
   }
 
   /**

@@ -99,6 +99,10 @@ export class PremiumProductListener {
           usePoints: false,
           useCredit: false,
         },
+        // Sin envío: la instalación la provisiona el sistema, no la pidió el
+        // cliente. Tiene que quedar en $0 porque deliverProvisionedOrder
+        // —acá abajo— rechaza cualquier orden con plata pendiente.
+        { provisioned: true },
       );
 
       // Se entrega en el acto: es lo que activa el alquiler y arranca el
