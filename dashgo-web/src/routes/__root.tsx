@@ -114,7 +114,7 @@ function RoleNavLinks({
           Crédito
         </Link>
         <Link to="/super/subscription" className={linkClass} onClick={onNavigate}>
-          Suscripción
+          Precios
         </Link>
         <Link to="/super/rentals" className={linkClass} onClick={onNavigate}>
           Alquileres

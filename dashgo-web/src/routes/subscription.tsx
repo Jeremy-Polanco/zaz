@@ -22,7 +22,7 @@ import { TOKEN_KEY } from '../lib/api'
  * (dashgo-api .../orders/subscriber-bebedero.listener.ts), so we advertise it.
  */
 export const SUBSCRIPTION_PERKS =
-  'Bebedero gratis, envío gratis y mantenimiento sin costo.'
+  'Bebedero gratis y mantenimiento sin costo.'
 
 export const Route = createFileRoute('/subscription')({
   validateSearch: z.object({
@@ -161,7 +161,7 @@ export function SubscriptionPage() {
             Activo hasta {formatDate(sub.currentPeriodEnd)}, no se renovará.
           </p>
           <p className="mb-6 text-sm text-yellow-700">
-            Aún tienes envío gratis y mantenimiento sin costo hasta esa fecha.
+            Aún tienes tu bebedero y el mantenimiento sin costo hasta esa fecha.
           </p>
           <div className="flex flex-wrap gap-3">
             <Button
@@ -185,7 +185,7 @@ export function SubscriptionPage() {
         <div className="border border-red-200 bg-red-50 p-8">
           <p className="mb-2 text-base font-medium text-red-800">
             Tu pago está pendiente. Actualizá tu medio de pago para seguir con
-            el envío gratis y el mantenimiento sin costo.
+            tu bebedero y el mantenimiento sin costo.
           </p>
           <Button
             variant="accent"

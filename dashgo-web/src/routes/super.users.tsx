@@ -7,6 +7,7 @@ import {
   useAdminUsers,
   useCurrentUser,
   useDeleteUser,
+  useTransferSellerPortfolio,
   useUpdateUserAdmin,
 } from '../lib/queries'
 import { TOKEN_KEY, api } from '../lib/api'
@@ -346,7 +347,7 @@ export function PromoterCell({
 
 // ── Main page ──────────────────────────────────────────────────────────────────
 
-function SuperUsersPage() {
+export function SuperUsersPage() {
   const [subscription, setSubscription] = useState<
     AdminUsersSubscriptionFilter | undefined
   >(undefined)
@@ -355,11 +356,20 @@ function SuperUsersPage() {
   const [catalogId, setCatalogId] = useState<string | null>(null)
   const [pendingDelete, setPendingDelete] = useState<AdminUser | null>(null)
   const [birthdayMonthOnly, setBirthdayMonthOnly] = useState(false)
+  // 'all' | 'none' | <sellerId>. Ve la cartera de un vendedor puntual, o los
+  // clientes sin vendedor.
+  const [sellerFilter, setSellerFilter] = useState<'all' | 'none' | string>(
+    'all',
+  )
+  const [transferTarget, setTransferTarget] = useState('')
+  const [transferConfirming, setTransferConfirming] = useState(false)
+  const [transferSuccess, setTransferSuccess] = useState<string | null>(null)
 
   const { data: users, isPending } = useAdminUsers(subscription)
   const { data: me } = useCurrentUser()
   const deleteUser = useDeleteUser()
   const updateUser = useUpdateUserAdmin()
+  const transferPortfolio = useTransferSellerPortfolio()
   // Solo el super admin asigna cartera. Un vendedor entra a esta pantalla (ve
   // sus clientes) pero NO puede reasignar: si pudiera, el día que se pelea con
   // otro vendedor se lleva los clientes. La API lo rechaza igual.
@@ -382,6 +392,9 @@ function SuperUsersPage() {
     [allUsers],
   )
 
+  // El filtro por vendedor es 100% client-side, como el de texto: la lista de
+  // GET /users no está paginada y ya se filtra así en el navegador. Lo único
+  // que pega al servidor es el traspaso en sí (`useTransferSellerPortfolio`).
   const filtered = useMemo(() => {
     if (!users) return []
     const q = searchText.trim().toLowerCase()
@@ -393,11 +406,27 @@ function SuperUsersPage() {
           (u.phone?.toLowerCase().includes(q) ?? false),
       )
     }
+    if (sellerFilter === 'none') {
+      list = list.filter((u) => u.sellerId == null)
+    } else if (sellerFilter !== 'all') {
+      list = list.filter((u) => u.sellerId === sellerFilter)
+    }
     if (birthdayMonthOnly) {
       list = list.filter((u) => isBirthdayThisMonth(u.dateOfBirth))
     }
     return list
-  }, [users, searchText, birthdayMonthOnly])
+  }, [users, searchText, sellerFilter, birthdayMonthOnly])
+
+  const isSellerFilterActive = sellerFilter !== 'all' && sellerFilter !== 'none'
+  const sellerFilterName = isSellerFilterActive
+    ? (sellers.find((s) => s.id === sellerFilter)?.fullName ?? '')
+    : ''
+  // Destinos válidos para el traspaso: cualquier otro vendedor, o "Sin
+  // vendedor" para dejar la cartera sin dueño.
+  const transferTargets = useMemo(
+    () => sellers.filter((s) => s.id !== sellerFilter),
+    [sellers, sellerFilter],
+  )
 
   const birthdaysToday = useMemo(
     () => (users ?? []).filter((u) => isBirthdayToday(u.dateOfBirth)),
@@ -424,6 +453,31 @@ function SuperUsersPage() {
           onChange={(e) => setSearchText(e.target.value)}
           className="w-full max-w-sm border border-ink/20 bg-paper px-3 py-2 text-sm text-ink placeholder:text-ink-muted focus:outline-none focus:ring-1 focus:ring-accent"
         />
+        {/* Reasignar cartera es solo del super admin — mismo permiso que las
+            celdas Vendedor/Promotor. Un vendedor mirando su propia cartera no
+            necesita filtrarla por sí mismo. */}
+        {canAssign && (
+          <select
+            aria-label="Filtrar por vendedor"
+            value={sellerFilter}
+            onChange={(e) => {
+              setSellerFilter(e.target.value)
+              setTransferConfirming(false)
+              setTransferTarget('')
+              setTransferSuccess(null)
+              transferPortfolio.reset()
+            }}
+            className="border border-ink/20 bg-paper px-3 py-2 text-sm text-ink outline-none focus:border-ink"
+          >
+            <option value="all">Todos los vendedores</option>
+            <option value="none">Sin vendedor</option>
+            {sellers.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.fullName}
+              </option>
+            ))}
+          </select>
+        )}
       </div>
 
       <div className="mb-6 flex flex-wrap gap-2">
@@ -462,6 +516,96 @@ function SuperUsersPage() {
             Ya les llegó el saludo automático. Si querés mandarles un regalo,
             coordinalo con su próximo pedido.
           </p>
+        </div>
+      )}
+
+      {canAssign && isSellerFilterActive && filtered.length > 0 && (
+        <div className="mb-6 flex flex-wrap items-center gap-3 border border-accent/40 bg-accent/10 px-4 py-3">
+          <p className="text-sm text-ink">
+            {filtered.length} cliente{filtered.length === 1 ? '' : 's'} de{' '}
+            {sellerFilterName}
+          </p>
+          {transferConfirming ? (
+            <>
+              <span className="text-xs text-ink-muted">
+                ¿Confirmás el traspaso?
+              </span>
+              <button
+                type="button"
+                disabled={transferPortfolio.isPending}
+                onClick={() => {
+                  const toSellerId = transferTarget === '' ? null : transferTarget
+                  const destino =
+                    toSellerId === null
+                      ? 'Sin vendedor'
+                      : (transferTargets.find((s) => s.id === toSellerId)
+                          ?.fullName ?? '')
+                  transferPortfolio.mutate(
+                    { sellerId: sellerFilter, toSellerId },
+                    {
+                      onSuccess: (data) => {
+                        setTransferConfirming(false)
+                        setTransferTarget('')
+                        setTransferSuccess(
+                          `Se pasaron ${data.moved} cliente${data.moved === 1 ? '' : 's'} a ${destino}.`,
+                        )
+                        setSellerFilter(toSellerId ?? 'none')
+                      },
+                    },
+                  )
+                }}
+                className="border border-bad px-3 py-1.5 text-[11px] uppercase tracking-wide text-bad transition-colors hover:bg-bad/10 disabled:opacity-50"
+              >
+                {transferPortfolio.isPending ? 'Pasando…' : 'Confirmar traspaso'}
+              </button>
+              <button
+                type="button"
+                disabled={transferPortfolio.isPending}
+                onClick={() => setTransferConfirming(false)}
+                className="border border-ink/20 px-3 py-1.5 text-[11px] uppercase tracking-wide text-ink-muted transition-colors hover:border-ink/40 disabled:opacity-50"
+              >
+                Cancelar
+              </button>
+            </>
+          ) : (
+            <>
+              <select
+                aria-label="Pasar la cartera a"
+                value={transferTarget}
+                onChange={(e) => setTransferTarget(e.target.value)}
+                className="border border-ink/20 bg-paper px-2 py-1.5 text-xs text-ink outline-none focus:border-ink"
+              >
+                {transferTargets.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.fullName}
+                  </option>
+                ))}
+                <option value="">Sin vendedor</option>
+              </select>
+              <button
+                type="button"
+                onClick={() => setTransferConfirming(true)}
+                className="border border-accent px-3 py-1.5 text-[11px] uppercase tracking-wide text-accent-dark transition-colors hover:bg-accent/10"
+              >
+                Pasar {filtered.length} cliente{filtered.length === 1 ? '' : 's'}
+              </button>
+            </>
+          )}
+        </div>
+      )}
+
+      {transferSuccess && (
+        <div className="mb-6 border-l-4 border-ok bg-ok/10 p-4 text-sm text-ink">
+          {transferSuccess}
+        </div>
+      )}
+
+      {transferPortfolio.isError && (
+        <div className="mb-6 border-l-4 border-bad bg-bad/10 p-4 text-sm text-bad">
+          {serverMessage(
+            transferPortfolio.error,
+            'No se pudo traspasar la cartera. Intentá de nuevo.',
+          )}
         </div>
       )}
 

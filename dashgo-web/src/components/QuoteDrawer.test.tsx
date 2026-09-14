@@ -5,7 +5,8 @@
  * section is rendered with the order's customerId.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { screen } from '@testing-library/react'
+import { screen, fireEvent } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { renderWithProviders } from '../test/test-utils'
 import type { Order } from '../lib/types'
 import type { UserAddress } from '../lib/types'
@@ -162,5 +163,180 @@ describe('QuoteDrawer — Direcciones guardadas del cliente section', () => {
       <QuoteDrawer order={baseOrder} onClose={vi.fn()} />,
     )
     expect(screen.getByText(/cargando/i)).toBeInTheDocument()
+  })
+})
+
+// ── Recargo por distancia + Día de entrega ──────────────────────────────────
+//
+// deliverySurcharge ("delivery aparte del envío" para clientes lejanos) and
+// scheduledDeliveryDate are new on Order — the admin sets both from this same
+// drawer alongside shipping.
+
+describe('QuoteDrawer — recargo por distancia y día de entrega', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockUseSetOrderQuote.mockReturnValue(
+      makeMutationMock() as unknown as ReturnType<typeof useSetOrderQuote>,
+    )
+    mockUseSuperUserAddresses.mockReturnValue(
+      makeQueryResult(savedAddresses) as unknown as ReturnType<typeof useSuperUserAddresses>,
+    )
+  })
+
+  it('shows the helper text explaining the surcharge applies to subscribers too', () => {
+    renderWithProviders(<QuoteDrawer order={baseOrder} onClose={vi.fn()} />)
+    expect(
+      screen.getByText(
+        /se cobra también a suscriptores.*la suscripción cubre el envío, no la distancia/i,
+      ),
+    ).toBeInTheDocument()
+  })
+
+  it('defaults the surcharge field empty and the date field empty when the order has none', () => {
+    renderWithProviders(<QuoteDrawer order={baseOrder} onClose={vi.fn()} />)
+    expect(
+      screen.getByLabelText(/recargo por distancia/i),
+    ).toHaveValue(null)
+    expect(screen.getByLabelText(/día de entrega/i)).toHaveValue('')
+  })
+
+  it('defaults the surcharge field from order.deliverySurcharge when it is > 0', () => {
+    renderWithProviders(
+      <QuoteDrawer
+        order={{ ...baseOrder, deliverySurcharge: '3.00' }}
+        onClose={vi.fn()}
+      />,
+    )
+    expect(screen.getByLabelText(/recargo por distancia/i)).toHaveValue(3)
+  })
+
+  it('leaves the surcharge field empty when order.deliverySurcharge is "0.00"', () => {
+    renderWithProviders(
+      <QuoteDrawer
+        order={{ ...baseOrder, deliverySurcharge: '0.00' }}
+        onClose={vi.fn()}
+      />,
+    )
+    expect(screen.getByLabelText(/recargo por distancia/i)).toHaveValue(null)
+  })
+
+  it('defaults the date field from order.scheduledDeliveryDate', () => {
+    renderWithProviders(
+      <QuoteDrawer
+        order={{ ...baseOrder, scheduledDeliveryDate: '2026-09-20' }}
+        onClose={vi.fn()}
+      />,
+    )
+    expect(screen.getByLabelText(/día de entrega/i)).toHaveValue('2026-09-20')
+  })
+
+  it('sets min=today on the date field so staff cannot schedule in the past', () => {
+    renderWithProviders(<QuoteDrawer order={baseOrder} onClose={vi.fn()} />)
+    const input = screen.getByLabelText(/día de entrega/i)
+    // Just assert a min is present and well-formed — asserting the exact date
+    // would make the test flaky at midnight.
+    expect(input.getAttribute('min')).toMatch(/^\d{4}-\d{2}-\d{2}$/)
+  })
+
+  it('includes the surcharge in the tax preview (shipping + surcharge, both taxed)', async () => {
+    const user = userEvent.setup()
+    renderWithProviders(<QuoteDrawer order={baseOrder} onClose={vi.fn()} />)
+
+    await user.type(screen.getByLabelText(/envío \(usd\)/i), '5.00')
+    await user.type(screen.getByLabelText(/recargo por distancia/i), '3.00')
+
+    // subtotal 50.00 + shipping 5.00 + surcharge 3.00 = 58.00 taxable base
+    // taxCents = round(5800 * 0.08887) = 515 → $5.15; total = $63.15
+    expect(screen.getByText('$5.15')).toBeInTheDocument()
+    expect(screen.getByText('$63.15')).toBeInTheDocument()
+  })
+
+  it('shows a "Recargo por distancia" preview line only when the surcharge is > 0', async () => {
+    const user = userEvent.setup()
+    renderWithProviders(<QuoteDrawer order={baseOrder} onClose={vi.fn()} />)
+
+    expect(screen.queryByText('Recargo por distancia')).not.toBeInTheDocument()
+
+    await user.type(screen.getByLabelText(/recargo por distancia/i), '3.00')
+
+    expect(screen.getByText('Recargo por distancia')).toBeInTheDocument()
+    expect(screen.getByText('$3.00')).toBeInTheDocument()
+  })
+
+  it('submits shippingCents, surchargeCents and scheduledDeliveryDate together', async () => {
+    const user = userEvent.setup()
+    const mutateAsync = vi.fn().mockResolvedValue({})
+    mockUseSetOrderQuote.mockReturnValue({
+      ...makeMutationMock(),
+      mutateAsync,
+    } as unknown as ReturnType<typeof useSetOrderQuote>)
+    const onClose = vi.fn()
+
+    renderWithProviders(<QuoteDrawer order={baseOrder} onClose={onClose} />)
+
+    await user.type(screen.getByLabelText(/envío \(usd\)/i), '5.00')
+    await user.type(screen.getByLabelText(/recargo por distancia/i), '3.00')
+    fireEvent.change(screen.getByLabelText(/día de entrega/i), {
+      target: { value: '2026-09-20' },
+    })
+    await user.click(screen.getByRole('button', { name: /enviar cotización/i }))
+
+    expect(mutateAsync).toHaveBeenCalledWith({
+      id: baseOrder.id,
+      shippingCents: 500,
+      surchargeCents: 300,
+      scheduledDeliveryDate: '2026-09-20',
+    })
+    expect(onClose).toHaveBeenCalled()
+  })
+
+  it('sends surchargeCents: 0 when the surcharge field is cleared', async () => {
+    const user = userEvent.setup()
+    const mutateAsync = vi.fn().mockResolvedValue({})
+    mockUseSetOrderQuote.mockReturnValue({
+      ...makeMutationMock(),
+      mutateAsync,
+    } as unknown as ReturnType<typeof useSetOrderQuote>)
+
+    renderWithProviders(
+      <QuoteDrawer
+        order={{ ...baseOrder, deliverySurcharge: '3.00' }}
+        onClose={vi.fn()}
+      />,
+    )
+
+    await user.clear(screen.getByLabelText(/recargo por distancia/i))
+    await user.type(screen.getByLabelText(/envío \(usd\)/i), '5.00')
+    await user.click(screen.getByRole('button', { name: /enviar cotización/i }))
+
+    expect(mutateAsync).toHaveBeenCalledWith(
+      expect.objectContaining({ surchargeCents: 0 }),
+    )
+  })
+
+  it('sends scheduledDeliveryDate: null when the date field is cleared', async () => {
+    const user = userEvent.setup()
+    const mutateAsync = vi.fn().mockResolvedValue({})
+    mockUseSetOrderQuote.mockReturnValue({
+      ...makeMutationMock(),
+      mutateAsync,
+    } as unknown as ReturnType<typeof useSetOrderQuote>)
+
+    renderWithProviders(
+      <QuoteDrawer
+        order={{ ...baseOrder, scheduledDeliveryDate: '2026-09-20' }}
+        onClose={vi.fn()}
+      />,
+    )
+
+    fireEvent.change(screen.getByLabelText(/día de entrega/i), {
+      target: { value: '' },
+    })
+    await user.type(screen.getByLabelText(/envío \(usd\)/i), '5.00')
+    await user.click(screen.getByRole('button', { name: /enviar cotización/i }))
+
+    expect(mutateAsync).toHaveBeenCalledWith(
+      expect.objectContaining({ scheduledDeliveryDate: null }),
+    )
   })
 })

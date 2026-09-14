@@ -1,12 +1,13 @@
 import { createFileRoute, isRedirect, Link, redirect } from '@tanstack/react-router'
-import { useMemo, useState } from 'react'
+import { useMemo, useState, type ReactNode } from 'react'
 import { DataTable } from '../components/DataTable'
 import { QuoteDrawer } from '../components/QuoteDrawer'
 import { OrderLocationDrawer } from '../components/OrderLocationDrawer'
 import { OrderAddressModal } from '../components/OrderAddressModal'
+import { DeliveryDayPicker } from '../components/DeliveryDayPicker'
 import { Button, SectionHeading } from '../components/ui'
 import { useOrders, useUpdateOrderStatus } from '../lib/queries'
-import { formatDate, formatMoney } from '../lib/utils'
+import { formatDate, formatDeliveryDay, formatMoney } from '../lib/utils'
 import { formatAddressLine } from '../lib/address'
 import type { Order, OrderStatus } from '../lib/types'
 import type { ColumnDef } from '@tanstack/react-table'
@@ -130,10 +131,17 @@ export function SuperOrdersPage() {
       {
         header: 'Fecha',
         accessorKey: 'createdAt',
-        cell: ({ getValue }) => (
-          <span className="nums text-xs text-ink-muted">
-            {formatDate(getValue<string>())}
-          </span>
+        cell: ({ getValue, row }) => (
+          <div className="flex flex-col gap-0.5">
+            <span className="nums text-xs text-ink-muted">
+              {formatDate(getValue<string>())}
+            </span>
+            {row.original.scheduledDeliveryDate && (
+              <span className="nums text-[0.65rem] text-accent">
+                Entrega: {formatDeliveryDay(row.original.scheduledDeliveryDate)}
+              </span>
+            )}
+          </div>
         ),
       },
       {
@@ -174,6 +182,26 @@ export function SuperOrdersPage() {
                 {addr ? '📍 Editar ubicación' : '📍 Fijar ubicación'}
               </button>
             </div>
+          )
+        },
+      },
+      {
+        // Miles from the driver's active dispatch location to the delivery
+        // address, computed by the API. The list already arrives sorted
+        // (active orders nearest-first, then history newest-first) — this
+        // table renders rows in the order the API gives them, never re-sorts.
+        header: 'Distancia',
+        id: 'distance',
+        cell: ({ row }) => {
+          const d = row.original.distanceMiles
+          return d == null ? (
+            <span className="text-ink-muted" data-testid="distance-cell">
+              —
+            </span>
+          ) : (
+            <span className="nums text-ink" data-testid="distance-cell">
+              {d.toFixed(1)} mi
+            </span>
           )
         },
       },
@@ -293,8 +321,9 @@ export function SuperOrdersPage() {
             row.original.items.every(
               (it) => it.product?.requiresQuote === false,
             )
+          let primaryAction: ReactNode
           if (row.original.status === 'delivered') {
-            return (
+            primaryAction = (
               <Link
                 to="/orders/$orderId/invoice"
                 params={{ orderId: row.original.id }}
@@ -303,9 +332,8 @@ export function SuperOrdersPage() {
                 Ver factura ↗
               </Link>
             )
-          }
-          if (row.original.status === 'pending_quote') {
-            return (
+          } else if (row.original.status === 'pending_quote') {
+            primaryAction = (
               <Button
                 size="sm"
                 variant="accent"
@@ -314,9 +342,8 @@ export function SuperOrdersPage() {
                 Cotizar envío
               </Button>
             )
-          }
-          if (row.original.status === 'quoted') {
-            return (
+          } else if (row.original.status === 'quoted') {
+            primaryAction = (
               <div className="flex flex-col items-start gap-1">
                 <span className="text-[0.65rem] uppercase tracking-[0.14em] text-ink-muted">
                   Esperando al cliente
@@ -332,17 +359,39 @@ export function SuperOrdersPage() {
                 )}
               </div>
             )
+          } else {
+            const next = nextStatus(row.original.status)
+            primaryAction = next ? (
+              <Button
+                size="sm"
+                variant={row.original.status === 'in_delivery_route' ? 'accent' : 'primary'}
+                onClick={() => updateStatus.mutate({ id: row.original.id, status: next })}
+              >
+                {nextLabel(row.original.status)}
+              </Button>
+            ) : (
+              <span className="text-ink-muted">—</span>
+            )
           }
-          const next = nextStatus(row.original.status)
-          if (!next) return <span className="text-ink-muted">—</span>
+
+          // The day-assignment control is offered for every status the delivery
+          // op still has a say over — not delivered (already happened) or
+          // cancelled (dead order; also never shown in this table, see the
+          // "never shows cancelled" list filter above).
+          const canScheduleDelivery =
+            row.original.status !== 'delivered' &&
+            row.original.status !== 'cancelled'
+
           return (
-            <Button
-              size="sm"
-              variant={row.original.status === 'in_delivery_route' ? 'accent' : 'primary'}
-              onClick={() => updateStatus.mutate({ id: row.original.id, status: next })}
-            >
-              {nextLabel(row.original.status)}
-            </Button>
+            <div className="flex flex-col items-start gap-1.5">
+              {primaryAction}
+              {canScheduleDelivery && (
+                <DeliveryDayPicker
+                  orderId={row.original.id}
+                  scheduledDeliveryDate={row.original.scheduledDeliveryDate}
+                />
+              )}
+            </div>
           )
         },
       },

@@ -13,6 +13,7 @@ import {
   useOrders,
   usePointsBalance,
   useProducts,
+  useShippingRate,
 } from '../lib/queries'
 import { CheckoutCreditStep } from '../components/CheckoutCreditStep'
 import { CardAuthForm } from '../components/CardAuthForm'
@@ -21,7 +22,7 @@ import { useCart, clearCart } from '../lib/cart'
 import { Button, SectionHeading } from '../components/ui'
 import { userAddressToGeoAddress } from '../lib/address'
 import { cn, formatCents } from '../lib/utils'
-import { computeQuotePreviewCents } from '../lib/tax'
+import { DEFAULT_FLAT_SHIPPING_CENTS, computeQuotePreviewCents } from '../lib/tax'
 import { effectivePriceCentsFor, subscriberPriceWins } from '../lib/pricing'
 import { TOKEN_KEY } from '../lib/api'
 
@@ -157,14 +158,33 @@ function CheckoutPage() {
       ? Math.round((subtotalCents * tipPercent) / 100)
       : 0
 
-  // Shipping + tax are quoted by the super admin AFTER the order is placed.
-  // The subtotal (minus points/credit) is the initial total; the real total
-  // shows on the order detail screen once it lands in "quoted".
+  // Flat shipping fee, admin-set from the super panel (see useShippingRate) —
+  // every order pays it, subscribers included (2026-09-14: the subscription's
+  // value is the bebedero itself — free rental + no-cost maintenance — plus
+  // subscriber pricing, not a shipping discount). Applies whether skip-quote
+  // or not; only TAX is still quoted by the admin after the fact for
+  // pending_quote orders.
+  //
+  // null while the rate is still loading — never show/use a shipping total
+  // that could change once it arrives. DEFAULT_FLAT_SHIPPING_CENTS is only a
+  // fallback for when the fetch itself fails, not a hardcoded "the rate is
+  // $5" assumption.
+  const shippingRate = useShippingRate()
+  const shippingCents =
+    shippingRate.data?.shippingCents ??
+    (shippingRate.isError ? DEFAULT_FLAT_SHIPPING_CENTS : null)
+  const shippingLoading = shippingCents === null
+  const effectiveShippingCents = shippingCents ?? 0
+
+  // Tax is quoted by the super admin AFTER the order is placed for
+  // pending_quote orders. The subtotal + shipping (minus points/credit) is
+  // the initial total; the real total shows on the order detail screen once
+  // it lands in "quoted".
   const previewTotalCents = Math.max(0, subtotalCents - pointsAppliedCents - creditAppliedCents)
 
   // Skip-cotización: when EVERY cart item has requiresQuote=false (e.g. water),
-  // the order is auto-quoted at creation — shipping $0, tax computed now. Show
-  // the real numbers instead of the "a cotizar" placeholders.
+  // the order is auto-quoted at creation — flat shipping + tax computed now.
+  // Show the real numbers instead of the "a cotizar" placeholders.
   const allSkipQuote =
     cartItems.length > 0 &&
     cartItems.every(
@@ -180,12 +200,13 @@ function CheckoutPage() {
   const skipQuoteTaxCents = allSkipQuote
     ? computeQuotePreviewCents({
         subtotalCents,
-        shippingCents: 0,
+        shippingCents: effectiveShippingCents,
         pointsRedeemedCents: pointsAppliedCents,
         taxableSubtotalCents,
       }).taxCents
     : 0
-  const skipQuoteTotalCents = previewTotalCents + skipQuoteTaxCents + tipCents
+  const skipQuoteTotalCents =
+    previewTotalCents + effectiveShippingCents + skipQuoteTaxCents + tipCents
 
   if (totalItems === 0) {
     return (
@@ -571,11 +592,13 @@ function CheckoutPage() {
               type="submit"
               size="lg"
               variant="accent"
-              disabled={createOrder.isPending || confirmOrder.isPending}
+              disabled={createOrder.isPending || confirmOrder.isPending || shippingLoading}
             >
               {createOrder.isPending || confirmOrder.isPending
                 ? 'Enviando…'
-                : `Confirmar pedido · ${formatCents(allSkipQuote ? skipQuoteTotalCents : previewTotalCents + tipCents)} →`}
+                : shippingLoading
+                  ? 'Confirmar pedido · … →'
+                  : `Confirmar pedido · ${formatCents(allSkipQuote ? skipQuoteTotalCents : previewTotalCents + effectiveShippingCents + tipCents)} →`}
             </Button>
           </form>
         </div>
@@ -687,32 +710,17 @@ function CheckoutPage() {
                 <span className="text-[0.7rem] uppercase tracking-[0.15em] text-ink-muted">
                   Envío
                 </span>
-                {allSkipQuote ? (
-                  <span className="nums text-sm font-medium text-green-600">
-                    Gratis
-                  </span>
-                ) : isActiveSubscriber ? (
-                  <span className="nums text-sm font-medium text-green-600">
-                    Gratis con tu suscripción
-                  </span>
-                ) : (
-                  <span className="nums text-sm font-medium italic text-ink-muted">
-                    A cotizar
-                  </span>
-                )}
+                <span className="nums text-sm font-medium text-ink">
+                  {shippingLoading ? '…' : formatCents(effectiveShippingCents)}
+                </span>
               </div>
-              {isActiveSubscriber && (
-                <p className="text-[0.65rem] uppercase tracking-[0.12em] text-green-600">
-                  Envío gratis con tu suscripción
-                </p>
-              )}
               <div className="flex items-baseline justify-between">
                 <span className="text-[0.7rem] uppercase tracking-[0.15em] text-ink-muted">
                   Impuestos
                 </span>
                 {allSkipQuote ? (
                   <span className="nums text-sm font-medium text-ink">
-                    {formatCents(skipQuoteTaxCents)}
+                    {shippingLoading ? '…' : formatCents(skipQuoteTaxCents)}
                   </span>
                 ) : (
                   <span className="nums text-sm font-medium italic text-ink-muted">
@@ -737,16 +745,20 @@ function CheckoutPage() {
                 {allSkipQuote ? 'Total' : tipCents > 0 ? 'Total parcial' : 'Subtotal'}
               </span>
               <span className="display nums text-3xl font-semibold text-brand">
-                {formatCents(
-                  allSkipQuote ? skipQuoteTotalCents : previewTotalCents + tipCents,
-                )}
+                {shippingLoading
+                  ? '…'
+                  : formatCents(
+                      allSkipQuote
+                        ? skipQuoteTotalCents
+                        : previewTotalCents + effectiveShippingCents + tipCents,
+                    )}
               </span>
             </div>
 
             <p className="mt-4 text-[0.65rem] uppercase tracking-[0.12em] text-ink-muted">
               {allSkipQuote
                 ? 'Sin cotización — este es el total final. Confirmás y pagás.'
-                : 'El repartidor te cotiza el envío y te avisamos para confirmar el total.'}
+                : 'El repartidor confirma tu pedido y te avisamos con el total final.'}
             </p>
           </div>
         </aside>

@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { renderWithProviders } from '../test/test-utils'
-import type { AdminPlanResponse } from '../lib/types'
+import type { AdminPlanResponse, ShippingRate } from '../lib/types'
 
 // ── Module mocks ───────────────────────────────────────────────────────────────
 // The stub CAPTURES the options handed to createFileRoute, so the route guard
@@ -34,6 +34,9 @@ vi.mock('../lib/queries', () => ({
   // La tarjeta del plan Premium vive en la misma página.
   useAdminSubscriptionPlans: vi.fn(() => ({ data: [], isPending: false })),
   useCreateSubscriptionPlan: vi.fn(() => ({ mutateAsync: vi.fn(), isPending: false })),
+  // La tarifa de envío general también se edita en esta página ("Precios").
+  useShippingRate: vi.fn(),
+  useUpdateShippingRate: vi.fn(),
 }))
 vi.mock('../lib/api', () => ({
   api: { get: vi.fn(), put: vi.fn() },
@@ -42,12 +45,16 @@ vi.mock('../lib/api', () => ({
 
 import {
   useAdminSubscriptionPlan,
+  useShippingRate,
+  useUpdateShippingRate,
   useUpdateSubscriptionPlan,
 } from '../lib/queries'
 import { SuperSubscriptionPage } from './super.subscription'
 
 const mockUsePlan = vi.mocked(useAdminSubscriptionPlan)
 const mockUseMutation = vi.mocked(useUpdateSubscriptionPlan)
+const mockUseShippingRate = vi.mocked(useShippingRate)
+const mockUseUpdateShippingRate = vi.mocked(useUpdateShippingRate)
 
 // ── Fixtures ───────────────────────────────────────────────────────────────────
 
@@ -62,6 +69,8 @@ const defaultPlan: AdminPlanResponse = {
   interval: 'month',
   updatedAt: '2026-05-01T00:00:00.000Z',
 }
+
+const defaultShippingRate: ShippingRate = { shippingCents: 500 }
 
 function createMutationMock(
   overrides: Partial<{
@@ -88,10 +97,16 @@ function setup({
   plan = defaultPlan,
   planPending = false,
   mutation = createMutationMock(),
+  shippingRate = defaultShippingRate,
+  shippingRatePending = false,
+  shippingMutation = createMutationMock(),
 }: {
   plan?: AdminPlanResponse | null
   planPending?: boolean
   mutation?: ReturnType<typeof createMutationMock>
+  shippingRate?: ShippingRate | null
+  shippingRatePending?: boolean
+  shippingMutation?: ReturnType<typeof createMutationMock>
 } = {}) {
   mockUsePlan.mockReturnValue({
     data: planPending ? undefined : plan,
@@ -103,11 +118,25 @@ function setup({
   mockUseMutation.mockReturnValue(
     mutation as unknown as ReturnType<typeof useUpdateSubscriptionPlan>,
   )
+
+  mockUseShippingRate.mockReturnValue({
+    data: shippingRatePending ? undefined : shippingRate,
+    isPending: shippingRatePending,
+    isError: false,
+    error: null,
+  } as unknown as ReturnType<typeof useShippingRate>)
+
+  mockUseUpdateShippingRate.mockReturnValue(
+    shippingMutation as unknown as ReturnType<typeof useUpdateShippingRate>,
+  )
+
   return mutation
 }
 
 const priceInput = () => screen.getByTestId('price-input')
 const submit = () => screen.getByTestId('submit-btn')
+const shippingInput = () => screen.getByTestId('shipping-input')
+const shippingSubmit = () => screen.getByTestId('shipping-submit-btn')
 
 // ── Tests ──────────────────────────────────────────────────────────────────────
 
@@ -296,6 +325,91 @@ describe('SuperSubscriptionPage — tax preview', () => {
 
     await screen.findByText(/El precio mínimo es \$1\.00/)
     expect(screen.queryByTestId('gross-preview')).not.toBeInTheDocument()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// The general delivery rate — a second card on the same page (broadened to
+// "Precios" 2026-09-14). Business ask: the super admin can change the flat
+// shipping every order pays from the panel, instead of it being hardcoded.
+// ---------------------------------------------------------------------------
+
+describe('SuperSubscriptionPage — shipping rate', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  it('renders the current rate from the API', () => {
+    setup({ shippingRate: { shippingCents: 500 } })
+    renderWithProviders(<SuperSubscriptionPage />)
+
+    expect(screen.getByTestId('current-shipping-rate')).toHaveTextContent(
+      '$5.00',
+    )
+  })
+
+  it('submits the dollar amount converted to cents', async () => {
+    const shippingMutation = createMutationMock()
+    setup({ shippingMutation })
+    renderWithProviders(<SuperSubscriptionPage />)
+
+    await userEvent.clear(shippingInput())
+    await userEvent.type(shippingInput(), '6.50')
+    await userEvent.click(shippingSubmit())
+
+    await waitFor(() =>
+      expect(shippingMutation.mutate).toHaveBeenCalledWith(
+        { shippingCents: 650 },
+        expect.anything(),
+      ),
+    )
+  })
+
+  it('rejects a value above $100 with the Spanish message', async () => {
+    const shippingMutation = createMutationMock()
+    setup({ shippingMutation })
+    renderWithProviders(<SuperSubscriptionPage />)
+
+    await userEvent.clear(shippingInput())
+    await userEvent.type(shippingInput(), '150')
+    await userEvent.click(shippingSubmit())
+
+    expect(
+      await screen.findByText(/La tarifa máxima es \$100\.00/),
+    ).toBeInTheDocument()
+    expect(shippingMutation.mutate).not.toHaveBeenCalled()
+  })
+
+  it('rejects a negative value with the Spanish message', async () => {
+    const shippingMutation = createMutationMock()
+    setup({ shippingMutation })
+    renderWithProviders(<SuperSubscriptionPage />)
+
+    await userEvent.clear(shippingInput())
+    await userEvent.type(shippingInput(), '-5')
+    await userEvent.click(shippingSubmit())
+
+    expect(
+      await screen.findByText(/La tarifa mínima es \$0\.00/),
+    ).toBeInTheDocument()
+    expect(shippingMutation.mutate).not.toHaveBeenCalled()
+  })
+
+  it('confirms success to the admin after saving', () => {
+    setup({ shippingMutation: createMutationMock({ isSuccess: true }) })
+    renderWithProviders(<SuperSubscriptionPage />)
+
+    expect(
+      screen.getByText('Tarifa actualizada correctamente.'),
+    ).toBeInTheDocument()
+  })
+
+  // Guards the fix: with native validation active the browser would swallow
+  // the submit and the Spanish messages above could never render.
+  it('opts out of native constraint validation so zod can report', () => {
+    setup()
+    renderWithProviders(<SuperSubscriptionPage />)
+
+    const form = (shippingInput() as HTMLInputElement).form!
+    expect(form.noValidate).toBe(true)
   })
 })
 

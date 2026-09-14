@@ -11,7 +11,7 @@ export const Route = createFileRoute('/orders/$orderId/invoice')({
   component: InvoicePage,
 })
 
-function InvoicePage() {
+export function InvoicePage() {
   const { orderId } = Route.useParams()
   const navigate = useNavigate()
   const { data: invoice, isPending, isError, error } = useInvoice(orderId)
@@ -164,6 +164,16 @@ function InvoicePage() {
                   : 'Gratis'}
               </dd>
             </div>
+            {parseFloat(invoice.deliverySurcharge ?? '0') > 0 && (
+              <div className="flex justify-between border-b border-ink/10 pb-2">
+                <dt className="text-[0.7rem] uppercase tracking-[0.15em] text-ink-muted">
+                  Recargo por distancia
+                </dt>
+                <dd className="nums text-sm text-ink">
+                  {formatMoney(invoice.deliverySurcharge!)}
+                </dd>
+              </div>
+            )}
             <div className="flex justify-between border-b border-ink/10 pb-2">
               <dt className="text-[0.7rem] uppercase tracking-[0.15em] text-ink-muted">
                 Impuestos ({taxRatePct}%)

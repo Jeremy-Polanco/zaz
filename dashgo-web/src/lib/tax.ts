@@ -6,6 +6,18 @@
 export const TAX_RATE = 0.08887
 
 /**
+ * Fallback shipping rate, used ONLY if `GET /shipping/rate` cannot be
+ * fetched (network error, etc). The real value is the admin-set rate the
+ * super admin configures from the panel (see `useShippingRate` in
+ * `lib/queries.ts`) — every customer order pays that flat rate, subscribers
+ * included (2026-09-14: the subscription's value is the bebedero itself —
+ * free rental + no-cost maintenance — not a shipping discount). The only $0
+ * case is a system-provisioned subscription order (the bebedero rental),
+ * which never goes through this client.
+ */
+export const DEFAULT_FLAT_SHIPPING_CENTS = 500
+
+/**
  * Compute the quote preview given cent-denominated inputs. Matches the formula
  * in OrdersService.setQuote exactly.
  */

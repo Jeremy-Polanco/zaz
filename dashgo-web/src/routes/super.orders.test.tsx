@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { screen, within } from '@testing-library/react'
+import { screen, within, fireEvent } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { renderWithRouter } from '../test/test-utils'
 import type { GeoAddress, Order, OrderStatus } from '../lib/types'
@@ -18,6 +18,7 @@ vi.mock('@tanstack/react-router', async (importOriginal) => {
 vi.mock('../lib/queries', () => ({
   useOrders: vi.fn(),
   useUpdateOrderStatus: vi.fn(),
+  useSetDeliveryDate: vi.fn(),
 }))
 vi.mock('../lib/api', () => ({
   api: { get: vi.fn(), patch: vi.fn() },
@@ -45,11 +46,12 @@ vi.mock('../components/QuoteDrawer', () => ({
   ),
 }))
 
-import { useOrders, useUpdateOrderStatus } from '../lib/queries'
+import { useOrders, useUpdateOrderStatus, useSetDeliveryDate } from '../lib/queries'
 import { SuperOrdersPage } from './super.orders'
 
 const mockUseOrders = vi.mocked(useOrders)
 const mockUseUpdateOrderStatus = vi.mocked(useUpdateOrderStatus)
+const mockUseSetDeliveryDate = vi.mocked(useSetDeliveryDate)
 
 // ── Fixtures ───────────────────────────────────────────────────────────────────
 
@@ -85,7 +87,12 @@ function makeOrder(overrides: Partial<Order> = {}): Order {
 }
 
 function setup(
-  opts: { orders?: Order[]; isPending?: boolean; mutate?: ReturnType<typeof vi.fn> } = {},
+  opts: {
+    orders?: Order[]
+    isPending?: boolean
+    mutate?: ReturnType<typeof vi.fn>
+    setDeliveryDateMutateAsync?: ReturnType<typeof vi.fn>
+  } = {},
 ) {
   mockUseOrders.mockReturnValue({
     data: opts.isPending ? undefined : (opts.orders ?? []),
@@ -100,6 +107,13 @@ function setup(
     isPending: false,
     reset: vi.fn(),
   } as unknown as ReturnType<typeof useUpdateOrderStatus>)
+
+  mockUseSetDeliveryDate.mockReturnValue({
+    mutate: vi.fn(),
+    mutateAsync: opts.setDeliveryDateMutateAsync ?? vi.fn().mockResolvedValue({}),
+    isPending: false,
+    reset: vi.fn(),
+  } as unknown as ReturnType<typeof useSetDeliveryDate>)
 }
 
 /**
@@ -179,6 +193,55 @@ describe('SuperOrdersPage — Dirección cell', () => {
 // The KPI strip and the list filter drive what the delivery operator sees
 // first. Neither existed in the old address-cell driver.
 // ---------------------------------------------------------------------------
+
+describe('SuperOrdersPage — Distancia column', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  it('renders the distance in miles when the API computed it', async () => {
+    setup({ orders: [makeOrder({ distanceMiles: 2.3 })] })
+    await renderOrders()
+
+    const row = rowFor('Ana Cliente')
+    expect(within(row).getByText('2.3 mi')).toBeInTheDocument()
+  })
+
+  it('shows a muted dash when the API could not compute a distance', async () => {
+    // "Ana Cliente" also has no items, so "Lista de compra" renders its own
+    // "—" — scope to the distance cell specifically via its testid.
+    setup({ orders: [makeOrder({ distanceMiles: null })] })
+    await renderOrders()
+
+    const row = rowFor('Ana Cliente')
+    expect(within(row).getByTestId('distance-cell')).toHaveTextContent('—')
+  })
+
+  // The API already sorts active orders nearest-first from the driver's
+  // active location — the table must render in that order, never re-sort.
+  it('keeps the API order (nearest-first) instead of re-sorting', async () => {
+    setup({
+      orders: [
+        makeOrder({
+          id: 'near',
+          status: 'in_delivery_route',
+          customer: makeCustomer('Cliente Cercano'),
+          distanceMiles: 1.2,
+        }),
+        makeOrder({
+          id: 'far',
+          status: 'in_delivery_route',
+          customer: makeCustomer('Cliente Lejano'),
+          distanceMiles: 8.5,
+        }),
+      ],
+    })
+    await renderOrders()
+
+    const names = screen
+      .getAllByText(/Cliente (Cercano|Lejano)/)
+      .map((el) => el.textContent)
+    expect(names).toEqual(['Cliente Cercano', 'Cliente Lejano'])
+  })
+})
 
 describe('SuperOrdersPage — route metrics', () => {
   beforeEach(() => vi.clearAllMocks())
@@ -295,5 +358,137 @@ describe('SuperOrdersPage — loading', () => {
 
     expect(await screen.findByText('Cargando…')).toBeInTheDocument()
     expect(screen.queryByText('Panel · Reparto')).not.toBeInTheDocument()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// scheduledDeliveryDate — the "Fecha" column surfaces it, the "Acciones"
+// column is where staff assigns/clears it (DeliveryDayPicker).
+// ---------------------------------------------------------------------------
+
+describe('SuperOrdersPage — Fecha column, día de entrega', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  it('shows "Entrega: {día}" under the created date when a day is scheduled', async () => {
+    setup({ orders: [makeOrder({ scheduledDeliveryDate: '2026-09-20' })] })
+    await renderOrders()
+
+    const row = rowFor('Ana Cliente')
+    expect(
+      within(row).getByText(/Entrega: domingo 20 de septiembre/),
+    ).toBeInTheDocument()
+  })
+
+  it('shows nothing extra when no day is scheduled yet', async () => {
+    setup({ orders: [makeOrder({ scheduledDeliveryDate: null })] })
+    await renderOrders()
+
+    const row = rowFor('Ana Cliente')
+    expect(within(row).queryByText(/Entrega:/)).not.toBeInTheDocument()
+  })
+})
+
+describe('SuperOrdersPage — Acciones column, asignar día de entrega', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  it('shows "📅 Asignar día" when the order has no scheduled day', async () => {
+    setup({ orders: [makeOrder({ status: 'pending_validation' })] })
+    await renderOrders()
+
+    const row = rowFor('Ana Cliente')
+    expect(
+      within(row).getByRole('button', { name: '📅 Asignar día' }),
+    ).toBeInTheDocument()
+  })
+
+  it('shows "📅 dd/mm" instead when a day is already scheduled', async () => {
+    setup({
+      orders: [
+        makeOrder({
+          status: 'pending_validation',
+          scheduledDeliveryDate: '2026-09-20',
+        }),
+      ],
+    })
+    await renderOrders()
+
+    const row = rowFor('Ana Cliente')
+    expect(
+      within(row).getByRole('button', { name: '📅 20/09' }),
+    ).toBeInTheDocument()
+  })
+
+  it('opens an inline date input and "Quitar" is hidden until a day exists', async () => {
+    setup({ orders: [makeOrder({ status: 'pending_validation' })] })
+    await renderOrders()
+
+    const row = rowFor('Ana Cliente')
+    await userEvent.click(
+      within(row).getByRole('button', { name: '📅 Asignar día' }),
+    )
+
+    expect(within(row).getByLabelText(/día de entrega/i)).toBeInTheDocument()
+    expect(
+      within(row).queryByRole('button', { name: 'Quitar' }),
+    ).not.toBeInTheDocument()
+  })
+
+  it('calls useSetDeliveryDate with the chosen day when "Guardar" is clicked', async () => {
+    const mutateAsync = vi.fn().mockResolvedValue({})
+    setup({
+      orders: [makeOrder({ status: 'pending_validation' })],
+      setDeliveryDateMutateAsync: mutateAsync,
+    })
+    await renderOrders()
+
+    const row = rowFor('Ana Cliente')
+    await userEvent.click(
+      within(row).getByRole('button', { name: '📅 Asignar día' }),
+    )
+    fireEvent.change(within(row).getByLabelText(/día de entrega/i), {
+      target: { value: '2026-09-25' },
+    })
+    await userEvent.click(within(row).getByRole('button', { name: 'Guardar' }))
+
+    expect(mutateAsync).toHaveBeenCalledWith({
+      id: 'order-001',
+      scheduledDeliveryDate: '2026-09-25',
+    })
+  })
+
+  it('"Quitar" sends scheduledDeliveryDate: null', async () => {
+    const mutateAsync = vi.fn().mockResolvedValue({})
+    setup({
+      orders: [
+        makeOrder({
+          status: 'pending_validation',
+          scheduledDeliveryDate: '2026-09-20',
+        }),
+      ],
+      setDeliveryDateMutateAsync: mutateAsync,
+    })
+    await renderOrders()
+
+    const row = rowFor('Ana Cliente')
+    await userEvent.click(within(row).getByRole('button', { name: '📅 20/09' }))
+    await userEvent.click(within(row).getByRole('button', { name: 'Quitar' }))
+
+    expect(mutateAsync).toHaveBeenCalledWith({
+      id: 'order-001',
+      scheduledDeliveryDate: null,
+    })
+  })
+
+  it('hides the day-assignment control on delivered orders', async () => {
+    setup({
+      orders: [makeOrder({ status: 'delivered', customer: makeCustomer('Entregado') })],
+    })
+    await renderOrders()
+    await userEvent.click(screen.getByRole('button', { name: 'Todos' }))
+
+    const row = rowFor('Entregado')
+    expect(
+      within(row).queryByRole('button', { name: /Asignar día|^📅/ }),
+    ).not.toBeInTheDocument()
   })
 })

@@ -1,8 +1,8 @@
-import { describe, it, expect, vi } from 'vitest'
-import { screen } from '@testing-library/react'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { renderWithProviders } from '../test/test-utils'
-import type { AdminUser } from '../lib/types'
+import type { AdminUser, AuthUser } from '../lib/types'
 
 // ── Module mocks ───────────────────────────────────────────────────────────────
 
@@ -16,12 +16,21 @@ vi.mock('@tanstack/react-router', async (importOriginal) => {
   }
 })
 
-vi.mock('../lib/queries', () => ({
-  useAdminUsers: vi.fn(() => ({ data: [], isPending: false })),
-  useCurrentUser: vi.fn(() => ({ data: null })),
-  useDeleteUser: vi.fn(() => ({ mutateAsync: vi.fn(), isPending: false })),
-  useUpdateUserAdmin: vi.fn(() => ({ mutate: vi.fn(), isPending: false })),
-}))
+// `useTransferSellerPortfolio` is intentionally left as the REAL
+// implementation (spread from the original module) so the transfer tests
+// below exercise the actual mutationFn and assert on the mocked `api.post`
+// call — not just on a stubbed `mutate`. Every other hook stays mocked,
+// matching the rest of this file's page-level tests.
+vi.mock('../lib/queries', async (importOriginal) => {
+  const original = await importOriginal<typeof import('../lib/queries')>()
+  return {
+    ...original,
+    useAdminUsers: vi.fn(() => ({ data: [], isPending: false })),
+    useCurrentUser: vi.fn(() => ({ data: null })),
+    useDeleteUser: vi.fn(() => ({ mutateAsync: vi.fn(), isPending: false })),
+    useUpdateUserAdmin: vi.fn(() => ({ mutate: vi.fn(), isPending: false })),
+  }
+})
 
 vi.mock('../lib/api', () => ({
   api: { get: vi.fn(), post: vi.fn(), patch: vi.fn(), delete: vi.fn() },
@@ -33,7 +42,17 @@ vi.mock('../components/UserAddressesPanel', () => ({
   UserAddressesPanel: () => null,
 }))
 
-import { PromoterCell, RoleCell, SellerCell } from './super.users'
+import { api } from '../lib/api'
+import { useAdminUsers, useCurrentUser } from '../lib/queries'
+import {
+  PromoterCell,
+  RoleCell,
+  SellerCell,
+  SuperUsersPage,
+} from './super.users'
+
+const mockUseAdminUsers = vi.mocked(useAdminUsers)
+const mockUseCurrentUser = vi.mocked(useCurrentUser)
 
 function mkUser(o: Partial<AdminUser> = {}): AdminUser {
   return {
@@ -364,5 +383,176 @@ describe('PromoterCell', () => {
     ) as HTMLSelectElement
     expect(select.value).toBe('p-1')
     expect(onAssign).not.toHaveBeenCalled()
+  })
+})
+
+// ── SuperUsersPage — seller portfolio filter & transfer ─────────────────────────
+// "El super admin debe poder asignarle clientes a otro vendedor" (owner,
+// 2026-09-14). `useTransferSellerPortfolio` is left un-mocked (see the
+// `vi.mock('../lib/queries', ...)` factory above) so these tests assert on
+// the real request the app sends via the mocked `api.post`.
+
+function mkMe(o: Partial<AuthUser> = {}): AuthUser {
+  return {
+    id: 'admin-1',
+    email: null,
+    fullName: 'Admin',
+    phone: null,
+    role: 'super_admin_delivery',
+    addressDefault: null,
+    activeLocationId: null,
+    referralCode: null,
+    creditLocked: false,
+    ...o,
+  }
+}
+
+const SUPER_ADMIN = mkMe()
+const SELLER_1 = mkUser({ id: 's-1', fullName: 'Vendedor Uno', role: 'seller' })
+const SELLER_2 = mkUser({ id: 's-2', fullName: 'Vendedor Dos', role: 'seller' })
+const CLIENT_A = mkUser({ id: 'c-1', fullName: 'Cliente A', sellerId: 's-1' })
+const CLIENT_B = mkUser({ id: 'c-2', fullName: 'Cliente B', sellerId: 's-1' })
+const CLIENT_C = mkUser({ id: 'c-3', fullName: 'Cliente C', sellerId: null })
+const CLIENT_D = mkUser({ id: 'c-4', fullName: 'Cliente D', sellerId: 's-2' })
+const ALL_USERS = [SELLER_1, SELLER_2, CLIENT_A, CLIENT_B, CLIENT_C, CLIENT_D]
+
+function setup(opts: { me?: AuthUser | null; users?: AdminUser[] } = {}) {
+  mockUseCurrentUser.mockReturnValue({
+    data: opts.me === undefined ? SUPER_ADMIN : opts.me,
+  } as unknown as ReturnType<typeof useCurrentUser>)
+  mockUseAdminUsers.mockReturnValue({
+    data: opts.users ?? ALL_USERS,
+    isPending: false,
+  } as unknown as ReturnType<typeof useAdminUsers>)
+}
+
+describe('SuperUsersPage — seller portfolio filter & transfer', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('narrows the list to a seller\'s customers', async () => {
+    setup()
+    renderWithProviders(<SuperUsersPage />)
+
+    await userEvent.selectOptions(
+      screen.getByLabelText('Filtrar por vendedor'),
+      's-1',
+    )
+
+    expect(screen.getByText('Cliente A')).toBeInTheDocument()
+    expect(screen.getByText('Cliente B')).toBeInTheDocument()
+    expect(screen.queryByText('Cliente C')).not.toBeInTheDocument()
+    expect(screen.queryByText('Cliente D')).not.toBeInTheDocument()
+  })
+
+  it('"Sin vendedor" shows only unassigned customers', async () => {
+    setup()
+    renderWithProviders(<SuperUsersPage />)
+
+    await userEvent.selectOptions(
+      screen.getByLabelText('Filtrar por vendedor'),
+      'none',
+    )
+
+    expect(screen.getByText('Cliente C')).toBeInTheDocument()
+    expect(screen.queryByText('Cliente A')).not.toBeInTheDocument()
+    expect(screen.queryByText('Cliente D')).not.toBeInTheDocument()
+  })
+
+  it('shows the reassign bar only once a concrete seller is picked', async () => {
+    setup()
+    renderWithProviders(<SuperUsersPage />)
+
+    expect(
+      screen.queryByLabelText('Pasar la cartera a'),
+    ).not.toBeInTheDocument()
+
+    await userEvent.selectOptions(
+      screen.getByLabelText('Filtrar por vendedor'),
+      'none',
+    )
+    expect(
+      screen.queryByLabelText('Pasar la cartera a'),
+    ).not.toBeInTheDocument()
+
+    await userEvent.selectOptions(
+      screen.getByLabelText('Filtrar por vendedor'),
+      's-1',
+    )
+    expect(screen.getByLabelText('Pasar la cartera a')).toBeInTheDocument()
+    expect(screen.getByText('2 clientes de Vendedor Uno')).toBeInTheDocument()
+  })
+
+  it('confirms the transfer to another seller and shows the success line', async () => {
+    vi.mocked(api.post).mockResolvedValue({ data: { moved: 2 } })
+    setup()
+    renderWithProviders(<SuperUsersPage />)
+
+    await userEvent.selectOptions(
+      screen.getByLabelText('Filtrar por vendedor'),
+      's-1',
+    )
+    await userEvent.selectOptions(
+      screen.getByLabelText('Pasar la cartera a'),
+      's-2',
+    )
+    await userEvent.click(
+      screen.getByRole('button', { name: /Pasar 2 clientes/ }),
+    )
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Confirmar traspaso' }),
+    )
+
+    await waitFor(() =>
+      expect(api.post).toHaveBeenCalledWith('/users/sellers/s-1/transfer', {
+        toSellerId: 's-2',
+      }),
+    )
+    expect(
+      await screen.findByText('Se pasaron 2 clientes a Vendedor Dos.'),
+    ).toBeInTheDocument()
+  })
+
+  it('sends null when the destination is "Sin vendedor"', async () => {
+    vi.mocked(api.post).mockResolvedValue({ data: { moved: 1 } })
+    setup()
+    renderWithProviders(<SuperUsersPage />)
+
+    await userEvent.selectOptions(
+      screen.getByLabelText('Filtrar por vendedor'),
+      's-2',
+    )
+    await userEvent.selectOptions(
+      screen.getByLabelText('Pasar la cartera a'),
+      '',
+    )
+    await userEvent.click(
+      screen.getByRole('button', { name: /Pasar 1 cliente/ }),
+    )
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Confirmar traspaso' }),
+    )
+
+    await waitFor(() =>
+      expect(api.post).toHaveBeenCalledWith('/users/sellers/s-2/transfer', {
+        toSellerId: null,
+      }),
+    )
+    expect(
+      await screen.findByText('Se pasaron 1 cliente a Sin vendedor.'),
+    ).toBeInTheDocument()
+  })
+
+  it('a non-admin viewer never sees the filter or the transfer bar', () => {
+    setup({ me: mkMe({ id: 's-1', role: 'seller' }) })
+    renderWithProviders(<SuperUsersPage />)
+
+    expect(
+      screen.queryByLabelText('Filtrar por vendedor'),
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByLabelText('Pasar la cartera a'),
+    ).not.toBeInTheDocument()
   })
 })

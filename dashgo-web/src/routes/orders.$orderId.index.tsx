@@ -10,7 +10,7 @@ import {
 import { CardAuthForm } from '../components/CardAuthForm'
 import { Button, SectionHeading } from '../components/ui'
 import { StatusBadge } from '../components/StatusBadge'
-import { formatCents, formatMoney } from '../lib/utils'
+import { formatCents, formatDeliveryDay, formatMoney } from '../lib/utils'
 import type { AuthorizedIntent, Order } from '../lib/types'
 
 export const Route = createFileRoute('/orders/$orderId/')({
@@ -43,7 +43,9 @@ function useOrder(orderId: string) {
   })
 }
 
-function OrderDetailPage() {
+// Exported so a route test renders THIS component instead of a test-local
+// copy of its logic — see orders.$orderId.index.test.tsx.
+export function OrderDetailPage() {
   const { orderId } = Route.useParams()
   const { data: order, isPending, error } = useOrder(orderId)
   const confirmCash = useConfirmCashOrder()
@@ -81,6 +83,9 @@ function OrderDetailPage() {
 
   const subtotalCents = Math.round(parseFloat(order.subtotal) * 100)
   const shippingCents = Math.round(parseFloat(order.shipping) * 100)
+  const surchargeCents = Math.round(
+    parseFloat(order.deliverySurcharge ?? '0') * 100,
+  )
   const taxCents = Math.round(parseFloat(order.tax) * 100)
   const pointsCents = Math.round(parseFloat(order.pointsRedeemed) * 100)
   const totalCents = Math.round(parseFloat(order.totalAmount) * 100)
@@ -132,6 +137,15 @@ function OrderDetailPage() {
           {order.paymentMethod === 'cash' ? 'Pago en efectivo' : 'Pago digital'}
         </span>
       </div>
+
+      {order.scheduledDeliveryDate && (
+        <div className="mb-8 border-l-4 border-accent bg-accent/5 p-5">
+          <span className="eyebrow">Entrega programada</span>
+          <p className="display mt-2 text-xl font-semibold capitalize">
+            {formatDeliveryDay(order.scheduledDeliveryDate)}
+          </p>
+        </div>
+      )}
 
       {order.status === 'pending_quote' && (
         <div className="mb-8 border-l-4 border-accent bg-accent/5 p-5">
@@ -410,14 +424,16 @@ function OrderDetailPage() {
           )}
           <div className="flex justify-between">
             <span className="text-ink-muted">Envío</span>
-            <span className="nums">
-              {order.status === 'pending_quote' ? (
-                <span className="italic text-ink-muted">A cotizar</span>
-              ) : (
-                formatCents(shippingCents)
-              )}
-            </span>
+            {/* Shipping is the flat fee set at order creation (free for
+                subscribers) — no longer "a cotizar" like tax below. */}
+            <span className="nums">{formatCents(shippingCents)}</span>
           </div>
+          {surchargeCents > 0 && (
+            <div className="flex justify-between">
+              <span className="text-ink-muted">Recargo por distancia</span>
+              <span className="nums">{formatCents(surchargeCents)}</span>
+            </div>
+          )}
           <div className="flex justify-between">
             <span className="text-ink-muted">Impuestos</span>
             <span className="nums">

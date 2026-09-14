@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import type { GeoAddress, Order } from '../lib/types'
 import { useSetOrderQuote } from '../lib/queries'
 import { computeQuotePreviewCents } from '../lib/tax'
-import { formatCents } from '../lib/utils'
+import { formatCents, isoDayFromDate } from '../lib/utils'
 import { Button, FieldError, Input, Label } from './ui'
 import { SavedAddressesList } from './SavedAddressesList'
 
@@ -31,7 +31,16 @@ export function QuoteDrawer({
   const [shippingDollars, setShippingDollars] = useState<string>(
     order.shipping && parseFloat(order.shipping) > 0 ? order.shipping : '',
   )
+  const [surchargeDollars, setSurchargeDollars] = useState<string>(
+    order.deliverySurcharge && parseFloat(order.deliverySurcharge) > 0
+      ? order.deliverySurcharge
+      : '',
+  )
+  const [deliveryDate, setDeliveryDate] = useState<string>(
+    order.scheduledDeliveryDate ?? '',
+  )
   const [formError, setFormError] = useState<string | null>(null)
+  const todayIsoDay = isoDayFromDate(new Date())
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -43,11 +52,17 @@ export function QuoteDrawer({
 
   const parsed = parseFloat(shippingDollars)
   const shippingCents = Number.isFinite(parsed) ? Math.round(parsed * 100) : 0
+  const surchargeParsed = parseFloat(surchargeDollars)
+  const surchargeCents = Number.isFinite(surchargeParsed)
+    ? Math.round(surchargeParsed * 100)
+    : 0
   const subtotalCents = Math.round(parseFloat(order.subtotal) * 100)
   const pointsRedeemedCents = Math.round(parseFloat(order.pointsRedeemed) * 100)
+  // Envío y recargo por distancia son ambos cargos de delivery — se prorratean
+  // juntos por la parte gravable. Ver dashgo-api OrdersService.setQuote.
   const preview = computeQuotePreviewCents({
     subtotalCents,
-    shippingCents,
+    shippingCents: shippingCents + surchargeCents,
     pointsRedeemedCents,
   })
 
@@ -58,7 +73,12 @@ export function QuoteDrawer({
       return
     }
     try {
-      await setQuote.mutateAsync({ id: order.id, shippingCents })
+      await setQuote.mutateAsync({
+        id: order.id,
+        shippingCents,
+        surchargeCents,
+        scheduledDeliveryDate: deliveryDate === '' ? null : deliveryDate,
+      })
       onClose()
     } catch (err) {
       setFormError(
@@ -139,7 +159,42 @@ export function QuoteDrawer({
           <FieldError message={formError ?? undefined} />
         </div>
 
+        <div className="mb-4">
+          <Label htmlFor="surchargeDollars">Recargo por distancia (USD)</Label>
+          <Input
+            id="surchargeDollars"
+            type="number"
+            inputMode="decimal"
+            step="0.01"
+            min="0"
+            placeholder="0.00"
+            value={surchargeDollars}
+            onChange={(e) => setSurchargeDollars(e.target.value)}
+          />
+          <p className="mt-2 text-xs text-ink-muted">
+            Se cobra también a suscriptores — la suscripción cubre el envío,
+            no la distancia.
+          </p>
+        </div>
+
+        <div className="mb-4">
+          <Label htmlFor="deliveryDate">Día de entrega</Label>
+          <Input
+            id="deliveryDate"
+            type="date"
+            min={todayIsoDay}
+            value={deliveryDate}
+            onChange={(e) => setDeliveryDate(e.target.value)}
+          />
+        </div>
+
         <div className="mb-8 space-y-1 border-t border-ink/10 pt-4 text-sm">
+          {surchargeCents > 0 && (
+            <div className="flex justify-between">
+              <span className="text-ink-muted">Recargo por distancia</span>
+              <span className="nums">{formatCents(surchargeCents)}</span>
+            </div>
+          )}
           <div className="flex justify-between">
             <span className="text-ink-muted">Impuestos (8.887%)</span>
             <span className="nums">{formatCents(preview.taxCents)}</span>

@@ -160,6 +160,13 @@ export interface Order {
   subtotal: string
   pointsRedeemed: string
   shipping: string
+  /**
+   * Recargo por distancia ("delivery aparte del envío" para clientes lejanos).
+   * Decimal string, e.g. "3.00". Ya incluido en totalAmount. 0 para la
+   * mayoría de los pedidos. Se cobra también a suscriptores (la suscripción
+   * cubre el envío, no la distancia).
+   */
+  deliverySurcharge?: string
   tax: string
   taxRate: string
   totalAmount: string
@@ -183,6 +190,20 @@ export interface Order {
   skipQuote?: boolean
   items: OrderItem[]
   createdAt: string
+  /**
+   * Staff only. Miles from the driver's active dispatch location to the
+   * delivery address (1 decimal), computed by the API. Null when the order
+   * has no coordinates yet or no origin is configured. The list already
+   * arrives sorted (active orders nearest-first) — the web only displays it.
+   */
+  distanceMiles?: number | null
+  /**
+   * Day the order is scheduled to be delivered — 'YYYY-MM-DD', a DAY with no
+   * time and no timezone. null when staff hasn't assigned one yet. Staff sets
+   * it via PATCH /orders/:id/delivery-date or as part of the quote; the API
+   * pushes the customer a notification when it's set — the web just reads it.
+   */
+  scheduledDeliveryDate?: string | null
 }
 
 export interface AuthorizedIntent {
@@ -195,6 +216,15 @@ export interface AuthorizedIntent {
 export interface ShippingQuote {
   shippingCents: number
   miles: number | null
+}
+
+/**
+ * GET /shipping/rate — the flat shipping rate currently in force, admin-set
+ * from the super panel (defaults to 500 until the admin sets one). Public
+ * endpoint: used for the checkout preview and the admin editor.
+ */
+export interface ShippingRate {
+  shippingCents: number
 }
 
 export interface LoginResponse {
@@ -253,6 +283,8 @@ export interface Invoice {
   subtotal: string
   pointsRedeemed: string
   shipping: string
+  /** Recargo por distancia — ya incluido en total. Decimal string, e.g. "3.00". */
+  deliverySurcharge?: string
   tax: string
   taxRate: string
   /** Propina snapshot — ya incluida en total. */
@@ -567,6 +599,11 @@ export interface SellerCatalogItem {
 
 /** Filter for GET /users?subscription=... — omit for all users. */
 export type AdminUsersSubscriptionFilter = 'active' | 'none'
+
+/** Response of POST /users/sellers/:sellerId/transfer — how many customers moved. */
+export interface TransferSellerPortfolioResult {
+  moved: number
+}
 
 // ── UserAddress ───────────────────────────────────────────────────────────────
 

@@ -46,3 +46,37 @@ export function formatDate(iso: string) {
     timeStyle: 'short',
   })
 }
+
+/**
+ * Formats a bare 'YYYY-MM-DD' DAY (no time, no timezone — e.g.
+ * `scheduledDeliveryDate`) as "martes 16 de septiembre" in Spanish.
+ *
+ * Deliberately does NOT go through `new Date(isoDay)`: that parses the string
+ * as UTC midnight, and a viewer west of Greenwich (Udash ops are in New
+ * Jersey) then renders it back as the PREVIOUS day. Building the Date from
+ * the numeric y/m/d parts constructs local midnight instead, so the day never
+ * shifts regardless of the viewer's timezone.
+ */
+export function formatDeliveryDay(isoDay: string): string {
+  const [year, month, day] = isoDay.split('-').map(Number)
+  const date = new Date(year, month - 1, day)
+  return date
+    .toLocaleDateString('es-AR', {
+      weekday: 'long',
+      day: 'numeric',
+      month: 'long',
+    })
+    .replace(', ', ' ')
+}
+
+/**
+ * Local 'YYYY-MM-DD' for a Date — the admin's <input type="date"> value and
+ * the `min` bound (today) both need this, built from local y/m/d so it never
+ * drifts a day off from what the picker shows on screen.
+ */
+export function isoDayFromDate(d: Date): string {
+  const year = d.getFullYear()
+  const month = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}

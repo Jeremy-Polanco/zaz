@@ -127,6 +127,13 @@ describe('subscription perks copy', () => {
     expect(SUBSCRIPTION_PERKS).toMatch(/bebedero/i)
     expect(SUBSCRIPTION_PERKS).toMatch(/gratis/i)
   })
+
+  // The subscription no longer includes free shipping (2026-09-14): every
+  // customer order pays the flat shipping rate, subscribers included. The
+  // subscription's real value is the free bebedero + no-cost maintenance.
+  it('no longer mentions free shipping', () => {
+    expect(SUBSCRIPTION_PERKS).not.toMatch(/envío gratis/i)
+  })
 })
 
 describe('SubscriptionPage — loading', () => {

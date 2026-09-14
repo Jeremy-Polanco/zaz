@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { TAX_RATE, computeGrossCents, computeQuotePreviewCents } from './tax'
+import {
+  DEFAULT_FLAT_SHIPPING_CENTS,
+  TAX_RATE,
+  computeGrossCents,
+  computeQuotePreviewCents,
+} from './tax'
 
 describe('TAX_RATE', () => {
   it('matches the backend rate in dashgo-api/src/common/tax.ts', () => {
@@ -10,6 +15,34 @@ describe('TAX_RATE', () => {
 describe('computeGrossCents', () => {
   it('adds the rounded tax on top of the net amount', () => {
     expect(computeGrossCents(1000)).toBe(1089)
+  })
+})
+
+describe('DEFAULT_FLAT_SHIPPING_CENTS', () => {
+  it('matches the backend flat shipping fee in dashgo-api/src/common/shipping.ts', () => {
+    expect(DEFAULT_FLAT_SHIPPING_CENTS).toBe(500)
+  })
+
+  it('taxes a standard line plus the flat shipping', () => {
+    const r = computeQuotePreviewCents({
+      subtotalCents: 1000,
+      shippingCents: DEFAULT_FLAT_SHIPPING_CENTS,
+      pointsRedeemedCents: 0,
+      taxableSubtotalCents: 1000,
+    })
+    expect(r.taxCents).toBe(133)
+    expect(r.totalCents).toBe(1633)
+  })
+
+  it('does not tax the flat shipping on an all-exempt line (e.g. agua)', () => {
+    const r = computeQuotePreviewCents({
+      subtotalCents: 1000,
+      shippingCents: DEFAULT_FLAT_SHIPPING_CENTS,
+      pointsRedeemedCents: 0,
+      taxableSubtotalCents: 0,
+    })
+    expect(r.taxCents).toBe(0)
+    expect(r.totalCents).toBe(1500)
   })
 })
 

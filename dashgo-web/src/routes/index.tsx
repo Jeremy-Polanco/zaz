@@ -4,6 +4,8 @@ import { api } from '../lib/api'
 import type { AuthUser } from '../lib/types'
 import { Button } from '../components/ui'
 import { isStaff } from '../lib/roles'
+import { useShippingRate } from '../lib/queries'
+import { formatCents } from '../lib/utils'
 
 export const Route = createFileRoute('/')({
   beforeLoad: async () => {
@@ -56,6 +58,7 @@ function Marquee() {
 }
 
 function Landing() {
+  const shippingRate = useShippingRate()
   return (
     <div className="page-rise">
       {/* HERO */}
@@ -96,7 +99,7 @@ function Landing() {
 
             <div className="mt-6 grid grid-cols-3 gap-6 border-t border-ink/15 pt-6">
               <Stat value="12min" label="Tiempo promedio" />
-              <Stat value="$0" label="Costo de envío" />
+              <Stat value={shippingRate.data ? formatCents(shippingRate.data.shippingCents) : '$5'} label="Costo de envío" />
               <Stat value="24/7" label="Disponible" />
             </div>
           </div>

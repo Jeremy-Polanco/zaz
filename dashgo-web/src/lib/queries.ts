@@ -35,9 +35,11 @@ import type {
   SellerEarnings,
   SellerPayableRow,
   ShippingQuote,
+  ShippingRate,
   Subscription,
   SubscriptionPlan,
   SubscriptionTier,
+  TransferSellerPortfolioResult,
   UpdateAddressInput,
   UserAddress,
   UserRole,
@@ -222,17 +224,54 @@ export function useSetOrderQuote() {
     mutationFn: async ({
       id,
       shippingCents,
+      surchargeCents,
+      scheduledDeliveryDate,
     }: {
       id: string
       shippingCents: number
+      /** Recargo por distancia. Omitido = mantiene el recargo actual del pedido. */
+      surchargeCents?: number
+      /** 'YYYY-MM-DD'. Omitido = mantiene el día actual; `null` lo desasigna. */
+      scheduledDeliveryDate?: string | null
     }) => {
       const { data } = await api.patch<Order>(`/orders/${id}/quote`, {
         shippingCents,
+        surchargeCents,
+        scheduledDeliveryDate,
       })
       return data
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['orders'] })
+    },
+  })
+}
+
+/**
+ * Staff: PATCH /orders/:id/delivery-date — assign or unassign (`null`) the day
+ * staff plans to deliver the order. Allowed on any status except
+ * delivered/cancelled (the API enforces this; the web only hides the control).
+ * The API sends the customer a push notification itself — nothing to do here
+ * beyond refreshing the caches the order detail/list read from.
+ */
+export function useSetDeliveryDate() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async ({
+      id,
+      scheduledDeliveryDate,
+    }: {
+      id: string
+      scheduledDeliveryDate: string | null
+    }) => {
+      const { data } = await api.patch<Order>(`/orders/${id}/delivery-date`, {
+        scheduledDeliveryDate,
+      })
+      return data
+    },
+    onSuccess: (_data, { id }) => {
+      qc.invalidateQueries({ queryKey: ['orders'] })
+      qc.invalidateQueries({ queryKey: ['order', id] })
     },
   })
 }
@@ -380,6 +419,34 @@ export function useUpdateUserAdmin() {
       maintenanceTimerDisabled?: boolean
     }) => {
       const { data } = await api.patch<AdminUser>(`/users/${id}`, patch)
+      return data
+    },
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['users', 'admin'] })
+    },
+  })
+}
+
+/**
+ * Super-admin: POST /users/sellers/:sellerId/transfer — reasigna TODA la
+ * cartera de un vendedor a otro de una vez (`toSellerId: null` la deja sin
+ * vendedor). Invalida la lista de usuarios admin: los clientes movidos deben
+ * reflejar el nuevo vendedor sin recargar la página.
+ */
+export function useTransferSellerPortfolio() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async ({
+      sellerId,
+      toSellerId,
+    }: {
+      sellerId: string
+      toSellerId: string | null
+    }) => {
+      const { data } = await api.post<TransferSellerPortfolioResult>(
+        `/users/sellers/${sellerId}/transfer`,
+        { toSellerId },
+      )
       return data
     },
     onSuccess: () => {
@@ -758,6 +825,36 @@ export function useComputeShipping(input: ComputeShippingInput | null) {
     },
     enabled: !!input,
     retry: false,
+  })
+}
+
+/**
+ * GET /shipping/rate — the flat shipping rate currently in force (public, no
+ * auth needed). Drives the checkout preview and the admin "Tarifa de envío"
+ * editor. staleTime keeps it from refetching on every mount — the rate
+ * changes rarely, and the admin's own PUT already updates the cache.
+ */
+export function useShippingRate() {
+  return useQuery<ShippingRate>({
+    queryKey: ['shipping', 'rate'],
+    queryFn: async () =>
+      (await api.get<ShippingRate>('/shipping/rate')).data,
+    staleTime: 5 * 60_000,
+  })
+}
+
+/** Super-admin: PUT /shipping/rate — set the general delivery rate. */
+export function useUpdateShippingRate() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (input: ShippingRate) => {
+      const { data } = await api.put<ShippingRate>('/shipping/rate', input)
+      return data
+    },
+    onSuccess: (data) => {
+      qc.setQueryData(['shipping', 'rate'], data)
+      qc.invalidateQueries({ queryKey: ['shipping', 'rate'] })
+    },
   })
 }
 
