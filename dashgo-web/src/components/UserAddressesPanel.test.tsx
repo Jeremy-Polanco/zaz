@@ -41,6 +41,7 @@ const addresses: UserAddress[] = [
     isDefault: true,
     createdAt: '2026-01-01T00:00:00.000Z',
     updatedAt: '2026-01-01T00:00:00.000Z',
+    postalCode: '10451',
   },
   {
     id: 'addr-2',
@@ -55,6 +56,7 @@ const addresses: UserAddress[] = [
     isDefault: false,
     createdAt: '2026-01-02T00:00:00.000Z',
     updatedAt: '2026-01-02T00:00:00.000Z',
+    postalCode: null,
   },
 ]
 
@@ -182,6 +184,57 @@ describe('UserAddressesPanel', () => {
         input: expect.objectContaining({ label: 'Casa Nueva', line1: 'Calle Duarte 45' }),
       }),
     )
+  })
+
+  it('shows the ZIP next to the address when set, and nothing when absent', () => {
+    mockAddresses.mockReturnValue(
+      queryResult(addresses) as unknown as ReturnType<typeof useSuperUserAddresses>,
+    )
+    renderWithProviders(<UserAddressesPanel userId="user-abc" />)
+
+    expect(screen.getByText(/10451/)).toBeInTheDocument()
+  })
+
+  it('edits an address: includes the ZIP typed in the edit form', async () => {
+    mockAddresses.mockReturnValue(
+      queryResult(addresses) as unknown as ReturnType<typeof useSuperUserAddresses>,
+    )
+    renderWithProviders(<UserAddressesPanel userId="user-abc" />)
+
+    const items = screen.getAllByRole('listitem')
+    await userEvent.click(
+      within(items[1]).getByRole('button', { name: /editar/i }),
+    )
+
+    const zipInput = screen.getByLabelText(/código postal|zip/i)
+    await userEvent.type(zipInput, '10451')
+    await userEvent.click(screen.getByRole('button', { name: 'Guardar' }))
+
+    expect(updateMutateAsync).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'addr-2',
+        input: expect.objectContaining({ postalCode: '10451' }),
+      }),
+    )
+  })
+
+  it('rejects a ZIP that is not 5 digits and does not submit', async () => {
+    mockAddresses.mockReturnValue(
+      queryResult(addresses) as unknown as ReturnType<typeof useSuperUserAddresses>,
+    )
+    renderWithProviders(<UserAddressesPanel userId="user-abc" />)
+
+    const items = screen.getAllByRole('listitem')
+    await userEvent.click(
+      within(items[1]).getByRole('button', { name: /editar/i }),
+    )
+
+    const zipInput = screen.getByLabelText(/código postal|zip/i)
+    await userEvent.type(zipInput, '104')
+    await userEvent.click(screen.getByRole('button', { name: 'Guardar' }))
+
+    expect(updateMutateAsync).not.toHaveBeenCalled()
+    expect(screen.getByText(/5 dígitos/)).toBeInTheDocument()
   })
 
   it('shows the empty-state copy when there are no addresses', () => {

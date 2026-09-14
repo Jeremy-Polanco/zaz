@@ -385,6 +385,7 @@ function CheckoutPage() {
                           </span>
                           <span className="mt-0.5 block truncate text-sm text-ink-muted">
                             {addr.line1}
+                            {addr.postalCode ? ` · ZIP ${addr.postalCode}` : ''}
                           </span>
                         </span>
                         <span

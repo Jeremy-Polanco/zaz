@@ -1,12 +1,13 @@
 import { useState } from 'react'
 import type { UserAddress } from '../lib/types'
+import { optionalPostalCodeSchema } from '../lib/schemas'
 import {
   useSuperUserAddresses,
   useSetDefaultAddressForUser,
   useDeleteAddressForUser,
   useUpdateAddressForUser,
 } from '../lib/queries'
-import { Button, Input, Label } from './ui'
+import { Button, FieldError, Input, Label } from './ui'
 
 type EditForm = {
   label: string
@@ -14,6 +15,7 @@ type EditForm = {
   line2: string
   building: string
   instructions: string
+  postalCode: string
 }
 
 function toForm(a: UserAddress): EditForm {
@@ -23,6 +25,7 @@ function toForm(a: UserAddress): EditForm {
     line2: a.line2 ?? '',
     building: a.building ?? '',
     instructions: a.instructions ?? '',
+    postalCode: a.postalCode ?? '',
   }
 }
 
@@ -40,6 +43,7 @@ export function UserAddressesPanel({ userId }: { userId: string }) {
 
   const [editingId, setEditingId] = useState<string | null>(null)
   const [form, setForm] = useState<EditForm | null>(null)
+  const [error, setError] = useState<string | null>(null)
 
   if (isLoading) {
     return <p className="text-sm text-ink-muted">Cargando direcciones…</p>
@@ -57,15 +61,23 @@ export function UserAddressesPanel({ userId }: { userId: string }) {
   const startEdit = (a: UserAddress) => {
     setEditingId(a.id)
     setForm(toForm(a))
+    setError(null)
   }
 
   const cancelEdit = () => {
     setEditingId(null)
     setForm(null)
+    setError(null)
   }
 
   const saveEdit = async (id: string) => {
     if (!form) return
+    const zipResult = optionalPostalCodeSchema.safeParse(form.postalCode)
+    if (!zipResult.success) {
+      setError(zipResult.error.issues[0]?.message ?? 'ZIP inválido')
+      return
+    }
+    setError(null)
     await update.mutateAsync({
       id,
       input: {
@@ -74,6 +86,7 @@ export function UserAddressesPanel({ userId }: { userId: string }) {
         line2: form.line2.trim() || undefined,
         building: form.building.trim() || undefined,
         instructions: form.instructions.trim() || undefined,
+        postalCode: zipResult.data,
       },
     })
     cancelEdit()
@@ -131,6 +144,22 @@ export function UserAddressesPanel({ userId }: { userId: string }) {
                   }
                 />
               </div>
+              <div>
+                <Label htmlFor={`zip-${a.id}`}>Código postal (ZIP)</Label>
+                <Input
+                  id={`zip-${a.id}`}
+                  value={form.postalCode}
+                  inputMode="numeric"
+                  maxLength={5}
+                  onChange={(e) =>
+                    setForm({
+                      ...form,
+                      postalCode: e.target.value.replace(/\D/g, '').slice(0, 5),
+                    })
+                  }
+                />
+                <FieldError message={error ?? undefined} />
+              </div>
               <div className="flex gap-2">
                 <Button
                   size="sm"
@@ -162,6 +191,9 @@ export function UserAddressesPanel({ userId }: { userId: string }) {
                 </p>
                 {a.building && (
                   <p className="text-xs text-ink-muted">{a.building}</p>
+                )}
+                {a.postalCode && (
+                  <p className="text-xs text-ink-muted">ZIP {a.postalCode}</p>
                 )}
                 {a.instructions && (
                   <p className="text-xs text-ink-muted">{a.instructions}</p>

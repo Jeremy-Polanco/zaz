@@ -6,6 +6,7 @@ import {
 } from '../lib/queries'
 import { requestBrowserLocation, reverseGeocode } from '../lib/geo'
 import { formatAddressShort } from '../lib/address'
+import { optionalPostalCodeSchema } from '../lib/schemas'
 import { MapPicker } from './MapPicker'
 import { SavedAddressesList } from './SavedAddressesList'
 import { Button, FieldError, Input, Label } from './ui'
@@ -36,6 +37,9 @@ export function OrderLocationDrawer({
   const [reference, setReference] = useState(
     order.deliveryAddress?.reference ?? '',
   )
+  const [postalCode, setPostalCode] = useState(
+    order.deliveryAddress?.postalCode ?? '',
+  )
   const [pin, setPin] = useState<{ lat?: number; lng?: number }>({
     lat: order.deliveryAddress?.lat ?? undefined,
     lng: order.deliveryAddress?.lng ?? undefined,
@@ -64,6 +68,9 @@ export function OrderLocationDrawer({
       try {
         const rev = await reverseGeocode(coords.lat, coords.lng)
         setText((prev) => prev || rev.text)
+        if (rev.postalCode) {
+          setPostalCode((prev) => prev || rev.postalCode!)
+        }
       } catch {
         setText((prev) => prev || `${coords.lat.toFixed(5)}, ${coords.lng.toFixed(5)}`)
       }
@@ -81,6 +88,7 @@ export function OrderLocationDrawer({
     setText(a.line1)
     setBuilding(a.building ?? '')
     setPin({ lat: a.lat, lng: a.lng })
+    setPostalCode((prev) => prev || (a.postalCode ?? ''))
     setError(null)
   }
 
@@ -94,6 +102,11 @@ export function OrderLocationDrawer({
       setError('Ponle un nombre a la dirección para guardarla')
       return
     }
+    const zipResult = optionalPostalCodeSchema.safeParse(postalCode)
+    if (!zipResult.success) {
+      setError(zipResult.error.issues[0]?.message ?? 'ZIP inválido')
+      return
+    }
     try {
       await setOrderLocation.mutateAsync({
         id: order.id,
@@ -104,6 +117,7 @@ export function OrderLocationDrawer({
         houseNumber: houseNumber.trim() || undefined,
         unit: unit.trim() || undefined,
         reference: reference.trim() || undefined,
+        postalCode: zipResult.data,
       })
       if (saveToUser && saveLabel.trim() && order.customerId) {
         try {
@@ -113,6 +127,7 @@ export function OrderLocationDrawer({
             lat: pin.lat,
             lng: pin.lng,
             building: building.trim() || undefined,
+            postalCode: zipResult.data,
           })
         } catch {
           // Non-blocking: the order location was set regardless.
@@ -185,14 +200,29 @@ export function OrderLocationDrawer({
             </div>
           </div>
 
-          <div className="mt-3">
-            <Label htmlFor="loc-building">Edificio</Label>
-            <Input
-              id="loc-building"
-              placeholder="Ej. Edif. 4, Torre B"
-              value={building}
-              onChange={(e) => setBuilding(e.target.value)}
-            />
+          <div className="mt-3 grid grid-cols-2 gap-3">
+            <div>
+              <Label htmlFor="loc-building">Edificio</Label>
+              <Input
+                id="loc-building"
+                placeholder="Ej. Edif. 4, Torre B"
+                value={building}
+                onChange={(e) => setBuilding(e.target.value)}
+              />
+            </div>
+            <div>
+              <Label htmlFor="loc-zip">Código postal (ZIP)</Label>
+              <Input
+                id="loc-zip"
+                placeholder="Ej. 10451"
+                inputMode="numeric"
+                maxLength={5}
+                value={postalCode ?? ''}
+                onChange={(e) =>
+                  setPostalCode(e.target.value.replace(/\D/g, '').slice(0, 5))
+                }
+              />
+            </div>
           </div>
 
           <div className="mt-3">

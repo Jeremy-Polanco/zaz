@@ -101,6 +101,17 @@ describe('SavedAddressesList', () => {
     expect(screen.getByText('Calle Las Mercedes 23')).toBeInTheDocument()
   })
 
+  it('shows the ZIP for addresses that have one', () => {
+    mockUseAddresses.mockReturnValue(
+      makeQueryResult({
+        data: [{ ...addresses[0], postalCode: '10451' }],
+      }) as unknown as ReturnType<typeof useSuperUserAddresses>,
+    )
+    renderWithProviders(<SavedAddressesList userId="user-abc" />)
+
+    expect(screen.getByText(/10451/)).toBeInTheDocument()
+  })
+
   it('shows default badge only on the default address', () => {
     mockUseAddresses.mockReturnValue(
       makeQueryResult({ data: addresses }) as unknown as ReturnType<typeof useSuperUserAddresses>,

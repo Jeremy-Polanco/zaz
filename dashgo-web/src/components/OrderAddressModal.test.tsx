@@ -44,6 +44,19 @@ describe('OrderAddressModal', () => {
     expect(within(dialog).getByText('frente al colmado')).toBeInTheDocument()
   })
 
+  it('shows the ZIP among the structured details when present', () => {
+    renderWithProviders(
+      <OrderAddressModal
+        order={makeOrder({ ...fullAddress, postalCode: '10451' })}
+        onClose={vi.fn()}
+      />,
+    )
+
+    const dialog = screen.getByRole('dialog')
+    expect(within(dialog).getByText('ZIP')).toBeInTheDocument()
+    expect(within(dialog).getByText('10451')).toBeInTheDocument()
+  })
+
   it('shows a Maps link only when coordinates exist', () => {
     const { rerender } = renderWithProviders(
       <OrderAddressModal order={makeOrder(fullAddress)} onClose={vi.fn()} />,

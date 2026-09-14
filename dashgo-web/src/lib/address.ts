@@ -13,17 +13,20 @@ export function userAddressToGeoAddress(addr: UserAddress): {
   lng: number
   building?: string
   reference?: string
+  postalCode?: string
 } {
   const line2 = (addr.line2 ?? '').trim()
   const text = line2 ? `${addr.line1}, ${line2}` : addr.line1
   const building = (addr.building ?? '').trim()
   const reference = (addr.instructions ?? '').trim()
+  const postalCode = (addr.postalCode ?? '').trim()
   return {
     text,
     lat: addr.lat,
     lng: addr.lng,
     ...(building ? { building } : {}),
     ...(reference ? { reference } : {}),
+    ...(postalCode ? { postalCode } : {}),
   }
 }
 
@@ -46,10 +49,13 @@ export function formatAddressShort(
   if (!addr) return 'Sin ubicación'
   const house = clean(addr.houseNumber)
   const ref = clean(addr.reference)
-  if (house && ref) return `Casa ${house} — ${ref}`
-  if (house) return `Casa ${house}`
-  if (ref) return ref
-  return clean(addr.text) || 'Sin ubicación'
+  const zip = clean(addr.postalCode)
+  const zipSuffix = zip ? ` · ZIP ${zip}` : ''
+  if (house && ref) return `Casa ${house} — ${ref}${zipSuffix}`
+  if (house) return `Casa ${house}${zipSuffix}`
+  if (ref) return `${ref}${zipSuffix}`
+  const text = clean(addr.text)
+  return text ? `${text}${zipSuffix}` : 'Sin ubicación'
 }
 
 /**
@@ -68,7 +74,9 @@ export function formatAddressLine(
   const segments = [primary, clean(addr.building), clean(addr.unit)].filter(
     Boolean,
   )
-  return segments.length ? segments.join(' · ') : 'Sin ubicación'
+  if (!segments.length) return 'Sin ubicación'
+  const zip = clean(addr.postalCode)
+  return zip ? `${segments.join(' · ')} · ZIP ${zip}` : segments.join(' · ')
 }
 
 /**
@@ -84,10 +92,12 @@ export function addressDetailParts(
   const house = clean(addr.houseNumber)
   const building = clean(addr.building)
   const unit = clean(addr.unit)
+  const zip = clean(addr.postalCode)
   const ref = clean(addr.reference)
   if (house) parts.push({ label: 'N° de casa', value: house })
   if (building) parts.push({ label: 'Edificio', value: building })
   if (unit) parts.push({ label: 'Apto / Piso', value: unit })
+  if (zip) parts.push({ label: 'ZIP', value: zip })
   if (ref) parts.push({ label: 'Referencia', value: ref })
   return parts
 }

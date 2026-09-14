@@ -48,6 +48,23 @@ export const invitePromoterSchema = z.object({
 })
 export type InvitePromoterInput = z.infer<typeof invitePromoterSchema>
 
+// ZIP code — 5 US digits. Mirrors the backend's `^\d{5}$` validator.
+export const postalCodeSchema = z
+  .string()
+  .trim()
+  .regex(/^\d{5}$/, 'Ingresá un ZIP de 5 dígitos')
+
+// Admin-side ZIP: optional, but validated when present. A blank input becomes
+// undefined so it's omitted from the payload rather than sent as ''.
+export const optionalPostalCodeSchema = z
+  .string()
+  .trim()
+  .optional()
+  .transform((v) => (v === '' ? undefined : v))
+  .refine((v) => v === undefined || /^\d{5}$/.test(v), {
+    message: 'Ingresá un ZIP de 5 dígitos',
+  })
+
 export const addressSchema = z.object({
   text: z.string().min(5, 'Dirección requerida'),
   lat: z.number().optional(),
@@ -65,6 +82,7 @@ export const savedAddressSchema = z.object({
   lat: z.number({ message: 'Ubicá el pin en el mapa' }).min(-90).max(90),
   lng: z.number({ message: 'Ubicá el pin en el mapa' }).min(-180).max(180),
   instructions: z.string().max(500).or(z.literal('')).optional(),
+  postalCode: postalCodeSchema,
 })
 export type SavedAddressInput = z.infer<typeof savedAddressSchema>
 
@@ -79,6 +97,12 @@ export const deliveryAddressSchema = z.object({
   houseNumber: z.string().optional(),
   unit: z.string().optional(),
   reference: z.string().optional(),
+  // Plain optional regex (no transform): userAddressToGeoAddress() already
+  // omits the key entirely when blank, so this never sees ''. A transform-based
+  // schema here would make zod infer `postalCode: string | undefined` as a
+  // REQUIRED key instead of an optional one, breaking zodResolver's structural
+  // match against CheckoutInput in checkout.tsx.
+  postalCode: postalCodeSchema.optional(),
 })
 export type DeliveryAddressInput = z.infer<typeof deliveryAddressSchema>
 

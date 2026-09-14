@@ -163,6 +163,20 @@ describe('SuperOrdersPage — Dirección cell', () => {
     expect(within(row).getByText(/Editar ubicación/)).toBeInTheDocument()
   })
 
+  it('appends the ZIP to the address line when the order has one', async () => {
+    setup({
+      orders: [
+        makeOrder({ deliveryAddress: makeAddress({ postalCode: '10451' }) }),
+      ],
+    })
+    await renderOrders()
+
+    const row = rowFor('Ana Cliente')
+    expect(
+      within(row).getByText('Calle 1 · Edif. 4 · Apto 3B · ZIP 10451'),
+    ).toBeInTheDocument()
+  })
+
   it('opens the read-only details modal from the address line', async () => {
     setup({ orders: [makeOrder({ deliveryAddress: makeAddress() })] })
     await renderOrders()

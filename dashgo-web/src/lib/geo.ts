@@ -7,6 +7,13 @@ export interface ReverseGeocodeResult {
   text: string
   lat: number
   lng: number
+  /** ZIP from Nominatim's address.postcode (addressdetails=1), trimmed, or null. */
+  postalCode: string | null
+}
+
+function extractPostalCode(address?: { postcode?: string }): string | null {
+  const postcode = address?.postcode?.trim()
+  return postcode ? postcode : null
 }
 
 export function requestBrowserLocation(options?: PositionOptions): Promise<Coords> {
@@ -46,11 +53,15 @@ export async function reverseGeocode(
   if (!res.ok) {
     throw new Error(`Nominatim respondió ${res.status}`)
   }
-  const data = (await res.json()) as { display_name?: string }
+  const data = (await res.json()) as {
+    display_name?: string
+    address?: { postcode?: string }
+  }
   return {
     text: data.display_name ?? `${lat.toFixed(5)}, ${lng.toFixed(5)}`,
     lat,
     lng,
+    postalCode: extractPostalCode(data.address),
   }
 }
 
@@ -61,6 +72,7 @@ export async function forwardGeocode(query: string): Promise<ReverseGeocodeResul
     q: query,
     limit: '5',
     countrycodes: 'us',
+    addressdetails: '1',
   })
   const res = await fetch(`${NOMINATIM_BASE}/search?${params.toString()}`, {
     headers: {
@@ -73,10 +85,12 @@ export async function forwardGeocode(query: string): Promise<ReverseGeocodeResul
     display_name: string
     lat: string
     lon: string
+    address?: { postcode?: string }
   }>
   return data.map((item) => ({
     text: item.display_name,
     lat: parseFloat(item.lat),
     lng: parseFloat(item.lon),
+    postalCode: extractPostalCode(item.address),
   }))
 }

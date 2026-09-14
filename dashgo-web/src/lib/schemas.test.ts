@@ -5,10 +5,13 @@ import {
   verifyOtpSchema,
   loginSchema,
   savedAddressSchema,
+  deliveryAddressSchema,
   checkoutSchema,
   grantCreditSchema,
   subscriptionSchema,
   subscriptionStatusSchema,
+  postalCodeSchema,
+  optionalPostalCodeSchema,
 } from './schemas'
 import { z } from 'zod'
 
@@ -41,6 +44,7 @@ describe('savedAddressSchema', () => {
     line1: 'Av. 27 de Febrero 123',
     lat: 40.84,
     lng: -73.93,
+    postalCode: '10451',
   }
 
   it('accepts a minimal valid address', () => {
@@ -64,6 +68,88 @@ describe('savedAddressSchema', () => {
     expect(savedAddressSchema.safeParse({ ...valid, lat: 200 }).success).toBe(
       false,
     )
+  })
+
+  it('requires a postalCode', () => {
+    const { postalCode: _drop, ...withoutZip } = valid
+    const result = savedAddressSchema.safeParse(withoutZip)
+    expect(result.success).toBe(false)
+  })
+
+  it('rejects a postalCode that is not 5 digits', () => {
+    const result = savedAddressSchema.safeParse({ ...valid, postalCode: '104' })
+    expect(result.success).toBe(false)
+    if (!result.success) {
+      expect(result.error.issues[0].message).toMatch(/5 dígitos/)
+    }
+  })
+
+  it('trims whitespace around a valid postalCode', () => {
+    const result = savedAddressSchema.safeParse({ ...valid, postalCode: ' 10451 ' })
+    expect(result.success).toBe(true)
+    if (result.success) {
+      expect(result.data.postalCode).toBe('10451')
+    }
+  })
+})
+
+// ── postalCodeSchema / optionalPostalCodeSchema ─────────────────────────────
+
+describe('postalCodeSchema', () => {
+  it('accepts a 5-digit ZIP', () => {
+    expect(postalCodeSchema.safeParse('10451').success).toBe(true)
+  })
+
+  it('rejects a ZIP with letters or the wrong length', () => {
+    expect(postalCodeSchema.safeParse('1045').success).toBe(false)
+    expect(postalCodeSchema.safeParse('104511').success).toBe(false)
+    expect(postalCodeSchema.safeParse('1045a').success).toBe(false)
+  })
+})
+
+describe('optionalPostalCodeSchema', () => {
+  it('accepts undefined (field never touched)', () => {
+    expect(optionalPostalCodeSchema.safeParse(undefined).success).toBe(true)
+  })
+
+  it('treats an empty string as absent', () => {
+    const result = optionalPostalCodeSchema.safeParse('')
+    expect(result.success).toBe(true)
+    if (result.success) {
+      expect(result.data).toBeUndefined()
+    }
+  })
+
+  it('accepts a valid 5-digit ZIP', () => {
+    const result = optionalPostalCodeSchema.safeParse('10451')
+    expect(result.success).toBe(true)
+    if (result.success) {
+      expect(result.data).toBe('10451')
+    }
+  })
+
+  it('rejects an invalid ZIP when present', () => {
+    expect(optionalPostalCodeSchema.safeParse('abc').success).toBe(false)
+  })
+})
+
+// ── deliveryAddressSchema ────────────────────────────────────────────────────
+
+describe('deliveryAddressSchema', () => {
+  const valid = { text: 'Calle 1', lat: 18.47, lng: -69.9 }
+
+  it('accepts a payload without postalCode', () => {
+    expect(deliveryAddressSchema.safeParse(valid).success).toBe(true)
+  })
+
+  it('accepts a valid postalCode', () => {
+    const result = deliveryAddressSchema.safeParse({ ...valid, postalCode: '10451' })
+    expect(result.success).toBe(true)
+  })
+
+  it('rejects an invalid postalCode', () => {
+    const result = deliveryAddressSchema.safeParse({ ...valid, postalCode: 'bad' })
+    expect(result.success).toBe(false)
   })
 })
 

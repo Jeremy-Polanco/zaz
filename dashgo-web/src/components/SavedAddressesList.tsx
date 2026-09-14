@@ -26,6 +26,11 @@ export function SavedAddressesList({ userId, onPick }: Props) {
             <div className="min-w-0">
               <span className="font-semibold text-ink">{a.label}</span>
               <span className="ml-2 text-sm text-ink-soft">{a.line1}</span>
+              {a.postalCode && (
+                <span className="ml-2 text-xs text-ink-muted">
+                  ZIP {a.postalCode}
+                </span>
+              )}
             </div>
             {a.isDefault && (
               <span className="shrink-0 text-[0.65rem] uppercase tracking-[0.12em] text-brand">

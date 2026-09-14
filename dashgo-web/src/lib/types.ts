@@ -28,6 +28,8 @@ export interface GeoAddress {
   unit?: string | null
   /** Visible landmark to find the drop-off ("frente al colmado"). */
   reference?: string | null
+  /** ZIP code (5 digits, e.g. "10451"). */
+  postalCode?: string | null
 }
 
 export interface AuthUser {
@@ -620,6 +622,10 @@ export type UserAddress = {
   isDefault: boolean
   createdAt: string
   updatedAt: string
+  /** ZIP code (5 digits, e.g. "10451"). */
+  postalCode?: string | null
+  /** Delivery zone the address falls into. Assigned by the backend. */
+  zoneId?: string | null
 }
 
 export type CreateAddressInput = {
@@ -630,6 +636,8 @@ export type CreateAddressInput = {
   lat: number
   lng: number
   instructions?: string
+  /** 5-digit ZIP, e.g. "10451". */
+  postalCode?: string
 }
 
 export type UpdateAddressInput = Partial<CreateAddressInput>

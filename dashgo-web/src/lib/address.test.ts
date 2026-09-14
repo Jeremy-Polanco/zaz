@@ -34,6 +34,29 @@ describe('formatAddressShort', () => {
     ).toBe('Casa 24 — frente al colmado')
   })
 
+  it('appends the ZIP when present', () => {
+    expect(
+      formatAddressShort({
+        ...base,
+        houseNumber: '24',
+        reference: 'frente al colmado',
+        postalCode: '10451',
+      }),
+    ).toBe('Casa 24 — frente al colmado · ZIP 10451')
+  })
+
+  it('appends the ZIP to the free-text fallback', () => {
+    expect(formatAddressShort({ ...base, postalCode: '10451' })).toBe(
+      'Calle Duarte 100, Santo Domingo · ZIP 10451',
+    )
+  })
+
+  it('does not append a ZIP to "Sin ubicación"', () => {
+    expect(formatAddressShort({ text: '', postalCode: '10451' })).toBe(
+      'Sin ubicación',
+    )
+  })
+
   it('shows only the house number when there is no reference', () => {
     expect(formatAddressShort({ ...base, houseNumber: '24' })).toBe('Casa 24')
   })
@@ -73,6 +96,29 @@ describe('formatAddressLine', () => {
 
   it('shows just the address line when there is no building or unit', () => {
     expect(formatAddressLine(base)).toBe('Calle Duarte 100, Santo Domingo')
+  })
+
+  it('appends the ZIP after building and unit', () => {
+    expect(
+      formatAddressLine({
+        ...base,
+        building: 'Edif. 4',
+        unit: 'Apto 3B',
+        postalCode: '10451',
+      }),
+    ).toBe('Calle Duarte 100, Santo Domingo · Edif. 4 · Apto 3B · ZIP 10451')
+  })
+
+  it('appends the ZIP even with no building or unit', () => {
+    expect(formatAddressLine({ ...base, postalCode: '10451' })).toBe(
+      'Calle Duarte 100, Santo Domingo · ZIP 10451',
+    )
+  })
+
+  it('does not append a ZIP to "Sin ubicación"', () => {
+    expect(formatAddressLine({ text: '', postalCode: '10451' })).toBe(
+      'Sin ubicación',
+    )
   })
 
   it('falls back to the house number when there is no free-text', () => {
@@ -120,6 +166,29 @@ describe('addressDetailParts', () => {
   it('returns an empty list for a missing address', () => {
     expect(addressDetailParts(null)).toEqual([])
   })
+
+  it('includes the ZIP when present, after Apto/Piso and before Referencia', () => {
+    expect(
+      addressDetailParts({
+        ...base,
+        houseNumber: '24',
+        unit: 'Apto 3B',
+        postalCode: '10451',
+        reference: 'frente al colmado',
+      }),
+    ).toEqual([
+      { label: 'N° de casa', value: '24' },
+      { label: 'Apto / Piso', value: 'Apto 3B' },
+      { label: 'ZIP', value: '10451' },
+      { label: 'Referencia', value: 'frente al colmado' },
+    ])
+  })
+
+  it('omits ZIP when absent', () => {
+    expect(addressDetailParts({ ...base, houseNumber: '24' })).toEqual([
+      { label: 'N° de casa', value: '24' },
+    ])
+  })
 })
 
 describe('userAddressToGeoAddress', () => {
@@ -155,5 +224,17 @@ describe('userAddressToGeoAddress', () => {
     )
     expect(result).not.toHaveProperty('building')
     expect(result).not.toHaveProperty('reference')
+  })
+
+  it('copies postalCode when present', () => {
+    const result = userAddressToGeoAddress(
+      fakeUserAddress({ postalCode: '10451' }),
+    )
+    expect(result).toMatchObject({ postalCode: '10451' })
+  })
+
+  it('omits postalCode when null or absent', () => {
+    const result = userAddressToGeoAddress(fakeUserAddress({ postalCode: null }))
+    expect(result).not.toHaveProperty('postalCode')
   })
 })

@@ -292,6 +292,7 @@ export function useSetOrderDeliveryAddress() {
       houseNumber,
       unit,
       reference,
+      postalCode,
     }: {
       id: string
       text: string
@@ -301,6 +302,7 @@ export function useSetOrderDeliveryAddress() {
       houseNumber?: string
       unit?: string
       reference?: string
+      postalCode?: string
     }) => {
       const { data } = await api.patch<Order>(`/orders/${id}/delivery-address`, {
         text,
@@ -310,6 +312,7 @@ export function useSetOrderDeliveryAddress() {
         houseNumber,
         unit,
         reference,
+        postalCode,
       })
       return data
     },
