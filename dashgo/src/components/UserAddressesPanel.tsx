@@ -16,6 +16,7 @@ type EditForm = {
   line2: string
   building: string
   instructions: string
+  postalCode: string
 }
 
 function toForm(a: UserAddress): EditForm {
@@ -25,6 +26,7 @@ function toForm(a: UserAddress): EditForm {
     line2: a.line2 ?? '',
     building: a.building ?? '',
     instructions: a.instructions ?? '',
+    postalCode: a.postalCode ?? '',
   }
 }
 
@@ -80,6 +82,7 @@ export function UserAddressesPanel({ userId }: { userId: string }) {
       line2: form.line2.trim() || undefined,
       building: form.building.trim() || undefined,
       instructions: form.instructions.trim() || undefined,
+      postalCode: form.postalCode.trim() || undefined,
     })
     cancelEdit()
   }
@@ -129,6 +132,16 @@ export function UserAddressesPanel({ userId }: { userId: string }) {
                 onChangeText={(v) => setForm({ ...form, instructions: v })}
               />
             </View>
+            <View className="mt-3">
+              <FieldLabel>{t('panel.postalCode')}</FieldLabel>
+              <TextInput
+                className={inputCls}
+                value={form.postalCode}
+                onChangeText={(v) => setForm({ ...form, postalCode: v })}
+                keyboardType="number-pad"
+                maxLength={5}
+              />
+            </View>
             <View className="mt-4 flex-row gap-3">
               <Pressable
                 onPress={() => saveEdit(a.id)}
@@ -173,6 +186,11 @@ export function UserAddressesPanel({ userId }: { userId: string }) {
             {a.instructions ? (
               <Text className="font-sans text-[12px] text-ink-muted">
                 {a.instructions}
+              </Text>
+            ) : null}
+            {a.postalCode ? (
+              <Text className="font-sans text-[12px] text-ink-muted">
+                ZIP {a.postalCode}
               </Text>
             ) : null}
             <View className="mt-3 flex-row flex-wrap gap-4">

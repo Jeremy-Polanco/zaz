@@ -17,6 +17,7 @@ export const deliveryAddressSchema = z.object({
   houseNumber: z.string().optional(),
   unit: z.string().optional(),
   reference: z.string().optional(),
+  postalCode: z.string().optional(),
 })
 export type DeliveryAddressInput = z.infer<typeof deliveryAddressSchema>
 
@@ -138,6 +139,8 @@ export const savedAddressSchema = z.object({
   lat: z.number().min(-90).max(90),
   lng: z.number().min(-180).max(180),
   instructions: z.string().max(500).optional(),
+  // Customer must enter the ZIP — prefilled from the geocoder when possible.
+  postalCode: z.string().regex(/^\d{5}$/, 'Ingresá un ZIP de 5 dígitos'),
 })
 
 export const updateSavedAddressSchema = savedAddressSchema.partial()

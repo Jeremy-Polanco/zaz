@@ -55,8 +55,24 @@ jest.mock('../../lib/api', () => ({
   },
 }))
 
-jest.mock('../../components/MapPicker', () => ({
-  MapPicker: () => null,
+jest.mock('../../components/MapPicker', () => {
+  const RN = require('react-native')
+  return {
+    MapPicker: ({
+      onChange,
+    }: {
+      onChange: (coords: { lat: number; lng: number }) => void
+    }) =>
+      require('react').createElement(RN.Pressable, {
+        testID: 'map-picker',
+        onPress: () => onChange({ lat: 40.85, lng: -73.93 }),
+      }),
+  }
+})
+
+const mockReverseGeocode = jest.fn()
+jest.mock('../../lib/geo', () => ({
+  reverseGeocode: (...args: unknown[]) => mockReverseGeocode(...args),
 }))
 
 // Alert will be spied on after react-native is imported below
@@ -99,10 +115,12 @@ const testAddress: UserAddress = {
   isDefault: true,
   createdAt: '2024-01-01T00:00:00Z',
   updatedAt: '2024-01-01T00:00:00Z',
+  postalCode: '10451',
 }
 
 beforeEach(() => {
   alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(() => undefined)
+  mockReverseGeocode.mockResolvedValue({ text: 'x', postalCode: null })
 })
 
 function setupMocks() {
@@ -150,6 +168,11 @@ describe('EditAddress — pre-population', () => {
     const { getByDisplayValue } = renderWithProviders(<EditAddress />)
     expect(getByDisplayValue('Av. 27 de Febrero 123')).toBeTruthy()
   })
+
+  it('pre-populates the postal code field with the existing ZIP', () => {
+    const { getByDisplayValue } = renderWithProviders(<EditAddress />)
+    expect(getByDisplayValue('10451')).toBeTruthy()
+  })
 })
 
 describe('EditAddress — update flow', () => {
@@ -169,6 +192,51 @@ describe('EditAddress — update flow', () => {
           label: 'Casa Nueva',
         }),
       )
+    })
+  })
+})
+
+describe('EditAddress — postal code (ZIP)', () => {
+  beforeEach(() => setupMocks())
+
+  it('calls mutateAsync with the updated ZIP', async () => {
+    const { getByDisplayValue, getByText } = renderWithProviders(<EditAddress />)
+    const zipInput = getByDisplayValue('10451')
+    fireEvent.changeText(zipInput, '07201')
+    await act(async () => {
+      fireEvent.press(getByText(/Guardar/i))
+    })
+    await waitFor(() => {
+      expect(mockUpdateMutateAsync).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 'addr-1', postalCode: '07201' }),
+      )
+    })
+  })
+
+  it('shows a validation error when the ZIP is cleared', async () => {
+    const { getByDisplayValue, getByText, queryByText } = renderWithProviders(
+      <EditAddress />,
+    )
+    fireEvent.changeText(getByDisplayValue('10451'), '')
+    await act(async () => {
+      fireEvent.press(getByText(/Guardar/i))
+    })
+    await waitFor(() => {
+      expect(queryByText(/Ingresá un ZIP de 5 dígitos/i)).toBeTruthy()
+    })
+  })
+
+  it('prefills the ZIP from the geocoder only when the field is empty', async () => {
+    mockReverseGeocode.mockResolvedValue({ text: 'x', postalCode: '99999' })
+    const { getByTestId, getByDisplayValue } = renderWithProviders(<EditAddress />)
+
+    // Already has a ZIP ('10451') — moving the pin must not overwrite it.
+    await act(async () => {
+      fireEvent.press(getByTestId('map-picker'))
+    })
+
+    await waitFor(() => {
+      expect(getByDisplayValue('10451')).toBeTruthy()
     })
   })
 })

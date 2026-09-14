@@ -135,6 +135,24 @@ describe('AddressesIndex — list with 2 addresses', () => {
   })
 })
 
+describe('AddressesIndex — ZIP display', () => {
+  it('shows the ZIP next to the address line when present', () => {
+    setupMocks([
+      makeAddress({ id: 'addr-1', label: 'Casa', postalCode: '10451' }),
+    ])
+    const { getByText } = renderWithProviders(<AddressesIndex />)
+    expect(
+      getByText('Av. 27 de Febrero 123 · ZIP 10451'),
+    ).toBeTruthy()
+  })
+
+  it('does not show a ZIP suffix when postalCode is absent', () => {
+    setupMocks([makeAddress({ id: 'addr-1', label: 'Casa' })])
+    const { getByText } = renderWithProviders(<AddressesIndex />)
+    expect(getByText('Av. 27 de Febrero 123')).toBeTruthy()
+  })
+})
+
 describe('AddressesIndex — empty state', () => {
   beforeEach(() => setupMocks([]))
 

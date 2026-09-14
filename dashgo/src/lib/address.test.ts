@@ -61,6 +61,16 @@ describe('formatAddressShort', () => {
     expect(formatAddressShort(null)).toBe('Sin ubicación')
     expect(formatAddressShort({ text: '' })).toBe('Sin ubicación')
   })
+
+  it('appends the ZIP when postalCode is present', () => {
+    expect(
+      formatAddressShort({ ...base, houseNumber: '24', postalCode: '10451' }),
+    ).toBe('Casa 24 · ZIP 10451')
+  })
+
+  it('does not append a ZIP suffix when postalCode is absent', () => {
+    expect(formatAddressShort({ ...base, houseNumber: '24' })).toBe('Casa 24')
+  })
 })
 
 describe('formatAddressLine', () => {
@@ -93,6 +103,29 @@ describe('formatAddressLine', () => {
   it('handles a missing address', () => {
     expect(formatAddressLine(null)).toBe('Sin ubicación')
     expect(formatAddressLine({ text: '' })).toBe('Sin ubicación')
+  })
+
+  it('appends the ZIP when postalCode is present', () => {
+    expect(formatAddressLine({ ...base, postalCode: '10451' })).toBe(
+      'Calle Duarte 100, Santo Domingo · ZIP 10451',
+    )
+  })
+
+  it('appends the ZIP after building and unit', () => {
+    expect(
+      formatAddressLine({
+        ...base,
+        building: 'Edif. 4',
+        unit: 'Apto 3B',
+        postalCode: '10451',
+      }),
+    ).toBe('Calle Duarte 100, Santo Domingo · Edif. 4 · Apto 3B · ZIP 10451')
+  })
+
+  it('ignores a whitespace-only postalCode', () => {
+    expect(formatAddressLine({ ...base, postalCode: '   ' })).toBe(
+      'Calle Duarte 100, Santo Domingo',
+    )
   })
 })
 
@@ -158,5 +191,17 @@ describe('userAddressToGeoAddress', () => {
     )
     expect(result).not.toHaveProperty('building')
     expect(result).not.toHaveProperty('reference')
+  })
+
+  it('copies postalCode onto the mapped GeoAddress', () => {
+    const result = userAddressToGeoAddress(
+      fakeUserAddress({ postalCode: '10451' }),
+    )
+    expect(result.postalCode).toBe('10451')
+  })
+
+  it('omits postalCode when the saved address has none', () => {
+    const result = userAddressToGeoAddress(fakeUserAddress({ postalCode: null }))
+    expect(result).not.toHaveProperty('postalCode')
   })
 })

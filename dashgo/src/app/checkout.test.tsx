@@ -227,6 +227,48 @@ afterEach(() => {
 
 // ── Create-order payload — no deliveryAddress ─────────────────────────────────
 
+// ── Selected address summary — ZIP display ────────────────────────────────────
+
+const ADDRESS_WITH_ZIP = {
+  id: 'addr-1',
+  userId: 'user-1',
+  label: 'Casa',
+  line1: 'Calle Duarte 100',
+  line2: null,
+  building: null,
+  lat: 18.47,
+  lng: -69.9,
+  instructions: null,
+  isDefault: true,
+  createdAt: '2026-01-01T00:00:00.000Z',
+  updatedAt: '2026-01-01T00:00:00.000Z',
+  postalCode: '10451',
+}
+
+describe('Checkout — selected address summary', () => {
+  it('shows the ZIP next to the address line when the saved address has one', () => {
+    setupCheckoutMocks([MOCK_PRODUCT], { 'product-1': 2 })
+    mockUseMyAddresses.mockReturnValue({
+      data: [ADDRESS_WITH_ZIP],
+    } as unknown as ReturnType<typeof useMyAddresses>)
+
+    const { getByText } = renderWithProviders(<CheckoutScreen />)
+
+    expect(getByText('Calle Duarte 100 · ZIP 10451')).toBeTruthy()
+  })
+
+  it('does not show a ZIP suffix when the saved address has none', () => {
+    setupCheckoutMocks([MOCK_PRODUCT], { 'product-1': 2 })
+    mockUseMyAddresses.mockReturnValue({
+      data: [{ ...ADDRESS_WITH_ZIP, postalCode: null }],
+    } as unknown as ReturnType<typeof useMyAddresses>)
+
+    const { getByText } = renderWithProviders(<CheckoutScreen />)
+
+    expect(getByText('Calle Duarte 100')).toBeTruthy()
+  })
+})
+
 describe('Checkout — create-order payload', () => {
   it('submits an order with no deliveryAddress field', async () => {
     setupCheckoutMocks([SINGLE_PRODUCT as unknown as typeof MOCK_PRODUCT], { 'product-single': 1 })

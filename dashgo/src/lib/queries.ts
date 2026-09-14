@@ -463,6 +463,7 @@ export function useSetOrderDeliveryAddress() {
       houseNumber?: string
       unit?: string
       reference?: string
+      postalCode?: string
     }) => {
       const { data } = await api.patch<Order>(
         `/orders/${input.id}/delivery-address`,
@@ -474,6 +475,7 @@ export function useSetOrderDeliveryAddress() {
           houseNumber: input.houseNumber,
           unit: input.unit,
           reference: input.reference,
+          postalCode: input.postalCode,
         },
       )
       return data

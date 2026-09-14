@@ -45,6 +45,7 @@ export default {
     viewMyOrders: 'View my orders',
     itemsEyebrow: 'Shopping list',
     unitPrice: '{{price}} each',
+    deliveryAddressEyebrow: 'Delivery address',
   },
   alerts: {
     errorTitle: 'Error',

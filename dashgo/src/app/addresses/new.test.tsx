@@ -49,9 +49,27 @@ jest.mock('../../lib/api', () => ({
   },
 }))
 
-// MapPicker uses react-native-maps which can't render in jest-expo
-jest.mock('../../components/MapPicker', () => ({
-  MapPicker: () => null,
+// MapPicker uses react-native-maps which can't render in jest-expo — stub it
+// with a pressable that fires onChange with a fixed coordinate, so tests can
+// exercise the "pin moved → prefill ZIP" flow without a real map.
+jest.mock('../../components/MapPicker', () => {
+  const RN = require('react-native')
+  return {
+    MapPicker: ({
+      onChange,
+    }: {
+      onChange: (coords: { lat: number; lng: number }) => void
+    }) =>
+      require('react').createElement(RN.Pressable, {
+        testID: 'map-picker',
+        onPress: () => onChange({ lat: 40.85, lng: -73.93 }),
+      }),
+  }
+})
+
+const mockReverseGeocode = jest.fn()
+jest.mock('../../lib/geo', () => ({
+  reverseGeocode: (...args: unknown[]) => mockReverseGeocode(...args),
 }))
 
 // ── imports after mocks ───────────────────────────────────────────────────────
@@ -76,6 +94,7 @@ function setupMocks(opts: { onSuccess?: () => void } = {}) {
     isPending: false,
     isLoading: false,
   } as unknown as ReturnType<typeof useCreateAddress>)
+  mockReverseGeocode.mockResolvedValue({ text: 'x', postalCode: null })
 }
 
 afterEach(() => {
@@ -147,6 +166,7 @@ describe('NewAddress — submission', () => {
     const { getByText, getByPlaceholderText } = renderWithProviders(<NewAddress />)
     fireEvent.changeText(getByPlaceholderText(/Ej: Casa, Oficina/i), 'Trabajo')
     fireEvent.changeText(getByPlaceholderText(/Av. 27 de Febrero/i), 'Calle 5 #123')
+    fireEvent.changeText(getByPlaceholderText('07201'), '10451')
     await act(async () => {
       fireEvent.press(getByText(/Guardar/i))
     })
@@ -155,6 +175,7 @@ describe('NewAddress — submission', () => {
         expect.objectContaining({
           label: 'Trabajo',
           line1: 'Calle 5 #123',
+          postalCode: '10451',
         }),
       )
     })
@@ -165,11 +186,80 @@ describe('NewAddress — submission', () => {
     const { getByText, getByPlaceholderText } = renderWithProviders(<NewAddress />)
     fireEvent.changeText(getByPlaceholderText(/Ej: Casa, Oficina/i), 'Trabajo')
     fireEvent.changeText(getByPlaceholderText(/Av. 27 de Febrero/i), 'Calle 5 #123')
+    fireEvent.changeText(getByPlaceholderText('07201'), '10451')
     await act(async () => {
       fireEvent.press(getByText(/Guardar/i))
     })
     await waitFor(() => {
       expect(mockRouter.replace).toHaveBeenCalledWith('/addresses' as never)
+    })
+  })
+})
+
+describe('NewAddress — postal code (ZIP)', () => {
+  beforeEach(() => setupMocks())
+
+  it('renders the postal code field', () => {
+    const { getByPlaceholderText } = renderWithProviders(<NewAddress />)
+    expect(getByPlaceholderText('07201')).toBeTruthy()
+  })
+
+  it('shows a validation error when the ZIP is missing on submit', async () => {
+    const { getByText, getByPlaceholderText, queryByText } = renderWithProviders(
+      <NewAddress />,
+    )
+    fireEvent.changeText(getByPlaceholderText(/Ej: Casa, Oficina/i), 'Trabajo')
+    fireEvent.changeText(getByPlaceholderText(/Av. 27 de Febrero/i), 'Calle 5 #123')
+    await act(async () => {
+      fireEvent.press(getByText(/Guardar/i))
+    })
+    await waitFor(() => {
+      expect(queryByText(/Ingresá un ZIP de 5 dígitos/i)).toBeTruthy()
+    })
+    expect(mockMutateAsync).not.toHaveBeenCalled()
+  })
+
+  it('shows a validation error when the ZIP is not 5 digits', async () => {
+    const { getByText, getByPlaceholderText, queryByText } = renderWithProviders(
+      <NewAddress />,
+    )
+    fireEvent.changeText(getByPlaceholderText(/Ej: Casa, Oficina/i), 'Trabajo')
+    fireEvent.changeText(getByPlaceholderText(/Av. 27 de Febrero/i), 'Calle 5 #123')
+    fireEvent.changeText(getByPlaceholderText('07201'), '104')
+    await act(async () => {
+      fireEvent.press(getByText(/Guardar/i))
+    })
+    await waitFor(() => {
+      expect(queryByText(/Ingresá un ZIP de 5 dígitos/i)).toBeTruthy()
+    })
+  })
+
+  it('prefills the ZIP from the geocoder when the pin moves and the field is empty', async () => {
+    mockReverseGeocode.mockResolvedValue({ text: 'x', postalCode: '10451' })
+    const { getByTestId, getByPlaceholderText } = renderWithProviders(<NewAddress />)
+
+    await act(async () => {
+      fireEvent.press(getByTestId('map-picker'))
+    })
+
+    await waitFor(() => {
+      expect(getByPlaceholderText('07201').props.value).toBe('10451')
+    })
+    expect(mockReverseGeocode).toHaveBeenCalledWith(40.85, -73.93)
+  })
+
+  it('does not overwrite a ZIP the customer already typed', async () => {
+    mockReverseGeocode.mockResolvedValue({ text: 'x', postalCode: '99999' })
+    const { getByTestId, getByPlaceholderText } = renderWithProviders(<NewAddress />)
+
+    fireEvent.changeText(getByPlaceholderText('07201'), '10451')
+
+    await act(async () => {
+      fireEvent.press(getByTestId('map-picker'))
+    })
+
+    await waitFor(() => {
+      expect(getByPlaceholderText('07201').props.value).toBe('10451')
     })
   })
 })

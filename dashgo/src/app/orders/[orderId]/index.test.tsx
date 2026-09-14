@@ -190,3 +190,30 @@ describe('Order detail — distance surcharge breakdown row', () => {
     expect(queryByText('Recargo por distancia')).toBeNull()
   })
 })
+
+describe('Order detail — delivery address', () => {
+  it('shows the delivery address (with ZIP) through formatAddressLine when present', async () => {
+    mockApiGet.mockResolvedValue({
+      data: makeOrder({
+        deliveryAddress: {
+          text: 'Calle Duarte 100',
+          postalCode: '10451',
+        },
+      }),
+    })
+
+    const { findByText } = renderWithProviders(<OrderDetailScreen />)
+
+    expect(await findByText('Calle Duarte 100 · ZIP 10451')).toBeTruthy()
+    expect(await findByText('Dirección de entrega')).toBeTruthy()
+  })
+
+  it('hides the delivery address section when there is none', async () => {
+    mockApiGet.mockResolvedValue({ data: makeOrder({ deliveryAddress: null }) })
+
+    const { queryByText, findByText } = renderWithProviders(<OrderDetailScreen />)
+
+    await findByText('$5')
+    expect(queryByText('Dirección de entrega')).toBeNull()
+  })
+})

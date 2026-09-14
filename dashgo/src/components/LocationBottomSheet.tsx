@@ -47,6 +47,9 @@ export function LocationBottomSheet({
   const [reference, setReference] = useState(
     order.deliveryAddress?.reference ?? '',
   )
+  const [postalCode, setPostalCode] = useState(
+    order.deliveryAddress?.postalCode ?? '',
+  )
   const [pin, setPin] = useState<{ lat?: number; lng?: number }>({
     lat: order.deliveryAddress?.lat ?? undefined,
     lng: order.deliveryAddress?.lng ?? undefined,
@@ -67,6 +70,7 @@ export function LocationBottomSheet({
       try {
         const rev = await reverseGeocode(coords.lat, coords.lng)
         setText((prev) => prev || rev.text)
+        setPostalCode((prev) => prev || rev.postalCode || '')
       } catch {
         setText(
           (prev) =>
@@ -102,6 +106,7 @@ export function LocationBottomSheet({
         houseNumber: houseNumber.trim() || undefined,
         unit: unit.trim() || undefined,
         reference: reference.trim() || undefined,
+        postalCode: postalCode.trim() || undefined,
       })
       if (saveToUser && saveLabel.trim() && order.customerId) {
         try {
@@ -111,6 +116,7 @@ export function LocationBottomSheet({
             lat: pin.lat,
             lng: pin.lng,
             building: building.trim() || undefined,
+            postalCode: postalCode.trim() || undefined,
           })
         } catch {
           // Non-blocking: the order location was set regardless.
@@ -210,6 +216,19 @@ export function LocationBottomSheet({
               placeholderTextColor="#6B6488"
               value={reference}
               onChangeText={setReference}
+            />
+          </View>
+
+          <View className="mt-4">
+            <FieldLabel>{t('pin.postalCode')}</FieldLabel>
+            <TextInput
+              className="h-11 border-b border-ink/25 pb-1 font-sans text-[16px] text-ink"
+              placeholder={t('pin.postalCodePlaceholder')}
+              placeholderTextColor="#6B6488"
+              value={postalCode}
+              onChangeText={setPostalCode}
+              keyboardType="number-pad"
+              maxLength={5}
             />
           </View>
 

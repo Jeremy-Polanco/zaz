@@ -561,6 +561,7 @@ export default function CheckoutScreen() {
                       </Text>
                       <Text className="mt-0.5 font-sans text-[15px] text-ink-muted" numberOfLines={1}>
                         {addr.line1}
+                        {addr.postalCode ? ` · ZIP ${addr.postalCode}` : ''}
                       </Text>
                     </View>
                     <View

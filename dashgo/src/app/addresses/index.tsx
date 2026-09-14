@@ -34,6 +34,7 @@ function AddressCard({ address }: { address: UserAddress }) {
         </View>
         <Text className="text-[15px] text-ink-soft" numberOfLines={1}>
           {address.line1}
+          {address.postalCode ? ` · ZIP ${address.postalCode}` : ''}
         </Text>
       </View>
       <Text className="ml-3 text-[20px] text-ink-soft">›</Text>

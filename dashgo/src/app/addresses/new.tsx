@@ -15,6 +15,7 @@ import { useForm, Controller } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { savedAddressSchema, type SavedAddressInput } from '../../lib/schemas'
 import { useCreateAddress } from '../../lib/queries'
+import { reverseGeocode } from '../../lib/geo'
 import { MapPicker } from '../../components/MapPicker'
 import { ScreenHeader } from '../../components/ScreenHeader'
 
@@ -29,6 +30,7 @@ export default function NewAddress() {
     control,
     handleSubmit,
     setValue,
+    getValues,
     watch,
     formState: { errors },
   } = useForm<SavedAddressInput>({
@@ -40,11 +42,29 @@ export default function NewAddress() {
       lat: FALLBACK_LAT,
       lng: FALLBACK_LNG,
       instructions: undefined,
+      postalCode: '',
     },
   })
 
   const lat = watch('lat')
   const lng = watch('lng')
+
+  // Prefill the ZIP from the geocoder when the pin moves, but never clobber
+  // something the customer already typed.
+  const handlePinChange = ({ lat: newLat, lng: newLng }: { lat: number; lng: number }) => {
+    setValue('lat', newLat)
+    setValue('lng', newLng)
+    if (getValues('postalCode')) return
+    reverseGeocode(newLat, newLng)
+      .then((res) => {
+        if (res.postalCode && !getValues('postalCode')) {
+          setValue('postalCode', res.postalCode)
+        }
+      })
+      .catch(() => {
+        // Non-blocking: the customer can still type the ZIP manually.
+      })
+  }
 
   const onSubmit = async (values: SavedAddressInput) => {
     await createAddress.mutateAsync(values)
@@ -141,13 +161,34 @@ export default function NewAddress() {
             <Text className="font-sans-medium text-[15px] uppercase tracking-wide text-ink-soft">
               {t('form.pinLabel')}
             </Text>
-            <MapPicker
-              value={{ lat, lng }}
-              onChange={({ lat: newLat, lng: newLng }) => {
-                setValue('lat', newLat)
-                setValue('lng', newLng)
-              }}
+            <MapPicker value={{ lat, lng }} onChange={handlePinChange} />
+          </View>
+
+          {/* Postal code / ZIP */}
+          <View className="gap-1.5">
+            <Text className="font-sans-medium text-[15px] uppercase tracking-wide text-ink-soft">
+              {t('form.postalCode')}
+            </Text>
+            <Controller
+              control={control}
+              name="postalCode"
+              render={({ field }) => (
+                <TextInput
+                  className="rounded-lg border border-ink/20 bg-paper px-4 py-3 text-[16px] text-ink"
+                  placeholder="07201"
+                  placeholderTextColor="#9ca3af"
+                  value={field.value}
+                  onChangeText={field.onChange}
+                  onBlur={field.onBlur}
+                  keyboardType="number-pad"
+                  maxLength={5}
+                  returnKeyType="next"
+                />
+              )}
             />
+            {errors.postalCode && (
+              <Text className="text-[15px] text-red-500">{errors.postalCode.message}</Text>
+            )}
           </View>
 
           {/* Instructions (optional) */}

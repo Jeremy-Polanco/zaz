@@ -5,6 +5,7 @@
 import {
   addressSchema,
   checkoutSchema,
+  deliveryAddressSchema,
   phoneSchema,
   sendOtpSchema,
   verifyOtpSchema,
@@ -15,6 +16,8 @@ import {
   subscriptionStatusSchema,
   subscriptionSchema,
   subscriptionPlanSchema,
+  savedAddressSchema,
+  updateSavedAddressSchema,
 } from './schemas'
 
 describe('addressSchema', () => {
@@ -216,5 +219,73 @@ describe('subscriptionPlanSchema', () => {
       interval: 'month',
     })
     expect(result.success).toBe(false)
+  })
+})
+
+describe('savedAddressSchema — postalCode (required, 5 digits)', () => {
+  const base = { label: 'Casa', line1: 'Calle 123', lat: 18.5, lng: -69.9 }
+
+  it('accepts a valid 5-digit postalCode', () => {
+    const result = savedAddressSchema.safeParse({ ...base, postalCode: '10451' })
+    expect(result.success).toBe(true)
+  })
+
+  it('rejects a missing postalCode', () => {
+    const result = savedAddressSchema.safeParse(base)
+    expect(result.success).toBe(false)
+    if (!result.success) {
+      expect(
+        result.error.issues.some((i) => i.path[0] === 'postalCode'),
+      ).toBe(true)
+    }
+  })
+
+  it('rejects a postalCode with fewer than 5 digits', () => {
+    const result = savedAddressSchema.safeParse({ ...base, postalCode: '1045' })
+    expect(result.success).toBe(false)
+    if (!result.success) {
+      const issue = result.error.issues.find((i) => i.path[0] === 'postalCode')
+      expect(issue?.message).toBe('Ingresá un ZIP de 5 dígitos')
+    }
+  })
+
+  it('rejects a postalCode with non-digit characters', () => {
+    const result = savedAddressSchema.safeParse({ ...base, postalCode: '1045a' })
+    expect(result.success).toBe(false)
+  })
+
+  it('rejects a postalCode longer than 5 digits', () => {
+    const result = savedAddressSchema.safeParse({ ...base, postalCode: '104512' })
+    expect(result.success).toBe(false)
+  })
+})
+
+describe('updateSavedAddressSchema — postalCode optional but validated', () => {
+  it('accepts an update with no postalCode at all', () => {
+    const result = updateSavedAddressSchema.safeParse({ label: 'Casa Nueva' })
+    expect(result.success).toBe(true)
+  })
+
+  it('accepts an update with a valid postalCode', () => {
+    const result = updateSavedAddressSchema.safeParse({ postalCode: '07201' })
+    expect(result.success).toBe(true)
+  })
+
+  it('rejects an update with an invalid postalCode', () => {
+    const result = updateSavedAddressSchema.safeParse({ postalCode: 'abc' })
+    expect(result.success).toBe(false)
+  })
+})
+
+describe('deliveryAddressSchema — optional postalCode', () => {
+  const base = { text: 'Calle 123', lat: 18.5, lng: -69.9 }
+
+  it('accepts a delivery address without postalCode', () => {
+    expect(deliveryAddressSchema.safeParse(base).success).toBe(true)
+  })
+
+  it('accepts a delivery address with a postalCode', () => {
+    const result = deliveryAddressSchema.safeParse({ ...base, postalCode: '10451' })
+    expect(result.success).toBe(true)
   })
 })

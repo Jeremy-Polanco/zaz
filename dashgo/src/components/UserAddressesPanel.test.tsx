@@ -174,3 +174,70 @@ describe('UserAddressesPanel (mobile)', () => {
     expect(screen.getByText(/sin direcciones guardadas/i)).toBeTruthy()
   })
 })
+
+describe('UserAddressesPanel (mobile) — ZIP (postalCode)', () => {
+  let updateMutateAsync: jest.Mock
+
+  beforeEach(() => {
+    jest.clearAllMocks()
+    updateMutateAsync = jest.fn().mockResolvedValue({})
+    mockSetDefault.mockReturnValue(
+      mutationMock({ mutate: jest.fn() }) as unknown as ReturnType<
+        typeof useSetDefaultAddressForUser
+      >,
+    )
+    mockDelete.mockReturnValue(
+      mutationMock({ mutate: jest.fn() }) as unknown as ReturnType<
+        typeof useDeleteAddressForUser
+      >,
+    )
+    mockUpdate.mockReturnValue(
+      mutationMock({ mutateAsync: updateMutateAsync }) as unknown as ReturnType<
+        typeof useUpdateAddressForUser
+      >,
+    )
+  })
+
+  it('shows the ZIP on the read-only card when present', () => {
+    mockAddresses.mockReturnValue(
+      queryResult([{ ...addresses[0], postalCode: '10451' }]),
+    )
+    renderWithProviders(<UserAddressesPanel userId="user-abc" />)
+
+    expect(screen.getByText('ZIP 10451')).toBeTruthy()
+  })
+
+  it('does not show a ZIP line when postalCode is absent', () => {
+    mockAddresses.mockReturnValue(queryResult(addresses))
+    renderWithProviders(<UserAddressesPanel userId="user-abc" />)
+
+    expect(screen.queryByText(/^ZIP /)).toBeNull()
+  })
+
+  it('pre-populates the ZIP field when editing', () => {
+    mockAddresses.mockReturnValue(
+      queryResult([{ ...addresses[0], postalCode: '10451' }]),
+    )
+    renderWithProviders(<UserAddressesPanel userId="user-abc" />)
+
+    fireEvent.press(screen.getAllByText('Editar')[0])
+    expect(screen.getByDisplayValue('10451')).toBeTruthy()
+  })
+
+  it('saves the edited ZIP', async () => {
+    mockAddresses.mockReturnValue(
+      queryResult([{ ...addresses[0], postalCode: '10451' }]),
+    )
+    renderWithProviders(<UserAddressesPanel userId="user-abc" />)
+
+    fireEvent.press(screen.getAllByText('Editar')[0])
+    fireEvent.changeText(screen.getByDisplayValue('10451'), '07201')
+    fireEvent.press(screen.getByText('Guardar'))
+
+    await waitFor(() => {
+      expect(updateMutateAsync).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 'addr-1', postalCode: '07201' }),
+      )
+    })
+  })
+})

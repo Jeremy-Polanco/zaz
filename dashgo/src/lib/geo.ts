@@ -26,7 +26,14 @@ export function haversineMeters(
 
 export type ReverseGeocodeResult = {
   text: string
+  /** 5-digit US ZIP from Nominatim's `address.postcode`, trimmed, or null. */
+  postalCode: string | null
   raw?: unknown
+}
+
+function extractPostalCode(address: Record<string, string> | undefined): string | null {
+  const postcode = address?.postcode?.trim()
+  return postcode ? postcode : null
 }
 
 export async function requestDeviceLocation(): Promise<Coords> {
@@ -47,7 +54,7 @@ export async function reverseGeocode(
   lat: number,
   lng: number,
 ): Promise<ReverseGeocodeResult> {
-  const url = `${NOMINATIM}/reverse?format=jsonv2&lat=${lat}&lon=${lng}`
+  const url = `${NOMINATIM}/reverse?format=jsonv2&lat=${lat}&lon=${lng}&addressdetails=1`
   const res = await fetch(url, {
     headers: {
       'Accept-Language': 'es,en',
@@ -60,19 +67,21 @@ export async function reverseGeocode(
     address?: Record<string, string>
   }
   const text = data.display_name ?? `${lat.toFixed(5)}, ${lng.toFixed(5)}`
-  return { text, raw: data }
+  return { text, postalCode: extractPostalCode(data.address), raw: data }
 }
 
 export type ForwardGeocodeResult = {
   lat: number
   lng: number
   text: string
+  /** 5-digit US ZIP from Nominatim's `address.postcode`, trimmed, or null. */
+  postalCode: string | null
 }
 
 export async function forwardGeocode(
   query: string,
 ): Promise<ForwardGeocodeResult[]> {
-  const url = `${NOMINATIM}/search?format=jsonv2&countrycodes=us&limit=5&q=${encodeURIComponent(
+  const url = `${NOMINATIM}/search?format=jsonv2&countrycodes=us&limit=5&addressdetails=1&q=${encodeURIComponent(
     query,
   )}`
   const res = await fetch(url, {
@@ -86,10 +95,12 @@ export async function forwardGeocode(
     lat: string
     lon: string
     display_name: string
+    address?: Record<string, string>
   }>
   return data.map((r) => ({
     lat: parseFloat(r.lat),
     lng: parseFloat(r.lon),
     text: r.display_name,
+    postalCode: extractPostalCode(r.address),
   }))
 }

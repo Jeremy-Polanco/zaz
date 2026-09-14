@@ -13,6 +13,7 @@ import {
 } from '../../../lib/queries'
 import type { Order } from '../../../lib/types'
 import { formatCents, formatDeliveryDay } from '../../../lib/format'
+import { formatAddressLine } from '../../../lib/address'
 import { BreakdownRow, Button, Eyebrow, Hairline, StatusStepper } from '../../../components/ui'
 import { SuscriptorBadge } from '../../../components/SuscriptorBadge'
 import { ScreenHeader } from '../../../components/ScreenHeader'
@@ -393,6 +394,15 @@ export default function OrderDetailScreen() {
                 {order.status === 'confirmed_by_colmado' &&
                   t('banner.readyToDeliver')}
                 {order.status === 'in_delivery_route' && t('banner.onTheWay')}
+              </Text>
+            </View>
+          )}
+
+          {order.deliveryAddress && (
+            <View className="mb-6">
+              <Eyebrow className="mb-2">{t('detail.deliveryAddressEyebrow')}</Eyebrow>
+              <Text className="font-sans text-[15px] text-ink-soft">
+                {formatAddressLine(order.deliveryAddress)}
               </Text>
             </View>
           )}
