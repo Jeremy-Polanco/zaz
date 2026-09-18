@@ -5,12 +5,13 @@ import { Subscription } from '../../entities/subscription.entity';
 import { SubscriptionPlan } from '../../entities/subscription-plan.entity';
 import { User } from '../../entities/user.entity';
 import { SubscriptionService } from './subscription.service';
+import { SubscriptionReconcileCron } from './subscription-reconcile.cron';
 import { SubscriptionController } from './subscription.controller';
 import { AdminSubscriptionController } from './admin-subscription.controller';
 
 @Module({
   imports: [TypeOrmModule.forFeature([Subscription, User, SubscriptionPlan]), ConfigModule],
-  providers: [SubscriptionService],
+  providers: [SubscriptionService, SubscriptionReconcileCron],
   controllers: [SubscriptionController, AdminSubscriptionController],
   exports: [SubscriptionService],
 })

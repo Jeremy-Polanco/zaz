@@ -272,7 +272,23 @@ export class UsersService {
 
     const qb = this.users
       .createQueryBuilder('user')
-      .leftJoin(Subscription, 'subscription', 'subscription.user_id = user.id')
+      // UNA fila por usuario: su suscripción más nueva. Con más de una (una
+      // cancelada vieja + la activa nueva, algo normal desde que el reconcile
+      // contra Stripe importa también las canceladas) el join duplicaba la
+      // fila cruda y corría el índice entities[i] ↔ raw[i]: los usuarios
+      // siguientes heredaban un estado ajeno y el tag "suscrito" aparecía o
+      // desaparecía al azar. Misma regla que getMySubscription (la más nueva
+      // por current_period_end). SQL crudo: sobrevive renombres sin avisar.
+      .leftJoin(
+        Subscription,
+        'subscription',
+        `subscription.user_id = user.id AND subscription.id = (
+           SELECT s2.id FROM subscriptions s2
+            WHERE s2.user_id = user.id
+            ORDER BY s2.current_period_end DESC
+            LIMIT 1
+         )`,
+      )
       .addSelect('subscription.status', 'subscription_status')
       .orderBy('user.createdAt', 'DESC');
 

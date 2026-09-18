@@ -22,7 +22,10 @@ import { getRepositoryToken } from '@nestjs/typeorm';
 import { UsersService } from './users.service';
 import { AuthService } from '../auth/auth.service';
 import { User } from '../../entities/user.entity';
-import { SubscriptionStatus } from '../../entities/subscription.entity';
+import {
+  Subscription,
+  SubscriptionStatus,
+} from '../../entities/subscription.entity';
 import { UserRole } from '../../entities/enums';
 import { UserSubscriptionFilter } from './dto/list-users-query.dto';
 import { AuthenticatedUser } from '../../common/types/authenticated-user';
@@ -195,6 +198,21 @@ describe('UsersService.findAll (admin list)', () => {
   it('orders by createdAt DESC', async () => {
     await service.findAll(admin, {});
     expect(userRepo._qb.orderBy).toHaveBeenCalledWith('user.createdAt', 'DESC');
+  });
+
+  it('joins ONE subscription per user — the newest — so raw[i] stays aligned with entities[i]', async () => {
+    // Un cliente con dos filas (cancelada vieja + activa nueva) duplicaba su
+    // fila cruda y corría el índice: los usuarios siguientes heredaban un
+    // estado ajeno y el tag "suscrito" aparecía o desaparecía al azar.
+    await service.findAll(admin, {});
+
+    expect(userRepo._qb.leftJoin).toHaveBeenCalledWith(
+      Subscription,
+      'subscription',
+      expect.stringMatching(
+        /subscription\.id = \(\s*SELECT s2\.id FROM subscriptions s2\s+WHERE s2\.user_id = user\.id\s+ORDER BY s2\.current_period_end DESC\s+LIMIT 1\s*\)/,
+      ),
+    );
   });
 
   it('subscription=active → pushes the active filter into the query', async () => {

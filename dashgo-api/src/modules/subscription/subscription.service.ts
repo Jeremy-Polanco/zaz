@@ -36,6 +36,15 @@ import { computeGrossCents } from '../../common/tax';
 
 type StripeClient = InstanceType<typeof Stripe>;
 
+/** Resumen de una corrida de `reconcileWithStripe`. */
+export interface SubscriptionReconcileResult {
+  scanned: number;
+  upserted: number;
+  skipped: number;
+  purged: number;
+  failed: number;
+}
+
 // Local shapes for Stripe event objects (avoids StripeConstructor namespace issues)
 interface StripeEventLike {
   type: string;
@@ -60,6 +69,7 @@ interface StripeSubscriptionItemPeriod {
 interface StripeSubscriptionObject {
   id: string;
   status: string;
+  customer?: string | { id: string } | null;
   // Legacy API (pre-2025-04-30): period bounds live on the subscription itself
   current_period_start?: number;
   current_period_end?: number;
@@ -214,7 +224,13 @@ export class SubscriptionService implements OnModuleInit {
       mode: 'subscription',
       customer: customerId,
       line_items: [{ price: activePlan.activeStripePriceId, quantity: 1 }],
+      // En la sesión Y en la suscripción. Stripe NO copia el metadata de la
+      // sesión a la suscripción: sin `subscription_data` cada webhook
+      // posterior (renovación, cancelación, past_due) llegaba sin userId y se
+      // descartaba — `current_period_end` quedaba congelado en el primer mes y
+      // el suscriptor perdía todos los beneficios a los 30 días.
       metadata: { userId },
+      subscription_data: { metadata: { userId } },
       success_url: successUrl,
       cancel_url: cancelUrl,
     });
@@ -234,7 +250,10 @@ export class SubscriptionService implements OnModuleInit {
 
   async cancelAtPeriodEnd(userId: string): Promise<void> {
     const stripe = this.requireStripe();
-    const sub = await this.subscriptions.findOne({ where: { userId } });
+    const sub = await this.subscriptions.findOne({
+      where: { userId },
+      order: { currentPeriodEnd: 'DESC' },
+    });
     if (!sub) {
       throw new NotFoundException({
         statusCode: 404,
@@ -250,7 +269,10 @@ export class SubscriptionService implements OnModuleInit {
 
   async reactivate(userId: string): Promise<void> {
     const stripe = this.requireStripe();
-    const sub = await this.subscriptions.findOne({ where: { userId } });
+    const sub = await this.subscriptions.findOne({
+      where: { userId },
+      order: { currentPeriodEnd: 'DESC' },
+    });
     if (!sub) {
       throw new NotFoundException({
         statusCode: 404,
@@ -288,7 +310,10 @@ export class SubscriptionService implements OnModuleInit {
   async getMySubscription(
     userId: string,
   ): Promise<SubscriptionResponseDto | null> {
-    const sub = await this.subscriptions.findOne({ where: { userId } });
+    const sub = await this.subscriptions.findOne({
+      where: { userId },
+      order: { currentPeriodEnd: 'DESC' },
+    });
     if (!sub) return null;
     return plainToInstance(SubscriptionResponseDto, sub, {
       excludeExtraneousValues: true,
@@ -744,15 +769,95 @@ export class SubscriptionService implements OnModuleInit {
     };
   }
 
+  /**
+   * Converge la tabla `subscriptions` con la verdad de Stripe.
+   *
+   * La tabla solo se escribía por webhook. Cuando Stripe no nos entrega un
+   * evento (endpoint deshabilitado, app archivada, evento sin metadata) la fila
+   * queda congelada: `current_period_end` vence, `isActiveSubscriber` pasa a
+   * false y el suscriptor pierde mantenimiento gratis, bebedero y precios sin
+   * que la app se entere — la pantalla sigue diciendo "Activa". Así llegó el
+   * "tiene suscripción y le está cobrando" del 2026-09-18.
+   *
+   * Lista TODAS las suscripciones (status 'all', para enterarnos también de
+   * las canceladas) y las upsertea con las mismas reglas del webhook. Las de
+   * alquiler (metadata.rentalId) viven en `rentals`: si alguna se coló acá, se
+   * purga. Un error en una suscripción no aborta el resto.
+   */
+  async reconcileWithStripe(): Promise<SubscriptionReconcileResult> {
+    const result: SubscriptionReconcileResult = {
+      scanned: 0,
+      upserted: 0,
+      skipped: 0,
+      purged: 0,
+      failed: 0,
+    };
+    if (!this.stripe) {
+      this.logger.warn('reconcileWithStripe: Stripe disabled — nothing to do');
+      return result;
+    }
+
+    let startingAfter: string | undefined;
+    do {
+      const page = await this.stripe.subscriptions.list({
+        status: 'all',
+        limit: 100,
+        ...(startingAfter ? { starting_after: startingAfter } : {}),
+      });
+      for (const raw of page.data) {
+        const sub = raw as unknown as StripeSubscriptionObject;
+        result.scanned += 1;
+        try {
+          if (sub.metadata?.rentalId) {
+            const purged = await this.subscriptions.delete({
+              stripeSubscriptionId: sub.id,
+            });
+            const affected = purged?.affected ?? 0;
+            if (affected > 0) {
+              result.purged += affected;
+              this.logger.warn(
+                `reconcileWithStripe: purged rental subscription ${sub.id} (rental ${sub.metadata.rentalId}) from the plan table`,
+              );
+            }
+            continue;
+          }
+          if (await this.upsertSubscription(sub)) result.upserted += 1;
+          else result.skipped += 1;
+        } catch (err) {
+          result.failed += 1;
+          this.logger.error(
+            `reconcileWithStripe: subscription ${sub.id} failed: ${(err as Error).message}`,
+          );
+        }
+      }
+      const last = page.data[page.data.length - 1];
+      startingAfter = page.has_more && last ? last.id : undefined;
+    } while (startingAfter);
+
+    this.logger.log(
+      `reconciled subscriptions vs Stripe: ${JSON.stringify(result)}`,
+    );
+    return result;
+  }
+
+  /**
+   * Escribe la fila de la suscripción. Devuelve true si escribió, false si la
+   * descartó (alquiler, sin dueño resoluble, sin período).
+   */
   private async upsertSubscription(
     stripeSub: StripeSubscriptionObject,
-  ): Promise<void> {
-    const userId = stripeSub.metadata?.userId;
+  ): Promise<boolean> {
+    // Las suscripciones de ALQUILER se manejan en RentalsService y jamás
+    // entran a esta tabla. Guard único para todos los caminos — el de
+    // invoice.* no lo tenía y hubiera metido al inquilino como suscriptor.
+    if (stripeSub.metadata?.rentalId) return false;
+
+    const userId = await this.resolveUserId(stripeSub);
     if (!userId) {
       this.logger.warn(
-        `subscription ${stripeSub.id} has no metadata.userId — skipping upsert`,
+        `subscription ${stripeSub.id} has no metadata.userId and no user matches its customer — skipping upsert`,
       );
-      return;
+      return false;
     }
 
     const { start, end } = this.extractPeriodBounds(stripeSub);
@@ -760,7 +865,7 @@ export class SubscriptionService implements OnModuleInit {
       this.logger.warn(
         `subscription ${stripeSub.id} missing current_period_start/end on both subscription and items[0] — check Stripe API version. Skipping upsert.`,
       );
-      return;
+      return false;
     }
 
     // For canceled subscriptions, default canceled_at to NOW() if Stripe omits it
@@ -781,6 +886,14 @@ export class SubscriptionService implements OnModuleInit {
       plans,
     );
 
+    // Estado anterior, para emitir SUBSCRIPTION_ACTIVATED solo en la
+    // transición a active: el reconcile horario re-upsertea todo y los
+    // listeners de bebedero no tienen por qué correr N veces por hora.
+    const previous = await this.subscriptions.findOne({
+      where: { stripeSubscriptionId: stripeSub.id },
+      select: ['id', 'status'],
+    });
+
     await this.subscriptions.upsert(
       {
         userId,
@@ -798,13 +911,42 @@ export class SubscriptionService implements OnModuleInit {
       `upserted subscription ${stripeSub.id} for user ${userId} — status: ${stripeSub.status}`,
     );
 
-    // Fire the auto-bebedero side-effect when the subscription is active. The
-    // listener (OrdersModule) is idempotent — replayed "active" webhooks won't
-    // create duplicate bebedero orders. Event-driven to keep the module graph
-    // acyclic (OrdersModule already depends on SubscriptionModule).
-    if (normalizedStatus === SubscriptionStatus.ACTIVE) {
+    // Auto-bebedero al activarse. El listener (OrdersModule) es idempotente
+    // igual; event-driven para mantener el grafo de módulos acíclico
+    // (OrdersModule ya depende de SubscriptionModule).
+    if (
+      normalizedStatus === SubscriptionStatus.ACTIVE &&
+      previous?.status !== SubscriptionStatus.ACTIVE
+    ) {
       this.events.emit(SUBSCRIPTION_ACTIVATED, { userId, tier });
     }
+    return true;
+  }
+
+  /**
+   * Dueño de una suscripción de Stripe. Primero `metadata.userId` (el checkout
+   * lo escribe en la suscripción vía subscription_data desde 2026-09-18). Si
+   * no viene — toda suscripción anterior a esa fecha, y las que el dueño crea
+   * a mano en el Dashboard — se resuelve por `users.stripe_customer_id`.
+   */
+  private async resolveUserId(
+    stripeSub: StripeSubscriptionObject,
+  ): Promise<string | null> {
+    if (stripeSub.metadata?.userId) return stripeSub.metadata.userId;
+    const customerId =
+      typeof stripeSub.customer === 'string'
+        ? stripeSub.customer
+        : stripeSub.customer?.id;
+    if (!customerId) return null;
+    const user = await this.users.findOne({
+      where: { stripeCustomerId: customerId },
+      select: ['id'],
+    });
+    if (!user) return null;
+    this.logger.log(
+      `subscription ${stripeSub.id} resolved to user ${user.id} via stripe customer ${customerId}`,
+    );
+    return user.id;
   }
 
   private normalizeStatus(stripeStatus: string): SubscriptionStatus {
