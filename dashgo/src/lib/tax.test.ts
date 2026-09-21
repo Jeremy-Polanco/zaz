@@ -3,6 +3,8 @@ import {
   DEFAULT_FLAT_SHIPPING_CENTS,
   computeGrossCents,
   computeQuotePreviewCents,
+  computeTaxCents,
+  formatTaxRatePct,
 } from './tax'
 
 describe('TAX_RATE', () => {
@@ -14,6 +16,30 @@ describe('TAX_RATE', () => {
 describe('DEFAULT_FLAT_SHIPPING_CENTS', () => {
   it('is the $5 fallback used only when GET /shipping/rate cannot be fetched', () => {
     expect(DEFAULT_FLAT_SHIPPING_CENTS).toBe(500)
+  })
+})
+
+describe('computeTaxCents', () => {
+  it('defaults to TAX_RATE when no rate is passed', () => {
+    expect(computeTaxCents(1000)).toBe(Math.round(1000 * TAX_RATE))
+  })
+
+  it('uses the per-zone rate when one is passed (e.g. Elizabeth NJ 6.625%)', () => {
+    expect(computeTaxCents(1000, 0.06625)).toBe(66) // round(1000 * 0.06625) = 66.25 → 66
+  })
+})
+
+describe('formatTaxRatePct', () => {
+  it('formats the fallback rate as "8.887%"', () => {
+    expect(formatTaxRatePct(TAX_RATE)).toBe('8.887%')
+  })
+
+  it('formats a per-zone rate as "6.625%" (Elizabeth NJ)', () => {
+    expect(formatTaxRatePct(0.06625)).toBe('6.625%')
+  })
+
+  it('formats the Bronx/Brooklyn/Manhattan rate as "8.875%"', () => {
+    expect(formatTaxRatePct(0.08875)).toBe('8.875%')
   })
 })
 
@@ -118,6 +144,30 @@ describe('computeQuotePreviewCents', () => {
       })
       expect(r.taxCents).toBe(0)
       expect(r.totalCents).toBe(1500)
+    })
+  })
+
+  describe('con taxRate por zona (opcional)', () => {
+    it('defaults to TAX_RATE and returns it when no taxRate is passed', () => {
+      const r = computeQuotePreviewCents({
+        subtotalCents: 1000,
+        shippingCents: 0,
+        pointsRedeemedCents: 0,
+      })
+      expect(r.taxRate).toBe(TAX_RATE)
+      expect(r.taxCents).toBe(Math.round(1000 * TAX_RATE))
+    })
+
+    it('uses the passed per-zone rate instead of TAX_RATE and returns it (Elizabeth NJ 6.625%)', () => {
+      const r = computeQuotePreviewCents({
+        subtotalCents: 5000,
+        shippingCents: 0,
+        pointsRedeemedCents: 0,
+        taxRate: 0.06625,
+      })
+      expect(r.taxRate).toBe(0.06625)
+      expect(r.taxCents).toBe(Math.round(5000 * 0.06625))
+      expect(r.taxCents).not.toBe(Math.round(5000 * TAX_RATE))
     })
   })
 })

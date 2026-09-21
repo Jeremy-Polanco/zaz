@@ -23,6 +23,7 @@ import { CreditModule } from '../credit/credit.module';
 import { SubscriptionModule } from '../subscription/subscription.module';
 import { TwilioModule } from '../twilio/twilio.module';
 import { RentalsModule } from '../rentals/rentals.module';
+import { AddressesModule } from '../addresses/addresses.module';
 
 @Module({
   imports: [
@@ -45,6 +46,10 @@ import { RentalsModule } from '../rentals/rentals.module';
     CreditModule,
     SubscriptionModule,
     TwilioModule,
+    // La tasa de impuesto sale de la zona de la dirección (DeliveryZonesService).
+    // Import directo, sin forwardRef: AddressesModule no importa ningún módulo
+    // de la app, así que no hay ciclo posible.
+    AddressesModule,
     // T65: RentalsModule imported so OrdersService can call activateRentalsForOrder.
     // No circular dependency: RentalsModule does NOT import OrdersModule.
     // PaymentsModule already imports forwardRef(RentalsModule) — this is a direct import.

@@ -11,6 +11,19 @@ import { DeliveryZone } from '../../entities/delivery-zone.entity';
 import { CreateAddressDto } from './dto/create-address.dto';
 import { UpdateAddressDto } from './dto/update-address.dto';
 import { resolveZoneId } from './resolve-zone';
+import { DeliveryZonesService } from './delivery-zones.service';
+import type { TaxRateQuery } from './delivery-zones.service';
+
+/**
+ * La dirección como la ve el cliente: la fila más la TASA de impuesto que le
+ * corresponde.
+ *
+ * La tasa NO es columna a propósito. La fija la zona (`delivery_zones.tax_rate`)
+ * y la zona la edita el admin: copiada en cada dirección habría que
+ * rebackfillear la libreta entera cada vez que un estado cambia un decimal.
+ * Se calcula al responder, que es cuando importa.
+ */
+export type AddressResponse = UserAddress & { taxRate: number };
 
 @Injectable()
 export class AddressesService {
@@ -22,16 +35,18 @@ export class AddressesService {
     @InjectRepository(DeliveryZone)
     private readonly zones: Repository<DeliveryZone>,
     private readonly dataSource: DataSource,
+    private readonly deliveryZonesService: DeliveryZonesService,
   ) {}
 
   /**
    * List addresses for a user ordered by default first, then by created_at ASC.
    */
-  async list(userId: string): Promise<UserAddress[]> {
-    return this.addresses.find({
+  async list(userId: string): Promise<AddressResponse[]> {
+    const addresses = await this.addresses.find({
       where: { userId },
       order: { isDefault: 'DESC', createdAt: 'ASC' },
     });
+    return this.withTaxRates(addresses);
   }
 
   /**
@@ -39,7 +54,7 @@ export class AddressesService {
    * First-ever address for a user is automatically set as default.
    * Throws 400 ADDRESS_CAP_EXCEEDED if the user already has 10 addresses.
    */
-  async create(userId: string, dto: CreateAddressDto): Promise<UserAddress> {
+  async create(userId: string, dto: CreateAddressDto): Promise<AddressResponse> {
     const count = await this.addresses.count({ where: { userId } });
     if (count >= 10) {
       throw new BadRequestException({
@@ -60,7 +75,7 @@ export class AddressesService {
       // haría inútil.
       zoneId: await this.resolveZone(postalCode),
     });
-    return this.addresses.save(entity);
+    return this.withTaxRate(await this.addresses.save(entity));
   }
 
   /**
@@ -72,7 +87,7 @@ export class AddressesService {
     userId: string,
     id: string,
     dto: UpdateAddressDto,
-  ): Promise<UserAddress> {
+  ): Promise<AddressResponse> {
     const addr = await this.addresses.findOne({ where: { id } });
     if (!addr || addr.userId !== userId) {
       throw new NotFoundException({
@@ -99,7 +114,7 @@ export class AddressesService {
         addr.zoneId = await this.resolveZone(postalCode);
       }
     }
-    return this.addresses.save(addr);
+    return this.withTaxRate(await this.addresses.save(addr));
   }
 
   /**
@@ -139,8 +154,8 @@ export class AddressesService {
    *   2) Sets is_default=true on the target.
    * Throws 404 if the address doesn't exist or belongs to another user.
    */
-  async setDefault(userId: string, id: string): Promise<UserAddress> {
-    return this.dataSource.transaction(async (mgr) => {
+  async setDefault(userId: string, id: string): Promise<AddressResponse> {
+    const updated = await this.dataSource.transaction(async (mgr) => {
       const repo = mgr.getRepository(UserAddress);
       const target = await repo.findOne({ where: { id } });
       if (!target || target.userId !== userId) {
@@ -159,6 +174,7 @@ export class AddressesService {
       target.isDefault = true;
       return repo.save(target);
     });
+    return this.withTaxRate(updated);
   }
 
   /**
@@ -169,7 +185,7 @@ export class AddressesService {
    * Throws 404 if the address doesn't exist or belongs to another user.
    * Returns the now-active address.
    */
-  async setActiveLocation(userId: string, id: string): Promise<UserAddress> {
+  async setActiveLocation(userId: string, id: string): Promise<AddressResponse> {
     const target = await this.addresses.findOne({ where: { id } });
     if (!target || target.userId !== userId) {
       throw new NotFoundException({
@@ -179,15 +195,46 @@ export class AddressesService {
       });
     }
     await this.users.update(userId, { activeLocationId: id });
-    return target;
+    return this.withTaxRate(target);
   }
 
   /**
    * Super-admin variant: list any user's addresses.
    * No ownership check — the controller's RolesGuard handles authorization.
    */
-  async listByUserId(targetUserId: string): Promise<UserAddress[]> {
+  async listByUserId(targetUserId: string): Promise<AddressResponse[]> {
     return this.list(targetUserId);
+  }
+
+  /**
+   * Los dos datos viajan, pero el que manda es el ZIP (ver
+   * `delivery-zones.service.ts`): `zone_id` se resolvió el día que se guardó la
+   * dirección y nadie lo refresca si el admin le cambia los prefijos a una
+   * zona. Va igual como respaldo — sin ZIP, o con un ZIP que no cae en ningún
+   * prefijo, es el único dato que queda.
+   */
+  private static taxRateQuery(address: UserAddress): TaxRateQuery {
+    return { zoneId: address.zoneId ?? null, postalCode: address.postalCode };
+  }
+
+  private async withTaxRate(address: UserAddress): Promise<AddressResponse> {
+    const { taxRate } = await this.deliveryZonesService.resolveTaxRate(
+      AddressesService.taxRateQuery(address),
+    );
+    return { ...address, taxRate };
+  }
+
+  /** En lote: diez direcciones no pueden ser diez consultas a la tabla. */
+  private async withTaxRates(
+    addresses: UserAddress[],
+  ): Promise<AddressResponse[]> {
+    const rates = await this.deliveryZonesService.resolveTaxRates(
+      addresses.map((a) => AddressesService.taxRateQuery(a)),
+    );
+    return addresses.map((address, i) => ({
+      ...address,
+      taxRate: rates[i].taxRate,
+    }));
   }
 
   /**

@@ -649,6 +649,13 @@ export interface UserAddress {
   updatedAt: string
   postalCode?: string | null
   zoneId?: string | null
+  /**
+   * Tasa de impuesto de la zona de esta dirección (ej. 0.06625 en Elizabeth
+   * NJ), calculada server-side. Ausente/undefined en direcciones creadas
+   * antes de esta feature o si el backend no la resuelve — el checkout cae
+   * al fallback TAX_RATE en ese caso.
+   */
+  taxRate?: number
 }
 
 export interface CreateAddressInput {

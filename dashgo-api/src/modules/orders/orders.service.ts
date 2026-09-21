@@ -13,6 +13,7 @@ import { Order, OrderItem, Product } from '../../entities';
 import { UserAddress } from '../../entities/user-address.entity';
 import { DeliveryZone } from '../../entities/delivery-zone.entity';
 import { resolveZoneId } from '../addresses/resolve-zone';
+import { DeliveryZonesService } from '../addresses/delivery-zones.service';
 import {
   OrderStatus,
   PaymentMethod,
@@ -100,6 +101,7 @@ export class OrdersService {
     private readonly twilio: TwilioService,
     private readonly rentalsService: RentalsService,
     private readonly orderNotifications: OrderNotificationsService,
+    private readonly deliveryZonesService: DeliveryZonesService,
   ) {}
 
   /**
@@ -528,11 +530,75 @@ export class OrdersService {
       // puntos se prorratean por la parte gravable del pedido (ver
       // common/tax.ts). Un pedido de puro agua exenta no paga impuesto ni
       // siquiera por el viaje.
+      //
+      // La DIRECCIÓN se resuelve antes que el impuesto y no después: la TASA
+      // sale de la zona de reparto a la que cae esa dirección (NJ 6.625%, NYC
+      // 8.875%). Calculando el impuesto primero se le cobraba a todo el mundo
+      // la constante global.
+      //
+      // When no address is supplied, fall back to the customer's default saved
+      // location so subsequent orders auto-inherit it (the colmado can still
+      // re-pin at delivery). Mirrors the frontend userAddressToGeoAddress map.
+      //
+      // El `postalCode` del snapshot lo ESCRIBE el cliente: si fuera la única
+      // fuente de la tasa, el cliente elegiría cuánto impuesto paga. Por eso,
+      // cuando manda `deliveryAddressId`, la plata sale de la fila real de su
+      // libreta — leída con el userId adentro del where, que es el chequeo de
+      // propiedad.
+      let bookAddress: UserAddress | null = null;
+      if (dto.deliveryAddressId) {
+        bookAddress = await this.userAddresses.findOne({
+          where: { id: dto.deliveryAddressId, userId: user.id },
+        });
+        if (!bookAddress) {
+          // Id de otro, o borrado entre que el cliente abrió el checkout y
+          // mandó el pedido. No se rompe la compra: se cobra con el ZIP
+          // posteado, igual que antes de que el campo existiera.
+          this.logger.warn(
+            `deliveryAddressId ${dto.deliveryAddressId} no pertenece al usuario ${user.id} — la tasa sale del ZIP posteado`,
+          );
+        }
+      }
+
+      let resolvedDeliveryAddress: GeoAddress | null =
+        dto.deliveryAddress ?? null;
+      if (!resolvedDeliveryAddress) {
+        // Sin snapshot: la fila elegida, y si no hay, la dirección por defecto.
+        const source =
+          bookAddress ??
+          (await this.userAddresses.findOne({
+            where: { userId: user.id, isDefault: true },
+          }));
+        if (source) {
+          bookAddress = source;
+          resolvedDeliveryAddress = this.userAddressToDeliveryAddress(source);
+        }
+      }
+
+      // Sin zona y sin ZIP esto devuelve TAX_RATE: el pedido de una dirección
+      // que no cae en ninguna zona sigue pagando lo que pagaba siempre.
+      //
+      // Con fila de libreta se pregunta por SUS datos (el ZIP manda, el
+      // `zone_id` es el respaldo — ver delivery-zones.service.ts) y el ZIP
+      // posteado se ignora para la plata.
+      const { taxRate } = await this.deliveryZonesService.resolveTaxRate(
+        bookAddress
+          ? {
+              zoneId: bookAddress.zoneId ?? null,
+              postalCode: bookAddress.postalCode ?? null,
+            }
+          : {
+              zoneId: null,
+              postalCode: resolvedDeliveryAddress?.postalCode ?? null,
+            },
+      );
+
       const flatShippingCents = await this.shippingRate.getFlatShippingCents();
       const shippingCents = opts.provisioned ? 0 : flatShippingCents;
       const base = computeTaxableBase(taxLines, {
         shippingCents,
         pointsRedeemedCents,
+        taxRate,
       });
       // Lo que el cliente termina debiendo sigue descontando TODOS los puntos,
       // no solo la parte prorrateada — el prorrateo es únicamente para repartir
@@ -549,19 +615,6 @@ export class OrdersService {
         : 0;
       const totalCents = netCents + taxCents + tipCents;
 
-      // When no address is supplied, fall back to the customer's default saved
-      // location so subsequent orders auto-inherit it (the colmado can still
-      // re-pin at delivery). Mirrors the frontend userAddressToGeoAddress map.
-      let resolvedDeliveryAddress: GeoAddress | null =
-        dto.deliveryAddress ?? null;
-      if (!resolvedDeliveryAddress) {
-        const def = await this.userAddresses.findOne({
-          where: { userId: user.id, isDefault: true },
-        });
-        if (def)
-          resolvedDeliveryAddress = this.userAddressToDeliveryAddress(def);
-      }
-
       const order = orderRepo.create({
         customerId: user.id,
         status: skipQuote ? OrderStatus.QUOTED : OrderStatus.PENDING_QUOTE,
@@ -572,7 +625,10 @@ export class OrdersService {
         pointsRedeemed: (pointsRedeemedCents / 100).toFixed(2),
         shipping: (shippingCents / 100).toFixed(2),
         tax: (taxCents / 100).toFixed(2),
-        taxRate: TAX_RATE.toFixed(5),
+        // La tasa se CONGELA acá: `orders.tax_rate` deja de ser una constante
+        // decorativa y pasa a explicar, años después, por qué este pedido pagó
+        // lo que pagó. Cambiar la tasa de la zona no re-cotiza lo ya vendido.
+        taxRate: taxRate.toFixed(5),
         // Congela la base gravable — sin esto el impuesto de un pedido mixto
         // no se puede reconstruir después.
         taxableSubtotal: ((skipQuote ? base.taxableCents : 0) / 100).toFixed(2),
@@ -769,6 +825,125 @@ export class OrdersService {
   }
 
   /**
+   * ¿A este pedido todavía se le puede cambiar el impuesto?
+   *
+   * Sí mientras el cliente NO haya puesto la plata. Dos señales, porque hay dos
+   * formas de pagar:
+   *  - `stripePaymentIntentId`: ya existe una retención de tarjeta por un monto
+   *    concreto. Mover la tasa después es cobrar distinto de lo autorizado.
+   *  - el ESTADO: el efectivo nunca tiene intent, así que ahí es lo único que
+   *    queda. PENDING_QUOTE y QUOTED son los dos estados ANTERIORES a que el
+   *    pedido se confirme; de PENDING_VALIDATION en adelante ya se descontó
+   *    stock y la venta está cerrada (ver ALLOWED_TRANSITIONS y `authorize`,
+   *    que sólo acepta QUOTED).
+   *
+   * Existe porque el flujo real del negocio cotiza DESPUÉS de saber la
+   * dirección: el cliente pide (muchas veces sin dirección), el admin pincha la
+   * ubicación y recién ahí cotiza. Congelar la tasa al crear el pedido le
+   * cobraba a todo New Jersey el fallback de 8.887%.
+   */
+  private isTaxRateRepriceable(order: Order): boolean {
+    if (order.stripePaymentIntentId) return false;
+    return (
+      order.status === OrderStatus.PENDING_QUOTE ||
+      order.status === OrderStatus.QUOTED
+    );
+  }
+
+  /**
+   * La tasa que se le aplica AHORA a este pedido, y si hay que re-congelarla.
+   *
+   * Repreciable → se vuelve a resolver la zona por el código postal del pedido
+   * (o el que se está por pinchar). No repreciable → manda la que quedó
+   * congelada; ilegible (columna vacía, pedido viejo) cae en la constante
+   * histórica y NUNCA en 0, que sería cobrar de menos.
+   *
+   * Se pregunta por ZIP y no por el `zone_id` de la libreta a propósito: la
+   * dirección de un pedido es un snapshot JSONB que sólo tiene el código
+   * postal, y ése es igual el dato primario en todo el sistema (ver
+   * delivery-zones.service.ts).
+   */
+  private async currentTaxRate(
+    order: Order,
+    postalCode: string | null = order.deliveryAddress?.postalCode ?? null,
+  ): Promise<{ taxRate: number; repriced: boolean }> {
+    if (!this.isTaxRateRepriceable(order)) {
+      const frozen = parseFloat(order.taxRate ?? '');
+      return {
+        taxRate: Number.isFinite(frozen) ? frozen : TAX_RATE,
+        repriced: false,
+      };
+    }
+    const { taxRate } = await this.deliveryZonesService.resolveTaxRate({
+      zoneId: null,
+      postalCode,
+    });
+    return { taxRate, repriced: true };
+  }
+
+  /** Envío + recargo por distancia, que para el impuesto son el mismo cargo. */
+  private deliveryCentsOf(order: Order): number {
+    return (
+      Math.round(parseFloat(order.shipping ?? '0') * 100) +
+      Math.round(parseFloat(order.deliverySurcharge ?? '0') * 100)
+    );
+  }
+
+  /**
+   * Impuesto, base gravable y total de un pedido a una tasa dada.
+   *
+   * Vive acá y no adentro de `setQuote` porque re-pinchar la dirección de un
+   * pedido YA cotizado también tiene que re-hacer esta cuenta: cambiarle la
+   * tasa sin recalcular el impuesto dejaría la orden diciendo que cobró 6.625%
+   * sobre un monto calculado al 8.887%.
+   *
+   * La base sale de las LÍNEAS: sólo los ítems 'standard' pagan impuesto, y el
+   * envío y los puntos se prorratean por la parte gravable (ver common/tax.ts).
+   * Si el pedido llegara sin líneas se cae a "todo gravable", que es el
+   * comportamiento histórico — nunca cobrar de menos.
+   */
+  private quoteTotals(
+    order: Order,
+    deliveryCents: number,
+    taxRate: number,
+  ): { taxCents: number; taxableCents: number; totalCents: number } {
+    const subtotalCents = Math.round(parseFloat(order.subtotal) * 100);
+    const pointsRedeemedCents = Math.round(
+      parseFloat(order.pointsRedeemed) * 100,
+    );
+    const taxLines: TaxableLine[] = (order.items ?? []).map((item) => ({
+      lineCents:
+        Math.round(parseFloat(item.priceAtOrder) * 100) * item.quantity,
+      taxCategory: item.product?.taxCategory ?? 'standard',
+    }));
+    const opts = {
+      shippingCents: deliveryCents,
+      pointsRedeemedCents,
+      taxRate,
+    };
+    const base = taxLines.length
+      ? computeTaxableBase(taxLines, opts)
+      : computeTaxableBase(
+          [{ lineCents: subtotalCents, taxCategory: 'standard' }],
+          opts,
+        );
+
+    // El neto que paga el cliente descuenta TODOS los puntos; el prorrateo solo
+    // reparte el descuento entre la mitad gravada y la exenta.
+    const netCents = Math.max(
+      0,
+      subtotalCents + deliveryCents - pointsRedeemedCents,
+    );
+    // Preserve the propina chosen at checkout — untaxed, rides on the total.
+    const tipCents = Math.round(parseFloat(order.tip ?? '0') * 100);
+    return {
+      taxCents: base.taxCents,
+      taxableCents: base.taxableCents,
+      totalCents: netCents + base.taxCents + tipCents,
+    };
+  }
+
+  /**
    * Super admin sets the manually-quoted shipping amount for an order.
    * Recomputes tax and total on the backend (source of truth). Idempotent
    * when the amount is unchanged.
@@ -839,44 +1014,18 @@ export class OrdersService {
     // exenta sigue sin pagar impuesto por el viaje.
     const deliveryCents = effectiveShippingCents + surchargeCents;
 
-    const subtotalCents = Math.round(parseFloat(order.subtotal) * 100);
-    const pointsRedeemedCents = Math.round(
-      parseFloat(order.pointsRedeemed) * 100,
+    // La tasa SÍ se vuelve a resolver mientras el pedido siga siendo
+    // repreciable, porque el orden real es "pido → me pinchan la dirección →
+    // me cotizan": al crearse, la mitad de los pedidos no tenía dirección y se
+    // congelaba el fallback. Ya autorizado (o confirmado, si es efectivo) manda
+    // la tasa congelada: re-resolver ahí re-cotizaría una venta cerrada, y
+    // encima con la zona de hoy y no con la de entonces.
+    const { taxRate, repriced } = await this.currentTaxRate(order);
+    const { taxCents, taxableCents, totalCents } = this.quoteTotals(
+      order,
+      deliveryCents,
+      taxRate,
     );
-
-    // Base gravable a partir de las LÍNEAS: solo los ítems 'standard' pagan
-    // impuesto, y el envío y los puntos se prorratean por la parte gravable
-    // (ver common/tax.ts). `findOne` ya trae items + items.product. Si por lo
-    // que sea el pedido llegara sin líneas, se cae a "todo gravable", que es
-    // el comportamiento histórico — nunca cobrar de menos.
-    const taxLines: TaxableLine[] = (order.items ?? []).map((item) => ({
-      lineCents:
-        Math.round(parseFloat(item.priceAtOrder) * 100) * item.quantity,
-      taxCategory: item.product?.taxCategory ?? 'standard',
-    }));
-    const base = taxLines.length
-      ? computeTaxableBase(taxLines, {
-          shippingCents: deliveryCents,
-          pointsRedeemedCents,
-        })
-      : computeTaxableBase(
-          [{ lineCents: subtotalCents, taxCategory: 'standard' }],
-          {
-            shippingCents: deliveryCents,
-            pointsRedeemedCents,
-          },
-        );
-
-    // El neto que paga el cliente descuenta TODOS los puntos; el prorrateo solo
-    // reparte el descuento entre la mitad gravada y la exenta.
-    const netCents = Math.max(
-      0,
-      subtotalCents + deliveryCents - pointsRedeemedCents,
-    );
-    const taxCents = base.taxCents;
-    // Preserve the propina chosen at checkout — untaxed, rides on the total.
-    const tipCents = Math.round(parseFloat(order.tip ?? '0') * 100);
-    const totalCents = netCents + taxCents + tipCents;
 
     await this.orders.update(id, {
       shipping: (effectiveShippingCents / 100).toFixed(2),
@@ -886,7 +1035,11 @@ export class OrdersService {
         ? { scheduledDeliveryDate: opts.scheduledDeliveryDate }
         : {}),
       tax: (taxCents / 100).toFixed(2),
-      taxableSubtotal: (base.taxableCents / 100).toFixed(2),
+      // La tasa re-resuelta se CONGELA en la misma escritura que el impuesto
+      // que la usó: separadas, un error entre medio dejaría la orden diciendo
+      // que cobró una tasa distinta de la que aplicó.
+      ...(repriced ? { taxRate: taxRate.toFixed(5) } : {}),
+      taxableSubtotal: (taxableCents / 100).toFixed(2),
       totalAmount: (totalCents / 100).toFixed(2),
       status: OrderStatus.QUOTED,
       quotedAt: order.quotedAt ?? new Date(),
@@ -997,6 +1150,15 @@ export class OrdersService {
    * exact destination. The FIRST location pinned for a customer who has no
    * saved address yet is auto-saved to their address book (as default), so
    * subsequent orders auto-inherit it; further locations are added explicitly.
+   *
+   * TOCA `order.taxRate` mientras el pedido todavía sea repreciable (ver
+   * `isTaxRateRepriceable`): la dirección que acaba de pincharse es la que
+   * decide el impuesto, y el formulario de cotización del admin lee
+   * `order.taxRate` para mostrar el porcentaje. Sin esto el admin cotizaría
+   * mirando el 8.887% del fallback aunque la chincheta esté en New Jersey.
+   *
+   * Una vez autorizado (o confirmado, si es efectivo) NO se toca: ahí afinar la
+   * ubicación al llegar no puede cambiar el impuesto de una venta ya cerrada.
    */
   async setDeliveryAddress(
     id: string,
@@ -1008,6 +1170,25 @@ export class OrdersService {
       'Solo el super admin o el vendedor asignado pueden fijar la dirección de entrega',
     );
     const order = await this.findOne(id, user);
+
+    // La tasa sale del ZIP que se está pinchando AHORA, no del que traía el
+    // pedido. El `zone_id` de la dirección que se auto-guarda más abajo no hace
+    // falta: se deriva de este mismo código postal con el mismo resolutor, y el
+    // ZIP es el dato primario (ver delivery-zones.service.ts) — sin ZIP esa
+    // fila tampoco tendría zona.
+    const { taxRate, repriced } = await this.currentTaxRate(
+      order,
+      address.postalCode ?? null,
+    );
+    // Un pedido ya COTIZADO tiene impuesto calculado: moverle la tasa sin
+    // rehacer la cuenta lo dejaría diciendo que cobró 6.625% sobre un monto
+    // sacado al 8.887%. Uno sin cotizar tiene tax = 0 a propósito — su impuesto
+    // recién nace en setQuote.
+    const requote =
+      repriced && order.status === OrderStatus.QUOTED
+        ? this.quoteTotals(order, this.deliveryCentsOf(order), taxRate)
+        : null;
+
     await this.orders.update(order.id, {
       deliveryAddress: {
         text: address.text,
@@ -1019,6 +1200,14 @@ export class OrdersService {
         reference: address.reference ?? null,
         postalCode: address.postalCode ?? null,
       },
+      ...(repriced ? { taxRate: taxRate.toFixed(5) } : {}),
+      ...(requote
+        ? {
+            tax: (requote.taxCents / 100).toFixed(2),
+            taxableSubtotal: (requote.taxableCents / 100).toFixed(2),
+            totalAmount: (requote.totalCents / 100).toFixed(2),
+          }
+        : {}),
     });
 
     // Auto-save the FIRST location to the customer's address book so future

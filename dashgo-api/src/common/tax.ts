@@ -1,17 +1,44 @@
 /**
- * Canonical tax math for the whole API. This is the single source of truth for
- * TAX_RATE — orders, payments and subscriptions all import it from here. The
- * frontend mirrors (dashgo-web/src/lib/tax.ts and dashgo/src/lib/tax.ts) must
- * stay identical to this value.
+ * Canonical tax math for the whole API.
+ *
+ * TAX_RATE ya NO es "la" tasa: es el FALLBACK. La tasa real la fija la zona de
+ * reparto a la que cae la dirección de entrega (`delivery_zones.tax_rate`) —
+ * New Jersey cobra 6.625% y NYC 8.875%, y cobrarle a los dos lo mismo era
+ * cobrarle de más a uno y de menos al otro.
+ *
+ * Este número se queda por una razón concreta: es la constante histórica con la
+ * que se cotizó todo lo que ya está en la base. Una dirección sin zona (sin ZIP,
+ * o un ZIP que no matchea ningún prefijo) sigue pagando exactamente lo que venía
+ * pagando. Caer en 0 ante un dato faltante sería cobrar de menos, que es el
+ * error caro.
+ *
+ * Los espejos del frontend (dashgo-web/src/lib/tax.ts y dashgo/src/lib/tax.ts)
+ * tienen que seguir igual a este valor mientras sigan calculando el fallback.
  */
 export const TAX_RATE = 0.08887;
 
 /**
  * Tax owed on a net (pre-tax) cent amount. Rounds to the nearest cent — matches
- * the order quote formula exactly (Math.round(taxable * TAX_RATE)).
+ * the order quote formula exactly (Math.round(taxable * rate)).
+ *
+ * `taxRate` es la tasa de la zona; omitirla usa el fallback histórico.
  */
-export function computeTaxCents(netCents: number): number {
-  return Math.round(netCents * TAX_RATE);
+export function computeTaxCents(
+  netCents: number,
+  taxRate: number = TAX_RATE,
+): number {
+  return Math.round(netCents * taxRate);
+}
+
+/**
+ * La tasa como porcentaje para mostrarle al humano: 0.06625 → "6.625%".
+ *
+ * Tres decimales y no dos porque las tasas reales los usan (6.625%, 8.875%):
+ * redondear a "6.63%" en la factura es explicarle mal al cliente por qué pagó
+ * lo que pagó.
+ */
+export function formatTaxRatePct(rate: number): string {
+  return `${(rate * 100).toFixed(3)}%`;
 }
 
 /**
@@ -47,6 +74,11 @@ export interface TaxableLine {
 export interface TaxableBaseOptions {
   shippingCents?: number;
   pointsRedeemedCents?: number;
+  /**
+   * Tasa de la zona de reparto. Omitirla usa TAX_RATE (el fallback histórico),
+   * que es lo que corresponde cuando la dirección no cae en ninguna zona.
+   */
+  taxRate?: number;
 }
 
 export interface TaxableBase {
@@ -60,6 +92,12 @@ export interface TaxableBase {
   /** Final base the rate is applied to. */
   taxableCents: number;
   taxCents: number;
+  /**
+   * Tasa que se aplicó. Viaja de vuelta para que quien llama la congele en la
+   * orden sin volver a adivinarla — `orders.tax_rate` tiene que poder explicar
+   * el impuesto cobrado años después.
+   */
+  taxRate: number;
 }
 
 /**
@@ -71,6 +109,9 @@ export interface TaxableBase {
  * first would understate what is owed. An unknown category is treated as
  * `standard` — under-collecting sales tax is the expensive mistake.
  *
+ * La TASA sale de `opts.taxRate` (la de la zona de entrega). Sin ella se usa
+ * TAX_RATE, que es lo que cobraba el sistema antes de que existieran zonas.
+ *
  * When every line is `standard` this reduces EXACTLY to the historical formula
  * (`max(0, subtotal + shipping - points) × RATE`), so orders already in the
  * system keep their numbers. There is a test pinning that.
@@ -81,6 +122,7 @@ export function computeTaxableBase(
 ): TaxableBase {
   const shippingCents = opts.shippingCents ?? 0;
   const pointsRedeemedCents = opts.pointsRedeemedCents ?? 0;
+  const taxRate = opts.taxRate ?? TAX_RATE;
 
   let subtotalCents = 0;
   let taxableSubtotalCents = 0;
@@ -110,6 +152,7 @@ export function computeTaxableBase(
     taxableShippingCents,
     pointsOnTaxableCents,
     taxableCents,
-    taxCents: computeTaxCents(taxableCents),
+    taxCents: computeTaxCents(taxableCents, taxRate),
+    taxRate,
   };
 }

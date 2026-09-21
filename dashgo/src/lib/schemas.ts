@@ -41,6 +41,10 @@ export const checkoutSchema = z.object({
   // Optional: when the customer has saved addresses they pick which one this
   // order goes to. Absent → colmado pins the location at delivery time (legacy).
   deliveryAddress: deliveryAddressSchema.optional(),
+  // UUID of the customer's saved address (UserAddress.id). The server uses
+  // this row — not the deliveryAddress snapshot's postalCode — to resolve
+  // the tax rate/zone; the snapshot above is still sent as-is for display.
+  deliveryAddressId: z.string().uuid().optional(),
 })
 
 export const phoneSchema = z

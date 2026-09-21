@@ -5,6 +5,19 @@ import {
   PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from 'typeorm';
+import { TAX_RATE } from '../common/tax';
+
+/**
+ * Postgres devuelve `numeric` como string; la tasa se usa como NÚMERO en toda
+ * la matemática de impuestos (ver common/tax.ts), así que se convierte una sola
+ * vez acá y no en cada consumidor. Mismo patrón que lat/lng en
+ * user-address.entity.ts. Exportado para poder testearlo sin levantar TypeORM.
+ */
+export const taxRateTransformer = {
+  to: (value: number | null | undefined): number | null | undefined => value,
+  from: (value: string | number | null): number =>
+    typeof value === 'number' ? value : parseFloat(value ?? ''),
+};
 
 /**
  * Zona de reparto — la unidad con la que el negocio piensa su mapa: "el Bronx",
@@ -63,6 +76,30 @@ export class DeliveryZone {
    */
   @Column({ name: 'is_active', type: 'boolean', default: true })
   isActive!: boolean;
+
+  /**
+   * Tasa de impuesto sobre la venta de la zona, como fracción (0.06625 = 6.625%).
+   *
+   * Por qué vive en la ZONA y no en una constante: New Jersey cobra 6.625% y
+   * NYC 8.875%. Con una sola tasa global se le cobraba de más a uno y de menos
+   * al otro, y cobrar de menos se paga de la caja propia.
+   *
+   * El DEFAULT es la constante histórica (TAX_RATE, 8.887%) a propósito: una
+   * zona que el admin cargue y no configure sigue cobrando exactamente lo que
+   * cobraba el sistema antes. El faltante nunca cae en 0.
+   *
+   * La orden congela la tasa en `orders.tax_rate` al crearse — cambiar esto
+   * acá no re-cotiza nada de lo ya vendido.
+   */
+  @Column({
+    name: 'tax_rate',
+    type: 'numeric',
+    precision: 6,
+    scale: 5,
+    default: TAX_RATE,
+    transformer: taxRateTransformer,
+  })
+  taxRate!: number;
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt!: Date;

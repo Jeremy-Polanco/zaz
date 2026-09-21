@@ -127,6 +127,12 @@ export const checkoutSchema = z.object({
   usePoints: z.boolean().optional(),
   useCredit: z.boolean().optional(),
   deliveryAddress: deliveryAddressSchema.optional(),
+  // UUID of the customer's saved address (ownership-checked server-side).
+  // The server uses THIS to resolve the tax rate/zone — the `deliveryAddress`
+  // snapshot above is still sent as-is for the order's historical record, but
+  // its postalCode is no longer trusted for money. Absent when the order has
+  // no saved address (legacy: colmado pins the location at delivery time).
+  deliveryAddressId: z.string().uuid().optional(),
 })
 export type CheckoutInput = z.infer<typeof checkoutSchema>
 

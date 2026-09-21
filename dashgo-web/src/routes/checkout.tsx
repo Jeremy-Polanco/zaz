@@ -22,7 +22,12 @@ import { useCart, clearCart } from '../lib/cart'
 import { Button, SectionHeading } from '../components/ui'
 import { userAddressToGeoAddress } from '../lib/address'
 import { cn, formatCents } from '../lib/utils'
-import { DEFAULT_FLAT_SHIPPING_CENTS, computeQuotePreviewCents } from '../lib/tax'
+import {
+  DEFAULT_FLAT_SHIPPING_CENTS,
+  TAX_RATE,
+  computeQuotePreviewCents,
+  formatTaxRatePct,
+} from '../lib/tax'
 import { effectivePriceCentsFor, subscriberPriceWins } from '../lib/pricing'
 import { TOKEN_KEY } from '../lib/api'
 
@@ -34,7 +39,9 @@ export const Route = createFileRoute('/checkout')({
   component: CheckoutPage,
 })
 
-function CheckoutPage() {
+// Exported so checkout.test.tsx renders THIS component instead of a
+// test-local copy of its logic — a copy passes while production breaks.
+export function CheckoutPage() {
   const router = useRouter()
   const { data: user } = useCurrentUser()
   const { items: cart, totalItems } = useCart()
@@ -197,12 +204,19 @@ function CheckoutPage() {
     if (!p || p.taxCategory === 'exempt') return sum
     return sum + effectivePriceCentsFor(p, isActiveSubscriber) * it.quantity
   }, 0)
+  // La dirección seleccionada ya trae su propia tasa (por zona, ej. 0.06625
+  // en Elizabeth NJ) — el fallback TAX_RATE es solo para cuando todavía no
+  // hay dirección elegida o la dirección es de una respuesta vieja sin
+  // taxRate. El server vuelve a congelar la tasa real al crear la orden;
+  // esto es solo el preview.
+  const previewTaxRate = selectedAddress?.taxRate ?? TAX_RATE
   const skipQuoteTaxCents = allSkipQuote
     ? computeQuotePreviewCents({
         subtotalCents,
         shippingCents: effectiveShippingCents,
         pointsRedeemedCents: pointsAppliedCents,
         taxableSubtotalCents,
+        taxRate: previewTaxRate,
       }).taxCents
     : 0
   const skipQuoteTotalCents =
@@ -256,6 +270,11 @@ function CheckoutPage() {
       deliveryAddress: selectedAddress
         ? userAddressToGeoAddress(selectedAddress)
         : undefined,
+      // El server ahora resuelve la tasa de impuesto desde ESTA dirección
+      // guardada (ownership-checked) e ignora el ZIP del snapshot de arriba
+      // para el cálculo de dinero — el snapshot se sigue mandando igual que
+      // antes, solo para el registro histórico de la orden.
+      deliveryAddressId: selectedAddress?.id,
     })
 
     // Skip-cotización orders are auto-quoted at creation (status 'quoted'):
@@ -717,7 +736,9 @@ function CheckoutPage() {
               </div>
               <div className="flex items-baseline justify-between">
                 <span className="text-[0.7rem] uppercase tracking-[0.15em] text-ink-muted">
-                  Impuestos
+                  {allSkipQuote
+                    ? `Impuestos (${formatTaxRatePct(previewTaxRate)})`
+                    : 'Impuestos'}
                 </span>
                 {allSkipQuote ? (
                   <span className="nums text-sm font-medium text-ink">

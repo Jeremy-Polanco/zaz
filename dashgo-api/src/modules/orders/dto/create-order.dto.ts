@@ -80,6 +80,23 @@ export class CreateOrderDto {
   @Type(() => DeliveryAddressDto)
   deliveryAddress?: DeliveryAddressDto;
 
+  /**
+   * Id de la dirección GUARDADA del cliente de la que sale este pedido.
+   *
+   * Va al tope del DTO y NO adentro de `deliveryAddress` porque el snapshot se
+   * persiste tal cual en el JSONB de la orden: un id de otra tabla ahí adentro
+   * sería un dato que nadie mantiene y que la orden vieja no tiene.
+   *
+   * Existe por la PLATA: el `postalCode` del snapshot lo escribe el cliente, y
+   * con la tasa de impuesto saliendo de ahí, el cliente elegiría cuánto
+   * impuesto paga. Con el id, el servidor lee la fila real (validando que sea
+   * suya) y esa fila fija la tasa. Es opcional a propósito — el mobile <= 1.0.8
+   * que ya está en la calle sigue mandando sólo el snapshot.
+   */
+  @IsOptional()
+  @IsUUID()
+  deliveryAddressId?: string;
+
   @IsEnum(PaymentMethod)
   paymentMethod!: PaymentMethod;
 

@@ -17,6 +17,8 @@ import { PointsService } from '../points/points.service';
 import { ShippingService } from '../shipping/shipping.service';
 import { CreditService } from '../credit/credit.service';
 import { SubscriptionService } from '../subscription/subscription.service';
+import { DeliveryZonesService } from '../addresses/delivery-zones.service';
+import { TAX_RATE } from '../../common/tax';
 import { createMockStripe, MockStripe } from '../../test-utils/stripe';
 
 // ---------------------------------------------------------------------------
@@ -105,6 +107,7 @@ describe('PaymentsService', () => {
   let pointsService: jest.Mocked<PointsService>;
   let shippingService: jest.Mocked<ShippingService>;
   let subscriptionService: jest.Mocked<SubscriptionService>;
+  let deliveryZonesService: { resolveTaxRate: jest.Mock };
 
   beforeEach(async () => {
     mockStripeInstance = createMockStripe();
@@ -140,6 +143,14 @@ describe('PaymentsService', () => {
       isActiveSubscriber: jest.fn().mockResolvedValue(false),
     } as unknown as jest.Mocked<SubscriptionService>;
 
+    // Por defecto el destino no cae en ninguna zona: se cobra el fallback
+    // histórico y todos los montos que ya estaban testeados no se mueven.
+    deliveryZonesService = {
+      resolveTaxRate: jest
+        .fn()
+        .mockResolvedValue({ zoneId: null, taxRate: TAX_RATE }),
+    };
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         PaymentsService,
@@ -150,6 +161,7 @@ describe('PaymentsService', () => {
         { provide: ShippingService, useValue: shippingService },
         { provide: CreditService, useValue: creditService },
         { provide: SubscriptionService, useValue: subscriptionService },
+        { provide: DeliveryZonesService, useValue: deliveryZonesService },
       ],
     }).compile();
 
@@ -270,6 +282,7 @@ describe('PaymentsService', () => {
         { provide: ShippingService, useValue: shippingService },
         { provide: CreditService, useValue: creditService },
         { provide: SubscriptionService, useValue: subscriptionService },
+        { provide: DeliveryZonesService, useValue: deliveryZonesService },
       ],
     }).compile();
     const svc = mod.get<PaymentsService>(PaymentsService);
@@ -790,4 +803,70 @@ describe('PaymentsService', () => {
       });
     });
   });
+
+  // -------------------------------------------------------------------------
+  // Tasa de impuesto por zona: el intent tiene que cobrar lo MISMO que después
+  // cotiza la orden, o el cliente ve un precio y paga otro.
+  // -------------------------------------------------------------------------
+  describe('createIntentForItems — tasa por zona de entrega', () => {
+    const NJ_RATE = 0.06625;
+
+    beforeEach(() => {
+      productsRepo.find.mockResolvedValue([
+        makeProduct({ id: 'prod-1', priceToPublic: '5.00' }),
+      ]);
+      mockStripeInstance.paymentIntents.create.mockResolvedValue({
+        id: 'pi_zone',
+        client_secret: 'secret_zone',
+        amount: 0,
+        currency: 'usd',
+      });
+    });
+
+    it('resuelve la tasa con el código postal del destino', async () => {
+      await service.createIntentForItems({
+        userId: 'user-1',
+        items: [{ productId: 'prod-1', quantity: 2 }],
+        deliveryAddress: { text: '1 Elizabeth Ave', postalCode: '07201' },
+      });
+
+      expect(deliveryZonesService.resolveTaxRate).toHaveBeenCalledWith(
+        expect.objectContaining({ postalCode: '07201' }),
+      );
+    });
+
+    it('cobra la tasa de la zona, no la global', async () => {
+      deliveryZonesService.resolveTaxRate.mockResolvedValue({
+        zoneId: 'zone-nj',
+        taxRate: NJ_RATE,
+      });
+
+      await service.createIntentForItems({
+        userId: 'user-1',
+        items: [{ productId: 'prod-1', quantity: 2 }],
+        deliveryAddress: { text: '1 Elizabeth Ave', postalCode: '07201' },
+      });
+
+      // subtotal 1000, envío 0 → round(1000 * 0.06625) = 66, total 1066
+      // (con la tasa global habrían sido 1089).
+      expect(mockStripeInstance.paymentIntents.create).toHaveBeenCalledWith(
+        expect.objectContaining({ amount: 1066 }),
+        expect.anything(),
+      );
+    });
+
+    it('sin código postal cobra el fallback histórico', async () => {
+      await service.createIntentForItems({
+        userId: 'user-1',
+        items: [{ productId: 'prod-1', quantity: 2 }],
+      });
+
+      // round(1000 * 0.08887) = 89 → 1089, exactamente lo de siempre.
+      expect(mockStripeInstance.paymentIntents.create).toHaveBeenCalledWith(
+        expect.objectContaining({ amount: 1089 }),
+        expect.anything(),
+      );
+    });
+  });
+
 });

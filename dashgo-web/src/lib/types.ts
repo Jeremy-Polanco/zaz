@@ -626,6 +626,13 @@ export type UserAddress = {
   postalCode?: string | null
   /** Delivery zone the address falls into. Assigned by the backend. */
   zoneId?: string | null
+  /**
+   * Tax rate for this address (e.g. 0.06625 in Elizabeth NJ, 0.08875 in
+   * Bronx/Brooklyn/Manhattan, 0.08887 fallback when the address is in no
+   * zone). Optional — older cached responses may lack it; fall back to
+   * `TAX_RATE` in `lib/tax.ts` when absent.
+   */
+  taxRate?: number
 }
 
 export type CreateAddressInput = {

@@ -1,7 +1,11 @@
 /**
- * Mirror of the backend TAX_RATE in dashgo-api/src/modules/orders/orders.service.ts.
- * Keep these identical — the backend is the source of truth, this is advisory
- * for preview math (quote drawer).
+ * FALLBACK rate — used only for addresses/orders that carry no per-zone
+ * taxRate (older cached data, or an address the backend couldn't match to a
+ * zone). The real rate comes from the API per address/order (`taxRate` on
+ * UserAddress/Order/Invoice) — see `computeTaxCents`/`computeQuotePreviewCents`
+ * below, which both accept an explicit `taxRate` and only fall back to this
+ * constant when one isn't given. Mirror of the backend's own fallback in
+ * dashgo-api/src/common/tax.ts — keep these identical.
  */
 export const TAX_RATE = 0.08887
 
@@ -30,6 +34,24 @@ export function computeGrossCents(netCents: number): number {
   return netCents + Math.round(netCents * TAX_RATE)
 }
 
+/**
+ * Tax on a net (taxable) amount, at the given rate — TAX_RATE (the no-zone
+ * fallback) when omitted. Callers that know the address/order's real rate
+ * (per-zone) should always pass it explicitly.
+ */
+export function computeTaxCents(netCents: number, taxRate: number = TAX_RATE): number {
+  return Math.round(netCents * taxRate)
+}
+
+/**
+ * "6.625%" from a decimal rate like 0.06625. Matches the shape the admin/
+ * customer UI has always shown ("Impuestos (8.887%)"), just driven by
+ * whatever rate applies instead of a hardcoded one.
+ */
+export function formatTaxRatePct(rate: number): string {
+  return `${(rate * 100).toFixed(3)}%`
+}
+
 export function computeQuotePreviewCents(input: {
   subtotalCents: number
   shippingCents: number
@@ -40,12 +62,21 @@ export function computeQuotePreviewCents(input: {
    * comportamiento histórico, y el que nunca cobra de menos.
    */
   taxableSubtotalCents?: number
+  /**
+   * Tasa de impuesto de la dirección/orden (ej. 0.06625 en Elizabeth NJ).
+   * Si se omite, cae al fallback TAX_RATE — nunca asumir 8.887% cuando la
+   * dirección seleccionada ya trae su propia tasa.
+   */
+  taxRate?: number
 }): {
   taxableCents: number
   taxCents: number
   totalCents: number
+  /** La tasa efectivamente usada — TAX_RATE cuando no se pasó ninguna. */
+  taxRate: number
 } {
   const taxableSubtotalCents = input.taxableSubtotalCents ?? input.subtotalCents
+  const taxRate = input.taxRate ?? TAX_RATE
 
   // Envío y puntos se prorratean por la parte gravable del pedido. Espejo de
   // computeTaxableBase en dashgo-api/src/common/tax.ts.
@@ -60,7 +91,7 @@ export function computeQuotePreviewCents(input: {
     0,
     taxableSubtotalCents + taxableShippingCents - pointsOnTaxableCents,
   )
-  const taxCents = Math.round(taxableCents * TAX_RATE)
+  const taxCents = computeTaxCents(taxableCents, taxRate)
   // El neto que paga el cliente descuenta TODOS los puntos; el prorrateo solo
   // reparte el descuento entre la mitad gravada y la exenta.
   const netCents = Math.max(
@@ -68,5 +99,5 @@ export function computeQuotePreviewCents(input: {
     input.subtotalCents + input.shippingCents - input.pointsRedeemedCents,
   )
   const totalCents = netCents + taxCents
-  return { taxableCents, taxCents, totalCents }
+  return { taxableCents, taxCents, totalCents, taxRate }
 }

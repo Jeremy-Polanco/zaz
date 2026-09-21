@@ -11,12 +11,16 @@ import { ShippingModule } from '../shipping/shipping.module';
 import { CreditModule } from '../credit/credit.module';
 import { SubscriptionModule } from '../subscription/subscription.module';
 import { RentalsModule } from '../rentals/rentals.module';
+import { AddressesModule } from '../addresses/addresses.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([Product, Order, StripeWebhookEvent]),
     PointsModule,
     ShippingModule,
+    // El intent tiene que cobrar la MISMA tasa que después cotiza la orden.
+    // Import directo: AddressesModule no importa nada de la app, no hay ciclo.
+    AddressesModule,
     forwardRef(() => CreditModule),
     forwardRef(() => SubscriptionModule),
     forwardRef(() => RentalsModule),

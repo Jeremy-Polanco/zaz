@@ -690,3 +690,91 @@ describe('Tarifa de envío (admin-configurable, GET /shipping/rate)', () => {
     expect(getByText('$11.50')).toBeTruthy()
   })
 })
+
+// ── Tasa de impuesto por zona (address.taxRate) ───────────────────────────────
+
+describe('Checkout — per-zone tax rate (selected address.taxRate)', () => {
+  it('previews tax at the selected address\'s rate (6.625%) instead of the TAX_RATE fallback', async () => {
+    setupCheckoutMocks([WATER_PRODUCT as unknown as typeof MOCK_PRODUCT], { 'product-water': 1 })
+    mockUseMyAddresses.mockReturnValue({
+      data: [{ ...ADDRESS_WITH_ZIP, taxRate: 0.06625 }],
+    } as unknown as ReturnType<typeof useMyAddresses>)
+
+    const { getByText, queryByText } = renderWithProviders(<CheckoutScreen />)
+
+    // taxable = 4500 (subtotal) + 500 (flat shipping) = 5000
+    // tax = round(5000 × 0.06625) = 331 → "$3.31" (vs. the $4.44 fallback)
+    await waitFor(() => {
+      expect(getByText('$3.31')).toBeTruthy()
+    })
+    expect(queryByText('$4.44')).toBeNull()
+    // Label shows the rate that was actually applied.
+    expect(getByText(/6\.625%/)).toBeTruthy()
+
+    // total = 4500 + 500 + 331 = 5331 → "$53.31"
+    expect(getByText('$53.31')).toBeTruthy()
+  })
+
+  it('falls back to the TAX_RATE label/preview when the selected address has no taxRate', async () => {
+    setupCheckoutMocks([WATER_PRODUCT as unknown as typeof MOCK_PRODUCT], { 'product-water': 1 })
+    mockUseMyAddresses.mockReturnValue({
+      data: [ADDRESS_WITH_ZIP],
+    } as unknown as ReturnType<typeof useMyAddresses>)
+
+    const { getByText } = renderWithProviders(<CheckoutScreen />)
+
+    await waitFor(() => {
+      expect(getByText('$4.44')).toBeTruthy()
+    })
+    expect(getByText(/8\.887%/)).toBeTruthy()
+  })
+
+  it('includes the selected address\'s postalCode in the create-order deliveryAddress payload', async () => {
+    setupCheckoutMocks([SINGLE_PRODUCT as unknown as typeof MOCK_PRODUCT], { 'product-single': 1 })
+    mockUseMyAddresses.mockReturnValue({
+      data: [{ ...ADDRESS_WITH_ZIP, taxRate: 0.06625 }],
+    } as unknown as ReturnType<typeof useMyAddresses>)
+
+    const { getByText } = renderWithProviders(<CheckoutScreen />)
+
+    await waitFor(() => {
+      expect(getByText('Calle Duarte 100 · ZIP 10451')).toBeTruthy()
+    })
+
+    await act(async () => {
+      fireEvent.press(getByText(/Confirmar pedido/i))
+    })
+
+    await waitFor(() => {
+      expect(mockCreateOrderMutateAsync).toHaveBeenCalled()
+    })
+    const payload = mockCreateOrderMutateAsync.mock.calls[0][0]
+    expect(payload.deliveryAddress).toMatchObject({ postalCode: '10451' })
+  })
+
+  it('includes deliveryAddressId (the saved address id) alongside the deliveryAddress snapshot', async () => {
+    setupCheckoutMocks([SINGLE_PRODUCT as unknown as typeof MOCK_PRODUCT], { 'product-single': 1 })
+    mockUseMyAddresses.mockReturnValue({
+      data: [{ ...ADDRESS_WITH_ZIP, taxRate: 0.06625 }],
+    } as unknown as ReturnType<typeof useMyAddresses>)
+
+    const { getByText } = renderWithProviders(<CheckoutScreen />)
+
+    await waitFor(() => {
+      expect(getByText('Calle Duarte 100 · ZIP 10451')).toBeTruthy()
+    })
+
+    await act(async () => {
+      fireEvent.press(getByText(/Confirmar pedido/i))
+    })
+
+    await waitFor(() => {
+      expect(mockCreateOrderMutateAsync).toHaveBeenCalled()
+    })
+    const payload = mockCreateOrderMutateAsync.mock.calls[0][0]
+    // The server resolves the tax rate from this saved address row — the
+    // snapshot ZIP alone is no longer trusted for money (see API contract).
+    expect(payload.deliveryAddressId).toBe('addr-1')
+    expect(payload.deliveryAddress).toMatchObject({ postalCode: '10451' })
+  })
+})

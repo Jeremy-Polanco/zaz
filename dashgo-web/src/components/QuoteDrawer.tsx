@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { GeoAddress, Order } from '../lib/types'
 import { useSetOrderQuote } from '../lib/queries'
-import { computeQuotePreviewCents } from '../lib/tax'
+import { TAX_RATE, computeQuotePreviewCents, formatTaxRatePct } from '../lib/tax'
 import { formatCents, isoDayFromDate } from '../lib/utils'
 import { Button, FieldError, Input, Label } from './ui'
 import { SavedAddressesList } from './SavedAddressesList'
@@ -58,12 +58,31 @@ export function QuoteDrawer({
     : 0
   const subtotalCents = Math.round(parseFloat(order.subtotal) * 100)
   const pointsRedeemedCents = Math.round(parseFloat(order.pointsRedeemed) * 100)
+  // La orden ya trae su propia tasa congelada al crearse (por zona, ej.
+  // 0.06625 en Elizabeth NJ) — nunca asumir el fallback de 8.887% si el
+  // pedido ya sabe cuál es la suya. parseFloat por si viniera un string raro.
+  const parsedOrderTaxRate = parseFloat(order.taxRate)
+  const orderTaxRate = Number.isFinite(parsedOrderTaxRate) ? parsedOrderTaxRate : TAX_RATE
+  // Cuando el listado de items trae el producto embebido, replicamos la base
+  // gravable real (excluye 'exempt', ej. agua) — igual que en checkout.tsx.
+  // Si el producto no viene populado (algunos endpoints no lo incluyen), no
+  // hay forma de saber qué línea es exenta: se asume todo gravable, el
+  // comportamiento histórico.
+  const itemsHaveProduct = order.items.length > 0 && order.items.every((it) => it.product)
+  const taxableSubtotalCents = itemsHaveProduct
+    ? order.items.reduce((sum, it) => {
+        if (it.product!.taxCategory === 'exempt') return sum
+        return sum + Math.round(parseFloat(it.priceAtOrder) * 100) * it.quantity
+      }, 0)
+    : undefined
   // Envío y recargo por distancia son ambos cargos de delivery — se prorratean
   // juntos por la parte gravable. Ver dashgo-api OrdersService.setQuote.
   const preview = computeQuotePreviewCents({
     subtotalCents,
     shippingCents: shippingCents + surchargeCents,
     pointsRedeemedCents,
+    taxableSubtotalCents,
+    taxRate: orderTaxRate,
   })
 
   const submit = async () => {
@@ -196,7 +215,9 @@ export function QuoteDrawer({
             </div>
           )}
           <div className="flex justify-between">
-            <span className="text-ink-muted">Impuestos (8.887%)</span>
+            <span className="text-ink-muted">
+              Impuestos ({formatTaxRatePct(preview.taxRate)})
+            </span>
             <span className="nums">{formatCents(preview.taxCents)}</span>
           </div>
           <div className="flex items-baseline justify-between border-t-2 border-ink pt-3 mt-3">

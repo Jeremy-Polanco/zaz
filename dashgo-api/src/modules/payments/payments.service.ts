@@ -20,6 +20,7 @@ import { CreditService } from '../credit/credit.service';
 import { SubscriptionService } from '../subscription/subscription.service';
 import { assertStripeProductionConfig } from '../../common/stripe/stripe-runtime-guard';
 import { TAX_RATE, computeTaxableBase } from '../../common/tax';
+import { DeliveryZonesService } from '../addresses/delivery-zones.service';
 import type { TaxableLine } from '../../common/tax';
 
 type StripeClient = InstanceType<typeof Stripe>;
@@ -32,6 +33,11 @@ export interface CreateIntentInput {
     text: string;
     lat?: number | null;
     lng?: number | null;
+    /**
+     * Código postal del destino: es lo que resuelve la zona y con ella la TASA
+     * de impuesto de este intent. Sin él se cobra el fallback histórico.
+     */
+    postalCode?: string | null;
   };
 }
 
@@ -67,6 +73,7 @@ export class PaymentsService implements OnModuleInit {
     private readonly credit: CreditService,
     @Inject(forwardRef(() => SubscriptionService))
     private readonly subscription: SubscriptionService,
+    private readonly deliveryZones: DeliveryZonesService,
   ) {}
 
   onModuleInit() {
@@ -149,12 +156,22 @@ export class PaymentsService implements OnModuleInit {
     });
     const shippingCents = quote.shippingCents;
 
+    // La TASA sale de la zona del destino, igual que en OrdersService.create:
+    // este intent es la plata que Stripe cobra, y la orden se crea un segundo
+    // después con la tasa de la MISMA dirección. Si acá se cobrara la global,
+    // el cliente de New Jersey vería 8.887% en el cobro y 6.625% en su orden.
+    // Sin código postal esto devuelve el fallback histórico.
+    const { taxRate } = await this.deliveryZones.resolveTaxRate({
+      postalCode: input.deliveryAddress?.postalCode ?? null,
+    });
+
     // Solo las líneas 'standard' pagan impuesto; envío y puntos se prorratean
     // por la parte gravable (ver common/tax.ts). Tiene que coincidir con lo que
     // calcula OrdersService o el intent no cuadra con el total de la orden.
     const base = computeTaxableBase(taxLines, {
       shippingCents,
       pointsRedeemedCents,
+      taxRate,
     });
     const netCents = Math.max(
       0,

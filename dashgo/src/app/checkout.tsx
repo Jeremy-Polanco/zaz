@@ -22,7 +22,12 @@ import {
 import { userAddressToGeoAddress } from '../lib/address'
 import { formatCents } from '../lib/format'
 import { effectivePriceCentsFor, subscriberPriceWins } from '../lib/pricing'
-import { computeQuotePreviewCents, DEFAULT_FLAT_SHIPPING_CENTS } from '../lib/tax'
+import {
+  computeQuotePreviewCents,
+  formatTaxRatePct,
+  DEFAULT_FLAT_SHIPPING_CENTS,
+  TAX_RATE,
+} from '../lib/tax'
 import type { PaymentMethod } from '../lib/types'
 import { Button, Eyebrow, Hairline } from '../components/ui'
 
@@ -213,6 +218,9 @@ export default function CheckoutScreen() {
       sum + effectivePriceCentsFor(li.product, isActiveSubscriber) * li.quantity
     )
   }, 0)
+  // Tasa de la dirección elegida (zona fiscal); solo un preview — el
+  // backend congela la tasa real al crear la orden (ver lib/tax.ts).
+  const effectiveTaxRate = selectedAddress?.taxRate ?? TAX_RATE
   // Usa shippingCentsSafe (0 mientras carga) para no trabar el cálculo — el
   // número no se muestra hasta que shippingLoading sea false (ver JSX).
   const skipQuoteTaxCents = allSkipQuote
@@ -221,6 +229,7 @@ export default function CheckoutScreen() {
         shippingCents: shippingCentsSafe,
         pointsRedeemedCents: redeemCents,
         taxableSubtotalCents,
+        taxRate: effectiveTaxRate,
       }).taxCents
     : 0
   const skipQuoteTotalCents =
@@ -278,7 +287,13 @@ export default function CheckoutScreen() {
         // Propina: digital-only — the server rejects it on cash orders.
         ...(paymentMethod === 'digital' && tipPercent ? { tipPercent } : {}),
         ...(selectedAddress
-          ? { deliveryAddress: userAddressToGeoAddress(selectedAddress) }
+          ? {
+              deliveryAddress: userAddressToGeoAddress(selectedAddress),
+              // Lets the server resolve the tax zone from the saved address
+              // row itself — the snapshot postalCode above is no longer
+              // trusted for money (see API contract: POST /orders).
+              deliveryAddressId: selectedAddress.id,
+            }
           : {}),
       })
 
@@ -842,7 +857,11 @@ export default function CheckoutScreen() {
           </View>
           <View className="mb-3 flex-row items-baseline justify-between">
             <Text className="font-sans text-[13px] uppercase tracking-label text-ink-muted">
-              {t('totals.taxes')}
+              {allSkipQuote
+                ? t('totals.taxesWithRate', {
+                    rate: formatTaxRatePct(effectiveTaxRate),
+                  })
+                : t('totals.taxes')}
             </Text>
             {allSkipQuote ? (
               <Text

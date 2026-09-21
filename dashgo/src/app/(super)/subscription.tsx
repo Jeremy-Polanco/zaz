@@ -13,7 +13,7 @@ import {
   useAdminSubscriptionPlan,
   useUpdateSubscriptionPlan,
 } from '../../lib/queries'
-import { TAX_RATE, computeGrossCents } from '../../lib/tax'
+import { TAX_RATE, computeGrossCents, formatTaxRatePct } from '../../lib/tax'
 import { formatCents } from '../../lib/format'
 import {
   Button,
@@ -24,7 +24,10 @@ import {
   SectionHead,
 } from '../../components/ui'
 
-const TAX_PERCENT_LABEL = `${(TAX_RATE * 100).toFixed(3)}%`
+// Suscripción = un solo precio de Stripe para todo el mundo (no hay "precio
+// por zona" en Stripe), así que se queda en el TAX_RATE fijo a propósito —
+// no lee taxRate de ninguna dirección, a diferencia del checkout de órdenes.
+const TAX_PERCENT_LABEL = formatTaxRatePct(TAX_RATE)
 
 export default function SuperSubscriptionScreen() {
   const { data: plan, isPending } = useAdminSubscriptionPlan()

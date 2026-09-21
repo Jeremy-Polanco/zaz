@@ -1,4 +1,5 @@
 import {
+  formatTaxRatePct,
   TAX_RATE,
   computeGrossCents,
   computeTaxCents,
@@ -129,5 +130,76 @@ describe('computeTaxableBase', () => {
       ]);
       expect(r.taxableSubtotalCents).toBe(1000);
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tasa por zona de reparto — la tasa ya no es una sola para todo el país.
+// TAX_RATE queda como FALLBACK (dirección sin zona); la real vive en
+// delivery_zones.tax_rate. NJ 6.625%, NYC 8.875%.
+// ---------------------------------------------------------------------------
+const NJ_RATE = 0.06625;
+const NYC_RATE = 0.08875;
+
+describe('computeTaxCents — tasa explícita', () => {
+  it('usa la tasa que le pasan en vez de TAX_RATE', () => {
+    expect(computeTaxCents(1000, NJ_RATE)).toBe(66); // 66.25 → 66
+    expect(computeTaxCents(1000, NYC_RATE)).toBe(89); // 88.75 → 89
+  });
+
+  it('sin tasa cae en TAX_RATE — el comportamiento histórico', () => {
+    expect(computeTaxCents(1000)).toBe(Math.round(1000 * TAX_RATE));
+  });
+
+  it('una tasa de 0% no cobra impuesto', () => {
+    // Una zona configurada explícitamente en 0 es un dato, no un faltante.
+    expect(computeTaxCents(12345, 0)).toBe(0);
+  });
+});
+
+describe('computeTaxableBase — taxRate', () => {
+  it('aplica la tasa de la zona a la base gravable', () => {
+    const r = computeTaxableBase([std(1000), std(500)], {
+      shippingCents: 300,
+      pointsRedeemedCents: 200,
+      taxRate: NJ_RATE,
+    });
+    const expectedTaxable = 1500 + 300 - 200;
+    expect(r.taxableCents).toBe(expectedTaxable);
+    expect(r.taxCents).toBe(Math.round(expectedTaxable * NJ_RATE));
+  });
+
+  it('devuelve la tasa que efectivamente usó', () => {
+    expect(computeTaxableBase([std(1000)], { taxRate: NYC_RATE }).taxRate).toBe(
+      NYC_RATE,
+    );
+  });
+
+  it('sin taxRate devuelve y aplica TAX_RATE', () => {
+    const r = computeTaxableBase([std(1000)]);
+    expect(r.taxRate).toBe(TAX_RATE);
+    expect(r.taxCents).toBe(Math.round(1000 * TAX_RATE));
+  });
+
+  it('el prorrateo de exentos es independiente de la tasa', () => {
+    // La mitad gravable se calcula igual; solo cambia el porcentaje aplicado.
+    const r = computeTaxableBase([std(500), exempt(1500)], {
+      shippingCents: 400,
+      taxRate: NJ_RATE,
+    });
+    expect(r.taxableCents).toBe(600);
+    expect(r.taxCents).toBe(Math.round(600 * NJ_RATE));
+  });
+});
+
+describe('formatTaxRatePct', () => {
+  it('formatea la tasa como porcentaje con tres decimales', () => {
+    expect(formatTaxRatePct(NJ_RATE)).toBe('6.625%');
+    expect(formatTaxRatePct(NYC_RATE)).toBe('8.875%');
+    expect(formatTaxRatePct(TAX_RATE)).toBe('8.887%');
+  });
+
+  it('formatea el 0% sin inventar decimales raros', () => {
+    expect(formatTaxRatePct(0)).toBe('0.000%');
   });
 });

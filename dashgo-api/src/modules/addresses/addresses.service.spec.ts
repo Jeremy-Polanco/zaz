@@ -16,6 +16,8 @@ import { User } from '../../entities/user.entity';
 import { DeliveryZone } from '../../entities/delivery-zone.entity';
 import { CreateAddressDto } from './dto/create-address.dto';
 import { UpdateAddressDto } from './dto/update-address.dto';
+import { DeliveryZonesService } from './delivery-zones.service';
+import { TAX_RATE } from '../../common/tax';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -48,6 +50,27 @@ function makeZonesRepoMock(
   return {
     find: jest.fn().mockResolvedValue(zones),
   } as unknown as jest.Mocked<Repository<DeliveryZone>>;
+}
+
+/**
+ * La tasa de impuesto de una dirección NO es una columna: se calcula al
+ * responder, a partir de la zona. Por defecto el mock devuelve el fallback
+ * histórico, que es lo que corresponde a una dirección sin zona.
+ */
+function makeZoneRatesMock(
+  resolved: { zoneId: string | null; taxRate: number } = {
+    zoneId: null,
+    taxRate: TAX_RATE,
+  },
+) {
+  return {
+    resolveTaxRate: jest.fn().mockResolvedValue(resolved),
+    resolveTaxRates: jest
+      .fn()
+      .mockImplementation((queries: unknown[]) =>
+        Promise.resolve(queries.map(() => resolved)),
+      ),
+  };
 }
 
 function makeDataSourceMock(
@@ -105,6 +128,7 @@ describe('AddressesService — list', () => {
         { provide: getRepositoryToken(User), useValue: makeUserRepoMock() },
         { provide: getRepositoryToken(DeliveryZone), useValue: makeZonesRepoMock() },
         { provide: DataSource, useValue: ds },
+        { provide: DeliveryZonesService, useValue: makeZoneRatesMock() },
       ],
     }).compile();
 
@@ -123,7 +147,12 @@ describe('AddressesService — list', () => {
       where: { userId: 'user-1' },
       order: { isDefault: 'DESC', createdAt: 'ASC' },
     });
-    expect(result).toEqual([addrB, addrA, addrC]);
+    // La respuesta ya no es la entidad cruda: lleva la tasa que le toca.
+    expect(result).toEqual([
+      { ...addrB, taxRate: TAX_RATE },
+      { ...addrA, taxRate: TAX_RATE },
+      { ...addrC, taxRate: TAX_RATE },
+    ]);
   });
 
   it('returns empty array when user has no addresses', async () => {
@@ -152,6 +181,7 @@ describe('AddressesService — create', () => {
         { provide: getRepositoryToken(User), useValue: makeUserRepoMock() },
         { provide: getRepositoryToken(DeliveryZone), useValue: makeZonesRepoMock() },
         { provide: DataSource, useValue: ds },
+        { provide: DeliveryZonesService, useValue: makeZoneRatesMock() },
       ],
     }).compile();
 
@@ -171,7 +201,7 @@ describe('AddressesService — create', () => {
       expect.objectContaining({ userId: 'user-1', isDefault: false }),
     );
     expect(repo.save).toHaveBeenCalled();
-    expect(result).toBe(saved);
+    expect(result).toEqual({ ...saved, taxRate: TAX_RATE });
   });
 
   it('creates with isDefault=true when user has no addresses (count=0)', async () => {
@@ -244,6 +274,7 @@ describe('AddressesService — update', () => {
         { provide: getRepositoryToken(User), useValue: makeUserRepoMock() },
         { provide: getRepositoryToken(DeliveryZone), useValue: makeZonesRepoMock() },
         { provide: DataSource, useValue: ds },
+        { provide: DeliveryZonesService, useValue: makeZoneRatesMock() },
       ],
     }).compile();
 
@@ -325,6 +356,7 @@ describe('AddressesService — delete', () => {
         { provide: getRepositoryToken(User), useValue: makeUserRepoMock() },
         { provide: getRepositoryToken(DeliveryZone), useValue: makeZonesRepoMock() },
         { provide: DataSource, useValue: { transaction: dsTransactionMock } },
+        { provide: DeliveryZonesService, useValue: makeZoneRatesMock() },
       ],
     }).compile();
 
@@ -416,6 +448,7 @@ describe('AddressesService — setDefault', () => {
         { provide: getRepositoryToken(User), useValue: makeUserRepoMock() },
         { provide: getRepositoryToken(DeliveryZone), useValue: makeZonesRepoMock() },
         { provide: DataSource, useValue: { transaction: dsTransactionMock } },
+        { provide: DeliveryZonesService, useValue: makeZoneRatesMock() },
       ],
     }).compile();
 
@@ -500,6 +533,7 @@ describe('AddressesService — listByUserId', () => {
         { provide: getRepositoryToken(User), useValue: makeUserRepoMock() },
         { provide: getRepositoryToken(DeliveryZone), useValue: makeZonesRepoMock() },
         { provide: DataSource, useValue: ds },
+        { provide: DeliveryZonesService, useValue: makeZoneRatesMock() },
       ],
     }).compile();
 
@@ -519,7 +553,7 @@ describe('AddressesService — listByUserId', () => {
       where: { userId: 'user-1' },
       order: { isDefault: 'DESC', createdAt: 'ASC' },
     });
-    expect(result).toEqual(addresses);
+    expect(result).toEqual(addresses.map((a) => ({ ...a, taxRate: TAX_RATE })));
   });
 
   it('returns empty array for user with no addresses', async () => {
@@ -550,6 +584,7 @@ describe('AddressesService — setActiveLocation', () => {
         { provide: getRepositoryToken(User), useValue: userRepo },
         { provide: getRepositoryToken(DeliveryZone), useValue: makeZonesRepoMock() },
         { provide: DataSource, useValue: ds },
+        { provide: DeliveryZonesService, useValue: makeZoneRatesMock() },
       ],
     }).compile();
 
@@ -566,7 +601,7 @@ describe('AddressesService — setActiveLocation', () => {
     expect(userRepo.update).toHaveBeenCalledWith('user-1', {
       activeLocationId: 'addr-b',
     });
-    expect(result).toBe(target);
+    expect(result).toEqual({ ...target, taxRate: TAX_RATE });
   });
 
   it('throws NotFoundException when address not found', async () => {
@@ -620,6 +655,7 @@ describe('AddressesService — postalCode y zoneId', () => {
         { provide: getRepositoryToken(User), useValue: makeUserRepoMock() },
         { provide: getRepositoryToken(DeliveryZone), useValue: zonesRepo },
         { provide: DataSource, useValue: ds },
+        { provide: DeliveryZonesService, useValue: makeZoneRatesMock() },
       ],
     }).compile();
 
@@ -773,5 +809,123 @@ describe('AddressesService — postalCode y zoneId', () => {
     expect(repo.create).toHaveBeenCalledWith(
       expect.objectContaining({ postalCode: '10451', zoneId: null }),
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// AddressesService — taxRate en la respuesta
+//
+// Por qué NO es columna: la tasa la fija la zona, y la zona la edita el admin.
+// Guardarla copiada en cada dirección sería tener que rebackfillear la libreta
+// entera cada vez que New Jersey cambia un decimal. Se calcula al responder.
+// ---------------------------------------------------------------------------
+
+describe('AddressesService — taxRate en la respuesta', () => {
+  const NJ_RATE = 0.06625;
+  let service: AddressesService;
+  let repo: jest.Mocked<Repository<UserAddress>>;
+  let zoneRates: ReturnType<typeof makeZoneRatesMock>;
+
+  const build = async (resolved?: { zoneId: string | null; taxRate: number }) => {
+    repo = makeRepoMock();
+    zoneRates = makeZoneRatesMock(resolved);
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        AddressesService,
+        { provide: getRepositoryToken(UserAddress), useValue: repo },
+        { provide: getRepositoryToken(User), useValue: makeUserRepoMock() },
+        {
+          provide: getRepositoryToken(DeliveryZone),
+          useValue: makeZonesRepoMock(),
+        },
+        { provide: DataSource, useValue: makeDataSourceMock(repo) },
+        { provide: DeliveryZonesService, useValue: zoneRates },
+      ],
+    }).compile();
+    service = module.get<AddressesService>(AddressesService);
+  };
+
+  it('una dirección con zona de New Jersey responde 6.625%', async () => {
+    await build({ zoneId: 'zone-nj', taxRate: NJ_RATE });
+    const addr = fakeAddress({ postalCode: '07201', zoneId: 'zone-nj' });
+    repo.count.mockResolvedValue(0);
+    repo.save.mockResolvedValue(addr);
+
+    const result = await service.create('user-1', {
+      label: 'Casa',
+      line1: 'Calle 1',
+      lat: 40.66,
+      lng: -74.21,
+      postalCode: '07201',
+    } as CreateAddressDto);
+
+    expect(result.taxRate).toBe(NJ_RATE);
+  });
+
+  it('una dirección sin zona responde el fallback histórico, nunca 0', async () => {
+    await build();
+    const addr = fakeAddress({ postalCode: null, zoneId: null });
+    repo.count.mockResolvedValue(0);
+    repo.save.mockResolvedValue(addr);
+
+    const result = await service.create('user-1', {
+      label: 'Casa',
+      line1: 'Calle 1',
+      lat: 18.47,
+      lng: -69.9,
+    } as CreateAddressDto);
+
+    expect(result.taxRate).toBe(TAX_RATE);
+  });
+
+  it('pregunta por la zona YA resuelta de la dirección, no por el ZIP', async () => {
+    // La libreta guarda `zone_id`: es la respuesta exacta y no depende de
+    // volver a parsear el prefijo.
+    await build({ zoneId: 'zone-nj', taxRate: NJ_RATE });
+    repo.find.mockResolvedValue([
+      fakeAddress({ id: 'a1', zoneId: 'zone-nj', postalCode: '07201' }),
+    ]);
+
+    await service.list('user-1');
+
+    expect(zoneRates.resolveTaxRates).toHaveBeenCalledWith([
+      { zoneId: 'zone-nj', postalCode: '07201' },
+    ]);
+  });
+
+  it('el listado resuelve todas las direcciones de una sola vez', async () => {
+    // Diez direcciones no pueden ser diez consultas a la tabla de zonas.
+    await build();
+    repo.find.mockResolvedValue([
+      fakeAddress({ id: 'a1' }),
+      fakeAddress({ id: 'a2' }),
+      fakeAddress({ id: 'a3' }),
+    ]);
+
+    const result = await service.list('user-1');
+
+    expect(zoneRates.resolveTaxRates).toHaveBeenCalledTimes(1);
+    expect(result.map((a) => a.taxRate)).toEqual([
+      TAX_RATE,
+      TAX_RATE,
+      TAX_RATE,
+    ]);
+  });
+
+  it('setDefault también devuelve la tasa — es la misma respuesta para el cliente', async () => {
+    await build({ zoneId: 'zone-nj', taxRate: NJ_RATE });
+    const target = fakeAddress({ id: 'addr-b', zoneId: 'zone-nj' });
+    repo.findOne.mockResolvedValue(target);
+    repo.createQueryBuilder.mockReturnValue({
+      update: jest.fn().mockReturnThis(),
+      set: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      execute: jest.fn().mockResolvedValue({}),
+    } as never);
+    repo.save.mockImplementation((a) => Promise.resolve(a as UserAddress));
+
+    const result = await service.setDefault('user-1', 'addr-b');
+
+    expect(result.taxRate).toBe(NJ_RATE);
   });
 });
