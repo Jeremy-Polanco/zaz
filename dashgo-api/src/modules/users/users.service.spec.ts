@@ -5,7 +5,7 @@
  *   - user WITH active subscription → hasActiveSubscription true, subscriptionStatus 'active'
  *   - user WITHOUT any subscription row → hasActiveSubscription false, subscriptionStatus null
  *   - user with a non-active subscription → hasActiveSubscription false, subscriptionStatus '<status>'
- *   - subscription=active → only active users (filter pushed to query)
+ *   - subscription=active → active OR past_due users (a failed renewal still counts, like pricing does)
  *   - subscription=none   → only non-active users (filter pushed to query)
  *   - ordering stays createdAt DESC
  *
@@ -227,8 +227,10 @@ describe('UsersService.findAll (admin list)', () => {
     });
 
     expect(userRepo._qb.andWhere).toHaveBeenCalledWith(
-      expect.stringContaining('subscription.status = :activeStatus'),
-      expect.objectContaining({ activeStatus: SubscriptionStatus.ACTIVE }),
+      expect.stringContaining('subscription.status IN (:...subscribedStatuses)'),
+      expect.objectContaining({
+        subscribedStatuses: [SubscriptionStatus.ACTIVE, SubscriptionStatus.PAST_DUE],
+      }),
     );
     expect(result).toHaveLength(1);
     expect(result[0].hasActiveSubscription).toBe(true);
@@ -246,8 +248,12 @@ describe('UsersService.findAll (admin list)', () => {
     });
 
     expect(userRepo._qb.andWhere).toHaveBeenCalledWith(
-      expect.stringContaining('subscription.status IS NULL'),
-      expect.objectContaining({ activeStatus: SubscriptionStatus.ACTIVE }),
+      expect.stringContaining(
+        'subscription.status IS NULL OR subscription.status NOT IN (:...subscribedStatuses)',
+      ),
+      expect.objectContaining({
+        subscribedStatuses: [SubscriptionStatus.ACTIVE, SubscriptionStatus.PAST_DUE],
+      }),
     );
     expect(result).toHaveLength(1);
     expect(result[0].hasActiveSubscription).toBe(false);

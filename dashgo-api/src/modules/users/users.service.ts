@@ -302,14 +302,22 @@ export class UsersService {
       qb.andWhere('user.seller_id = :sellerId', { sellerId: user.id });
     }
 
+    // "Con suscripción" = la misma regla con la que se COBRA
+    // (isActiveSubscriber): active o past_due. Una renovación fallida en
+    // reintento sigue siendo suscriptor; dejarla afuera del filtro hacía que
+    // el dueño viera "sin suscripción" a alguien que Stripe le muestra suscrito.
+    const subscribedStatuses = [
+      SubscriptionStatus.ACTIVE,
+      SubscriptionStatus.PAST_DUE,
+    ];
     if (filter.subscription === UserSubscriptionFilter.ACTIVE) {
-      qb.andWhere('subscription.status = :activeStatus', {
-        activeStatus: SubscriptionStatus.ACTIVE,
+      qb.andWhere('subscription.status IN (:...subscribedStatuses)', {
+        subscribedStatuses,
       });
     } else if (filter.subscription === UserSubscriptionFilter.NONE) {
       qb.andWhere(
-        '(subscription.status IS NULL OR subscription.status <> :activeStatus)',
-        { activeStatus: SubscriptionStatus.ACTIVE },
+        '(subscription.status IS NULL OR subscription.status NOT IN (:...subscribedStatuses))',
+        { subscribedStatuses },
       );
     }
 

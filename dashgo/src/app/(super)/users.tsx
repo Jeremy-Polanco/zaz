@@ -38,19 +38,32 @@ const FILTERS: {
   { label: 'Sin suscripción', value: 'none' },
 ]
 
-function SubscriptionBadge({ active }: { active: boolean }) {
+/**
+ * Tres estados, no dos: `past_due` (la renovación falló y Stripe reintenta)
+ * sigue siendo suscriptor para el cobro, así que mostrarlo como "Sin
+ * suscripción" hacía creer que la app había perdido la suscripción.
+ */
+function SubscriptionBadge({ status }: { status: string | null }) {
+  const tone =
+    status === 'active'
+      ? { box: 'border-ok/40 bg-ok/10', text: 'text-ok', label: 'Activa' }
+      : status === 'past_due'
+        ? {
+            box: 'border-warn/40 bg-warn/10',
+            text: 'text-warn',
+            label: 'Pago pendiente',
+          }
+        : {
+            box: 'border-ink/15 bg-ink/5',
+            text: 'text-ink-muted',
+            label: 'Sin suscripción',
+          }
   return (
-    <View
-      className={`border px-2 py-1 ${
-        active ? 'border-ok/40 bg-ok/10' : 'border-ink/15 bg-ink/5'
-      }`}
-    >
+    <View className={`border px-2 py-1 ${tone.box}`}>
       <Text
-        className={`font-sans text-[10px] uppercase tracking-label ${
-          active ? 'text-ok' : 'text-ink-muted'
-        }`}
+        className={`font-sans text-[10px] uppercase tracking-label ${tone.text}`}
       >
-        {active ? 'Activa' : 'Sin suscripción'}
+        {tone.label}
       </Text>
     </View>
   )
@@ -111,7 +124,7 @@ function UserRow({
           ) : null}
         </View>
         <View className="items-end gap-2">
-          <SubscriptionBadge active={item.hasActiveSubscription} />
+          <SubscriptionBadge status={item.subscriptionStatus} />
           <Pressable onPress={() => setExpanded((v) => !v)} hitSlop={8}>
             <Text className="font-sans text-[10px] uppercase tracking-label text-brand">
               {expanded ? 'Ocultar' : 'Direcciones'}

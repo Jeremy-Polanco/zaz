@@ -497,3 +497,43 @@ describe('SuperUsersScreen (mobile) — reasignar cartera de vendedor', () => {
     expect(screen.queryByText(/cliente de/)).toBeNull()
   })
 })
+
+describe('SuperUsersScreen (mobile) — subscription badge', () => {
+  beforeEach(() => {
+    jest.clearAllMocks()
+    mockMe.mockReturnValue({
+      data: { id: 'admin-1', role: 'super_admin_delivery' },
+    } as unknown as ReturnType<typeof useCurrentUser>)
+    mockDeleteUser.mockReturnValue({
+      mutate: jest.fn(),
+      mutateAsync: jest.fn(),
+      isPending: false,
+    } as unknown as ReturnType<typeof useDeleteUser>)
+    mockUsers.mockReturnValue({
+      data: [
+        adminUser({
+          id: 'u-active',
+          fullName: 'Cliente Activa',
+          hasActiveSubscription: true,
+          subscriptionStatus: 'active',
+        }),
+        adminUser({
+          id: 'u-past-due',
+          fullName: 'Cliente Morosa',
+          hasActiveSubscription: false,
+          subscriptionStatus: 'past_due',
+        }),
+      ],
+      isPending: false,
+      isRefetching: false,
+      refetch: jest.fn(),
+    } as unknown as ReturnType<typeof useAdminUsers>)
+  })
+
+  it('distingue "Pago pendiente" (past_due) de "Activa": sigue siendo suscriptor, no "sin suscripción"', () => {
+    renderWithProviders(<SuperUsersScreen />)
+
+    expect(screen.getByText('Activa')).toBeTruthy()
+    expect(screen.getByText('Pago pendiente')).toBeTruthy()
+  })
+})

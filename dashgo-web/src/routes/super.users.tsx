@@ -41,16 +41,24 @@ export const Route = createFileRoute('/super/users')({
 
 // ── Subscription badge ──────────────────────────────────────────────────────────
 
-function SubscriptionBadge({ user }: { user: AdminUser }) {
-  const active = user.hasActiveSubscription
-  const cls = active
-    ? 'border-ok/40 bg-ok/10 text-ok'
-    : 'border-ink/15 bg-ink/5 text-ink-muted'
+/**
+ * Tres estados, no dos: `past_due` (la renovación falló y Stripe reintenta)
+ * sigue siendo suscriptor para el cobro, así que mostrarlo como "Sin
+ * suscripción" hacía creer que la app había perdido la suscripción.
+ */
+export function SubscriptionBadge({ user }: { user: AdminUser }) {
+  const status = user.subscriptionStatus
+  const [cls, label] =
+    status === 'active'
+      ? ['border-ok/40 bg-ok/10 text-ok', 'Activa']
+      : status === 'past_due'
+        ? ['border-warn/40 bg-warn/10 text-warn', 'Pago pendiente']
+        : ['border-ink/15 bg-ink/5 text-ink-muted', 'Sin suscripción']
   return (
     <span
       className={`inline-flex items-center whitespace-nowrap border px-1.5 py-0.5 text-[0.6rem] font-medium uppercase tracking-[0.10em] ${cls}`}
     >
-      {active ? 'Activa' : 'Sin suscripción'}
+      {label}
     </span>
   )
 }

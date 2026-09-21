@@ -48,6 +48,7 @@ import {
   PromoterCell,
   RoleCell,
   SellerCell,
+  SubscriptionBadge,
   SuperUsersPage,
 } from './super.users'
 
@@ -72,6 +73,25 @@ function mkUser(o: Partial<AdminUser> = {}): AdminUser {
 
 const SELLER = mkUser({ id: 's-1', fullName: 'Vendedor Uno', role: 'seller' })
 const PROMOTER = mkUser({ id: 'p-1', fullName: 'Promotor Uno', role: 'promoter' })
+
+describe('SubscriptionBadge', () => {
+  it('distingue "Pago pendiente" (past_due) de "Activa" y de "Sin suscripción"', () => {
+    // past_due sigue siendo suscriptor para el cobro; mostrarlo como "Sin
+    // suscripción" hacía creer que la app había perdido la suscripción.
+    renderWithProviders(
+      <>
+        <SubscriptionBadge
+          user={mkUser({ hasActiveSubscription: true, subscriptionStatus: 'active' })}
+        />
+        <SubscriptionBadge user={mkUser({ id: 'u-2', subscriptionStatus: 'past_due' })} />
+        <SubscriptionBadge user={mkUser({ id: 'u-3', subscriptionStatus: null })} />
+      </>,
+    )
+    expect(screen.getByText('Activa')).toBeInTheDocument()
+    expect(screen.getByText('Pago pendiente')).toBeInTheDocument()
+    expect(screen.getByText('Sin suscripción')).toBeInTheDocument()
+  })
+})
 
 describe('SellerCell', () => {
   it('shows the assigned seller name to a non-admin viewer', () => {
