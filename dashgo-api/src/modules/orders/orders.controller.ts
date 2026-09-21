@@ -7,8 +7,11 @@ import {
   ParseUUIDPipe,
   Patch,
   Post,
+  Query,
+  Res,
   UseGuards,
 } from '@nestjs/common';
+import type { Response } from 'express';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import type { AuthenticatedUser } from '../../common/types/authenticated-user';
@@ -17,15 +20,48 @@ import { CreateOrderDto, DeliveryAddressDto } from './dto/create-order.dto';
 import { UpdateOrderStatusDto } from './dto/update-order-status.dto';
 import { SetQuoteDto } from './dto/set-quote.dto';
 import { SetDeliveryDateDto } from './dto/set-delivery-date.dto';
+import { ListOrdersQueryDto } from './dto/list-orders-query.dto';
 
 @UseGuards(JwtAuthGuard)
 @Controller('orders')
 export class OrdersController {
   constructor(private readonly orders: OrdersService) {}
 
+  /**
+   * GET /orders?lat&lng
+   *
+   * lat/lng son las coordenadas del DISPOSITIVO de quien pide la lista, en
+   * ESTE momento — sólo cuentan como origen "device" cuando llegan LAS DOS
+   * juntas. Sólo le importan al staff (SUPER_ADMIN_DELIVERY/SELLER); el
+   * cliente las manda a `findAll` igual, pero el service las ignora porque
+   * nunca arma orden de despacho para él.
+   *
+   * El header `X-Dispatch-Origin` (device | saved | none) expone qué origen
+   * se terminó usando SIN tocar el shape del array — web y mobile dependen
+   * de que `GET /orders` siga devolviendo la lista de pedidos tal cual.
+   * `@Res({ passthrough: true })` deja que Nest siga serializando el body
+   * normalmente (mismo patrón que HealthController).
+   */
   @Get()
-  findAll(@CurrentUser() user: AuthenticatedUser) {
-    return this.orders.findAll(user);
+  async findAll(
+    @Query() query: ListOrdersQueryDto,
+    @CurrentUser() user: AuthenticatedUser,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const deviceOrigin =
+      query.lat !== undefined && query.lng !== undefined
+        ? { lat: query.lat, lng: query.lng }
+        : undefined;
+
+    const { orders, originSource } = await this.orders.findAll(user, {
+      origin: deviceOrigin,
+    });
+
+    if (originSource) {
+      res.setHeader('X-Dispatch-Origin', originSource);
+    }
+
+    return orders;
   }
 
   /** Admin dashboard: who ordered today / who's been quiet 7d and 30d. */

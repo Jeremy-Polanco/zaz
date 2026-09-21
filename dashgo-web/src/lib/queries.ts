@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from './api'
 import type {
   AdminPlanResponse,
@@ -130,10 +130,69 @@ export function useSellersPayable() {
   })
 }
 
-export function useOrders() {
-  return useQuery<Order[]>({
-    queryKey: ['orders'],
-    queryFn: async () => (await api.get<Order[]>('/orders')).data,
+export type DispatchOrigin = 'device' | 'saved' | 'none'
+
+export type OrdersLocationParams = { lat?: number; lng?: number }
+
+interface OrdersFetchResult {
+  orders: Order[]
+  /** Response header X-Dispatch-Origin, or null if the API didn't send it. */
+  dispatchOrigin: DispatchOrigin | null
+}
+
+function ordersQueryKey(params?: OrdersLocationParams) {
+  const hasCoords = typeof params?.lat === 'number' && typeof params?.lng === 'number'
+  return hasCoords ? (['orders', params!.lat, params!.lng] as const) : (['orders'] as const)
+}
+
+function isDispatchOrigin(v: unknown): v is DispatchOrigin {
+  return v === 'device' || v === 'saved' || v === 'none'
+}
+
+async function fetchOrders(params?: OrdersLocationParams): Promise<OrdersFetchResult> {
+  const hasCoords = typeof params?.lat === 'number' && typeof params?.lng === 'number'
+  const res = await api.get<Order[]>('/orders', {
+    params: hasCoords ? { lat: params!.lat, lng: params!.lng } : undefined,
+  })
+  const origin = res.headers?.['x-dispatch-origin']
+  return {
+    orders: res.data,
+    dispatchOrigin: isDispatchOrigin(origin) ? origin : null,
+  }
+}
+
+/**
+ * GET /orders. Pass { lat, lng } (both numbers) so the API sorts staff orders
+ * nearest-first from that point and computes distanceMiles from it — used by
+ * the super-admin dispatch list (src/routes/super.orders.tsx). Customer
+ * screens keep calling this with no args: same queryKey ['orders'] as
+ * before, unaffected.
+ */
+export function useOrders(params?: OrdersLocationParams) {
+  return useQuery<OrdersFetchResult, Error, Order[]>({
+    queryKey: ordersQueryKey(params),
+    queryFn: () => fetchOrders(params),
+    select: (result) => result.orders,
+    // Resolving the device position changes the queryKey (no-coords →
+    // coords). Without this, the dispatch list would flash back to a loading
+    // state right when geolocation resolves — keep the last list on screen.
+    placeholderData: keepPreviousData,
+  })
+}
+
+/**
+ * Reads the `X-Dispatch-Origin` header from the SAME /orders request
+ * useOrders makes for the same params — shared queryKey means react-query
+ * dedupes this to one fetch, not two. 'none' means the API had neither
+ * device coords nor a saved admin location, so the list came back
+ * newest-first instead of by distance.
+ */
+export function useOrdersDispatchOrigin(params?: OrdersLocationParams) {
+  return useQuery<OrdersFetchResult, Error, DispatchOrigin | null>({
+    queryKey: ordersQueryKey(params),
+    queryFn: () => fetchOrders(params),
+    select: (result) => result.dispatchOrigin,
+    placeholderData: keepPreviousData,
   })
 }
 

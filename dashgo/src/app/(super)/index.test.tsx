@@ -25,10 +25,32 @@ jest.mock('expo-router', () => ({
   router: { navigate: jest.fn(), push: jest.fn(), back: jest.fn() },
 }))
 
+// The device-GPS hook (lib/use-device-position.ts) has its own dedicated
+// tests (mocking expo-location) — here it's mocked at the hook boundary so
+// this screen's tests can drive `status`/`position` directly.
+jest.mock('../../lib/use-device-position', () => ({
+  useDevicePosition: jest.fn(),
+}))
+
 import { useOrders } from '../../lib/queries'
+import { useDevicePosition } from '../../lib/use-device-position'
 import SuperOrdersScreen from './index'
 
 const mockUseOrders = useOrders as jest.MockedFunction<typeof useOrders>
+const mockUseDevicePosition = useDevicePosition as jest.MockedFunction<
+  typeof useDevicePosition
+>
+
+// Default: no position yet, nothing located — matches every pre-existing
+// test in this file that doesn't care about GPS. Tests that DO care
+// override with their own mockReturnValue.
+beforeEach(() => {
+  mockUseDevicePosition.mockReturnValue({
+    position: null,
+    status: 'idle',
+    refresh: jest.fn(),
+  })
+})
 
 function makeOrder(overrides: Partial<Order> = {}): Order {
   return {
@@ -129,5 +151,112 @@ describe('SuperOrdersScreen — order card shows the driver-to-address distance'
 
     const names = getAllByText(/^(Lejos|Cerca)$/).map((n) => n.props.children)
     expect(names).toEqual(['Lejos', 'Cerca'])
+  })
+})
+
+const NO_LOCATION_NOTICE =
+  'Sin tu ubicación, los pedidos salen por fecha. Activá la ubicación para verlos por cercanía.'
+
+describe('SuperOrdersScreen — dispatch sorted from the driver device position', () => {
+  function mockOrdersOnce() {
+    mockUseOrders.mockReturnValue({
+      data: [makeOrder()],
+      isPending: false,
+      refetch: jest.fn(),
+      isRefetching: false,
+    } as unknown as ReturnType<typeof useOrders>)
+  }
+
+  it('passes the device lat/lng to useOrders once GPS is granted', () => {
+    mockOrdersOnce()
+    mockUseDevicePosition.mockReturnValue({
+      position: { lat: 40.7357, lng: -74.1724 },
+      status: 'granted',
+      refresh: jest.fn(),
+    })
+
+    renderWithProviders(<SuperOrdersScreen />)
+
+    expect(mockUseOrders).toHaveBeenCalledWith({ lat: 40.7357, lng: -74.1724 })
+  })
+
+  it('calls useOrders with no coords and shows the notice when permission is denied', () => {
+    mockOrdersOnce()
+    mockUseDevicePosition.mockReturnValue({
+      position: null,
+      status: 'denied',
+      refresh: jest.fn(),
+    })
+
+    const { getByText } = renderWithProviders(<SuperOrdersScreen />)
+
+    expect(mockUseOrders).toHaveBeenCalledWith(undefined)
+    expect(getByText(NO_LOCATION_NOTICE)).toBeTruthy()
+  })
+
+  it('calls useOrders with no coords and shows the notice when GPS is unavailable', () => {
+    mockOrdersOnce()
+    mockUseDevicePosition.mockReturnValue({
+      position: null,
+      status: 'unavailable',
+      refresh: jest.fn(),
+    })
+
+    const { getByText } = renderWithProviders(<SuperOrdersScreen />)
+
+    expect(mockUseOrders).toHaveBeenCalledWith(undefined)
+    expect(getByText(NO_LOCATION_NOTICE)).toBeTruthy()
+  })
+
+  it('keeps showing the order list while locating, without the notice', () => {
+    mockOrdersOnce()
+    mockUseDevicePosition.mockReturnValue({
+      position: null,
+      status: 'locating',
+      refresh: jest.fn(),
+    })
+
+    const { getByText, queryByText } = renderWithProviders(<SuperOrdersScreen />)
+
+    expect(getByText('Ana Cliente')).toBeTruthy()
+    expect(queryByText(NO_LOCATION_NOTICE)).toBeNull()
+  })
+
+  it('does not show the notice once granted', () => {
+    mockOrdersOnce()
+    mockUseDevicePosition.mockReturnValue({
+      position: { lat: 1, lng: 2 },
+      status: 'granted',
+      refresh: jest.fn(),
+    })
+
+    const { queryByText } = renderWithProviders(<SuperOrdersScreen />)
+
+    expect(queryByText(NO_LOCATION_NOTICE)).toBeNull()
+  })
+
+  it('pull-to-refresh refetches orders AND refreshes the device position', () => {
+    mockOrdersOnce()
+    const refetch = jest.fn()
+    const refreshPosition = jest.fn()
+    mockUseOrders.mockReturnValue({
+      data: [makeOrder()],
+      isPending: false,
+      refetch,
+      isRefetching: false,
+    } as unknown as ReturnType<typeof useOrders>)
+    mockUseDevicePosition.mockReturnValue({
+      position: { lat: 1, lng: 2 },
+      status: 'granted',
+      refresh: refreshPosition,
+    })
+
+    const { UNSAFE_getByType } = renderWithProviders(<SuperOrdersScreen />)
+    const { FlatList } = require('react-native')
+
+    UNSAFE_getByType(FlatList).props.onRefresh()
+
+    expect(refetch).toHaveBeenCalledTimes(1)
+    expect(refreshPosition).toHaveBeenCalledTimes(1)
   })
 })

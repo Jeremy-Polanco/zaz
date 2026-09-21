@@ -81,6 +81,21 @@ export interface CustomerActivityRow {
   lastOrderAt: Date | null;
 }
 
+/**
+ * Qué origen usó `findAll` para ordenar el recorrido de despacho — expuesto
+ * por el controller como header `X-Dispatch-Origin` (nunca en el body, para
+ * no tocar el shape del array que consumen web y mobile).
+ *
+ *   'device' — coordenadas GPS del dispositivo, mandadas por la query.
+ *   'saved'  — dirección guardada (de quien pide, o si no la del admin
+ *              primario como último fallback).
+ *   'none'   — no hay ningún origen resoluble.
+ *
+ * `null` (fuera de este union) es lo que recibe un CLIENTE — ni siquiera
+ * aplica, porque nunca se le arma orden de despacho.
+ */
+export type DispatchOriginSource = 'device' | 'saved' | 'none';
+
 @Injectable()
 export class OrdersService {
   private readonly logger = new Logger(OrdersService.name);
@@ -156,10 +171,31 @@ export class OrdersService {
    * mientras la lista completa siga viniendo en una sola consulta. Si algún
    * día se pagina, el orden tiene que bajar al SQL o la primera página
    * dejaría de ser la de los pedidos más cercanos.
+   *
+   * El origen del recorrido se resuelve en este orden (sólo para staff):
+   *   1) `opts.origin` — coordenadas GPS del DISPOSITIVO mandadas por la
+   *      query (?lat&lng), cuando llegan LAS DOS. Es la regla del dueño: la
+   *      ruta sale de donde está el repartidor AHORA, no de una dirección
+   *      guardada.
+   *   2) El origen guardado de QUIEN PIDE la lista (su propia ubicación
+   *      activa / dirección default) — así un vendedor o admin secundario
+   *      arma su propia ruta sin pisar la del admin primario.
+   *   3) `ShippingService.getOrigin()` — el fallback histórico (admin
+   *      primario), para cuando quien pide no tiene nada guardado.
+   *   4) `null` — no hay origen; `sortOrdersForDispatch` degrada a
+   *      `distanceMiles: null` y orden por fecha.
+   *
+   * `originSource` viaja aparte (no en cada order) para que el controller
+   * lo exponga en un header sin tocar el shape del array que consumen web y
+   * mobile.
    */
   async findAll(
     user: AuthenticatedUser,
-  ): Promise<Array<Order & { distanceMiles?: number | null }>> {
+    opts: { origin?: { lat: number; lng: number } | null } = {},
+  ): Promise<{
+    orders: Array<Order & { distanceMiles?: number | null }>;
+    originSource: DispatchOriginSource | null;
+  }> {
     const orders = await this.orders.find({
       where: this.buildScope(user),
       relations: ['customer', 'items', 'items.product'],
@@ -169,10 +205,23 @@ export class OrdersService {
     const isStaff =
       user.role === UserRole.SUPER_ADMIN_DELIVERY ||
       user.role === UserRole.SELLER;
-    if (!isStaff) return orders;
+    if (!isStaff) return { orders, originSource: null };
 
-    const origin = await this.shipping.getOrigin();
-    return sortOrdersForDispatch(orders, origin);
+    let origin: { lat: number; lng: number } | null = null;
+    let originSource: DispatchOriginSource;
+
+    if (opts.origin) {
+      origin = opts.origin;
+      originSource = 'device';
+    } else {
+      origin = await this.shipping.getOriginForUser(user.id);
+      if (!origin) {
+        origin = await this.shipping.getOrigin();
+      }
+      originSource = origin ? 'saved' : 'none';
+    }
+
+    return { orders: sortOrdersForDispatch(orders, origin), originSource };
   }
 
   async findOne(id: string, user: AuthenticatedUser) {

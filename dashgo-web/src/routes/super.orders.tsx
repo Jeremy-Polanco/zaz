@@ -6,11 +6,12 @@ import { OrderLocationDrawer } from '../components/OrderLocationDrawer'
 import { OrderAddressModal } from '../components/OrderAddressModal'
 import { DeliveryDayPicker } from '../components/DeliveryDayPicker'
 import { Button, SectionHeading } from '../components/ui'
-import { useOrders, useUpdateOrderStatus } from '../lib/queries'
+import { useOrders, useOrdersDispatchOrigin, useUpdateOrderStatus } from '../lib/queries'
+import { useDevicePosition } from '../lib/use-device-position'
 import { formatDate, formatDeliveryDay, formatMoney } from '../lib/utils'
 import { formatAddressLine } from '../lib/address'
 import type { Order, OrderStatus } from '../lib/types'
-import type { ColumnDef } from '@tanstack/react-table'
+import type { ColumnDef, SortingState } from '@tanstack/react-table'
 import { TOKEN_KEY, api } from '../lib/api'
 import { isStaff } from '../lib/roles'
 import type { AuthUser } from '../lib/types'
@@ -85,12 +86,34 @@ type ListFilter = 'pending' | 'delivered' | 'all'
 // Exported so super.orders.test.tsx renders THIS component instead of a
 // test-local copy of its logic — a copy passes while production breaks.
 export function SuperOrdersPage() {
-  const { data: orders, isPending } = useOrders()
+  // El dispatch list se ordena desde donde ESTÁ el repartidor ahora — pedimos
+  // la posición del dispositivo y, si la tenemos, se la pasamos a useOrders
+  // para que el server ordene nearest-first y calcule distanceMiles desde ahí.
+  // Sin ella (denegada/no disponible), useOrders() no manda lat/lng y el
+  // server cae a la ubicación guardada del admin y, si tampoco hay, a fecha.
+  const devicePosition = useDevicePosition()
+  const hasDeviceCoords =
+    devicePosition.status === 'granted' && devicePosition.position != null
+  const locationParams = hasDeviceCoords
+    ? { lat: devicePosition.position!.lat, lng: devicePosition.position!.lng }
+    : undefined
+
+  const { data: orders, isPending } = useOrders(locationParams)
+  // Misma queryKey que useOrders → react-query reusa el fetch, no lo duplica.
+  const { data: dispatchOrigin } = useOrdersDispatchOrigin(locationParams)
+  const showLocationNotice =
+    devicePosition.status === 'denied' ||
+    devicePosition.status === 'unavailable' ||
+    dispatchOrigin === 'none'
+
   const updateStatus = useUpdateOrderStatus()
   const [quotingOrder, setQuotingOrder] = useState<Order | null>(null)
   const [locatingOrder, setLocatingOrder] = useState<Order | null>(null)
   const [detailOrder, setDetailOrder] = useState<Order | null>(null)
   const [listFilter, setListFilter] = useState<ListFilter>('pending')
+  // Controlado desde afuera de DataTable: el botón "Cercanía" necesita poder
+  // resetear el orden a como lo mandó la API (nearest-first o por fecha).
+  const [sorting, setSorting] = useState<SortingState>([])
 
   const activeStatuses: OrderStatus[] = [
     'pending_quote',
@@ -187,11 +210,15 @@ export function SuperOrdersPage() {
       },
       {
         // Miles from the driver's active dispatch location to the delivery
-        // address, computed by the API. The list already arrives sorted
-        // (active orders nearest-first, then history newest-first) — this
-        // table renders rows in the order the API gives them, never re-sorts.
+        // address, computed by the API. The list arrives pre-sorted
+        // (active orders nearest-first, then history newest-first) — the
+        // table renders that order by default (sorting === []). Sorting is
+        // opt-in via this header or the "Cercanía" control resets it.
         header: 'Distancia',
         id: 'distance',
+        // Infinity for a missing distance keeps it sorting last in ascending
+        // order without a custom sortingFn.
+        accessorFn: (row) => row.distanceMiles ?? Number.POSITIVE_INFINITY,
         cell: ({ row }) => {
           const d = row.original.distanceMiles
           return d == null ? (
@@ -436,7 +463,7 @@ export function SuperOrdersPage() {
           <Metric label="Entregados hoy" value={delivered} />
         </div>
 
-        <div className="mb-4 flex flex-wrap gap-2">
+        <div className="mb-4 flex flex-wrap items-center gap-2">
           {(
             [
               { value: 'pending', label: 'Pendientes' },
@@ -456,11 +483,40 @@ export function SuperOrdersPage() {
               {opt.label}
             </button>
           ))}
+
+          <div className="ml-auto flex items-center gap-2">
+            {/* Visible siempre — resetea el orden de vuelta al que manda la
+                API (nearest-first o por fecha), aunque ya esté sin ordenar. */}
+            <button
+              type="button"
+              onClick={() => setSorting([])}
+              disabled={sorting.length === 0}
+              className="rounded-full border border-ink/20 px-3 py-1 text-[11px] uppercase tracking-wide text-ink-muted hover:border-accent hover:text-accent disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              Cercanía
+            </button>
+            <button
+              type="button"
+              onClick={devicePosition.refresh}
+              className="rounded-full border border-ink/20 px-3 py-1 text-[11px] uppercase tracking-wide text-ink-muted hover:border-accent hover:text-accent"
+            >
+              📍 Actualizar mi ubicación
+            </button>
+          </div>
         </div>
+
+        {showLocationNotice && (
+          <p className="mb-4 text-xs text-ink-muted">
+            Sin tu ubicación, los pedidos salen por fecha. Activá la ubicación
+            para verlos por cercanía.
+          </p>
+        )}
 
         <DataTable
           data={visibleOrders}
           columns={columns}
+          sorting={sorting}
+          onSortingChange={setSorting}
           filterPlaceholder="Buscar por cliente, colmado o dirección…"
           emptyMessage={
             listFilter === 'pending'

@@ -158,3 +158,109 @@ describe('ShippingService — getOrigin', () => {
     expect(origin).toBeNull();
   });
 });
+
+/**
+ * Unit specs for ShippingService.getOriginForUser() — GET /orders?lat&lng.
+ *
+ * Same resolution steps as getOrigin() (active location → default address →
+ * legacy addressDefault → null), but scoped to a SPECIFIC user instead of
+ * "the primary repartidor". Used so a seller or secondary admin gets THEIR
+ * OWN saved location as the dispatch origin before OrdersService falls back
+ * to getOrigin()'s primary-admin resolution.
+ */
+describe('ShippingService — getOriginForUser', () => {
+  let service: ShippingService;
+  let users: jest.Mocked<Repository<User>>;
+  let addresses: jest.Mocked<Repository<UserAddress>>;
+
+  beforeEach(async () => {
+    users = makeUserRepoMock();
+    addresses = makeAddressRepoMock();
+
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        ShippingService,
+        { provide: getRepositoryToken(User), useValue: users },
+        { provide: getRepositoryToken(UserAddress), useValue: addresses },
+        { provide: ConfigService, useValue: { get: jest.fn((_k, d) => d) } },
+      ],
+    }).compile();
+
+    service = module.get<ShippingService>(ShippingService);
+  });
+
+  it('returns null when the user does not exist', async () => {
+    users.findOne.mockResolvedValue(null);
+
+    const origin = await service.getOriginForUser('missing-user');
+
+    expect(users.findOne).toHaveBeenCalledWith({
+      where: { id: 'missing-user' },
+    });
+    expect(origin).toBeNull();
+    expect(addresses.findOne).not.toHaveBeenCalled();
+  });
+
+  it('prefers the explicitly selected active location', async () => {
+    users.findOne.mockResolvedValue(
+      fakeAdmin({ id: 'seller-1', activeLocationId: 'addr-active' }),
+    );
+    addresses.findOne.mockResolvedValue(
+      fakeAddress({ id: 'addr-active', userId: 'seller-1', lat: 9, lng: 10 }),
+    );
+
+    const origin = await service.getOriginForUser('seller-1');
+
+    expect(addresses.findOne).toHaveBeenCalledWith({
+      where: { id: 'addr-active', userId: 'seller-1' },
+    });
+    expect(origin).toEqual({ lat: 9, lng: 10 });
+  });
+
+  it('falls back to the default address when no active location is set', async () => {
+    users.findOne.mockResolvedValue(
+      fakeAdmin({ id: 'seller-1', activeLocationId: null }),
+    );
+    addresses.findOne.mockResolvedValue(
+      fakeAddress({
+        id: 'addr-default',
+        userId: 'seller-1',
+        isDefault: true,
+        lat: 11,
+        lng: 12,
+      }),
+    );
+
+    const origin = await service.getOriginForUser('seller-1');
+
+    expect(addresses.findOne).toHaveBeenCalledWith({
+      where: { userId: 'seller-1', isDefault: true },
+    });
+    expect(origin).toEqual({ lat: 11, lng: 12 });
+  });
+
+  it('falls back to legacy addressDefault when no UserAddress rows exist', async () => {
+    users.findOne.mockResolvedValue(
+      fakeAdmin({
+        id: 'seller-1',
+        addressDefault: { text: 'X', lat: 13, lng: 14 },
+      }),
+    );
+    addresses.findOne.mockResolvedValue(null);
+
+    const origin = await service.getOriginForUser('seller-1');
+
+    expect(origin).toEqual({ lat: 13, lng: 14 });
+  });
+
+  it('returns null when the user has no usable coordinates anywhere', async () => {
+    users.findOne.mockResolvedValue(
+      fakeAdmin({ id: 'seller-1', addressDefault: null }),
+    );
+    addresses.findOne.mockResolvedValue(null);
+
+    const origin = await service.getOriginForUser('seller-1');
+
+    expect(origin).toBeNull();
+  });
+});

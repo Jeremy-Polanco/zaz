@@ -76,10 +76,33 @@ export class ShippingService {
     });
     if (!superAdmin) return null;
 
+    return this.resolveOriginForUser(superAdmin);
+  }
+
+  /**
+   * Same resolution steps as getOrigin() (active location → default address
+   * → legacy addressDefault → null), but scoped to a SPECIFIC user instead of
+   * "the primary repartidor".
+   *
+   * GET /orders uses this so a seller or a secondary admin dispatches from
+   * THEIR OWN saved location, not necessarily the primary's — getOrigin()'s
+   * primary-admin resolution stays as the last-resort fallback in the caller
+   * (OrdersService.findAll), not here.
+   */
+  async getOriginForUser(userId: string): Promise<{ lat: number; lng: number } | null> {
+    const user = await this.users.findOne({ where: { id: userId } });
+    if (!user) return null;
+
+    return this.resolveOriginForUser(user);
+  }
+
+  private async resolveOriginForUser(
+    user: User,
+  ): Promise<{ lat: number; lng: number } | null> {
     // 1) Explicitly selected active location.
-    if (superAdmin.activeLocationId) {
+    if (user.activeLocationId) {
       const active = await this.addresses.findOne({
-        where: { id: superAdmin.activeLocationId, userId: superAdmin.id },
+        where: { id: user.activeLocationId, userId: user.id },
       });
       if (active && typeof active.lat === 'number' && typeof active.lng === 'number') {
         return { lat: active.lat, lng: active.lng };
@@ -88,14 +111,14 @@ export class ShippingService {
 
     // 2) Default saved address.
     const fallback = await this.addresses.findOne({
-      where: { userId: superAdmin.id, isDefault: true },
+      where: { userId: user.id, isDefault: true },
     });
     if (fallback && typeof fallback.lat === 'number' && typeof fallback.lng === 'number') {
       return { lat: fallback.lat, lng: fallback.lng };
     }
 
     // 3) Legacy single-address JSONB.
-    const addr = superAdmin.addressDefault;
+    const addr = user.addressDefault;
     if (addr && typeof addr.lat === 'number' && typeof addr.lng === 'number') {
       return { lat: addr.lat, lng: addr.lng };
     }
