@@ -11,7 +11,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { ILike, Repository } from 'typeorm';
 import { SUBSCRIPTION_ACTIVATED } from '../../common/events/subscription.events';
 import Stripe = require('stripe');
 import {
@@ -80,9 +80,23 @@ interface StripeSubscriptionObject {
   metadata: Record<string, string>;
 }
 
+interface StripeCustomerObject {
+  id: string;
+  deleted?: boolean;
+  email?: string | null;
+  phone?: string | null;
+  metadata?: Record<string, string> | null;
+}
+
 interface StripeInvoiceObject {
   id: string;
   subscription: string | { id: string } | null;
+}
+
+/** Teléfono como lo guarda auth: E.164, solo dígitos con "+" adelante. */
+function normalizeE164(raw: string | null | undefined): string | null {
+  const digits = (raw ?? '').replace(/\D/g, '');
+  return digits ? `+${digits}` : null;
 }
 
 const SUBSCRIPTION_ALLOWLIST = [
@@ -938,15 +952,90 @@ export class SubscriptionService implements OnModuleInit {
         ? stripeSub.customer
         : stripeSub.customer?.id;
     if (!customerId) return null;
-    const user = await this.users.findOne({
+
+    const linked = await this.users.findOne({
       where: { stripeCustomerId: customerId },
       select: ['id'],
     });
-    if (!user) return null;
+    if (linked) {
+      this.logger.log(
+        `subscription ${stripeSub.id} resolved to user ${linked.id} via stripe customer ${customerId}`,
+      );
+      return linked.id;
+    }
+
+    const matched = await this.matchUserByStripeCustomer(customerId);
+    if (!matched) return null;
     this.logger.log(
-      `subscription ${stripeSub.id} resolved to user ${user.id} via stripe customer ${customerId}`,
+      `subscription ${stripeSub.id} resolved to user ${matched.userId} via stripe customer ${customerId} (${matched.via})`,
     );
-    return user.id;
+    return matched.userId;
+  }
+
+  /**
+   * Customer de Stripe que ningún usuario tiene en `stripe_customer_id`: lo
+   * creó el dueño a mano en el Dashboard, o el usuario quedó apuntando a otro
+   * customer (p. ej. uno vacío que abrió el portal). Le preguntamos a Stripe
+   * quién es y lo cruzamos, en orden, por metadata.userId (los customers que
+   * crea la app lo llevan), email (sin distinguir mayúsculas) y teléfono
+   * (E.164, como lo guarda auth). Si cierra, dejamos el customer enlazado
+   * para la próxima — salvo que el usuario ya tenga otro: ahí solo avisamos,
+   * pisarlo a ciegas podría romperle el portal y el checkout.
+   */
+  private async matchUserByStripeCustomer(
+    customerId: string,
+  ): Promise<{ userId: string; via: string } | null> {
+    if (!this.stripe) return null;
+    let customer: StripeCustomerObject;
+    try {
+      customer = (await this.stripe.customers.retrieve(
+        customerId,
+      )) as unknown as StripeCustomerObject;
+    } catch (err) {
+      this.logger.warn(
+        `could not retrieve stripe customer ${customerId}: ${(err as Error).message}`,
+      );
+      return null;
+    }
+    if (customer.deleted) return null;
+
+    const select: (keyof User)[] = ['id', 'stripeCustomerId'];
+    let user: User | null = null;
+    let via = '';
+
+    const metaUserId = customer.metadata?.userId;
+    if (metaUserId) {
+      user = await this.users.findOne({ where: { id: metaUserId }, select });
+      via = 'customer metadata.userId';
+    }
+
+    const email = customer.email?.trim().toLowerCase();
+    if (!user && email) {
+      // ILIKE sin comodines = igualdad sin mayúsculas; se escapan % y _ para
+      // que un "_" del email no haga de comodín y cruce con otro usuario.
+      user = await this.users.findOne({
+        where: { email: ILike(email.replace(/[\\%_]/g, '\\$&')) },
+        select,
+      });
+      via = 'customer email';
+    }
+
+    const phone = normalizeE164(customer.phone);
+    if (!user && phone) {
+      user = await this.users.findOne({ where: { phone }, select });
+      via = 'customer phone';
+    }
+
+    if (!user) return null;
+
+    if (!user.stripeCustomerId) {
+      await this.users.update(user.id, { stripeCustomerId: customerId });
+    } else if (user.stripeCustomerId !== customerId) {
+      this.logger.warn(
+        `user ${user.id} is linked to stripe customer ${user.stripeCustomerId} but subscription customer is ${customerId} — not overwriting; merge them in the Stripe Dashboard`,
+      );
+    }
+    return { userId: user.id, via };
   }
 
   private normalizeStatus(stripeStatus: string): SubscriptionStatus {

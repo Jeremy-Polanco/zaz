@@ -18,6 +18,7 @@
 export interface MockStripe {
   customers: {
     create: jest.Mock;
+    retrieve: jest.Mock;
     search: jest.Mock;
     update: jest.Mock;
     list: jest.Mock;
@@ -73,6 +74,12 @@ export function createMockStripe(): MockStripe {
   return {
     customers: {
       create: jest.fn().mockResolvedValue({ id: 'cus_test_default' }),
+      retrieve: jest.fn().mockResolvedValue({
+        id: 'cus_test_default',
+        email: null,
+        phone: null,
+        metadata: {},
+      }),
       search: jest.fn().mockResolvedValue({ data: [] }),
       update: jest.fn().mockResolvedValue({}),
       list: jest.fn().mockResolvedValue({ data: [] }),
@@ -182,6 +189,7 @@ export function createMockStripe(): MockStripe {
 export function resetMockStripe(mock: MockStripe): void {
   const fresh = createMockStripe();
   mock.customers.create.mockReset().mockImplementation(fresh.customers.create);
+  mock.customers.retrieve.mockReset().mockImplementation(fresh.customers.retrieve);
   mock.customers.search.mockReset().mockImplementation(fresh.customers.search);
   mock.customers.update.mockReset().mockImplementation(fresh.customers.update);
   mock.customers.list.mockReset().mockImplementation(fresh.customers.list);

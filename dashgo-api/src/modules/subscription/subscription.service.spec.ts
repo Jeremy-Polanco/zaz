@@ -10,7 +10,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { ConfigService } from '@nestjs/config';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { Repository } from 'typeorm';
+import { ILike, Repository } from 'typeorm';
 import { SubscriptionService } from './subscription.service';
 import { SUBSCRIPTION_ACTIVATED } from '../../common/events/subscription.events';
 import { Subscription, SubscriptionStatus } from '../../entities/subscription.entity';
@@ -2251,6 +2251,146 @@ describe('SubscriptionService — coverage completion', () => {
         failed: 0,
       });
       expect(mockStripeInstance.subscriptions.list).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('resolveUserId — customer sin usuario: cruza por metadata, email y teléfono', () => {
+    // Suscripción cuyo customer no está en ningún users.stripe_customer_id:
+    // la creó el dueño a mano en el Dashboard, o el usuario quedó apuntando a
+    // otro customer. Le preguntamos a Stripe quién es y lo cruzamos.
+    const orphan = () =>
+      fakeStripeSub({ id: 'sub_orphan', metadata: {}, customer: 'cus_orphan' });
+
+    function stubUsers(m: { byId?: User; byEmail?: User; byPhone?: User }) {
+      usersRepo.findOne.mockImplementation(async (opts) => {
+        const where = (opts.where ?? {}) as Record<string, unknown>;
+        if ('stripeCustomerId' in where) return null;
+        if ('id' in where) return m.byId ?? null;
+        if ('email' in where) return m.byEmail ?? null;
+        if ('phone' in where) return m.byPhone ?? null;
+        return null;
+      });
+    }
+
+    async function runOrphanWebhook() {
+      await service.handleWebhook({
+        type: 'customer.subscription.updated',
+        data: { object: orphan() },
+      });
+    }
+
+    it('cruza por customer.metadata.userId (los customers que crea la app lo llevan) y deja el customer enlazado', async () => {
+      await buildService();
+      subscriptionsRepo.upsert.mockResolvedValue({} as never);
+      mockStripeInstance.customers.retrieve.mockResolvedValue({
+        id: 'cus_orphan',
+        email: null,
+        phone: null,
+        metadata: { userId: 'user-meta' },
+      } as never);
+      stubUsers({ byId: fakeUser({ id: 'user-meta', stripeCustomerId: null }) });
+
+      await runOrphanWebhook();
+
+      expect(mockStripeInstance.customers.retrieve).toHaveBeenCalledWith('cus_orphan');
+      expect(subscriptionsRepo.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({ userId: 'user-meta', stripeSubscriptionId: 'sub_orphan' }),
+        ['stripeSubscriptionId'],
+      );
+      expect(usersRepo.update).toHaveBeenCalledWith('user-meta', {
+        stripeCustomerId: 'cus_orphan',
+      });
+    });
+
+    it('cruza por email sin distinguir mayúsculas cuando no hay metadata', async () => {
+      await buildService();
+      subscriptionsRepo.upsert.mockResolvedValue({} as never);
+      mockStripeInstance.customers.retrieve.mockResolvedValue({
+        id: 'cus_orphan',
+        email: '  Luis@Example.com ',
+        phone: null,
+        metadata: {},
+      } as never);
+      stubUsers({ byEmail: fakeUser({ id: 'user-email', stripeCustomerId: null }) });
+
+      await runOrphanWebhook();
+
+      expect(usersRepo.findOne).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { email: ILike('luis@example.com') } }),
+      );
+      expect(subscriptionsRepo.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({ userId: 'user-email' }),
+        ['stripeSubscriptionId'],
+      );
+    });
+
+    it('cruza por teléfono normalizado a E.164 cuando no hay metadata ni email', async () => {
+      await buildService();
+      subscriptionsRepo.upsert.mockResolvedValue({} as never);
+      mockStripeInstance.customers.retrieve.mockResolvedValue({
+        id: 'cus_orphan',
+        email: null,
+        phone: '+1 (646) 245-6579',
+        metadata: {},
+      } as never);
+      stubUsers({ byPhone: fakeUser({ id: 'user-phone', stripeCustomerId: null }) });
+
+      await runOrphanWebhook();
+
+      expect(usersRepo.findOne).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { phone: '+16462456579' } }),
+      );
+      expect(subscriptionsRepo.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({ userId: 'user-phone' }),
+        ['stripeSubscriptionId'],
+      );
+    });
+
+    it('si el usuario ya tiene OTRO customer enlazado, upsertea igual pero no lo pisa', async () => {
+      await buildService();
+      subscriptionsRepo.upsert.mockResolvedValue({} as never);
+      mockStripeInstance.customers.retrieve.mockResolvedValue({
+        id: 'cus_orphan',
+        email: null,
+        phone: null,
+        metadata: { userId: 'user-x' },
+      } as never);
+      stubUsers({ byId: fakeUser({ id: 'user-x', stripeCustomerId: 'cus_other' }) });
+
+      await runOrphanWebhook();
+
+      expect(subscriptionsRepo.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({ userId: 'user-x' }),
+        ['stripeSubscriptionId'],
+      );
+      expect(usersRepo.update).not.toHaveBeenCalled();
+    });
+
+    it('descarta si el customer está borrado, si nadie cruza, o si Stripe falla', async () => {
+      await buildService();
+      subscriptionsRepo.upsert.mockResolvedValue({} as never);
+      stubUsers({});
+
+      mockStripeInstance.customers.retrieve.mockResolvedValueOnce({
+        id: 'cus_orphan',
+        deleted: true,
+      } as never);
+      await runOrphanWebhook();
+
+      mockStripeInstance.customers.retrieve.mockResolvedValueOnce({
+        id: 'cus_orphan',
+        email: 'nobody@example.com',
+        phone: '+10000000000',
+        metadata: {},
+      } as never);
+      await runOrphanWebhook();
+
+      mockStripeInstance.customers.retrieve.mockRejectedValueOnce(
+        new Error('stripe down'),
+      );
+      await runOrphanWebhook();
+
+      expect(subscriptionsRepo.upsert).not.toHaveBeenCalled();
     });
   });
 
