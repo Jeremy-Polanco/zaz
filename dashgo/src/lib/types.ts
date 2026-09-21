@@ -648,13 +648,39 @@ export interface UserAddress {
   createdAt: string
   updatedAt: string
   postalCode?: string | null
+  /** House/door number (e.g. "24"). Customer-entered or geocoder-prefilled. */
+  houseNumber?: string | null
+  /**
+   * Server-derived from lat/lng at save time — clients never send these.
+   * Absent/undefined on addresses saved before this feature.
+   */
+  city?: string | null
+  /** Two-letter state code, e.g. "NJ". Server-derived. */
+  state?: string | null
+  /** Server-derived county, used to resolve `taxJurisdiction`. */
+  county?: string | null
+  /**
+   * Tax jurisdiction resolved from the delivery zone — drives the
+   * jurisdiction-specific tax label at checkout (NJ 6.625%, NYC 8.875%).
+   * Null when the address falls outside both known jurisdictions.
+   */
+  taxJurisdiction?: 'NJ' | 'NYC' | null
   zoneId?: string | null
+  /**
+   * Tasa de impuesto de la zona de esta dirección (ej. 0.06625 en Elizabeth
+   * NJ), calculada server-side. Ausente/undefined en direcciones creadas
+   * antes de esta feature o si el backend no la resuelve — el checkout cae
+   * al fallback TAX_RATE en ese caso.
+   */
+  taxRate?: number
 }
 
 export interface CreateAddressInput {
   label: string
   line1: string
   line2?: string
+  /** House/door number (max 40 chars). Server auto-fills from geocoding when omitted. */
+  houseNumber?: string
   building?: string
   lat: number
   lng: number

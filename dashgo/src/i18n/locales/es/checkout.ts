@@ -57,6 +57,8 @@ export default {
     shipping: 'Envío',
     toQuote: 'A cotizar',
     taxes: 'Impuestos',
+    taxesWithRate: 'Impuestos ({{rate}})',
+    taxesWithJurisdiction: 'Impuestos {{jurisdiction}} ({{rate}})',
     atQuote: 'Al cotizar',
     tipLine: 'Propina ({{percent}}%)',
     total: 'Total',

@@ -5,6 +5,7 @@ import {
   AppSetting,
   SellerProduct,
   DeliveryZone,
+  TaxJurisdiction,
   Category,
   Counter,
   CreditAccount,
@@ -76,6 +77,7 @@ export const buildDatabaseConfig = (
     AppSetting,
     SellerProduct,
     DeliveryZone,
+    TaxJurisdiction,
   ],
   // Belt-and-suspenders: hard-disable synchronize in production regardless of env var.
   // The env schema also enforces DB_SYNCHRONIZE='false' in production.

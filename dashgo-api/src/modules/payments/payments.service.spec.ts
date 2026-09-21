@@ -17,6 +17,10 @@ import { PointsService } from '../points/points.service';
 import { ShippingService } from '../shipping/shipping.service';
 import { CreditService } from '../credit/credit.service';
 import { SubscriptionService } from '../subscription/subscription.service';
+import { TaxJurisdictionService } from '../addresses/tax-jurisdiction.service';
+import { GeocodingService } from '../geocoding/geocoding.service';
+import { UserAddress } from '../../entities/user-address.entity';
+import { TAX_RATE } from '../../common/tax';
 import { createMockStripe, MockStripe } from '../../test-utils/stripe';
 
 // ---------------------------------------------------------------------------
@@ -49,6 +53,7 @@ function fakeOrder(overrides: Partial<Order> = {}): Order {
   return {
     id: 'order-1',
     customerId: 'user-1',
+    taxJurisdiction: null,
     customerNameSnapshot: null,
     customerPhoneSnapshot: null,
     status: OrderStatus.QUOTED,
@@ -105,12 +110,19 @@ describe('PaymentsService', () => {
   let pointsService: jest.Mocked<PointsService>;
   let shippingService: jest.Mocked<ShippingService>;
   let subscriptionService: jest.Mocked<SubscriptionService>;
+  let taxJurisdictionService: { resolveTaxRate: jest.Mock };
+  let userAddressesRepo: jest.Mocked<Repository<UserAddress>>;
+  let geocodingService: { reverse: jest.Mock };
 
   beforeEach(async () => {
     mockStripeInstance = createMockStripe();
 
     ordersRepo = makeRepoMock<Order>();
     productsRepo = makeRepoMock<Product>();
+    userAddressesRepo = makeRepoMock<UserAddress>();
+    // Por defecto el geocoder NO contesta: todos los montos ya testeados se
+    // siguen cobrando exactamente igual.
+    geocodingService = { reverse: jest.fn().mockResolvedValue(null) };
 
     creditService = {
       reverseCharge: jest.fn(),
@@ -140,6 +152,14 @@ describe('PaymentsService', () => {
       isActiveSubscriber: jest.fn().mockResolvedValue(false),
     } as unknown as jest.Mocked<SubscriptionService>;
 
+    // Por defecto el destino no cae en ninguna zona: se cobra el fallback
+    // histórico y todos los montos que ya estaban testeados no se mueven.
+    taxJurisdictionService = {
+      resolveTaxRate: jest
+        .fn()
+        .mockResolvedValue({ zoneId: null, jurisdiction: null, taxRate: TAX_RATE }),
+    };
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         PaymentsService,
@@ -150,6 +170,9 @@ describe('PaymentsService', () => {
         { provide: ShippingService, useValue: shippingService },
         { provide: CreditService, useValue: creditService },
         { provide: SubscriptionService, useValue: subscriptionService },
+        { provide: TaxJurisdictionService, useValue: taxJurisdictionService },
+        { provide: getRepositoryToken(UserAddress), useValue: userAddressesRepo },
+        { provide: GeocodingService, useValue: geocodingService },
       ],
     }).compile();
 
@@ -270,6 +293,9 @@ describe('PaymentsService', () => {
         { provide: ShippingService, useValue: shippingService },
         { provide: CreditService, useValue: creditService },
         { provide: SubscriptionService, useValue: subscriptionService },
+        { provide: TaxJurisdictionService, useValue: taxJurisdictionService },
+        { provide: getRepositoryToken(UserAddress), useValue: userAddressesRepo },
+        { provide: GeocodingService, useValue: geocodingService },
       ],
     }).compile();
     const svc = mod.get<PaymentsService>(PaymentsService);
@@ -790,4 +816,191 @@ describe('PaymentsService', () => {
       });
     });
   });
+
+  // -------------------------------------------------------------------------
+  // Tasa de impuesto por zona: el intent tiene que cobrar lo MISMO que después
+  // cotiza la orden, o el cliente ve un precio y paga otro.
+  // -------------------------------------------------------------------------
+  describe('createIntentForItems — tasa por zona de entrega', () => {
+    const NJ_RATE = 0.06625;
+
+    beforeEach(() => {
+      productsRepo.find.mockResolvedValue([
+        makeProduct({ id: 'prod-1', priceToPublic: '5.00' }),
+      ]);
+      mockStripeInstance.paymentIntents.create.mockResolvedValue({
+        id: 'pi_zone',
+        client_secret: 'secret_zone',
+        amount: 0,
+        currency: 'usd',
+      });
+    });
+
+    it('resuelve la tasa con el código postal del destino', async () => {
+      await service.createIntentForItems({
+        userId: 'user-1',
+        items: [{ productId: 'prod-1', quantity: 2 }],
+        deliveryAddress: { text: '1 Elizabeth Ave', postalCode: '07201' },
+      });
+
+      expect(taxJurisdictionService.resolveTaxRate).toHaveBeenCalledWith(
+        expect.objectContaining({ postalCode: '07201' }),
+      );
+    });
+
+    it('cobra la tasa de la zona, no la global', async () => {
+      taxJurisdictionService.resolveTaxRate.mockResolvedValue({
+        zoneId: 'zone-nj',
+        taxRate: NJ_RATE,
+      });
+
+      await service.createIntentForItems({
+        userId: 'user-1',
+        items: [{ productId: 'prod-1', quantity: 2 }],
+        deliveryAddress: { text: '1 Elizabeth Ave', postalCode: '07201' },
+      });
+
+      // subtotal 1000, envío 0 → round(1000 * 0.06625) = 66, total 1066
+      // (con la tasa global habrían sido 1089).
+      expect(mockStripeInstance.paymentIntents.create).toHaveBeenCalledWith(
+        expect.objectContaining({ amount: 1066 }),
+        expect.anything(),
+      );
+    });
+
+    it('sin código postal cobra el fallback histórico', async () => {
+      await service.createIntentForItems({
+        userId: 'user-1',
+        items: [{ productId: 'prod-1', quantity: 2 }],
+      });
+
+      // round(1000 * 0.08887) = 89 → 1089, exactamente lo de siempre.
+      expect(mockStripeInstance.paymentIntents.create).toHaveBeenCalledWith(
+        expect.objectContaining({ amount: 1089 }),
+        expect.anything(),
+      );
+    });
+
+    // -----------------------------------------------------------------------
+    // Ronda 4 — el intent tiene que mirar el MISMO destino que la orden.
+    //
+    // La orden resuelve por la fila guardada del cliente (ownership-checked) y,
+    // si no hay, por la geocodificación de la chincheta. El intent resolvía
+    // sólo por el ZIP posteado: el mismo carrito podía cobrarse 8.887% en
+    // Stripe y cotizarse 6.625% en la orden un segundo después.
+    // -----------------------------------------------------------------------
+    const BRONX_ROW = {
+      id: 'addr-bronx',
+      userId: 'user-1',
+      postalCode: '10462',
+      houseNumber: '1728',
+      city: 'New York',
+      county: 'Bronx County',
+      state: 'NY',
+      zoneId: 'zone-nyc',
+    } as unknown as UserAddress;
+
+    const BRONX_PLACE = {
+      houseNumber: '1728',
+      road: 'Williamsbridge Road',
+      city: 'New York',
+      county: 'Bronx County',
+      state: 'NY',
+      postalCode: '10462',
+      countryCode: 'us',
+    };
+
+    it('con deliveryAddressId la tasa sale de la fila guardada, no del ZIP posteado', async () => {
+      userAddressesRepo.findOne.mockResolvedValue(BRONX_ROW);
+
+      await service.createIntentForItems({
+        userId: 'user-1',
+        items: [{ productId: 'prod-1', quantity: 2 }],
+        deliveryAddressId: 'addr-bronx',
+        deliveryAddress: {
+          text: '1728 Williamsbridge Rd',
+          lat: 40.8448,
+          lng: -73.8648,
+          postalCode: '07201',
+        },
+      });
+
+      expect(userAddressesRepo.findOne).toHaveBeenCalledWith({
+        where: { id: 'addr-bronx', userId: 'user-1' },
+      });
+      expect(taxJurisdictionService.resolveTaxRate).toHaveBeenCalledWith({
+        zoneId: 'zone-nyc',
+        postalCode: '10462',
+        state: 'NY',
+        city: 'New York',
+        county: 'Bronx County',
+      });
+      // Con fila propia no se gasta la cuota de Nominatim.
+      expect(geocodingService.reverse).not.toHaveBeenCalled();
+    });
+
+    it('sin id, geocodifica la chincheta posteada igual que la orden', async () => {
+      geocodingService.reverse.mockResolvedValue(BRONX_PLACE);
+
+      await service.createIntentForItems({
+        userId: 'user-1',
+        items: [{ productId: 'prod-1', quantity: 2 }],
+        deliveryAddress: {
+          text: '1728 Williamsbridge Rd',
+          lat: 40.8448,
+          lng: -73.8648,
+          postalCode: '07201',
+        },
+      });
+
+      expect(geocodingService.reverse).toHaveBeenCalledWith(40.8448, -73.8648);
+      expect(taxJurisdictionService.resolveTaxRate).toHaveBeenCalledWith({
+        zoneId: null,
+        postalCode: '07201',
+        state: 'NY',
+        city: 'New York',
+        county: 'Bronx County',
+      });
+    });
+
+    it('un id ajeno se comporta EXACTAMENTE como no mandar ninguno', async () => {
+      userAddressesRepo.findOne.mockResolvedValue(null);
+      geocodingService.reverse.mockResolvedValue(BRONX_PLACE);
+
+      await service.createIntentForItems({
+        userId: 'user-1',
+        items: [{ productId: 'prod-1', quantity: 2 }],
+        deliveryAddressId: '00000000-0000-4000-8000-000000000000',
+        deliveryAddress: {
+          text: '1728 Williamsbridge Rd',
+          lat: 40.8448,
+          lng: -73.8648,
+          postalCode: '07201',
+        },
+      });
+
+      expect(geocodingService.reverse).toHaveBeenCalledWith(40.8448, -73.8648);
+      expect(taxJurisdictionService.resolveTaxRate).toHaveBeenCalledWith(
+        expect.objectContaining({ state: 'NY' }),
+      );
+    });
+
+    it('sin chincheta no se geocodifica nada: queda el ZIP posteado', async () => {
+      await service.createIntentForItems({
+        userId: 'user-1',
+        items: [{ productId: 'prod-1', quantity: 2 }],
+        deliveryAddress: { text: '1 Elizabeth Ave', postalCode: '07201' },
+      });
+
+      expect(geocodingService.reverse).not.toHaveBeenCalled();
+      expect(taxJurisdictionService.resolveTaxRate).toHaveBeenCalledWith({
+        zoneId: null,
+        postalCode: '07201',
+        state: null,
+        city: null,
+        county: null,
+      });
+    });
+  });
+
 });

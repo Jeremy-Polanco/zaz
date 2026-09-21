@@ -196,6 +196,62 @@ describe('EditAddress — update flow', () => {
   })
 })
 
+describe('EditAddress — house number', () => {
+  beforeEach(() => setupMocks())
+
+  it('pre-populates the house number field with the existing value', () => {
+    mockUseMyAddresses.mockReturnValue({
+      data: [{ ...testAddress, houseNumber: '24' }],
+      isPending: false,
+    } as unknown as ReturnType<typeof useMyAddresses>)
+
+    const { getByDisplayValue } = renderWithProviders(<EditAddress />)
+    expect(getByDisplayValue('24')).toBeTruthy()
+  })
+
+  it('calls mutateAsync with the updated house number', async () => {
+    mockUseMyAddresses.mockReturnValue({
+      data: [{ ...testAddress, houseNumber: '24' }],
+      isPending: false,
+    } as unknown as ReturnType<typeof useMyAddresses>)
+
+    const { getByDisplayValue, getByText } = renderWithProviders(<EditAddress />)
+    fireEvent.changeText(getByDisplayValue('24'), '30')
+    await act(async () => {
+      fireEvent.press(getByText(/Guardar/i))
+    })
+    await waitFor(() => {
+      expect(mockUpdateMutateAsync).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 'addr-1', houseNumber: '30' }),
+      )
+    })
+  })
+})
+
+describe('EditAddress — resolved place line', () => {
+  beforeEach(() => setupMocks())
+
+  it('shows the resolved city/state/ZIP line when the address has city and state', () => {
+    mockUseMyAddresses.mockReturnValue({
+      data: [{ ...testAddress, city: 'Elizabeth', state: 'NJ', postalCode: '07201' }],
+      isPending: false,
+    } as unknown as ReturnType<typeof useMyAddresses>)
+
+    const { getByText } = renderWithProviders(<EditAddress />)
+    expect(getByText('Elizabeth, NJ 07201')).toBeTruthy()
+  })
+
+  it('does not show a resolved line when the address has no city/state', () => {
+    mockUseMyAddresses.mockReturnValue({
+      data: [testAddress],
+      isPending: false,
+    } as unknown as ReturnType<typeof useMyAddresses>)
+
+    const { queryByText } = renderWithProviders(<EditAddress />)
+    expect(queryByText('Elizabeth, NJ 07201')).toBeNull()
+  })
+})
+
 describe('EditAddress — postal code (ZIP)', () => {
   beforeEach(() => setupMocks())
 
@@ -213,7 +269,7 @@ describe('EditAddress — postal code (ZIP)', () => {
     })
   })
 
-  it('shows a validation error when the ZIP is cleared', async () => {
+  it('allows clearing the ZIP — it is optional, the server re-fills it from the pin', async () => {
     const { getByDisplayValue, getByText, queryByText } = renderWithProviders(
       <EditAddress />,
     )
@@ -222,8 +278,10 @@ describe('EditAddress — postal code (ZIP)', () => {
       fireEvent.press(getByText(/Guardar/i))
     })
     await waitFor(() => {
-      expect(queryByText(/Ingresá un ZIP de 5 dígitos/i)).toBeTruthy()
+      expect(mockUpdateMutateAsync).toHaveBeenCalled()
     })
+    expect(queryByText(/Ingresá un ZIP de 5 dígitos/i)).toBeNull()
+    expect(mockUpdateMutateAsync.mock.calls[0][0].postalCode).toBeUndefined()
   })
 
   it('prefills the ZIP from the geocoder only when the field is empty', async () => {

@@ -94,7 +94,10 @@ export const deliveryAddressSchema = z.object({
   lat: z.number(),
   lng: z.number(),
   building: z.string().optional(),
-  houseNumber: z.string().optional(),
+  // Unlike the other optional fields, userAddressToGeoAddress() always emits
+  // this key (null rather than omitted) so the frozen snapshot carries the
+  // house number even before the server-side merge — see its docstring.
+  houseNumber: z.string().nullable().optional(),
   unit: z.string().optional(),
   reference: z.string().optional(),
   // Plain optional regex (no transform): userAddressToGeoAddress() already
@@ -127,6 +130,12 @@ export const checkoutSchema = z.object({
   usePoints: z.boolean().optional(),
   useCredit: z.boolean().optional(),
   deliveryAddress: deliveryAddressSchema.optional(),
+  // UUID of the customer's saved address (ownership-checked server-side).
+  // The server uses THIS to resolve the tax rate/zone — the `deliveryAddress`
+  // snapshot above is still sent as-is for the order's historical record, but
+  // its postalCode is no longer trusted for money. Absent when the order has
+  // no saved address (legacy: colmado pins the location at delivery time).
+  deliveryAddressId: z.string().uuid().optional(),
 })
 export type CheckoutInput = z.infer<typeof checkoutSchema>
 

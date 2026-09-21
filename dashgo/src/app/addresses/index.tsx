@@ -10,6 +10,7 @@ import { router, Stack } from 'expo-router'
 import { useTranslation } from 'react-i18next'
 import { useMyAddresses } from '../../lib/queries'
 import type { UserAddress } from '../../lib/types'
+import { formatAddressLine } from '../../lib/address'
 import { ScreenHeader } from '../../components/ScreenHeader'
 
 function AddressCard({ address }: { address: UserAddress }) {
@@ -33,8 +34,7 @@ function AddressCard({ address }: { address: UserAddress }) {
           )}
         </View>
         <Text className="text-[15px] text-ink-soft" numberOfLines={1}>
-          {address.line1}
-          {address.postalCode ? ` · ZIP ${address.postalCode}` : ''}
+          {formatAddressLine(address)}
         </Text>
       </View>
       <Text className="ml-3 text-[20px] text-ink-soft">›</Text>

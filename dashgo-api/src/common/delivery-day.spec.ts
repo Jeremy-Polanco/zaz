@@ -2,14 +2,15 @@
  * El día de reparto viaja como 'YYYY-MM-DD' (una FECHA, no un instante) y se le
  * muestra al cliente en español.
  *
- * Fijamos la zona horaria REAL del negocio para que el caso "no se corre el
- * día" sea determinista: en America/New_York (UTC-4/-5) la medianoche UTC cae
- * el día anterior a la tarde, que es exactamente la trampa que este helper
- * existe para evitar. Sin esto, la misma suite pasaría en un CI en UTC y
- * taparía el bug.
+ * La trampa que este helper evita depende de la zona horaria: en
+ * America/New_York (UTC-4/-5) la medianoche UTC cae la tarde del día anterior.
+ * Para que la suite sea determinista NO se toca `process.env.TZ`: dentro del
+ * sandbox de Jest esa asignación no cambia la zona real del proceso, así que el
+ * test pasaba en una Mac al oeste de UTC y fallaba en el CI (que corre en UTC).
+ * La demostración de la trampa fija la zona del negocio de forma explícita en
+ * el propio `toLocaleDateString`, y el helper se verifica en la zona que tenga
+ * la máquina — construye la fecha en hora local, así que nunca se corre.
  */
-process.env.TZ = 'America/New_York';
-
 import { formatDeliveryDay } from './delivery-day';
 
 const INTL_OPTS = {
@@ -29,7 +30,10 @@ describe('formatDeliveryDay', () => {
     // La trampa: 'YYYY-MM-DD' se parsea como MEDIANOCHE UTC, que en
     // America/New_York son las 20:00 del día anterior. El cliente leería
     // "martes 15" para una entrega que es el miércoles 16.
-    const naive = new Date('2026-09-16').toLocaleDateString('es', INTL_OPTS);
+    const naive = new Date('2026-09-16').toLocaleDateString('es', {
+      ...INTL_OPTS,
+      timeZone: 'America/New_York',
+    });
     expect(naive).toContain('15');
     expect(formatDeliveryDay('2026-09-16')).toContain('16');
   });

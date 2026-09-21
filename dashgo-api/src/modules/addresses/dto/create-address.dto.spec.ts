@@ -77,3 +77,52 @@ describe('UpdateAddressDto — postalCode', () => {
     ).resolves.toHaveLength(0);
   });
 });
+
+describe('CreateAddressDto — houseNumber', () => {
+  const makeHouse = (houseNumber: unknown) =>
+    plainToInstance(CreateAddressDto, { ...base, houseNumber });
+
+  it('acepta el número de puerta que escribe el cliente', async () => {
+    const dto = makeHouse('1101');
+    await expect(validate(dto)).resolves.toHaveLength(0);
+    expect(dto.houseNumber).toBe('1101');
+  });
+
+  it('acepta los formatos raros que SON válidos acá', async () => {
+    // "120-05" en Queens es un número de puerta real, no un typo.
+    for (const value of ['1101-A', '24 1/2', '120-05']) {
+      await expect(validate(makeHouse(value))).resolves.toHaveLength(0);
+    }
+  });
+
+  it('es opcional — la mayoría de las direcciones se guardan sin él', async () => {
+    await expect(
+      validate(plainToInstance(CreateAddressDto, { ...base })),
+    ).resolves.toHaveLength(0);
+  });
+
+  it('recorta espacios', async () => {
+    expect(makeHouse('  1101  ').houseNumber).toBe('1101');
+  });
+
+  it('rechaza más de 40 caracteres', async () => {
+    const errors = await validate(makeHouse('9'.repeat(41)));
+    expect(errors).toHaveLength(1);
+    expect(errors[0].constraints).toHaveProperty('maxLength');
+  });
+
+  it('NO acepta state/city/county del cliente: son hechos del servidor', async () => {
+    // `forbidNonWhitelisted` está encendido en el ValidationPipe global, así
+    // que un campo que no existe en el DTO es un 400. Lo que se verifica acá es
+    // que el DTO efectivamente NO los declara — si alguien los agregara, el
+    // cliente podría elegir su propia jurisdicción fiscal.
+    const dto = plainToInstance(CreateAddressDto, {
+      ...base,
+      state: 'NJ',
+      city: 'Elizabeth',
+      county: 'Union County',
+    }) as unknown as Record<string, unknown>;
+    expect(Object.keys(new CreateAddressDto())).not.toContain('state');
+    expect(dto.state).toBe('NJ'); // plainToInstance no filtra; lo hace el pipe
+  });
+});

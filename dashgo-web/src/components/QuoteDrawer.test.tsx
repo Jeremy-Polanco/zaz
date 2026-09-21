@@ -8,7 +8,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { screen, fireEvent } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { renderWithProviders } from '../test/test-utils'
-import type { Order } from '../lib/types'
+import type { Order, Product, OrderItem } from '../lib/types'
 import type { UserAddress } from '../lib/types'
 
 // ── Module mocks ───────────────────────────────────────────────────────────────
@@ -338,5 +338,121 @@ describe('QuoteDrawer — recargo por distancia y día de entrega', () => {
     expect(mutateAsync).toHaveBeenCalledWith(
       expect.objectContaining({ scheduledDeliveryDate: null }),
     )
+  })
+})
+
+// ── Tasa de impuesto por dirección/zona ─────────────────────────────────────
+//
+// order.taxRate is frozen by the server at order creation (per-zone, e.g.
+// 0.06625 in Elizabeth NJ) — the drawer must preview tax at THAT rate, not
+// the hardcoded 8.887% it used to show for every order regardless of zone.
+
+function makeProduct(overrides: Partial<Product> = {}): Product {
+  return {
+    id: 'prod-1',
+    name: 'Botellón 5gal',
+    description: null,
+    priceToPublic: '5.00',
+    isAvailable: true,
+    stock: 10,
+    imageContentType: null,
+    imageUpdatedAt: null,
+    createdAt: '2026-01-01T00:00:00.000Z',
+    promoterCommissionPct: '0',
+    pointsPct: '0',
+    categoryId: null,
+    offerLabel: null,
+    offerDiscountPct: null,
+    offerStartsAt: null,
+    offerEndsAt: null,
+    effectivePriceCents: 500,
+    basePriceCents: 500,
+    offerActive: false,
+    ...overrides,
+  } as Product
+}
+
+function makeOrderItem(overrides: Partial<OrderItem> = {}): OrderItem {
+  return {
+    id: 'item-1',
+    orderId: 'order-001',
+    productId: 'prod-1',
+    quantity: 1,
+    priceAtOrder: '30.00',
+    createdAt: '2026-05-01T10:00:00.000Z',
+    ...overrides,
+  }
+}
+
+describe('QuoteDrawer — tasa de impuesto por dirección/zona', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockUseSetOrderQuote.mockReturnValue(
+      makeMutationMock() as unknown as ReturnType<typeof useSetOrderQuote>,
+    )
+    mockUseSuperUserAddresses.mockReturnValue(
+      makeQueryResult(savedAddresses) as unknown as ReturnType<typeof useSuperUserAddresses>,
+    )
+  })
+
+  it('previews tax at the order taxRate (Elizabeth NJ 6.625%), not the 8.887% fallback', () => {
+    renderWithProviders(
+      <QuoteDrawer
+        order={{ ...baseOrder, taxRate: '0.06625' }}
+        onClose={vi.fn()}
+      />,
+    )
+    // subtotal 50.00, no shipping/surcharge -> taxable 5000c @ 6.625% = 331.25 -> 331
+    expect(screen.getByText('Impuestos (6.625%)')).toBeInTheDocument()
+    expect(screen.getByText('$3.31')).toBeInTheDocument()
+  })
+
+  it('falls back to TAX_RATE (8.887%) when order.taxRate is not a valid number', () => {
+    renderWithProviders(
+      <QuoteDrawer
+        order={{ ...baseOrder, taxRate: 'not-a-number' }}
+        onClose={vi.fn()}
+      />,
+    )
+    expect(screen.getByText('Impuestos (8.887%)')).toBeInTheDocument()
+  })
+
+  it('taxes only the standard-category items when order.items expose product.taxCategory', () => {
+    renderWithProviders(
+      <QuoteDrawer
+        order={{
+          ...baseOrder,
+          taxRate: '0.08887',
+          items: [
+            makeOrderItem({
+              id: 'item-standard',
+              priceAtOrder: '30.00',
+              quantity: 1,
+              product: makeProduct({ taxCategory: 'standard' }),
+            }),
+            makeOrderItem({
+              id: 'item-exempt',
+              priceAtOrder: '20.00',
+              quantity: 1,
+              product: makeProduct({ taxCategory: 'exempt' }),
+            }),
+          ],
+        }}
+        onClose={vi.fn()}
+      />,
+    )
+    // Only the $30.00 standard line is taxable: round(3000 * 0.08887) = 267 -> $2.67
+    expect(screen.getByText('$2.67')).toBeInTheDocument()
+  })
+
+  it('taxes the full subtotal when items have no populated product (historical behaviour)', () => {
+    renderWithProviders(
+      <QuoteDrawer
+        order={{ ...baseOrder, taxRate: '0.08887', items: [] }}
+        onClose={vi.fn()}
+      />,
+    )
+    // subtotal 5000c @ 8.887% = 444.35 -> 444
+    expect(screen.getByText('$4.44')).toBeInTheDocument()
   })
 })

@@ -64,6 +64,7 @@ function fakeOrder(
   return {
     id: 'order-1',
     customerId: 'user-1',
+    taxJurisdiction: null,
     customerNameSnapshot: null,
     customerPhoneSnapshot: null,
     status: 'pending_quote' as never,

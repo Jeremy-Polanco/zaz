@@ -85,9 +85,14 @@ import { Order } from '../../src/entities/order.entity';
 import { CreditMovement } from '../../src/entities/credit-movement.entity';
 import { Product } from '../../src/entities/product.entity';
 import { Category } from '../../src/entities/category.entity';
+import { DeliveryZone } from '../../src/entities/delivery-zone.entity';
 import { UserRole, OrderStatus, PaymentMethod } from '../../src/entities/enums';
 import { OrdersService } from '../../src/modules/orders/orders.service';
 import { TwilioService } from '../../src/modules/twilio/twilio.service';
+import { AddressesService } from '../../src/modules/addresses/addresses.service';
+import { UserAddress } from '../../src/entities/user-address.entity';
+import { ShippingRateService } from '../../src/modules/shipping/shipping-rate.service';
+import { computeTaxableBase } from '../../src/common/tax';
 import { Subscription, SubscriptionStatus } from '../../src/entities/subscription.entity';
 import { SubscriptionPlan } from '../../src/entities/subscription-plan.entity';
 import { RentalStatus } from '../../src/entities/rental.entity';
@@ -682,6 +687,360 @@ describe('OrdersService (integration)', () => {
       ).rejects.toMatchObject({
         response: expect.objectContaining({ code: 'MIXED_CART_NOT_ALLOWED' }),
       });
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Tax por zona: contra las tasas que SIEMBRA la migración
+  // 1808000000000-AddTaxRateToDeliveryZones sobre Postgres real — con mocks el
+  // prefijo de ZIP y el numeric(6,5) siempre salen perfectos, acá no.
+  // ─────────────────────────────────────────────────────────────────────────
+
+  describe('Tax por zona (Elizabeth NJ vs. ZIP sin zona)', () => {
+    let addressesService: AddressesService;
+    let shippingRateService: ShippingRateService;
+    let taxZoneCategory: Category;
+    let taxZoneProduct: Product;
+    let taxZoneQuotedProduct: Product;
+    const taxZoneUserIds: string[] = [];
+
+    beforeAll(async () => {
+      addressesService = app.get(AddressesService);
+      shippingRateService = app.get(ShippingRateService);
+
+      taxZoneCategory = await dataSource.getRepository(Category).save({
+        name: 'Tax Zone Test Category',
+        slug: `tax-zone-cat-${Date.now()}`,
+        emoji: null,
+        imageUrl: null,
+        isActive: true,
+      } as unknown as Category);
+
+      // requiresQuote: false → carrito skip-cotización: la orden congela el
+      // impuesto AL CREARSE (ver orders.service.ts `skipQuote`). Sin esto
+      // order.tax se queda en 0 hasta un setQuote manual que este test no hace.
+      taxZoneProduct = await dataSource.getRepository(Product).save({
+        name: 'Tax Zone Test Product',
+        priceToPublic: '10.00',
+        salePrice: null,
+        salePriceStart: null,
+        salePriceEnd: null,
+        isAvailable: true,
+        stock: 100,
+        imageUrl: null,
+        description: null,
+        categoryId: taxZoneCategory.id,
+        requiresQuote: false,
+      } as unknown as Product);
+
+      // requiresQuote: true → el camino REAL del negocio: el pedido nace en
+      // PENDING_QUOTE (sin impuesto), el admin pincha la dirección y recién
+      // ahí cotiza.
+      taxZoneQuotedProduct = await dataSource.getRepository(Product).save({
+        name: 'Tax Zone Quoted Product',
+        priceToPublic: '10.00',
+        salePrice: null,
+        salePriceStart: null,
+        salePriceEnd: null,
+        isAvailable: true,
+        stock: 100,
+        imageUrl: null,
+        description: null,
+        categoryId: taxZoneCategory.id,
+        requiresQuote: true,
+      } as unknown as Product);
+    });
+
+    afterAll(async () => {
+      for (const userId of taxZoneUserIds) {
+        // order_items cae por CASCADE al borrar la orden; user_addresses cae
+        // por CASCADE al borrar el usuario (ver migraciones 1777680132516 y
+        // 1778169602193) — no hace falta borrarlos a mano.
+        await dataSource.query(`DELETE FROM "orders" WHERE customer_id = $1`, [userId]);
+        await dataSource.getRepository(User).delete({ id: userId });
+      }
+      await dataSource.getRepository(Product).delete({ id: taxZoneProduct.id });
+      await dataSource
+        .getRepository(Product)
+        .delete({ id: taxZoneQuotedProduct.id });
+      await dataSource.getRepository(Category).delete({ id: taxZoneCategory.id });
+    });
+
+    it('ZIP de Elizabeth NJ (07201) resuelve 0.06625 y arrastra hasta la orden; un ZIP sin zona (90210) cae al fallback 0.08887', async () => {
+      const userData = makeUser({ role: UserRole.CLIENT });
+      const user = await dataSource.getRepository(User).save(userData as unknown as User);
+      taxZoneUserIds.push(user.id);
+
+      const elizabethZone = await dataSource
+        .getRepository(DeliveryZone)
+        .findOneOrFail({ where: { name: 'Elizabeth NJ' } });
+
+      // --- Dirección en zona: Elizabeth NJ, prefijo sembrado '0720' --------
+      const njAddress = await addressesService.create(user.id, {
+        label: 'Casa NJ',
+        line1: '123 Elizabeth Ave',
+        lat: 40.6639,
+        lng: -74.2107,
+        postalCode: '07201',
+      });
+
+      expect(njAddress.zoneId).toBe(elizabethZone.id);
+      expect(njAddress.taxRate).toBeCloseTo(0.06625, 5);
+
+      // --- Dirección fuera de toda zona: Beverly Hills no tiene reparto -----
+      const noZoneAddress = await addressesService.create(user.id, {
+        label: 'Casa sin zona',
+        line1: '456 Beverly Dr',
+        lat: 34.0901,
+        lng: -118.4065,
+        postalCode: '90210',
+      });
+
+      expect(noZoneAddress.zoneId).toBeNull();
+      expect(noZoneAddress.taxRate).toBeCloseTo(0.08887, 5);
+
+      // --- Orden con el snapshot de la dirección de Elizabeth NJ ------------
+      // La dirección de una orden es JSONB (sólo postalCode viaja, no zoneId),
+      // así que la tasa se vuelve a resolver por prefijo — no por la zona ya
+      // guardada en la libreta.
+      const authUser = { id: user.id, role: UserRole.CLIENT, email: null };
+      const order = await ordersService.create(authUser, {
+        items: [{ productId: taxZoneProduct.id, quantity: 1 }],
+        deliveryAddress: {
+          text: njAddress.line1,
+          lat: njAddress.lat,
+          lng: njAddress.lng,
+          postalCode: '07201',
+        },
+        paymentMethod: PaymentMethod.CASH,
+        usePoints: false,
+        useCredit: false,
+      });
+
+      expect(order.taxRate).toBe('0.06625');
+
+      // El impuesto esperado se calcula con la MISMA función pura que usa el
+      // servicio (common/tax.ts): carrito 100% 'standard' → tax =
+      // round((subtotal + envío − puntos) × tasa). El envío se lee en vivo
+      // (no se hardcodea DEFAULT_FLAT_SHIPPING_CENTS) porque es editable por
+      // el super admin y la base de test es compartida con otros specs.
+      const subtotalCents = 1000; // priceToPublic '10.00' × quantity 1
+      const shippingCents = await shippingRateService.getFlatShippingCents();
+      const expected = computeTaxableBase(
+        [{ lineCents: subtotalCents, taxCategory: 'standard' }],
+        { shippingCents, pointsRedeemedCents: 0, taxRate: 0.06625 },
+      );
+
+      expect(order.tax).toBe((expected.taxCents / 100).toFixed(2));
+    });
+
+    it('pedido sin dirección → el admin la pincha (07201) → al cotizar se cobra 6.625%, no el fallback', async () => {
+      // El flujo real: el cliente pide sin dirección, así que al crearse la
+      // orden se congela el fallback. Si la tasa no se re-resolviera después,
+      // TODO New Jersey pagaría 8.887%.
+      const userData = makeUser({ role: UserRole.CLIENT });
+      const user = await dataSource.getRepository(User).save(userData as unknown as User);
+      taxZoneUserIds.push(user.id);
+
+      const authUser = { id: user.id, role: UserRole.CLIENT, email: null };
+      const admin = {
+        id: user.id,
+        role: UserRole.SUPER_ADMIN_DELIVERY,
+        email: null,
+      };
+
+      const created = await ordersService.create(authUser, {
+        items: [{ productId: taxZoneQuotedProduct.id, quantity: 1 }],
+        paymentMethod: PaymentMethod.CASH,
+        usePoints: false,
+        useCredit: false,
+      });
+
+      expect(created.status).toBe(OrderStatus.PENDING_QUOTE);
+      expect(created.taxRate).toBe('0.08887');
+
+      // --- El admin pincha Elizabeth NJ ------------------------------------
+      const pinned = await ordersService.setDeliveryAddress(
+        created.id,
+        {
+          text: '123 Elizabeth Ave',
+          lat: 40.6639,
+          lng: -74.2107,
+          postalCode: '07201',
+        },
+        admin,
+      );
+
+      // La tasa se re-congela acá para que el formulario de cotización del
+      // admin muestre el porcentaje correcto ANTES de cotizar.
+      expect(pinned.taxRate).toBe('0.06625');
+      expect(pinned.tax).toBe('0.00'); // sin cotizar todavía no hay impuesto
+
+      // --- El admin cotiza el envío ----------------------------------------
+      const shippingCents = 500;
+      const quoted = await ordersService.setQuote(
+        created.id,
+        shippingCents,
+        admin,
+      );
+
+      expect(quoted.status).toBe(OrderStatus.QUOTED);
+      expect(quoted.taxRate).toBe('0.06625');
+
+      const expected = computeTaxableBase(
+        [{ lineCents: 1000, taxCategory: 'standard' }],
+        { shippingCents, pointsRedeemedCents: 0, taxRate: 0.06625 },
+      );
+      expect(quoted.tax).toBe((expected.taxCents / 100).toFixed(2));
+      // Y no el fallback: con 8.887% habrían sido $1.33.
+      expect(quoted.tax).toBe('0.99');
+    });
+
+    it('un ZIP del Bronx (10462) cobra 8.875% y congela la jurisdicción NYC', async () => {
+      // El otro lado de la línea del estado. Desde la migración 1809 la tasa NO
+      // sale de la zona (las cuatro sembradas quedaron en tax_rate NULL): sale
+      // de `tax_jurisdictions`. La geocodificación está apagada en la suite, así
+      // que esto prueba el camino "sin estado, resuelvo por el ZIP" — el de las
+      // direcciones viejas sin backfillear.
+      const userData = makeUser({ role: UserRole.CLIENT });
+      const user = await dataSource
+        .getRepository(User)
+        .save(userData as unknown as User);
+      taxZoneUserIds.push(user.id);
+
+      const authUser = { id: user.id, role: UserRole.CLIENT, email: null };
+      const order = await ordersService.create(authUser, {
+        items: [{ productId: taxZoneProduct.id, quantity: 1 }],
+        deliveryAddress: {
+          text: '1728 Williamsbridge Rd',
+          lat: 40.8448,
+          lng: -73.8648,
+          postalCode: '10462',
+        },
+        paymentMethod: PaymentMethod.CASH,
+        usePoints: false,
+        useCredit: false,
+      });
+
+      expect(order.taxRate).toBe('0.08875');
+      expect(order.taxJurisdiction).toBe('NYC');
+
+      const shippingCents = await shippingRateService.getFlatShippingCents();
+      const expected = computeTaxableBase(
+        [{ lineCents: 1000, taxCategory: 'standard' }],
+        { shippingCents, pointsRedeemedCents: 0, taxRate: 0.08875 },
+      );
+      expect(order.tax).toBe((expected.taxCents / 100).toFixed(2));
+    });
+
+    it('payload de producción (id + snapshot): el snapshot hereda estado y número de puerta de la fila, y cotizar NO mueve la jurisdicción', async () => {
+      // Esto es lo que postea el checkout de verdad: las DOS cosas juntas
+      // (ver dashgo-web/src/routes/checkout.tsx y dashgo/src/app/checkout.tsx).
+      // Antes, el `deliveryAddressId` apagaba la geocodificación y la fila no
+      // se copiaba: el JSONB quedaba con state null y `setQuote` re-resolvía
+      // con el ZIP posteado — del Bronx a New Jersey, de 8.875% a 6.625%.
+      const userData = makeUser({ role: UserRole.CLIENT });
+      const user = await dataSource
+        .getRepository(User)
+        .save(userData as unknown as User);
+      taxZoneUserIds.push(user.id);
+
+      // Fila de libreta YA geocodificada. La suite corre con
+      // GEOCODING_ENABLED=false, así que los campos derivados se escriben a
+      // mano — es exactamente lo que deja el backfill en producción.
+      const row = await dataSource.getRepository(UserAddress).save({
+        userId: user.id,
+        label: 'Casa',
+        line1: '1728 Williamsbridge Rd',
+        line2: null,
+        building: null,
+        lat: 40.8448,
+        lng: -73.8648,
+        instructions: null,
+        postalCode: '10462',
+        houseNumber: '1728',
+        city: 'New York',
+        county: 'Bronx County',
+        state: 'NY',
+        zoneId: null,
+        isDefault: true,
+      } as unknown as UserAddress);
+
+      const authUser = { id: user.id, role: UserRole.CLIENT, email: null };
+      const admin = {
+        id: user.id,
+        role: UserRole.SUPER_ADMIN_DELIVERY,
+        email: null,
+      };
+
+      const order = await ordersService.create(authUser, {
+        items: [{ productId: taxZoneQuotedProduct.id, quantity: 1 }],
+        deliveryAddressId: row.id,
+        deliveryAddress: {
+          text: '1728 Williamsbridge Rd',
+          lat: 40.8448,
+          lng: -73.8648,
+          // ZIP de New Jersey en el snapshot: el cliente lo escribe, así que
+          // no puede ser lo que fija la plata.
+          postalCode: '07201',
+        },
+        paymentMethod: PaymentMethod.CASH,
+        usePoints: false,
+        useCredit: false,
+      });
+
+      expect(order.deliveryAddress).toEqual(
+        expect.objectContaining({
+          city: 'New York',
+          state: 'NY',
+          county: 'Bronx County',
+          houseNumber: '1728',
+          postalCode: '10462',
+        }),
+      );
+      expect(order.taxJurisdiction).toBe('NYC');
+      expect(order.taxRate).toBe('0.08875');
+
+      // --- y el admin cotiza: la jurisdicción no se mueve ------------------
+      const shippingCents = 500;
+      const quoted = await ordersService.setQuote(
+        order.id,
+        shippingCents,
+        admin,
+      );
+
+      expect(quoted.taxJurisdiction).toBe('NYC');
+      expect(quoted.taxRate).toBe('0.08875');
+      const expected = computeTaxableBase(
+        [{ lineCents: 1000, taxCategory: 'standard' }],
+        { shippingCents, pointsRedeemedCents: 0, taxRate: 0.08875 },
+      );
+      expect(quoted.tax).toBe((expected.taxCents / 100).toFixed(2));
+    });
+
+    it('un ZIP sin jurisdicción congela null y el fallback histórico', async () => {
+      const userData = makeUser({ role: UserRole.CLIENT });
+      const user = await dataSource
+        .getRepository(User)
+        .save(userData as unknown as User);
+      taxZoneUserIds.push(user.id);
+
+      const authUser = { id: user.id, role: UserRole.CLIENT, email: null };
+      const order = await ordersService.create(authUser, {
+        items: [{ productId: taxZoneProduct.id, quantity: 1 }],
+        deliveryAddress: {
+          text: '456 Beverly Dr',
+          lat: 34.0901,
+          lng: -118.4065,
+          postalCode: '90210',
+        },
+        paymentMethod: PaymentMethod.CASH,
+        usePoints: false,
+        useCredit: false,
+      });
+
+      expect(order.taxRate).toBe('0.08887');
+      expect(order.taxJurisdiction).toBeNull();
     });
   });
 });

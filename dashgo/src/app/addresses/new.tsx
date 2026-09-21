@@ -39,30 +39,36 @@ export default function NewAddress() {
       label: '',
       line1: '',
       line2: undefined,
+      houseNumber: undefined,
       lat: FALLBACK_LAT,
       lng: FALLBACK_LNG,
       instructions: undefined,
-      postalCode: '',
+      postalCode: undefined,
     },
   })
 
   const lat = watch('lat')
   const lng = watch('lng')
 
-  // Prefill the ZIP from the geocoder when the pin moves, but never clobber
-  // something the customer already typed.
+  // Prefill the ZIP and house number from the geocoder when the pin moves,
+  // but never clobber something the customer already typed.
   const handlePinChange = ({ lat: newLat, lng: newLng }: { lat: number; lng: number }) => {
     setValue('lat', newLat)
     setValue('lng', newLng)
-    if (getValues('postalCode')) return
+    const hadPostalCode = !!getValues('postalCode')
+    const hadHouseNumber = !!getValues('houseNumber')
+    if (hadPostalCode && hadHouseNumber) return
     reverseGeocode(newLat, newLng)
       .then((res) => {
         if (res.postalCode && !getValues('postalCode')) {
           setValue('postalCode', res.postalCode)
         }
+        if (res.houseNumber && !getValues('houseNumber')) {
+          setValue('houseNumber', res.houseNumber)
+        }
       })
       .catch(() => {
-        // Non-blocking: the customer can still type the ZIP manually.
+        // Non-blocking: the customer can still type these fields manually.
       })
   }
 
@@ -133,6 +139,32 @@ export default function NewAddress() {
             )}
           </View>
 
+          {/* House number (optional) */}
+          <View className="gap-1.5">
+            <Text className="font-sans-medium text-[15px] uppercase tracking-wide text-ink-soft">
+              {t('form.houseNumber')}{' '}
+              <Text className="normal-case font-sans text-[13px]">{t('form.optional')}</Text>
+            </Text>
+            <Controller
+              control={control}
+              name="houseNumber"
+              render={({ field }) => (
+                <TextInput
+                  className="rounded-lg border border-ink/20 bg-paper px-4 py-3 text-[16px] text-ink"
+                  placeholder={t('form.houseNumberPlaceholder')}
+                  placeholderTextColor="#9ca3af"
+                  value={field.value ?? ''}
+                  onChangeText={(v) => field.onChange(v || undefined)}
+                  onBlur={field.onBlur}
+                  returnKeyType="next"
+                />
+              )}
+            />
+            {errors.houseNumber && (
+              <Text className="text-[15px] text-red-500">{errors.houseNumber.message}</Text>
+            )}
+          </View>
+
           {/* Line 2 (optional) */}
           <View className="gap-1.5">
             <Text className="font-sans-medium text-[15px] uppercase tracking-wide text-ink-soft">
@@ -177,8 +209,8 @@ export default function NewAddress() {
                   className="rounded-lg border border-ink/20 bg-paper px-4 py-3 text-[16px] text-ink"
                   placeholder="07201"
                   placeholderTextColor="#9ca3af"
-                  value={field.value}
-                  onChangeText={field.onChange}
+                  value={field.value ?? ''}
+                  onChangeText={(v) => field.onChange(v || undefined)}
                   onBlur={field.onBlur}
                   keyboardType="number-pad"
                   maxLength={5}

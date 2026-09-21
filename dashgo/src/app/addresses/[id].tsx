@@ -49,10 +49,11 @@ export default function EditAddress() {
           label: address.label,
           line1: address.line1,
           line2: address.line2 ?? undefined,
+          houseNumber: address.houseNumber ?? undefined,
           lat: address.lat,
           lng: address.lng,
           instructions: address.instructions ?? undefined,
-          postalCode: address.postalCode ?? '',
+          postalCode: address.postalCode ?? undefined,
         }
       : undefined,
   })
@@ -60,20 +61,25 @@ export default function EditAddress() {
   const lat = watch('lat') ?? 18.4861
   const lng = watch('lng') ?? -69.9312
 
-  // Prefill the ZIP from the geocoder when the pin moves, but never clobber
-  // something the customer already typed/saved.
+  // Prefill the ZIP and house number from the geocoder when the pin moves,
+  // but never clobber something the customer already typed/saved.
   const handlePinChange = ({ lat: newLat, lng: newLng }: { lat: number; lng: number }) => {
     setValue('lat', newLat)
     setValue('lng', newLng)
-    if (getValues('postalCode')) return
+    const hadPostalCode = !!getValues('postalCode')
+    const hadHouseNumber = !!getValues('houseNumber')
+    if (hadPostalCode && hadHouseNumber) return
     reverseGeocode(newLat, newLng)
       .then((res) => {
         if (res.postalCode && !getValues('postalCode')) {
           setValue('postalCode', res.postalCode)
         }
+        if (res.houseNumber && !getValues('houseNumber')) {
+          setValue('houseNumber', res.houseNumber)
+        }
       })
       .catch(() => {
-        // Non-blocking: the customer can still type the ZIP manually.
+        // Non-blocking: the customer can still type these fields manually.
       })
   }
 
@@ -184,6 +190,39 @@ export default function EditAddress() {
             )}
           </View>
 
+          {/* House number (optional) */}
+          <View className="gap-1.5">
+            <Text className="font-sans-medium text-[15px] uppercase tracking-wide text-ink-soft">
+              {t('form.houseNumber')}{' '}
+              <Text className="normal-case font-sans text-[13px]">{t('form.optional')}</Text>
+            </Text>
+            <Controller
+              control={control}
+              name="houseNumber"
+              render={({ field }) => (
+                <TextInput
+                  className="rounded-lg border border-ink/20 bg-paper px-4 py-3 text-[16px] text-ink"
+                  placeholder={t('form.houseNumberPlaceholder')}
+                  placeholderTextColor="#9ca3af"
+                  value={field.value ?? ''}
+                  onChangeText={(v) => field.onChange(v || undefined)}
+                  onBlur={field.onBlur}
+                  returnKeyType="next"
+                />
+              )}
+            />
+            {errors.houseNumber && (
+              <Text className="text-[15px] text-red-500">{errors.houseNumber.message}</Text>
+            )}
+          </View>
+
+          {/* Resolved place (read-only — server-derived from lat/lng) */}
+          {address.city && address.state ? (
+            <Text className="-mt-2 font-sans text-[13px] text-ink-muted">
+              {`${address.city}, ${address.state}${address.postalCode ? ` ${address.postalCode}` : ''}`}
+            </Text>
+          ) : null}
+
           {/* Line 2 */}
           <View className="gap-1.5">
             <Text className="font-sans-medium text-[15px] uppercase tracking-wide text-ink-soft">
@@ -228,8 +267,8 @@ export default function EditAddress() {
                   className="rounded-lg border border-ink/20 bg-paper px-4 py-3 text-[16px] text-ink"
                   placeholder="07201"
                   placeholderTextColor="#9ca3af"
-                  value={field.value}
-                  onChangeText={field.onChange}
+                  value={field.value ?? ''}
+                  onChangeText={(v) => field.onChange(v || undefined)}
                   onBlur={field.onBlur}
                   keyboardType="number-pad"
                   maxLength={5}

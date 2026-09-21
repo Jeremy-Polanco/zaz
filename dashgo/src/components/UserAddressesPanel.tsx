@@ -13,6 +13,7 @@ import { FieldLabel } from './ui'
 type EditForm = {
   label: string
   line1: string
+  houseNumber: string
   line2: string
   building: string
   instructions: string
@@ -23,6 +24,7 @@ function toForm(a: UserAddress): EditForm {
   return {
     label: a.label,
     line1: a.line1,
+    houseNumber: a.houseNumber ?? '',
     line2: a.line2 ?? '',
     building: a.building ?? '',
     instructions: a.instructions ?? '',
@@ -79,6 +81,7 @@ export function UserAddressesPanel({ userId }: { userId: string }) {
       id,
       label: form.label.trim(),
       line1: form.line1.trim(),
+      houseNumber: form.houseNumber.trim() || undefined,
       line2: form.line2.trim() || undefined,
       building: form.building.trim() || undefined,
       instructions: form.instructions.trim() || undefined,
@@ -104,6 +107,14 @@ export function UserAddressesPanel({ userId }: { userId: string }) {
                 className={inputCls}
                 value={form.line1}
                 onChangeText={(v) => setForm({ ...form, line1: v })}
+              />
+            </View>
+            <View className="mt-3">
+              <FieldLabel>{t('panel.houseNumber')}</FieldLabel>
+              <TextInput
+                className={inputCls}
+                value={form.houseNumber}
+                onChangeText={(v) => setForm({ ...form, houseNumber: v })}
               />
             </View>
             <View className="mt-3 flex-row gap-3">
@@ -188,7 +199,11 @@ export function UserAddressesPanel({ userId }: { userId: string }) {
                 {a.instructions}
               </Text>
             ) : null}
-            {a.postalCode ? (
+            {a.city && a.state ? (
+              <Text className="font-sans text-[12px] text-ink-muted">
+                {`${a.city}, ${a.state}${a.postalCode ? ` ${a.postalCode}` : ''}`}
+              </Text>
+            ) : a.postalCode ? (
               <Text className="font-sans text-[12px] text-ink-muted">
                 ZIP {a.postalCode}
               </Text>

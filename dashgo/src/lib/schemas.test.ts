@@ -222,7 +222,7 @@ describe('subscriptionPlanSchema', () => {
   })
 })
 
-describe('savedAddressSchema — postalCode (required, 5 digits)', () => {
+describe('savedAddressSchema — postalCode (optional, 5 digits when present)', () => {
   const base = { label: 'Casa', line1: 'Calle 123', lat: 18.5, lng: -69.9 }
 
   it('accepts a valid 5-digit postalCode', () => {
@@ -230,14 +230,9 @@ describe('savedAddressSchema — postalCode (required, 5 digits)', () => {
     expect(result.success).toBe(true)
   })
 
-  it('rejects a missing postalCode', () => {
+  it('accepts a missing postalCode — the server fills it in from the geocoded pin', () => {
     const result = savedAddressSchema.safeParse(base)
-    expect(result.success).toBe(false)
-    if (!result.success) {
-      expect(
-        result.error.issues.some((i) => i.path[0] === 'postalCode'),
-      ).toBe(true)
-    }
+    expect(result.success).toBe(true)
   })
 
   it('rejects a postalCode with fewer than 5 digits', () => {
@@ -256,6 +251,24 @@ describe('savedAddressSchema — postalCode (required, 5 digits)', () => {
 
   it('rejects a postalCode longer than 5 digits', () => {
     const result = savedAddressSchema.safeParse({ ...base, postalCode: '104512' })
+    expect(result.success).toBe(false)
+  })
+})
+
+describe('savedAddressSchema — houseNumber (optional, max 40)', () => {
+  const base = { label: 'Casa', line1: 'Calle 123', lat: 18.5, lng: -69.9 }
+
+  it('accepts a valid houseNumber', () => {
+    const result = savedAddressSchema.safeParse({ ...base, houseNumber: '24' })
+    expect(result.success).toBe(true)
+  })
+
+  it('accepts a missing houseNumber', () => {
+    expect(savedAddressSchema.safeParse(base).success).toBe(true)
+  })
+
+  it('rejects a houseNumber longer than 40 characters', () => {
+    const result = savedAddressSchema.safeParse({ ...base, houseNumber: 'x'.repeat(41) })
     expect(result.success).toBe(false)
   })
 })
@@ -287,5 +300,30 @@ describe('deliveryAddressSchema — optional postalCode', () => {
   it('accepts a delivery address with a postalCode', () => {
     const result = deliveryAddressSchema.safeParse({ ...base, postalCode: '10451' })
     expect(result.success).toBe(true)
+  })
+})
+
+describe('deliveryAddressSchema — houseNumber (nullable, max 40)', () => {
+  const base = { text: 'Calle 123', lat: 18.5, lng: -69.9 }
+
+  it('accepts a delivery address with a houseNumber', () => {
+    const result = deliveryAddressSchema.safeParse({ ...base, houseNumber: '24' })
+    expect(result.success).toBe(true)
+  })
+
+  it('accepts a delivery address without houseNumber at all', () => {
+    expect(deliveryAddressSchema.safeParse(base).success).toBe(true)
+  })
+
+  // userAddressToGeoAddress() emits `houseNumber: null` (not omitted) when
+  // the saved address has none — the schema must accept that explicit null.
+  it('accepts an explicit null houseNumber', () => {
+    const result = deliveryAddressSchema.safeParse({ ...base, houseNumber: null })
+    expect(result.success).toBe(true)
+  })
+
+  it('rejects a houseNumber longer than 40 characters', () => {
+    const result = deliveryAddressSchema.safeParse({ ...base, houseNumber: 'x'.repeat(41) })
+    expect(result.success).toBe(false)
   })
 })

@@ -7,6 +7,24 @@ import {
 } from 'typeorm';
 
 /**
+ * Postgres devuelve `numeric` como string; la tasa se usa como NÚMERO en toda
+ * la matemática de impuestos (ver common/tax.ts), así que se convierte una sola
+ * vez acá y no en cada consumidor. Mismo patrón que lat/lng en
+ * user-address.entity.ts. Exportado para poder testearlo sin levantar TypeORM.
+ */
+export const taxRateTransformer = {
+  to: (value: number | null | undefined): number | null | undefined => value,
+  from: (value: string | number | null): number | null => {
+    // NULL es un valor con significado propio en `delivery_zones.tax_rate`:
+    // "esta zona no pisa nada, cobrá lo que diga la ley". Convertirlo a NaN
+    // (que es lo que devolvía parseFloat) lo volvía indistinguible de un dato
+    // corrupto y hacía que la zona se comiera la jurisdicción.
+    if (value === null || value === undefined) return null;
+    return typeof value === 'number' ? value : parseFloat(value);
+  },
+};
+
+/**
  * Zona de reparto — la unidad con la que el negocio piensa su mapa: "el Bronx",
  * "Brooklyn", "Elizabeth". Resuelve DOS pedidos con un solo concepto:
  *
@@ -63,6 +81,34 @@ export class DeliveryZone {
    */
   @Column({ name: 'is_active', type: 'boolean', default: true })
   isActive!: boolean;
+
+  /**
+   * OVERRIDE opcional de la tasa de impuesto, como fracción (0.06625 = 6.625%).
+   *
+   * NULL — y es lo normal — significa "usá la ley": la tasa sale de
+   * `tax_jurisdictions` según el estado/ciudad/condado del destino (ver
+   * tax-jurisdiction.service.ts). La zona es un concepto de LOGÍSTICA (la
+   * dibuja el dueño con prefijos de ZIP para agrupar el reparto y cobrar
+   * distancia); que el impuesto colgara de ella significaba que partir o
+   * renombrar una zona podía cambiarle la tasa a un cliente sin que nadie lo
+   * decidiera.
+   *
+   * Un valor NO nulo es una decisión deliberada de alguien: esa zona cobra otra
+   * cosa y le gana a la jurisdicción. Es la salida de emergencia para un
+   * régimen especial, no el camino normal.
+   *
+   * La orden congela la tasa en `orders.tax_rate` al crearse — cambiar esto
+   * acá no re-cotiza nada de lo ya vendido.
+   */
+  @Column({
+    name: 'tax_rate',
+    type: 'numeric',
+    precision: 6,
+    scale: 5,
+    nullable: true,
+    transformer: taxRateTransformer,
+  })
+  taxRate!: number | null;
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt!: Date;

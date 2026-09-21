@@ -47,4 +47,18 @@ export interface GeoAddress {
    * (JSONB, sin migración) nacieron sin él y siguen siendo válidas.
    */
   postalCode?: string | null;
+  /**
+   * Ciudad / estado (sigla de 2 letras) / condado del destino, DERIVADOS POR EL
+   * SERVIDOR con geocodificación inversa de la lat/lng (ver modules/geocoding).
+   *
+   * Viajan dentro del snapshot y no se leen de la libreta a propósito: la
+   * dirección de un pedido se congela, y el impuesto que se le cobró tiene que
+   * poder explicarse años después aunque el cliente haya borrado o editado esa
+   * dirección. El ZIP solo no alcanza — decide mal en los bordes de estado.
+   *
+   * Opcionales: los pedidos viejos (JSONB, sin migración) nacieron sin ellos.
+   */
+  city?: string | null;
+  state?: string | null;
+  county?: string | null;
 }

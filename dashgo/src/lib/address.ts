@@ -14,12 +14,17 @@ export function userAddressToGeoAddress(addr: UserAddress): {
   building?: string
   reference?: string
   postalCode?: string
+  // Unlike the other optional fields above, houseNumber is always present
+  // (null rather than omitted) — the API's snapshot DTO accepts it, and
+  // explicit null is clearer than a silently missing field.
+  houseNumber: string | null
 } {
   const line2 = (addr.line2 ?? '').trim()
   const text = line2 ? `${addr.line1}, ${line2}` : addr.line1
   const building = (addr.building ?? '').trim()
   const reference = (addr.instructions ?? '').trim()
   const postalCode = (addr.postalCode ?? '').trim()
+  const houseNumber = (addr.houseNumber ?? '').trim()
   return {
     text,
     lat: addr.lat,
@@ -27,6 +32,7 @@ export function userAddressToGeoAddress(addr: UserAddress): {
     ...(building ? { building } : {}),
     ...(reference ? { reference } : {}),
     ...(postalCode ? { postalCode } : {}),
+    houseNumber: houseNumber ? houseNumber : null,
   }
 }
 
@@ -35,22 +41,71 @@ export interface AddressPart {
   value: string
 }
 
+/**
+ * Minimal shape of a saved address (UserAddress) as used by the list/summary
+ * formatters below. Distinguished from GeoAddress (an order snapshot, which
+ * has `text`/`unit`/`reference`) by the presence of `line1` — a saved
+ * address always has one, an order snapshot never does. Unlike GeoAddress,
+ * the house number is always shown as its own leading segment (not just a
+ * fallback for missing free text), since a saved address's `line1` is
+ * customer-entered street info, not a full formatted address.
+ */
+export interface SavedAddressLike {
+  line1: string
+  line2?: string | null
+  houseNumber?: string | null
+  building?: string | null
+  postalCode?: string | null
+  city?: string | null
+  state?: string | null
+}
+
 const clean = (v: string | null | undefined): string => (v ?? '').trim()
+
+function isSavedAddressLike(
+  addr: GeoAddress | SavedAddressLike,
+): addr is SavedAddressLike {
+  return 'line1' in addr
+}
+
+/**
+ * True when `line1` already leads with `houseNumber` as its own token
+ * (case/whitespace-insensitive whole-token match — not a substring or
+ * prefix check). The API auto-fills `houseNumber` from the geocoder (e.g.
+ * "1101") while `line1` is customer-typed and usually already starts with
+ * the house number ("1101 Elizabeth Avenue"), so showing "Casa 1101" in
+ * front of it would just repeat the same number. "11010 Main" does NOT
+ * match "1101" (prefix only, a different token) and "1101-A Main" does NOT
+ * match "1101" either (different token) — only an exact leading token
+ * counts as a duplicate.
+ */
+function line1HasLeadingHouseNumber(line1: string, houseNumber: string): boolean {
+  const leadingToken = line1.trim().split(/\s+/)[0] ?? ''
+  return leadingToken.toLowerCase() === houseNumber.trim().toLowerCase()
+}
 
 /**
  * Compact, route-friendly summary for the orders list. The colmado scans this
  * to place a delivery at a glance: house number first, then the visible
  * landmark ("Casa 24 — frente al colmado"). Falls back through partial data,
- * and finally to the free-text address.
+ * and finally to the free-text address. Also accepts a saved address
+ * (UserAddress-shaped) — same house-number-first idea, "Casa 24 · ZIP 07201".
  */
 export function formatAddressShort(
-  addr: GeoAddress | null | undefined,
+  addr: GeoAddress | SavedAddressLike | null | undefined,
 ): string {
   if (!addr) return 'Sin ubicación'
-  const house = clean(addr.houseNumber)
-  const ref = clean(addr.reference)
   const zip = clean(addr.postalCode)
   const zipSuffix = zip ? ` · ZIP ${zip}` : ''
+  if (isSavedAddressLike(addr)) {
+    const house = clean(addr.houseNumber)
+    const line1 = clean(addr.line1)
+    const showHouse = house !== '' && !line1HasLeadingHouseNumber(line1, house)
+    if (showHouse) return `Casa ${house}${zipSuffix}`
+    return line1 ? `${line1}${zipSuffix}` : 'Sin ubicación'
+  }
+  const house = clean(addr.houseNumber)
+  const ref = clean(addr.reference)
   if (house && ref) return `Casa ${house} — ${ref}${zipSuffix}`
   if (house) return `Casa ${house}${zipSuffix}`
   if (ref) return `${ref}${zipSuffix}`
@@ -64,14 +119,30 @@ export function formatAddressShort(
  * Edif. 4 · Apto 3B"). Falls back to the house number when there's no free-text,
  * and to "Sin ubicación" when empty. Use addressDetailParts() for the full
  * breakdown (reference, etc.) shown in the order detail.
+ *
+ * Also accepts a saved address (UserAddress-shaped): house number always
+ * leads when present ("Casa 24 · Calle X · Torre B · Apto 3B · ZIP 07201").
  */
 export function formatAddressLine(
-  addr: GeoAddress | null | undefined,
+  addr: GeoAddress | SavedAddressLike | null | undefined,
 ): string {
   if (!addr) return 'Sin ubicación'
+  const zip = clean(addr.postalCode)
+  if (isSavedAddressLike(addr)) {
+    const house = clean(addr.houseNumber)
+    const line1 = clean(addr.line1)
+    const showHouse = house !== '' && !line1HasLeadingHouseNumber(line1, house)
+    const segments = [
+      showHouse ? `Casa ${house}` : '',
+      line1,
+      clean(addr.building),
+      clean(addr.line2),
+      zip ? `ZIP ${zip}` : '',
+    ].filter(Boolean)
+    return segments.length ? segments.join(' · ') : 'Sin ubicación'
+  }
   const house = clean(addr.houseNumber)
   const primary = clean(addr.text) || (house ? `Casa ${house}` : '')
-  const zip = clean(addr.postalCode)
   const segments = [
     primary,
     clean(addr.building),

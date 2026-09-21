@@ -12,7 +12,7 @@ import {
 } from 'react-native'
 import type { Order } from '../lib/types'
 import { useSetOrderQuote } from '../lib/queries'
-import { computeQuotePreviewCents } from '../lib/tax'
+import { computeQuotePreviewCents, formatTaxRatePct, TAX_RATE } from '../lib/tax'
 import { formatCents } from '../lib/format'
 import { Button, Eyebrow, FieldLabel } from './ui'
 import { DeliveryDayPicker } from './DeliveryDayPicker'
@@ -72,12 +72,34 @@ export function QuoteBottomSheet({
   const pointsRedeemedCents = Math.round(
     parseFloat(order.pointsRedeemed) * 100,
   )
+  // Tasa congelada por el backend al crear la orden (zona de la dirección de
+  // entrega). Si viene inválida/ausente cae al fallback TAX_RATE — nunca
+  // rompe el preview.
+  const parsedOrderTaxRate = parseFloat(order.taxRate)
+  const effectiveTaxRate = Number.isFinite(parsedOrderTaxRate)
+    ? parsedOrderTaxRate
+    : TAX_RATE
+  // Cuando el listado de items trae el producto embebido, replicamos la base
+  // gravable real (excluye 'exempt', ej. agua) — igual que en
+  // dashgo-web QuoteDrawer.tsx. Si el producto no viene populado (algunos
+  // endpoints no lo incluyen), no hay forma de saber qué línea es exenta: se
+  // asume todo gravable, el comportamiento histórico.
+  const itemsHaveProduct =
+    order.items.length > 0 && order.items.every((it) => it.product)
+  const taxableSubtotalCents = itemsHaveProduct
+    ? order.items.reduce((sum, it) => {
+        if (it.product!.taxCategory === 'exempt') return sum
+        return sum + Math.round(parseFloat(it.priceAtOrder) * 100) * it.quantity
+      }, 0)
+    : undefined
   // El recargo se prorratea para impuestos igual que el envío (mismo
   // tratamiento en el backend — ver common/tax.ts).
   const preview = computeQuotePreviewCents({
     subtotalCents,
     shippingCents: shippingCents + surchargeCents,
     pointsRedeemedCents,
+    taxableSubtotalCents,
+    taxRate: effectiveTaxRate,
   })
   // Propina elegida en checkout (solo digital) — sin impuestos, va sobre el total.
   const tipCents = Math.round(parseFloat(order.tip ?? '0') * 100)
@@ -236,8 +258,11 @@ export function QuoteBottomSheet({
             </View>
           )}
           <View className="flex-row justify-between">
+            {/* Este panel es solo del super admin (sin i18n, español fijo —
+                igual que el resto de (super)); la tasa sale de la orden, no
+                de la constante fija. */}
             <Text className="font-sans text-[12px] uppercase tracking-label text-ink-muted">
-              Impuestos (8.887%)
+              {`Impuestos (${formatTaxRatePct(effectiveTaxRate)})`}
             </Text>
             <Text
               className="font-sans text-[13px] text-ink"

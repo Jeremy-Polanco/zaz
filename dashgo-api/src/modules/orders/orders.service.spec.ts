@@ -35,6 +35,9 @@ import { SubscriptionService } from '../subscription/subscription.service';
 import { TwilioService } from '../twilio/twilio.service';
 import { RentalsService } from '../rentals/rentals.service';
 import { OrderNotificationsService } from './order-notifications.service';
+import { TaxJurisdictionService } from '../addresses/tax-jurisdiction.service';
+import { GeocodingService } from '../geocoding/geocoding.service';
+import { TAX_RATE } from '../../common/tax';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -105,6 +108,7 @@ function fakeRentalProduct(overrides: Partial<Product> = {}): Product {
 function fakeOrder(overrides: Partial<Order> = {}): Order {
   return {
     id: 'order-1',
+    taxJurisdiction: null,
     customerId: 'user-1',
     customerNameSnapshot: null,
     customerPhoneSnapshot: null,
@@ -147,6 +151,8 @@ describe('OrdersService', () => {
   let productsRepo: jest.Mocked<Repository<Product>>;
   let userAddressesRepo: jest.Mocked<Repository<UserAddress>>;
   let deliveryZonesRepo: jest.Mocked<Repository<DeliveryZone>>;
+  let taxJurisdictionService: { resolveTaxRate: jest.Mock };
+  let geocodingService: { reverse: jest.Mock };
   let dataSource: jest.Mocked<DataSource>;
   let paymentsService: jest.Mocked<PaymentsService>;
   let pointsService: jest.Mocked<PointsService>;
@@ -171,6 +177,18 @@ describe('OrdersService', () => {
     userAddressesRepo = makeRepoMock<UserAddress>();
     deliveryZonesRepo = makeRepoMock<DeliveryZone>();
     deliveryZonesRepo.find.mockResolvedValue([]);
+    // Por defecto la dirección no cae en ninguna zona: se cobra el fallback
+    // histórico, así que TODOS los tests de plata que ya existían siguen dando
+    // exactamente el mismo número.
+    taxJurisdictionService = {
+      resolveTaxRate: jest
+        .fn()
+        .mockResolvedValue({ zoneId: null, jurisdiction: null, taxRate: TAX_RATE }),
+    };
+
+    // Por defecto el geocoder NO contesta: todos los tests de plata que ya
+    // existían se comportan exactamente igual que antes.
+    geocodingService = { reverse: jest.fn().mockResolvedValue(null) };
 
     paymentsService = {
       createAuthorizationIntent: jest.fn(),
@@ -278,6 +296,8 @@ describe('OrdersService', () => {
           provide: getRepositoryToken(DeliveryZone),
           useValue: deliveryZonesRepo,
         },
+        { provide: TaxJurisdictionService, useValue: taxJurisdictionService },
+        { provide: GeocodingService, useValue: geocodingService },
         { provide: DataSource, useValue: dataSource },
         { provide: PaymentsService, useValue: paymentsService },
         { provide: PointsService, useValue: pointsService },
@@ -2242,6 +2262,11 @@ describe('OrdersService', () => {
         unit: null,
         reference: 'frente al colmado',
         postalCode: '10451',
+        // El snapshot lleva adentro lo que derivó el servidor. Esta fila de
+        // libreta es vieja (sin geocodificar), así que los tres van en null.
+        city: null,
+        state: null,
+        county: null,
       });
     });
 
@@ -3371,6 +3396,483 @@ describe('OrdersService', () => {
   // status = QUOTED, quotedAt set.
   // If ANY item requires a quote, the whole order stays PENDING_QUOTE.
   // ─────────────────────────────────────────────────────────────────────────
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Tasa de impuesto POR ZONA de reparto.
+  //
+  // New Jersey cobra 6.625% y NYC 8.875%: con una sola tasa global se le
+  // cobraba de más a uno y de menos al otro. La tasa se resuelve al CREAR la
+  // orden (es la dirección del cliente en ese momento) y se congela en
+  // `orders.tax_rate`, que hasta ahora era una constante decorativa.
+  // ─────────────────────────────────────────────────────────────────────────
+
+  describe('create — tasa de impuesto por zona', () => {
+    const NJ_RATE = 0.06625;
+    const skipProduct = fakeProduct({ id: 'prod-water', requiresQuote: false });
+
+    /** Corre create() y devuelve el objeto que recibió orderRepo.create(). */
+    async function captureCreated(
+      dto: import('./dto/create-order.dto').CreateOrderDto,
+      products: Product[] = [skipProduct],
+    ): Promise<Partial<Order>> {
+      productsRepo.find.mockResolvedValue(products);
+      let captured: Partial<Order> = {};
+
+      (dataSource.transaction as jest.Mock).mockImplementation(
+        async (cb: (mgr: EntityManager) => Promise<unknown>) => {
+          const orderRepo = makeRepoMock<Order>();
+          const itemRepo = makeRepoMock<OrderItem>();
+          orderRepo.create.mockImplementation((d) => {
+            captured = d as Partial<Order>;
+            return { ...d, id: 'order-1' } as Order;
+          });
+          orderRepo.save.mockResolvedValue(fakeOrder());
+          orderRepo.update.mockResolvedValue({ affected: 1 } as never);
+          itemRepo.save.mockResolvedValue({} as never);
+          itemRepo.create.mockImplementation((d) => d as OrderItem);
+          const mgr = {
+            getRepository: (entity: unknown) => {
+              if (entity === Order) return orderRepo;
+              if (entity === OrderItem) return itemRepo;
+              return makeRepoMock();
+            },
+          };
+          return cb(mgr as unknown as EntityManager);
+        },
+      );
+      ordersRepo.findOne.mockResolvedValue(
+        fakeOrder({ customer: fakeUser() as never, items: [] }),
+      );
+      await service.create(fakeUser(UserRole.CLIENT), dto);
+      return captured;
+    }
+
+    const dtoWithZip = (postalCode?: string) =>
+      ({
+        items: [{ productId: 'prod-water', quantity: 1 }],
+        deliveryAddress: {
+          text: '123 Test',
+          lat: 40.66,
+          lng: -74.21,
+          ...(postalCode ? { postalCode } : {}),
+        },
+        paymentMethod: PaymentMethod.CASH,
+        usePoints: false,
+        useCredit: false,
+      }) as import('./dto/create-order.dto').CreateOrderDto;
+
+    it('resuelve la tasa con el ZIP del snapshot de la orden', async () => {
+      taxJurisdictionService.resolveTaxRate.mockResolvedValue({
+        zoneId: 'zone-nj',
+        jurisdiction: 'NJ',
+        taxRate: NJ_RATE,
+      });
+
+      await captureCreated(dtoWithZip('07201'));
+
+      expect(taxJurisdictionService.resolveTaxRate).toHaveBeenCalledWith(
+        expect.objectContaining({ postalCode: '07201' }),
+      );
+    });
+
+    it('congela la tasa de la zona en la orden y cobra ESA tasa', async () => {
+      taxJurisdictionService.resolveTaxRate.mockResolvedValue({
+        zoneId: 'zone-nj',
+        jurisdiction: 'NJ',
+        taxRate: NJ_RATE,
+      });
+
+      const created = await captureCreated(dtoWithZip('07201'));
+
+      // 5.00 de producto + 5.00 de envío fijo = 1000 gravable
+      // → round(1000 * 0.06625) = 66 (con la tasa vieja habrían sido 89).
+      expect(created.taxRate).toBe('0.06625');
+      expect(created.tax).toBe('0.66');
+      expect(created.totalAmount).toBe('10.66');
+    });
+
+    it('sin zona congela el fallback histórico — jamás 0', async () => {
+      // Una dirección que no cae en ninguna zona sigue pagando lo que pagaba.
+      const created = await captureCreated(dtoWithZip('90210'));
+
+      expect(created.taxRate).toBe('0.08887');
+      expect(created.tax).toBe('0.89');
+      expect(created.totalAmount).toBe('10.89');
+    });
+
+    it('sin dirección en el DTO usa la ZONA ya resuelta de la dirección por defecto', async () => {
+      // La libreta guarda la zona resuelta: preguntar por id es exacto y no
+      // depende de volver a parsear el prefijo del ZIP.
+      userAddressesRepo.findOne.mockResolvedValue({
+        id: 'a1',
+        userId: 'user-1',
+        label: 'Casa',
+        line1: 'Calle 1',
+        line2: null,
+        building: null,
+        lat: 40.66,
+        lng: -74.21,
+        instructions: null,
+        postalCode: '07201',
+        zoneId: 'zone-nj',
+        isDefault: true,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      } as unknown as UserAddress);
+      taxJurisdictionService.resolveTaxRate.mockResolvedValue({
+        zoneId: 'zone-nj',
+        jurisdiction: 'NJ',
+        taxRate: NJ_RATE,
+      });
+
+      const created = await captureCreated({
+        items: [{ productId: 'prod-water', quantity: 1 }],
+        paymentMethod: PaymentMethod.CASH,
+        usePoints: false,
+        useCredit: false,
+      } as import('./dto/create-order.dto').CreateOrderDto);
+
+      expect(taxJurisdictionService.resolveTaxRate).toHaveBeenCalledWith(
+        expect.objectContaining({ zoneId: 'zone-nj', postalCode: '07201' }),
+      );
+      expect(created.taxRate).toBe('0.06625');
+    });
+
+    /** Fila de la libreta del cliente, con su zona ya cacheada. */
+    const savedAddress = (overrides: Record<string, unknown> = {}) =>
+      ({
+        id: 'addr-nj',
+        userId: 'user-1',
+        label: 'Casa',
+        line1: 'Calle 1',
+        line2: null,
+        building: null,
+        lat: 40.66,
+        lng: -74.21,
+        instructions: null,
+        postalCode: '07201',
+        zoneId: 'zone-nj',
+        isDefault: true,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        ...overrides,
+      }) as unknown as UserAddress;
+
+    it('la dirección GUARDADA del cliente le gana al ZIP que posteó el cliente', async () => {
+      // El ZIP del snapshot lo elige el cliente: no puede ser la única fuente
+      // de la plata. Con `deliveryAddressId` la tasa sale de la fila real.
+      userAddressesRepo.findOne.mockResolvedValue(savedAddress());
+      taxJurisdictionService.resolveTaxRate.mockResolvedValue({
+        zoneId: 'zone-nj',
+        jurisdiction: 'NJ',
+        taxRate: NJ_RATE,
+      });
+
+      const created = await captureCreated({
+        ...dtoWithZip('10451'),
+        deliveryAddressId: 'addr-nj',
+      } as import('./dto/create-order.dto').CreateOrderDto);
+
+      expect(userAddressesRepo.findOne).toHaveBeenCalledWith({
+        where: { id: 'addr-nj', userId: 'user-1' },
+      });
+      expect(taxJurisdictionService.resolveTaxRate).toHaveBeenCalledWith({
+        zoneId: 'zone-nj',
+        postalCode: '07201',
+        state: null,
+        city: null,
+        county: null,
+      });
+      expect(created.taxRate).toBe('0.06625');
+    });
+
+    it('un id que no es del cliente (o ya no existe) cae al ZIP posteado', async () => {
+      // Ownership: `findOne` filtra por userId, así que el id de otro no
+      // aparece. No se rompe el pedido — se cobra como antes de que el campo
+      // existiera.
+      userAddressesRepo.findOne.mockResolvedValue(null);
+
+      await captureCreated({
+        ...dtoWithZip('10451'),
+        deliveryAddressId: 'addr-de-otro',
+      } as import('./dto/create-order.dto').CreateOrderDto);
+
+      expect(taxJurisdictionService.resolveTaxRate).toHaveBeenCalledWith({
+        zoneId: null,
+        postalCode: '10451',
+        state: null,
+        city: null,
+        county: null,
+      });
+    });
+
+    it('sin id se usa el ZIP posteado — mobile <= 1.0.8 sigue en la calle', async () => {
+      await captureCreated(dtoWithZip('10451'));
+
+      expect(userAddressesRepo.findOne).not.toHaveBeenCalled();
+      expect(taxJurisdictionService.resolveTaxRate).toHaveBeenCalledWith({
+        zoneId: null,
+        postalCode: '10451',
+        state: null,
+        city: null,
+        county: null,
+      });
+    });
+
+    it('con id y sin snapshot, la dirección guardada también arma el snapshot', async () => {
+      // La fila NO es la default: si el id no se mirara, la orden saldría sin
+      // dirección y con el fallback.
+      const row = savedAddress({ isDefault: false });
+      userAddressesRepo.findOne.mockImplementation(
+        (opts?: { where?: { id?: string } }) =>
+          Promise.resolve(opts?.where?.id === 'addr-nj' ? row : null),
+      );
+      taxJurisdictionService.resolveTaxRate.mockResolvedValue({
+        zoneId: 'zone-nj',
+        jurisdiction: 'NJ',
+        taxRate: NJ_RATE,
+      });
+
+      const created = await captureCreated({
+        items: [{ productId: 'prod-water', quantity: 1 }],
+        deliveryAddressId: 'addr-nj',
+        paymentMethod: PaymentMethod.CASH,
+        usePoints: false,
+        useCredit: false,
+      } as import('./dto/create-order.dto').CreateOrderDto);
+
+      expect(created.deliveryAddress).toEqual(
+        expect.objectContaining({ postalCode: '07201' }),
+      );
+      expect(created.taxRate).toBe('0.06625');
+    });
+
+    it('una orden sin cotizar congela la tasa igual (el impuesto llega en setQuote)', async () => {
+      // El impuesto de una PENDING_QUOTE es 0 hasta que el admin cotice, pero
+      // la TASA ya quedó fijada por la dirección a la que se pidió.
+      taxJurisdictionService.resolveTaxRate.mockResolvedValue({
+        zoneId: 'zone-nj',
+        jurisdiction: 'NJ',
+        taxRate: NJ_RATE,
+      });
+
+      const created = await captureCreated(dtoWithZip('07201'), [
+        fakeProduct({ id: 'prod-water', requiresQuote: true }),
+      ]);
+
+      expect(created.status).toBe(OrderStatus.PENDING_QUOTE);
+      expect(created.tax).toBe('0.00');
+      expect(created.taxRate).toBe('0.06625');
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Re-cotizar mientras el pedido TODAVÍA se puede re-cotizar.
+  //
+  // El flujo real del negocio es: el cliente pide (muchas veces sin dirección)
+  // → el admin pincha la dirección → el admin cotiza → el cliente autoriza. Si
+  // la tasa se congelara para siempre al crear el pedido, todo NJ pagaría el
+  // fallback de 8.887%. Se re-resuelve hasta que el pedido deja de ser
+  // repreciable: `stripePaymentIntentId` (ya hay una retención) o un estado
+  // posterior a QUOTED (el efectivo nunca tiene intent, ahí decide el estado).
+  // ─────────────────────────────────────────────────────────────────────────
+
+  describe('setQuote — re-resuelve la zona hasta que el pedido se autoriza', () => {
+    const superUser = fakeUser(UserRole.SUPER_ADMIN_DELIVERY);
+    const NJ_RATE = 0.06625;
+
+    beforeEach(() => {
+      subscriptionService.isActiveSubscriber.mockResolvedValue(false);
+      ordersRepo.update.mockResolvedValue({ affected: 1 } as never);
+    });
+
+    const quote = async (overrides: Partial<Order>) => {
+      ordersRepo.findOne.mockResolvedValue(
+        fakeOrder({
+          status: OrderStatus.PENDING_QUOTE,
+          subtotal: '10.00',
+          items: [],
+          deliveryAddress: { text: '123 Test St', postalCode: '07201' },
+          ...overrides,
+        }),
+      );
+      await service.setQuote('order-1', 300, superUser);
+      return ordersRepo.update.mock.calls[0][1] as Record<string, unknown>;
+    };
+
+    it('re-resuelve por el ZIP del pedido y GUARDA la tasa nueva', async () => {
+      // El pedido nació sin dirección (fallback congelado); el admin la pinchó
+      // y recién ahora se sabe que es New Jersey.
+      taxJurisdictionService.resolveTaxRate.mockResolvedValue({
+        zoneId: 'zone-nj',
+        jurisdiction: 'NJ',
+        taxRate: NJ_RATE,
+      });
+
+      const updateCall = await quote({ taxRate: '0.08887' });
+
+      expect(taxJurisdictionService.resolveTaxRate).toHaveBeenCalledWith({
+        zoneId: null,
+        postalCode: '07201',
+        state: null,
+        city: null,
+        county: null,
+      });
+      // 1000 + 300 = 1300 gravable → round(1300 * 0.06625) = 86
+      // (con el fallback habrían sido 116: el cliente de NJ pagaría de más).
+      expect(updateCall.taxRate).toBe('0.06625');
+      expect(updateCall.tax).toBe('0.86');
+      expect(updateCall.totalAmount).toBe('13.86');
+    });
+
+    it('NO vuelve a resolver la zona cuando el pedido YA fue autorizado', async () => {
+      // Con retención de tarjeta ya tomada, re-resolver re-cotizaría una venta
+      // que el cliente ya aceptó y pagó. Manda la tasa congelada.
+      const updateCall = await quote({
+        status: OrderStatus.QUOTED,
+        taxRate: '0.06625',
+        stripePaymentIntentId: 'pi_live_1',
+      });
+
+      expect(taxJurisdictionService.resolveTaxRate).not.toHaveBeenCalled();
+      expect(updateCall.taxRate).toBeUndefined();
+      expect(updateCall.tax).toBe('0.86');
+    });
+
+    it('una tasa ilegible en un pedido autorizado cae en el fallback, nunca en 0', async () => {
+      const updateCall = await quote({
+        status: OrderStatus.QUOTED,
+        taxRate: '',
+        stripePaymentIntentId: 'pi_live_1',
+      });
+
+      // round(1300 * 0.08887) = 116
+      expect(updateCall.tax).toBe('1.16');
+    });
+  });
+
+  describe('setDeliveryAddress — re-precia la tasa mientras se pueda', () => {
+    const admin = fakeUser(UserRole.SUPER_ADMIN_DELIVERY);
+    const NJ_RATE = 0.06625;
+    const njAddress = {
+      text: '123 Elizabeth Ave',
+      lat: 40.66,
+      lng: -74.21,
+      postalCode: '07201',
+    } as import('./dto/create-order.dto').DeliveryAddressDto;
+
+    beforeEach(() => {
+      ordersRepo.update.mockResolvedValue({ affected: 1 } as never);
+      userAddressesRepo.count.mockResolvedValue(1);
+    });
+
+    const pin = async (overrides: Partial<Order>) => {
+      ordersRepo.findOne.mockResolvedValue(
+        fakeOrder({ status: OrderStatus.PENDING_QUOTE, ...overrides }),
+      );
+      await service.setDeliveryAddress('order-1', njAddress, admin);
+      return ordersRepo.update.mock.calls[0][1] as Record<string, unknown>;
+    };
+
+    it('un pedido sin cotizar toma la tasa de la dirección recién pinchada', async () => {
+      // Sin esto el admin cotiza mirando un 8.887% que ya no corresponde.
+      taxJurisdictionService.resolveTaxRate.mockResolvedValue({
+        zoneId: 'zone-nj',
+        jurisdiction: 'NJ',
+        taxRate: NJ_RATE,
+      });
+
+      const updateCall = await pin({ taxRate: '0.08887' });
+
+      expect(taxJurisdictionService.resolveTaxRate).toHaveBeenCalledWith(
+        expect.objectContaining({ postalCode: '07201' }),
+      );
+      expect(updateCall.taxRate).toBe('0.06625');
+      // Sigue sin impuesto: el impuesto de un PENDING_QUOTE llega en setQuote.
+      expect(updateCall.tax).toBeUndefined();
+    });
+
+    it('un pedido YA autorizado conserva su tasa congelada', async () => {
+      const updateCall = await pin({
+        status: OrderStatus.QUOTED,
+        taxRate: '0.06625',
+        stripePaymentIntentId: 'pi_live_1',
+      });
+
+      expect(taxJurisdictionService.resolveTaxRate).not.toHaveBeenCalled();
+      expect(updateCall.taxRate).toBeUndefined();
+    });
+
+    it('un pedido en efectivo ya confirmado conserva su tasa: manda el ESTADO', async () => {
+      // El efectivo nunca tiene PaymentIntent, así que el único dato que dice
+      // "esta venta ya está cerrada" es el estado.
+      const updateCall = await pin({
+        status: OrderStatus.CONFIRMED_BY_COLMADO,
+        taxRate: '0.06625',
+        stripePaymentIntentId: null,
+      });
+
+      expect(taxJurisdictionService.resolveTaxRate).not.toHaveBeenCalled();
+      expect(updateCall.taxRate).toBeUndefined();
+    });
+
+    it('un pedido ya cotizado re-precia el IMPUESTO junto con la tasa', async () => {
+      // Cambiar `tax_rate` sin recalcular `tax` dejaría la orden diciendo que
+      // cobró 6.625% sobre un monto calculado al 8.887%.
+      taxJurisdictionService.resolveTaxRate.mockResolvedValue({
+        zoneId: 'zone-nj',
+        jurisdiction: 'NJ',
+        taxRate: NJ_RATE,
+      });
+
+      const updateCall = await pin({
+        status: OrderStatus.QUOTED,
+        taxRate: '0.08887',
+        subtotal: '10.00',
+        shipping: '3.00',
+        tax: '1.16',
+        totalAmount: '14.16',
+        items: [],
+      });
+
+      expect(updateCall.taxRate).toBe('0.06625');
+      expect(updateCall.tax).toBe('0.86');
+      expect(updateCall.totalAmount).toBe('13.86');
+    });
+
+    it('pinchar dirección y después cotizar cobra la tasa de la zona nueva', async () => {
+      // El camino real completo: pedido sin dirección (fallback congelado) →
+      // el admin pincha NJ → el admin cotiza.
+      taxJurisdictionService.resolveTaxRate.mockResolvedValue({
+        zoneId: 'zone-nj',
+        jurisdiction: 'NJ',
+        taxRate: NJ_RATE,
+      });
+      subscriptionService.isActiveSubscriber.mockResolvedValue(false);
+
+      const pinned = await pin({ taxRate: '0.08887', deliveryAddress: null });
+      expect(pinned.taxRate).toBe('0.06625');
+
+      ordersRepo.update.mockClear();
+      ordersRepo.findOne.mockResolvedValue(
+        fakeOrder({
+          status: OrderStatus.PENDING_QUOTE,
+          subtotal: '10.00',
+          items: [],
+          taxRate: pinned.taxRate as string,
+          deliveryAddress: { text: '123 Elizabeth Ave', postalCode: '07201' },
+        }),
+      );
+      await service.setQuote('order-1', 300, admin);
+      const quoted = ordersRepo.update.mock.calls[0][1] as Record<
+        string,
+        unknown
+      >;
+
+      expect(quoted.taxRate).toBe('0.06625');
+      expect(quoted.tax).toBe('0.86');
+    });
+  });
 
   describe('create — skip cotización (auto-quote)', () => {
     const skipProduct = fakeProduct({ id: 'prod-water', requiresQuote: false });
@@ -5369,4 +5871,961 @@ describe('OrdersService', () => {
       expect(paymentsService.cancelIntent).not.toHaveBeenCalled();
     });
   });
+  // ---------------------------------------------------------------------------
+  // La JURISDICCIÓN entra a la orden
+  //
+  // El ZIP lo escribe el cliente. Hasta acá era la única fuente de la tasa, así
+  // que el cliente elegía cuánto impuesto pagaba. Ahora, cuando el pedido llega
+  // con una chincheta y sin dirección guardada, el servidor geocodifica ESA
+  // chincheta antes de abrir la transacción y la orden congela también QUÉ LEY le
+  // puso precio.
+  // ---------------------------------------------------------------------------
+
+  describe('OrdersService — jurisdicción fiscal del pedido', () => {
+    const NJ_RATE = 0.06625;
+    const NYC_RATE = 0.08875;
+
+    const ELIZABETH = {
+      houseNumber: '1101',
+      road: 'Elizabeth Avenue',
+      city: 'Elizabeth',
+      county: 'Union County',
+      state: 'NJ',
+      postalCode: '07201',
+      countryCode: 'us',
+    };
+
+    describe('create', () => {
+      const skipProduct = fakeProduct({ id: 'prod-water', requiresQuote: false });
+
+      async function captureCreated(
+        dto: import('./dto/create-order.dto').CreateOrderDto,
+      ): Promise<Partial<Order>> {
+        productsRepo.find.mockResolvedValue([skipProduct]);
+        let captured: Partial<Order> = {};
+        (dataSource.transaction as jest.Mock).mockImplementation(
+          async (cb: (mgr: EntityManager) => Promise<unknown>) => {
+            const orderRepo = makeRepoMock<Order>();
+            const itemRepo = makeRepoMock<OrderItem>();
+            orderRepo.create.mockImplementation((d) => {
+              captured = d as Partial<Order>;
+              return { ...d, id: 'order-1' } as Order;
+            });
+            orderRepo.save.mockResolvedValue(fakeOrder());
+            orderRepo.update.mockResolvedValue({ affected: 1 } as never);
+            itemRepo.save.mockResolvedValue({} as never);
+            itemRepo.create.mockImplementation((d) => d as OrderItem);
+            return cb({
+              getRepository: (entity: unknown) => {
+                if (entity === Order) return orderRepo;
+                if (entity === OrderItem) return itemRepo;
+                return makeRepoMock();
+              },
+            } as unknown as EntityManager);
+          },
+        );
+        ordersRepo.findOne.mockResolvedValue(
+          fakeOrder({ customer: fakeUser() as never, items: [] }),
+        );
+        await service.create(fakeUser(UserRole.CLIENT), dto);
+        return captured;
+      }
+
+      const pinnedDto = (postalCode?: string) =>
+        ({
+          items: [{ productId: 'prod-water', quantity: 1 }],
+          deliveryAddress: {
+            text: '1101 Elizabeth Ave',
+            lat: 40.6639,
+            lng: -74.2107,
+            ...(postalCode ? { postalCode } : {}),
+          },
+          paymentMethod: PaymentMethod.CASH,
+          usePoints: false,
+          useCredit: false,
+        }) as import('./dto/create-order.dto').CreateOrderDto;
+
+      it('geocodifica la chincheta posteada y resuelve la tasa con el ESTADO', async () => {
+        geocodingService.reverse.mockResolvedValue(ELIZABETH);
+        taxJurisdictionService.resolveTaxRate.mockResolvedValue({
+          zoneId: null,
+          jurisdiction: 'NJ',
+          taxRate: NJ_RATE,
+        });
+
+        await captureCreated(pinnedDto('07201'));
+
+        expect(geocodingService.reverse).toHaveBeenCalledWith(40.6639, -74.2107);
+        expect(taxJurisdictionService.resolveTaxRate).toHaveBeenCalledWith(
+          expect.objectContaining({
+            state: 'NJ',
+            city: 'Elizabeth',
+            county: 'Union County',
+            postalCode: '07201',
+          }),
+        );
+      });
+
+      it('guarda ciudad/estado/condado DENTRO del snapshot de la orden', async () => {
+        // El snapshot se congela: si el cliente borra la dirección mañana, el
+        // pedido tiene que poder seguir explicando por qué pagó lo que pagó.
+        geocodingService.reverse.mockResolvedValue(ELIZABETH);
+
+        const created = await captureCreated(pinnedDto('07201'));
+
+        expect(created.deliveryAddress).toMatchObject({
+          city: 'Elizabeth',
+          state: 'NJ',
+          county: 'Union County',
+        });
+      });
+
+      it('sin ZIP posteado, el del geocoder entra al snapshot', async () => {
+        geocodingService.reverse.mockResolvedValue(ELIZABETH);
+
+        const created = await captureCreated(pinnedDto());
+
+        expect(created.deliveryAddress).toMatchObject({ postalCode: '07201' });
+      });
+
+      it('congela la LEY junto con la tasa', async () => {
+        geocodingService.reverse.mockResolvedValue(ELIZABETH);
+        taxJurisdictionService.resolveTaxRate.mockResolvedValue({
+          zoneId: null,
+          jurisdiction: 'NJ',
+          taxRate: NJ_RATE,
+        });
+
+        const created = await captureCreated(pinnedDto('07201'));
+
+        expect(created.taxJurisdiction).toBe('NJ');
+        expect(created.taxRate).toBe('0.06625');
+      });
+
+      it('sin jurisdicción el pedido congela null y el fallback histórico', async () => {
+        geocodingService.reverse.mockResolvedValue(null);
+
+        const created = await captureCreated(pinnedDto('90210'));
+
+        expect(created.taxJurisdiction).toBeNull();
+        expect(created.taxRate).toBe('0.08887');
+      });
+
+      it('si el geocoder no contesta, el pedido se crea igual con el ZIP posteado', async () => {
+        geocodingService.reverse.mockResolvedValue(null);
+        taxJurisdictionService.resolveTaxRate.mockResolvedValue({
+          zoneId: null,
+          jurisdiction: 'NJ',
+          taxRate: NJ_RATE,
+        });
+
+        const created = await captureCreated(pinnedDto('07201'));
+
+        expect(created.taxRate).toBe('0.06625');
+        expect(taxJurisdictionService.resolveTaxRate).toHaveBeenCalledWith(
+          expect.objectContaining({ postalCode: '07201', state: null }),
+        );
+      });
+
+      it('con deliveryAddressId NO se geocodifica: la fila guardada ya sabe dónde está', async () => {
+        // La fila la geocodificó AddressesService al guardarla. Volver a pegarle
+        // a Nominatim en cada pedido es gastar la cuota de 1 request/segundo.
+        userAddressesRepo.findOne.mockResolvedValue({
+          id: 'addr-nj',
+          userId: 'user-1',
+          label: 'Casa',
+          line1: '1101 Elizabeth Ave',
+          line2: null,
+          building: null,
+          houseNumber: '1101',
+          lat: 40.6639,
+          lng: -74.2107,
+          instructions: null,
+          postalCode: '07201',
+          city: 'Elizabeth',
+          state: 'NJ',
+          county: 'Union County',
+          zoneId: 'zone-nj',
+          isDefault: true,
+        } as unknown as UserAddress);
+        taxJurisdictionService.resolveTaxRate.mockResolvedValue({
+          zoneId: 'zone-nj',
+          jurisdiction: 'NJ',
+          taxRate: NJ_RATE,
+        });
+
+        const created = await captureCreated({
+          items: [{ productId: 'prod-water', quantity: 1 }],
+          deliveryAddressId: 'addr-nj',
+          paymentMethod: PaymentMethod.CASH,
+          usePoints: false,
+          useCredit: false,
+        } as import('./dto/create-order.dto').CreateOrderDto);
+
+        expect(geocodingService.reverse).not.toHaveBeenCalled();
+        expect(taxJurisdictionService.resolveTaxRate).toHaveBeenCalledWith({
+          zoneId: 'zone-nj',
+          postalCode: '07201',
+          state: 'NJ',
+          city: 'Elizabeth',
+          county: 'Union County',
+        });
+        // El snapshot que arma la fila guardada arrastra el número de puerta y
+        // la jurisdicción: antes emitía houseNumber: null siempre.
+        expect(created.deliveryAddress).toMatchObject({
+          houseNumber: '1101',
+          city: 'Elizabeth',
+          state: 'NJ',
+          county: 'Union County',
+        });
+        expect(created.taxJurisdiction).toBe('NJ');
+      });
+    });
+
+    describe('setDeliveryAddress', () => {
+      const admin = fakeUser(UserRole.SUPER_ADMIN_DELIVERY);
+      const BRONX = {
+        houseNumber: '1728',
+        road: 'Williamsbridge Road',
+        city: 'New York',
+        county: 'Bronx County',
+        state: 'NY',
+        postalCode: '10462',
+        countryCode: 'us',
+      };
+
+      beforeEach(() => {
+        ordersRepo.update.mockResolvedValue({ affected: 1 } as never);
+        userAddressesRepo.count.mockResolvedValue(1);
+      });
+
+      const pin = async (
+        address: import('./dto/create-order.dto').DeliveryAddressDto,
+        overrides: Partial<Order> = {},
+      ) => {
+        ordersRepo.findOne.mockResolvedValue(
+          fakeOrder({ status: OrderStatus.PENDING_QUOTE, ...overrides }),
+        );
+        await service.setDeliveryAddress('order-1', address, admin);
+        return ordersRepo.update.mock.calls[0][1] as Record<string, unknown>;
+      };
+
+      it('geocodifica la chincheta del admin y resuelve por estado/condado', async () => {
+        geocodingService.reverse.mockResolvedValue(BRONX);
+        taxJurisdictionService.resolveTaxRate.mockResolvedValue({
+          zoneId: null,
+          jurisdiction: 'NYC',
+          taxRate: NYC_RATE,
+        });
+
+        const updateCall = await pin({
+          text: '1728 Williamsbridge Rd',
+          lat: 40.8448,
+          lng: -73.8648,
+        } as import('./dto/create-order.dto').DeliveryAddressDto);
+
+        expect(geocodingService.reverse).toHaveBeenCalledWith(40.8448, -73.8648);
+        expect(taxJurisdictionService.resolveTaxRate).toHaveBeenCalledWith(
+          expect.objectContaining({ state: 'NY', county: 'Bronx County' }),
+        );
+        expect(updateCall.taxRate).toBe('0.08875');
+        expect(updateCall.taxJurisdiction).toBe('NYC');
+        expect(updateCall.deliveryAddress).toMatchObject({
+          city: 'New York',
+          state: 'NY',
+          county: 'Bronx County',
+          // El admin no escribió ni ZIP ni número: los completa el geocoder.
+          postalCode: '10462',
+          houseNumber: '1728',
+        });
+      });
+
+      it('lo que ESCRIBIÓ el admin le gana al geocoder', async () => {
+        geocodingService.reverse.mockResolvedValue(BRONX);
+
+        const updateCall = await pin({
+          text: '1730 Williamsbridge Rd',
+          lat: 40.8448,
+          lng: -73.8648,
+          postalCode: '10461',
+          houseNumber: '1730',
+        } as import('./dto/create-order.dto').DeliveryAddressDto);
+
+        expect(updateCall.deliveryAddress).toMatchObject({
+          postalCode: '10461',
+          houseNumber: '1730',
+          state: 'NY',
+        });
+      });
+
+      it('un pedido ya cerrado NO se re-precia aunque se re-pinche', async () => {
+        const updateCall = await pin(
+          {
+            text: '1728 Williamsbridge Rd',
+            lat: 40.8448,
+            lng: -73.8648,
+          } as import('./dto/create-order.dto').DeliveryAddressDto,
+          {
+            status: OrderStatus.QUOTED,
+            taxRate: '0.06625',
+            stripePaymentIntentId: 'pi_live_1',
+          },
+        );
+
+        expect(taxJurisdictionService.resolveTaxRate).not.toHaveBeenCalled();
+        expect(updateCall.taxRate).toBeUndefined();
+        expect(updateCall.taxJurisdiction).toBeUndefined();
+      });
+
+      it('la dirección auto-guardada se lleva el número de puerta y la jurisdicción', async () => {
+        // En la web el cliente no carga direcciones: esta chincheta ES su
+        // libreta. Si el número de puerta no viajara, la primera dirección del
+        // cliente nacería sin él.
+        geocodingService.reverse.mockResolvedValue(BRONX);
+        userAddressesRepo.count.mockResolvedValue(0);
+        deliveryZonesRepo.find.mockResolvedValue([]);
+        userAddressesRepo.save.mockResolvedValue({} as never);
+        userAddressesRepo.create.mockImplementation((d) => d as UserAddress);
+
+        await pin({
+          text: '1728 Williamsbridge Rd',
+          lat: 40.8448,
+          lng: -73.8648,
+          unit: 'Apt 3B',
+          reference: 'frente al colmado',
+        } as import('./dto/create-order.dto').DeliveryAddressDto);
+
+        expect(userAddressesRepo.create).toHaveBeenCalledWith(
+          expect.objectContaining({
+            houseNumber: '1728',
+            line2: 'Apt 3B',
+            instructions: 'frente al colmado',
+            postalCode: '10462',
+            city: 'New York',
+            state: 'NY',
+            county: 'Bronx County',
+          }),
+        );
+      });
+    });
+
+    describe('setQuote', () => {
+      const admin = fakeUser(UserRole.SUPER_ADMIN_DELIVERY);
+
+      beforeEach(() => {
+        ordersRepo.update.mockResolvedValue({ affected: 1 } as never);
+        subscriptionService.isActiveSubscriber.mockResolvedValue(false);
+      });
+
+      it('re-resuelve con el estado/ciudad/condado que quedaron en el snapshot', async () => {
+        // Al cotizar no se vuelve a geocodificar: el snapshot ya tiene la
+        // respuesta, congelada cuando se pinchó la dirección.
+        taxJurisdictionService.resolveTaxRate.mockResolvedValue({
+          zoneId: null,
+          jurisdiction: 'NYC',
+          taxRate: NYC_RATE,
+        });
+        ordersRepo.findOne.mockResolvedValue(
+          fakeOrder({
+            status: OrderStatus.PENDING_QUOTE,
+            subtotal: '10.00',
+            items: [],
+            deliveryAddress: {
+              text: '1728 Williamsbridge Rd',
+              postalCode: '10462',
+              city: 'New York',
+              state: 'NY',
+              county: 'Bronx County',
+            },
+          }),
+        );
+
+        await service.setQuote('order-1', 300, admin);
+        const updateCall = ordersRepo.update.mock.calls[0][1] as Record<
+          string,
+          unknown
+        >;
+
+        expect(geocodingService.reverse).not.toHaveBeenCalled();
+        expect(taxJurisdictionService.resolveTaxRate).toHaveBeenCalledWith(
+          expect.objectContaining({
+            state: 'NY',
+            city: 'New York',
+            county: 'Bronx County',
+            postalCode: '10462',
+          }),
+        );
+        expect(updateCall.taxRate).toBe('0.08875');
+        expect(updateCall.taxJurisdiction).toBe('NYC');
+      });
+
+      it('un pedido ya autorizado conserva su jurisdicción congelada', async () => {
+        ordersRepo.findOne.mockResolvedValue(
+          fakeOrder({
+            status: OrderStatus.QUOTED,
+            subtotal: '10.00',
+            items: [],
+            taxRate: '0.06625',
+            taxJurisdiction: 'NJ',
+            stripePaymentIntentId: 'pi_live_1',
+          }),
+        );
+
+        await service.setQuote('order-1', 300, admin);
+        const updateCall = ordersRepo.update.mock.calls[0][1] as Record<
+          string,
+          unknown
+        >;
+
+        expect(taxJurisdictionService.resolveTaxRate).not.toHaveBeenCalled();
+        expect(updateCall.taxJurisdiction).toBeUndefined();
+      });
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Ronda 4 — el snapshot CONGELADO y la consulta de impuesto tienen que
+  // llevar exactamente los mismos datos de jurisdicción.
+  //
+  // Producción postea SIEMPRE las dos cosas: `deliveryAddressId` Y
+  // `deliveryAddress` (ver checkout.tsx en web y en mobile). Con las dos, el
+  // snapshot se congelaba con `state: null` — la geocodificación quedaba
+  // apagada por el id y la fila de la libreta no se copiaba — y después
+  // `setQuote` re-resolvía SÓLO con el ZIP del JSONB. Una dirección del Bronx
+  // con un ZIP de New Jersey pasaba de 8.875% a 6.625% entre que se creaba el
+  // pedido y se lo cotizaba: cobrar de menos se paga de la caja propia.
+  // ─────────────────────────────────────────────────────────────────────────
+  describe('create — el snapshot hereda la jurisdicción de la dirección guardada', () => {
+    const NYC_RATE = 0.08875;
+    const NJ_RATE = 0.06625;
+    const skipProduct = fakeProduct({ id: 'prod-water', requiresQuote: false });
+
+    /** Corre create() y devuelve el objeto que recibió orderRepo.create(). */
+    async function captureCreated(
+      dto: import('./dto/create-order.dto').CreateOrderDto,
+    ): Promise<Partial<Order>> {
+      productsRepo.find.mockResolvedValue([skipProduct]);
+      let captured: Partial<Order> = {};
+
+      (dataSource.transaction as jest.Mock).mockImplementation(
+        async (cb: (mgr: EntityManager) => Promise<unknown>) => {
+          const orderRepo = makeRepoMock<Order>();
+          const itemRepo = makeRepoMock<OrderItem>();
+          orderRepo.create.mockImplementation((d) => {
+            captured = d as Partial<Order>;
+            return { ...d, id: 'order-1' } as Order;
+          });
+          orderRepo.save.mockResolvedValue(fakeOrder());
+          orderRepo.update.mockResolvedValue({ affected: 1 } as never);
+          itemRepo.save.mockResolvedValue({} as never);
+          itemRepo.create.mockImplementation((d) => d as OrderItem);
+          const mgr = {
+            getRepository: (entity: unknown) => {
+              if (entity === Order) return orderRepo;
+              if (entity === OrderItem) return itemRepo;
+              return makeRepoMock();
+            },
+          };
+          return cb(mgr as unknown as EntityManager);
+        },
+      );
+      ordersRepo.findOne.mockResolvedValue(
+        fakeOrder({ customer: fakeUser() as never, items: [] }),
+      );
+      await service.create(fakeUser(UserRole.CLIENT), dto);
+      return captured;
+    }
+
+    /** Fila de la libreta ya geocodificada: el Bronx, con estado y condado. */
+    const bronxRow = (overrides: Record<string, unknown> = {}) =>
+      ({
+        id: 'addr-bronx',
+        userId: 'user-1',
+        label: 'Casa',
+        line1: '1728 Williamsbridge Rd',
+        line2: null,
+        building: null,
+        lat: 40.8448,
+        lng: -73.8648,
+        instructions: null,
+        postalCode: '10462',
+        houseNumber: '1728',
+        city: 'New York',
+        county: 'Bronx County',
+        state: 'NY',
+        zoneId: 'zone-nyc',
+        isDefault: true,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        ...overrides,
+      }) as unknown as UserAddress;
+
+    /** Lo que postea el checkout de verdad: el id Y el snapshot. */
+    const productionDto = (
+      snapshot: Record<string, unknown> = {},
+      overrides: Record<string, unknown> = {},
+    ) =>
+      ({
+        items: [{ productId: 'prod-water', quantity: 1 }],
+        deliveryAddressId: 'addr-bronx',
+        deliveryAddress: {
+          text: '1728 Williamsbridge Rd',
+          lat: 40.8448,
+          lng: -73.8648,
+          postalCode: '10462',
+          ...snapshot,
+        },
+        paymentMethod: PaymentMethod.CASH,
+        usePoints: false,
+        useCredit: false,
+        ...overrides,
+      }) as unknown as import('./dto/create-order.dto').CreateOrderDto;
+
+    const BRONX_PLACE = {
+      houseNumber: '1728',
+      road: 'Williamsbridge Road',
+      city: 'New York',
+      county: 'Bronx County',
+      state: 'NY',
+      postalCode: '10462',
+      countryCode: 'us',
+    };
+
+    it('congela ciudad, estado, condado y número de puerta de la fila guardada', async () => {
+      // El payload de producción NO manda houseNumber (userAddressToGeoAddress
+      // no lo mapea): si la fila no se copiara, el pedido quedaría sin número
+      // de puerta y sin estado, que es justo lo que decide el impuesto.
+      userAddressesRepo.findOne.mockResolvedValue(bronxRow());
+      taxJurisdictionService.resolveTaxRate.mockResolvedValue({
+        zoneId: 'zone-nyc',
+        jurisdiction: 'NYC',
+        taxRate: NYC_RATE,
+      });
+
+      const created = await captureCreated(productionDto());
+
+      expect(created.deliveryAddress).toEqual(
+        expect.objectContaining({
+          city: 'New York',
+          state: 'NY',
+          county: 'Bronx County',
+          houseNumber: '1728',
+          postalCode: '10462',
+        }),
+      );
+      expect(created.taxJurisdiction).toBe('NYC');
+      expect(created.taxRate).toBe('0.08875');
+    });
+
+    it('lo que se pregunta y lo que se congela son EL MISMO destino', async () => {
+      // Si divergen, setQuote re-resuelve con otros datos y la tasa se mueve
+      // sola entre que el cliente pide y el admin cotiza.
+      userAddressesRepo.findOne.mockResolvedValue(bronxRow());
+
+      const created = await captureCreated(productionDto());
+
+      const query = taxJurisdictionService.resolveTaxRate.mock
+        .calls[0][0] as Record<string, unknown>;
+      const snapshot = created.deliveryAddress!;
+      expect(query).toEqual({
+        zoneId: 'zone-nyc',
+        postalCode: '10462',
+        state: 'NY',
+        city: 'New York',
+        county: 'Bronx County',
+      });
+      expect({
+        postalCode: snapshot.postalCode ?? null,
+        state: snapshot.state ?? null,
+        city: snapshot.city ?? null,
+        county: snapshot.county ?? null,
+      }).toEqual({
+        postalCode: query.postalCode,
+        state: query.state,
+        city: query.city,
+        county: query.county,
+      });
+    });
+
+    it('el texto, la chincheta y las referencias que refinó el cliente se respetan', async () => {
+      // La fila manda en los hechos del servidor (estado/ciudad/condado); lo
+      // que el cliente escribió sobre CÓMO llegar es suyo.
+      userAddressesRepo.findOne.mockResolvedValue(bronxRow());
+
+      const created = await captureCreated(
+        productionDto({
+          text: '1728 Williamsbridge Rd (portón verde)',
+          building: 'Torre B',
+          unit: '4C',
+          reference: 'Timbre roto, llamar',
+        }),
+      );
+
+      expect(created.deliveryAddress).toEqual(
+        expect.objectContaining({
+          text: '1728 Williamsbridge Rd (portón verde)',
+          building: 'Torre B',
+          unit: '4C',
+          reference: 'Timbre roto, llamar',
+          state: 'NY',
+        }),
+      );
+    });
+
+    it('una fila de NY con un ZIP de NJ posteado sigue en NYC, también al cotizar', async () => {
+      // El ZIP del snapshot lo escribe el cliente. Con la fila propia adentro
+      // del snapshot, el estado manda y cotizar no puede bajar la tasa.
+      userAddressesRepo.findOne.mockResolvedValue(bronxRow());
+      taxJurisdictionService.resolveTaxRate.mockResolvedValue({
+        zoneId: 'zone-nyc',
+        jurisdiction: 'NYC',
+        taxRate: NYC_RATE,
+      });
+
+      const created = await captureCreated(
+        productionDto({ postalCode: '07201' }),
+      );
+
+      expect(created.taxJurisdiction).toBe('NYC');
+
+      // --- y ahora el admin cotiza ESE pedido ------------------------------
+      taxJurisdictionService.resolveTaxRate.mockClear();
+      ordersRepo.update.mockResolvedValue({ affected: 1 } as never);
+      subscriptionService.isActiveSubscriber.mockResolvedValue(false);
+      ordersRepo.findOne.mockResolvedValue(
+        fakeOrder({
+          status: OrderStatus.PENDING_QUOTE,
+          subtotal: '10.00',
+          items: [],
+          taxRate: created.taxRate as string,
+          taxJurisdiction: created.taxJurisdiction as string,
+          deliveryAddress: created.deliveryAddress as never,
+        }),
+      );
+
+      await service.setQuote(
+        'order-1',
+        300,
+        fakeUser(UserRole.SUPER_ADMIN_DELIVERY),
+      );
+
+      expect(taxJurisdictionService.resolveTaxRate).toHaveBeenCalledWith({
+        zoneId: null,
+        postalCode: '10462',
+        state: 'NY',
+        city: 'New York',
+        county: 'Bronx County',
+      });
+      const updateCall = ordersRepo.update.mock.calls[0][1] as Record<
+        string,
+        unknown
+      >;
+      expect(updateCall.taxRate).toBe('0.08875');
+      expect(updateCall.taxJurisdiction).toBe('NYC');
+    });
+
+    it('una fila de NJ SIN ZIP sigue pagando New Jersey al cotizar', async () => {
+      // Antes: el snapshot quedaba sin estado y sin ZIP → jurisdicción null y
+      // fallback 8.887%. El cliente de Elizabeth pagaba de más.
+      userAddressesRepo.findOne.mockResolvedValue(
+        bronxRow({
+          id: 'addr-nj',
+          line1: '1101 Elizabeth Ave',
+          lat: 40.6639,
+          lng: -74.2107,
+          postalCode: null,
+          houseNumber: '1101',
+          city: 'Elizabeth',
+          county: 'Union County',
+          state: 'NJ',
+          zoneId: null,
+        }),
+      );
+      taxJurisdictionService.resolveTaxRate.mockResolvedValue({
+        zoneId: null,
+        jurisdiction: 'NJ',
+        taxRate: NJ_RATE,
+      });
+
+      const created = await captureCreated(
+        productionDto(
+          { text: '1101 Elizabeth Ave', lat: 40.6639, lng: -74.2107, postalCode: undefined },
+          { deliveryAddressId: 'addr-nj' },
+        ),
+      );
+
+      expect(created.deliveryAddress).toEqual(
+        expect.objectContaining({ state: 'NJ', county: 'Union County' }),
+      );
+      expect(created.taxJurisdiction).toBe('NJ');
+
+      taxJurisdictionService.resolveTaxRate.mockClear();
+      ordersRepo.update.mockResolvedValue({ affected: 1 } as never);
+      subscriptionService.isActiveSubscriber.mockResolvedValue(false);
+      ordersRepo.findOne.mockResolvedValue(
+        fakeOrder({
+          status: OrderStatus.PENDING_QUOTE,
+          subtotal: '10.00',
+          items: [],
+          taxRate: created.taxRate as string,
+          deliveryAddress: created.deliveryAddress as never,
+        }),
+      );
+
+      await service.setQuote(
+        'order-1',
+        300,
+        fakeUser(UserRole.SUPER_ADMIN_DELIVERY),
+      );
+
+      expect(taxJurisdictionService.resolveTaxRate).toHaveBeenCalledWith({
+        zoneId: null,
+        postalCode: null,
+        state: 'NJ',
+        city: 'Elizabeth',
+        county: 'Union County',
+      });
+      const updateCall = ordersRepo.update.mock.calls[0][1] as Record<
+        string,
+        unknown
+      >;
+      expect(updateCall.taxJurisdiction).toBe('NJ');
+      expect(updateCall.taxRate).toBe('0.06625');
+    });
+
+    it('una fila SIN ZIP usa el posteado, y lo congela: preguntar y congelar no se separan', async () => {
+      // Borde real de la libreta vieja: la fila tiene estado (backfilleada)
+      // pero nunca tuvo código postal. Si la consulta usara null y el snapshot
+      // guardara el ZIP posteado, `setQuote` resolvería la zona con un dato que
+      // al crear el pedido no se miró — y un override de zona movería la tasa.
+      userAddressesRepo.findOne.mockResolvedValue(
+        bronxRow({ postalCode: null, zoneId: null }),
+      );
+
+      const created = await captureCreated(
+        productionDto({ postalCode: '10451' }),
+      );
+
+      const query = taxJurisdictionService.resolveTaxRate.mock
+        .calls[0][0] as Record<string, unknown>;
+      expect(query.postalCode).toBe('10451');
+      expect(created.deliveryAddress?.postalCode).toBe('10451');
+      expect(created.deliveryAddress?.state).toBe('NY');
+    });
+
+    it('con fila propia NO se geocodifica: la fila ya se geocodificó al guardarse', async () => {
+      // La política de Nominatim es 1 request/segundo; repetirlo en cada
+      // pedido acerca el bloqueo por IP sin aportar un dato nuevo.
+      userAddressesRepo.findOne.mockResolvedValue(bronxRow());
+
+      await captureCreated(productionDto());
+
+      expect(geocodingService.reverse).not.toHaveBeenCalled();
+    });
+
+    it('un id ajeno (o borrado) SÍ geocodifica el snapshot posteado', async () => {
+      // Un id que no es del cliente tiene que comportarse igual que no mandar
+      // ninguno: si no, cualquiera apaga la geocodificación mandando basura y
+      // se queda con la tasa del ZIP que él mismo eligió.
+      userAddressesRepo.findOne.mockResolvedValue(null);
+      geocodingService.reverse.mockResolvedValue(BRONX_PLACE);
+      taxJurisdictionService.resolveTaxRate.mockResolvedValue({
+        zoneId: null,
+        jurisdiction: 'NYC',
+        taxRate: NYC_RATE,
+      });
+
+      const created = await captureCreated(
+        productionDto(
+          { postalCode: '07201' },
+          { deliveryAddressId: '00000000-0000-4000-8000-000000000000' },
+        ),
+      );
+
+      expect(geocodingService.reverse).toHaveBeenCalledWith(40.8448, -73.8648);
+      expect(taxJurisdictionService.resolveTaxRate).toHaveBeenCalledWith({
+        zoneId: null,
+        postalCode: '07201',
+        state: 'NY',
+        city: 'New York',
+        county: 'Bronx County',
+      });
+      expect(created.taxRate).toBe('0.08875');
+      expect(created.taxJurisdiction).toBe('NYC');
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Ronda 4 — una caída de Nominatim no puede MOVER plata.
+  // ─────────────────────────────────────────────────────────────────────────
+  describe('geocoder caído — la jurisdicción no se borra sola', () => {
+    const admin = fakeUser(UserRole.SUPER_ADMIN_DELIVERY);
+    const BRONX_SNAPSHOT = {
+      text: '1728 Williamsbridge Rd',
+      lat: 40.8448,
+      lng: -73.8648,
+      postalCode: '10462',
+      houseNumber: '1728',
+      building: null,
+      unit: null,
+      reference: null,
+      city: 'New York',
+      state: 'NY',
+      county: 'Bronx County',
+    };
+    const BRONX_PLACE = {
+      houseNumber: '1728',
+      road: 'Williamsbridge Road',
+      city: 'New York',
+      county: 'Bronx County',
+      state: 'NY',
+      postalCode: '10462',
+      countryCode: 'us',
+    };
+
+    beforeEach(() => {
+      ordersRepo.update.mockResolvedValue({ affected: 1 } as never);
+      userAddressesRepo.count.mockResolvedValue(1);
+      subscriptionService.isActiveSubscriber.mockResolvedValue(false);
+    });
+
+    it('setDeliveryAddress arrastra la jurisdicción anterior si Nominatim no contesta', async () => {
+      // Antes: `place` null nulleaba estado/ciudad/condado, el pedido se
+      // re-resolvía con el ZIP y un pedido YA cotizado del Bronx se recalculaba
+      // al fallback. Una caída de un tercero no puede re-preciar una venta.
+      geocodingService.reverse.mockResolvedValue(null);
+      taxJurisdictionService.resolveTaxRate.mockResolvedValue({
+        zoneId: null,
+        jurisdiction: 'NYC',
+        taxRate: 0.08875,
+      });
+      ordersRepo.findOne.mockResolvedValue(
+        fakeOrder({
+          status: OrderStatus.QUOTED,
+          subtotal: '10.00',
+          shipping: '3.00',
+          items: [],
+          taxRate: '0.08875',
+          taxJurisdiction: 'NYC',
+          deliveryAddress: BRONX_SNAPSHOT as never,
+        }),
+      );
+
+      await service.setDeliveryAddress(
+        'order-1',
+        {
+          text: '1728 Williamsbridge Rd (portón)',
+          lat: 40.8449,
+          lng: -73.8649,
+          postalCode: '10462',
+        } as import('./dto/create-order.dto').DeliveryAddressDto,
+        admin,
+      );
+
+      const updateCall = ordersRepo.update.mock.calls[0][1] as Record<
+        string,
+        unknown
+      >;
+      expect(updateCall.deliveryAddress).toEqual(
+        expect.objectContaining({
+          city: 'New York',
+          state: 'NY',
+          county: 'Bronx County',
+        }),
+      );
+      expect(taxJurisdictionService.resolveTaxRate).toHaveBeenCalledWith(
+        expect.objectContaining({ state: 'NY', county: 'Bronx County' }),
+      );
+      expect(updateCall.taxRate).toBe('0.08875');
+      expect(updateCall.taxJurisdiction).toBe('NYC');
+    });
+
+    it('setQuote re-intenta la geocodificación cuando el snapshot tiene chincheta y no tiene estado', async () => {
+      // Autocuración: el pedido nació durante la caída, se cotiza cuando
+      // Nominatim volvió. El snapshot se completa ANTES de escribir la tasa.
+      geocodingService.reverse.mockResolvedValue(BRONX_PLACE);
+      taxJurisdictionService.resolveTaxRate.mockResolvedValue({
+        zoneId: null,
+        jurisdiction: 'NYC',
+        taxRate: 0.08875,
+      });
+      ordersRepo.findOne.mockResolvedValue(
+        fakeOrder({
+          status: OrderStatus.PENDING_QUOTE,
+          subtotal: '10.00',
+          items: [],
+          deliveryAddress: {
+            text: '1728 Williamsbridge Rd',
+            lat: 40.8448,
+            lng: -73.8648,
+            postalCode: '10462',
+          } as never,
+        }),
+      );
+
+      await service.setQuote('order-1', 300, admin);
+
+      expect(geocodingService.reverse).toHaveBeenCalledWith(40.8448, -73.8648);
+      const updateCall = ordersRepo.update.mock.calls[0][1] as Record<
+        string,
+        unknown
+      >;
+      expect(updateCall.deliveryAddress).toEqual(
+        expect.objectContaining({
+          city: 'New York',
+          state: 'NY',
+          county: 'Bronx County',
+        }),
+      );
+      expect(taxJurisdictionService.resolveTaxRate).toHaveBeenCalledWith(
+        expect.objectContaining({ state: 'NY' }),
+      );
+      expect(updateCall.taxJurisdiction).toBe('NYC');
+    });
+
+    it('setQuote NO gasta una llamada cuando el snapshot ya tiene estado', async () => {
+      ordersRepo.findOne.mockResolvedValue(
+        fakeOrder({
+          status: OrderStatus.PENDING_QUOTE,
+          subtotal: '10.00',
+          items: [],
+          deliveryAddress: BRONX_SNAPSHOT as never,
+        }),
+      );
+
+      await service.setQuote('order-1', 300, admin);
+
+      expect(geocodingService.reverse).not.toHaveBeenCalled();
+    });
+
+    it('setQuote NO geocodifica un pedido que ya no se puede re-cotizar', async () => {
+      // Venta cerrada: la tasa congelada manda, así que la llamada de red
+      // sería gasto puro.
+      ordersRepo.findOne.mockResolvedValue(
+        fakeOrder({
+          status: OrderStatus.QUOTED,
+          subtotal: '10.00',
+          items: [],
+          taxRate: '0.08875',
+          stripePaymentIntentId: 'pi_live_1',
+          deliveryAddress: {
+            text: '1728 Williamsbridge Rd',
+            lat: 40.8448,
+            lng: -73.8648,
+            postalCode: '10462',
+          } as never,
+        }),
+      );
+
+      await service.setQuote('order-1', 300, admin);
+
+      expect(geocodingService.reverse).not.toHaveBeenCalled();
+      const updateCall = ordersRepo.update.mock.calls[0][1] as Record<
+        string,
+        unknown
+      >;
+      expect(updateCall.deliveryAddress).toBeUndefined();
+    });
+  });
+
 });

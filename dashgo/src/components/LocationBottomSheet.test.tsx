@@ -165,6 +165,60 @@ describe('LocationBottomSheet — postal code (ZIP)', () => {
     })
   })
 
+  it('sends houseNumber, line2 (from unit) and instructions (from reference) to the customer address book', async () => {
+    const { getByPlaceholderText, getByTestId, getByText } = render(
+      <LocationBottomSheet order={makeOrder()} onClose={jest.fn()} />,
+    )
+
+    fireEvent.changeText(getByPlaceholderText('Ej. 24'), '24')
+    fireEvent.changeText(getByPlaceholderText('Ej. Apto 3B'), 'Apto 3B')
+    fireEvent.changeText(
+      getByPlaceholderText('Ej. frente al colmado, casa amarilla'),
+      'frente al colmado',
+    )
+    await act(async () => {
+      fireEvent.press(getByTestId('map-picker'))
+    })
+    fireEvent.press(getByText('Guardar esta dirección al cliente'))
+    fireEvent.changeText(getByPlaceholderText('Ej. Casa, Trabajo'), 'Casa')
+    await act(async () => {
+      fireEvent.press(getByText('Guardar →'))
+    })
+
+    await waitFor(() => {
+      expect(mockCreateForUserMutateAsync).toHaveBeenCalledWith(
+        expect.objectContaining({
+          houseNumber: '24',
+          line2: 'Apto 3B',
+          instructions: 'frente al colmado',
+        }),
+      )
+    })
+  })
+
+  it('omits houseNumber/line2/instructions from the customer save when left blank', async () => {
+    const { getByTestId, getByText, getByPlaceholderText } = render(
+      <LocationBottomSheet order={makeOrder()} onClose={jest.fn()} />,
+    )
+
+    await act(async () => {
+      fireEvent.press(getByTestId('map-picker'))
+    })
+    fireEvent.press(getByText('Guardar esta dirección al cliente'))
+    fireEvent.changeText(getByPlaceholderText('Ej. Casa, Trabajo'), 'Casa')
+    await act(async () => {
+      fireEvent.press(getByText('Guardar →'))
+    })
+
+    await waitFor(() => {
+      expect(mockCreateForUserMutateAsync).toHaveBeenCalled()
+    })
+    const payload = mockCreateForUserMutateAsync.mock.calls[0][0]
+    expect(payload.houseNumber).toBeUndefined()
+    expect(payload.line2).toBeUndefined()
+    expect(payload.instructions).toBeUndefined()
+  })
+
   it('prefills the ZIP from the geocoder when "Usar mi ubicación" resolves one', async () => {
     mockReverseGeocode.mockResolvedValue({ text: 'Calle X', postalCode: '10451' })
 

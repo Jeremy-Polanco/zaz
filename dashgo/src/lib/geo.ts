@@ -28,12 +28,19 @@ export type ReverseGeocodeResult = {
   text: string
   /** 5-digit US ZIP from Nominatim's `address.postcode`, trimmed, or null. */
   postalCode: string | null
+  /** House/door number from Nominatim's `address.house_number`, trimmed, or null. */
+  houseNumber: string | null
   raw?: unknown
 }
 
 function extractPostalCode(address: Record<string, string> | undefined): string | null {
   const postcode = address?.postcode?.trim()
   return postcode ? postcode : null
+}
+
+function extractHouseNumber(address: Record<string, string> | undefined): string | null {
+  const houseNumber = address?.house_number?.trim()
+  return houseNumber ? houseNumber : null
 }
 
 export async function requestDeviceLocation(): Promise<Coords> {
@@ -67,7 +74,12 @@ export async function reverseGeocode(
     address?: Record<string, string>
   }
   const text = data.display_name ?? `${lat.toFixed(5)}, ${lng.toFixed(5)}`
-  return { text, postalCode: extractPostalCode(data.address), raw: data }
+  return {
+    text,
+    postalCode: extractPostalCode(data.address),
+    houseNumber: extractHouseNumber(data.address),
+    raw: data,
+  }
 }
 
 export type ForwardGeocodeResult = {

@@ -87,7 +87,7 @@ describe('SavedAddressesList', () => {
     vi.clearAllMocks()
   })
 
-  it('renders all addresses with label and line1', () => {
+  it('renders all addresses with label and the formatted address line', () => {
     mockUseAddresses.mockReturnValue(
       makeQueryResult({ data: addresses }) as unknown as ReturnType<typeof useSuperUserAddresses>,
     )
@@ -96,7 +96,8 @@ describe('SavedAddressesList', () => {
     expect(screen.getByText('Casa')).toBeInTheDocument()
     expect(screen.getByText('Calle Duarte 45')).toBeInTheDocument()
     expect(screen.getByText('Oficina')).toBeInTheDocument()
-    expect(screen.getByText('Av. Winston Churchill 1099')).toBeInTheDocument()
+    // addr-2 has line2 'Piso 3', so it renders combined via formatAddressLine.
+    expect(screen.getByText('Av. Winston Churchill 1099 · Piso 3')).toBeInTheDocument()
     expect(screen.getByText('Tío Pedro')).toBeInTheDocument()
     expect(screen.getByText('Calle Las Mercedes 23')).toBeInTheDocument()
   })
@@ -110,6 +111,19 @@ describe('SavedAddressesList', () => {
     renderWithProviders(<SavedAddressesList userId="user-abc" />)
 
     expect(screen.getByText(/10451/)).toBeInTheDocument()
+  })
+
+  it('shows the house number first when present, joined with line1 and the ZIP', () => {
+    mockUseAddresses.mockReturnValue(
+      makeQueryResult({
+        data: [{ ...addresses[0], houseNumber: '24', postalCode: '07201' }],
+      }) as unknown as ReturnType<typeof useSuperUserAddresses>,
+    )
+    renderWithProviders(<SavedAddressesList userId="user-abc" />)
+
+    expect(
+      screen.getByText('Casa 24 · Calle Duarte 45 · ZIP 07201'),
+    ).toBeInTheDocument()
   })
 
   it('shows default badge only on the default address', () => {

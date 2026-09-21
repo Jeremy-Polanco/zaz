@@ -19,6 +19,9 @@ import { PremiumPlanCard } from '../components/PremiumPlanCard'
 import type { AdminPlanResponse, ShippingRate } from '../lib/types'
 import { TAX_RATE, computeGrossCents } from '../lib/tax'
 
+// Suscripción = un solo precio de Stripe para todo el mundo, sin importar la
+// zona de entrega del suscriptor — a propósito NO usa el taxRate por
+// dirección/zona; se queda en el fallback TAX_RATE.
 const TAX_PERCENT_LABEL = `${(TAX_RATE * 100).toFixed(3).replace(/\.?0+$/, '')}%`
 
 // ── Route definition ───────────────────────────────────────────────────────────

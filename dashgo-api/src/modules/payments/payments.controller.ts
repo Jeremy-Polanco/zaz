@@ -68,6 +68,9 @@ export class PaymentsController {
       items: dto.items,
       usePoints: dto.usePoints,
       deliveryAddress: dto.deliveryAddress,
+      // La fila guardada del cliente le gana al ZIP posteado para fijar la
+      // tasa — exactamente igual que en POST /orders.
+      deliveryAddressId: dto.deliveryAddressId,
     });
   }
 

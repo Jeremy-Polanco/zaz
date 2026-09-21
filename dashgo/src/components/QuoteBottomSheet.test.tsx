@@ -137,6 +137,121 @@ describe('QuoteBottomSheet — recargo por distancia y día de entrega', () => {
     )
   })
 
+  it('shows the tax label at the order\'s own taxRate (6.625%), not the 8.887% fallback', () => {
+    mockSetOrderQuote.mockReturnValue({
+      mutateAsync: jest.fn(),
+      isPending: false,
+    } as unknown as ReturnType<typeof useSetOrderQuote>)
+
+    const { getByText, queryByText } = render(
+      <QuoteBottomSheet
+        order={makeOrder({ taxRate: '0.06625' })}
+        onClose={jest.fn()}
+      />,
+    )
+
+    expect(getByText('Impuestos (6.625%)')).toBeTruthy()
+    expect(queryByText('Impuestos (8.887%)')).toBeNull()
+  })
+
+  it('falls back to the 8.887% TAX_RATE label when order.taxRate is not a valid number', () => {
+    mockSetOrderQuote.mockReturnValue({
+      mutateAsync: jest.fn(),
+      isPending: false,
+    } as unknown as ReturnType<typeof useSetOrderQuote>)
+
+    const { getByText } = render(
+      <QuoteBottomSheet
+        order={makeOrder({ taxRate: 'not-a-number' })}
+        onClose={jest.fn()}
+      />,
+    )
+
+    expect(getByText('Impuestos (8.887%)')).toBeTruthy()
+  })
+
+  it('excludes exempt lines from the taxable base when every item has its product embedded (parity with web QuoteDrawer)', () => {
+    mockSetOrderQuote.mockReturnValue({
+      mutateAsync: jest.fn(),
+      isPending: false,
+    } as unknown as ReturnType<typeof useSetOrderQuote>)
+
+    // $15 exempt water + $5 taxable + $5 shipping @ 6.625%.
+    // taxable share = 5/20 = 0.25 → taxable shipping = round(500 × 0.25) = 125
+    // taxable base = 500 + 125 = 625¢ → tax = round(625 × 0.06625) = 41¢
+    const order = makeOrder({
+      subtotal: '20.00',
+      shipping: '5.00',
+      taxRate: '0.06625',
+      items: [
+        {
+          id: 'item-water',
+          orderId: 'order-1',
+          productId: 'product-water',
+          product: { taxCategory: 'exempt' },
+          quantity: 1,
+          priceAtOrder: '15.00',
+          createdAt: '2026-01-01T00:00:00Z',
+        },
+        {
+          id: 'item-single',
+          orderId: 'order-1',
+          productId: 'product-single',
+          product: { taxCategory: 'standard' },
+          quantity: 1,
+          priceAtOrder: '5.00',
+          createdAt: '2026-01-01T00:00:00Z',
+        },
+      ] as unknown as Order['items'],
+    })
+
+    const { getByText } = render(
+      <QuoteBottomSheet order={order} onClose={jest.fn()} />,
+    )
+
+    expect(getByText('$0.41')).toBeTruthy()
+  })
+
+  it('keeps the everything-taxable preview when items lack a populated product', () => {
+    mockSetOrderQuote.mockReturnValue({
+      mutateAsync: jest.fn(),
+      isPending: false,
+    } as unknown as ReturnType<typeof useSetOrderQuote>)
+
+    // Same $15 + $5 + $5 shipping @ 6.625%, but no item carries `product` —
+    // can't tell which line is exempt, so the whole subtotal is taxable
+    // (historical behavior): tax = round((2000 + 500) × 0.06625) = 166¢
+    const order = makeOrder({
+      subtotal: '20.00',
+      shipping: '5.00',
+      taxRate: '0.06625',
+      items: [
+        {
+          id: 'item-water',
+          orderId: 'order-1',
+          productId: 'product-water',
+          quantity: 1,
+          priceAtOrder: '15.00',
+          createdAt: '2026-01-01T00:00:00Z',
+        },
+        {
+          id: 'item-single',
+          orderId: 'order-1',
+          productId: 'product-single',
+          quantity: 1,
+          priceAtOrder: '5.00',
+          createdAt: '2026-01-01T00:00:00Z',
+        },
+      ] as unknown as Order['items'],
+    })
+
+    const { getByText } = render(
+      <QuoteBottomSheet order={order} onClose={jest.fn()} />,
+    )
+
+    expect(getByText('$1.66')).toBeTruthy()
+  })
+
   it('defaults the delivery day picker to order.scheduledDeliveryDate', () => {
     mockSetOrderQuote.mockReturnValue({
       mutateAsync: jest.fn(),

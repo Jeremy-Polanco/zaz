@@ -228,3 +228,40 @@ describe('CreatePaymentIntentDto', () => {
     });
   });
 });
+
+describe('PaymentIntentAddressInput — postalCode', () => {
+  const make = (postalCode?: unknown) =>
+    plainToInstance(PaymentIntentAddressInput, {
+      text: '123 Test',
+      ...(postalCode === undefined ? {} : { postalCode }),
+    });
+
+  it('acepta un ZIP de 5 dígitos — es el que fija la tasa del intent', async () => {
+    await expect(validate(make('10451'))).resolves.toHaveLength(0);
+  });
+
+  it('acepta el cero de adelante (Elizabeth NJ es 072xx)', async () => {
+    // Texto y no número: como number el 0 se pierde y NJ deja de resolver zona.
+    const dto = make('07201');
+    await expect(validate(dto)).resolves.toHaveLength(0);
+    expect(dto.postalCode).toBe('07201');
+  });
+
+  it('es opcional — las apps viejas mandan el intent sin ZIP', async () => {
+    await expect(validate(make())).resolves.toHaveLength(0);
+  });
+
+  it('recorta los espacios que pega el teclado del celular', async () => {
+    expect(make('  10451  ').postalCode).toBe('10451');
+  });
+
+  it('rechaza lo que no sean 5 dígitos, con el mismo mensaje que la libreta', async () => {
+    const errors = await validate(make('1045'));
+    expect(errors).toHaveLength(1);
+    expect(errors[0].constraints?.matches).toBe(
+      'El código postal debe tener 5 dígitos',
+    );
+    await expect(validate(make('10451-1234'))).resolves.toHaveLength(1);
+    await expect(validate(make('ABCDE'))).resolves.toHaveLength(1);
+  });
+});

@@ -129,6 +129,141 @@ describe('formatAddressLine', () => {
   })
 })
 
+describe('formatAddressLine — saved address (UserAddress-shaped)', () => {
+  it('shows the house number as a leading segment, then line1, then the ZIP', () => {
+    expect(
+      formatAddressLine({ houseNumber: '24', line1: 'Calle X', postalCode: '07201' }),
+    ).toBe('Casa 24 · Calle X · ZIP 07201')
+  })
+
+  it('omits the house number segment when absent', () => {
+    expect(formatAddressLine({ line1: 'Calle X', postalCode: '07201' })).toBe(
+      'Calle X · ZIP 07201',
+    )
+  })
+
+  it('includes building and line2 between line1 and the ZIP', () => {
+    expect(
+      formatAddressLine({
+        houseNumber: '24',
+        line1: 'Calle X',
+        building: 'Torre B',
+        line2: 'Apto 3B',
+        postalCode: '07201',
+      }),
+    ).toBe('Casa 24 · Calle X · Torre B · Apto 3B · ZIP 07201')
+  })
+
+  it('ignores whitespace-only fields', () => {
+    expect(
+      formatAddressLine({ houseNumber: '  ', line1: 'Calle X', building: '  ' }),
+    ).toBe('Calle X')
+  })
+
+  it('does not disturb the unchanged GeoAddress (order snapshot) behaviour', () => {
+    expect(formatAddressLine(base)).toBe('Calle Duarte 100, Santo Domingo')
+  })
+})
+
+// The API auto-fills `houseNumber` from the geocoder ("1101") while `line1`
+// is customer-typed and usually already starts with the number ("1101
+// Elizabeth Avenue") — without this, the list/checkout would double-print it
+// as "Casa 1101 · 1101 Elizabeth Avenue". Skip the "Casa <n>" segment only
+// when line1's LEADING TOKEN exactly matches houseNumber (case/whitespace
+// insensitive) — a prefix or a token that merely starts with the number
+// (e.g. "1101-A") must still show "Casa <n>".
+describe('formatAddressLine — house number de-duplication', () => {
+  it('skips "Casa <n>" when line1 already leads with that exact house number', () => {
+    expect(
+      formatAddressLine({
+        houseNumber: '1101',
+        line1: '1101 Elizabeth Avenue',
+        postalCode: '07201',
+      }),
+    ).toBe('1101 Elizabeth Avenue · ZIP 07201')
+  })
+
+  it('keeps "Casa <n>" when line1 does not start with the house number', () => {
+    expect(
+      formatAddressLine({ houseNumber: '24', line1: 'Elizabeth Avenue', postalCode: '07201' }),
+    ).toBe('Casa 24 · Elizabeth Avenue · ZIP 07201')
+  })
+
+  it('does not match when the house number is only a prefix of a longer leading token', () => {
+    expect(formatAddressLine({ houseNumber: '1101', line1: '11010 Main St' })).toBe(
+      'Casa 1101 · 11010 Main St',
+    )
+  })
+
+  it('does not match a leading token that merely starts with the house number (hyphen suffix)', () => {
+    expect(formatAddressLine({ houseNumber: '1101', line1: '1101-A Main St' })).toBe(
+      'Casa 1101 · 1101-A Main St',
+    )
+  })
+
+  it('matches a hyphenated house number as a whole token', () => {
+    expect(formatAddressLine({ houseNumber: '120-05', line1: '120-05 Main St' })).toBe(
+      '120-05 Main St',
+    )
+  })
+
+  it('matches case/whitespace-insensitively', () => {
+    expect(formatAddressLine({ houseNumber: ' 12A ', line1: '12a Main St' })).toBe(
+      '12a Main St',
+    )
+  })
+
+  it('has nothing to de-duplicate when houseNumber is empty', () => {
+    expect(formatAddressLine({ line1: '1101 Elizabeth Avenue' })).toBe(
+      '1101 Elizabeth Avenue',
+    )
+  })
+})
+
+describe('formatAddressShort — saved address (UserAddress-shaped)', () => {
+  it('shows "Casa {houseNumber}" plus the ZIP when present', () => {
+    expect(
+      formatAddressShort({ houseNumber: '24', line1: 'Calle X', postalCode: '07201' }),
+    ).toBe('Casa 24 · ZIP 07201')
+  })
+
+  it('falls back to line1 when there is no house number', () => {
+    expect(formatAddressShort({ line1: 'Calle X', postalCode: '07201' })).toBe(
+      'Calle X · ZIP 07201',
+    )
+  })
+
+  it('does not disturb the unchanged GeoAddress (order snapshot) behaviour', () => {
+    expect(
+      formatAddressShort({ ...base, houseNumber: '24', reference: 'frente al colmado' }),
+    ).toBe('Casa 24 — frente al colmado')
+  })
+})
+
+describe('formatAddressShort — house number de-duplication', () => {
+  it('falls back to line1 (which already contains the number) instead of "Casa <n>"', () => {
+    expect(
+      formatAddressShort({
+        houseNumber: '1101',
+        line1: '1101 Elizabeth Avenue',
+        postalCode: '07201',
+      }),
+    ).toBe('1101 Elizabeth Avenue · ZIP 07201')
+  })
+
+  it('keeps "Casa <n>" when line1 does not start with the house number', () => {
+    expect(
+      formatAddressShort({ houseNumber: '24', line1: 'Elizabeth Avenue', postalCode: '07201' }),
+    ).toBe('Casa 24 · ZIP 07201')
+  })
+
+  it('does not match when the house number is only a prefix of a longer leading token', () => {
+    expect(formatAddressShort({ houseNumber: '1101', line1: '11010 Main St' })).toBe(
+      'Casa 1101',
+    )
+  })
+})
+
 describe('addressDetailParts', () => {
   it('returns only the filled fields, in reading order', () => {
     expect(
@@ -164,6 +299,7 @@ describe('userAddressToGeoAddress', () => {
       text: 'Calle Duarte 100',
       lat: 18.47,
       lng: -69.9,
+      houseNumber: null,
     })
   })
 
@@ -182,6 +318,7 @@ describe('userAddressToGeoAddress', () => {
       lng: -69.9,
       building: 'Torre B',
       reference: 'frente al colmado',
+      houseNumber: null,
     })
   })
 
@@ -203,5 +340,26 @@ describe('userAddressToGeoAddress', () => {
   it('omits postalCode when the saved address has none', () => {
     const result = userAddressToGeoAddress(fakeUserAddress({ postalCode: null }))
     expect(result).not.toHaveProperty('postalCode')
+  })
+
+  it('carries houseNumber onto the mapped GeoAddress', () => {
+    const result = userAddressToGeoAddress(fakeUserAddress({ houseNumber: '24' }))
+    expect(result.houseNumber).toBe('24')
+  })
+
+  it('emits houseNumber as null (not omitted) when the saved address has none', () => {
+    const result = userAddressToGeoAddress(fakeUserAddress())
+    expect(result.houseNumber).toBeNull()
+    expect(result).toHaveProperty('houseNumber')
+  })
+
+  it('emits houseNumber as null when it is explicitly null', () => {
+    const result = userAddressToGeoAddress(fakeUserAddress({ houseNumber: null }))
+    expect(result.houseNumber).toBeNull()
+  })
+
+  it('treats a whitespace-only houseNumber as null', () => {
+    const result = userAddressToGeoAddress(fakeUserAddress({ houseNumber: '   ' }))
+    expect(result.houseNumber).toBeNull()
   })
 })

@@ -630,7 +630,15 @@ export function useCreatePaymentIntent() {
     mutationFn: async (input: {
       items: { productId: string; quantity: number }[]
       usePoints?: boolean
-      deliveryAddress?: { text: string; lat?: number; lng?: number }
+      // postalCode habilita al backend a resolver la zona fiscal (tax/rate
+      // por zona) desde el intent, igual que en el payload de creación de
+      // orden — ver userAddressToGeoAddress en lib/address.ts.
+      deliveryAddress?: {
+        text: string
+        lat?: number
+        lng?: number
+        postalCode?: string
+      }
     }) => {
       const { data } = await api.post<PaymentIntentResponse>(
         '/payments/intent',

@@ -241,3 +241,74 @@ describe('UserAddressesPanel (mobile) — ZIP (postalCode)', () => {
     })
   })
 })
+
+describe('UserAddressesPanel (mobile) — house number', () => {
+  let updateMutateAsync: jest.Mock
+
+  beforeEach(() => {
+    jest.clearAllMocks()
+    updateMutateAsync = jest.fn().mockResolvedValue({})
+    mockSetDefault.mockReturnValue(
+      mutationMock({ mutate: jest.fn() }) as unknown as ReturnType<
+        typeof useSetDefaultAddressForUser
+      >,
+    )
+    mockDelete.mockReturnValue(
+      mutationMock({ mutate: jest.fn() }) as unknown as ReturnType<
+        typeof useDeleteAddressForUser
+      >,
+    )
+    mockUpdate.mockReturnValue(
+      mutationMock({ mutateAsync: updateMutateAsync }) as unknown as ReturnType<
+        typeof useUpdateAddressForUser
+      >,
+    )
+  })
+
+  it('pre-populates the house number field when editing', () => {
+    mockAddresses.mockReturnValue(
+      queryResult([{ ...addresses[0], houseNumber: '24' }]),
+    )
+    renderWithProviders(<UserAddressesPanel userId="user-abc" />)
+
+    fireEvent.press(screen.getAllByText('Editar')[0])
+    expect(screen.getByDisplayValue('24')).toBeTruthy()
+  })
+
+  it('saves the edited house number', async () => {
+    mockAddresses.mockReturnValue(
+      queryResult([{ ...addresses[0], houseNumber: '24' }]),
+    )
+    renderWithProviders(<UserAddressesPanel userId="user-abc" />)
+
+    fireEvent.press(screen.getAllByText('Editar')[0])
+    fireEvent.changeText(screen.getByDisplayValue('24'), '30')
+    fireEvent.press(screen.getByText('Guardar'))
+
+    await waitFor(() => {
+      expect(updateMutateAsync).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 'addr-1', houseNumber: '30' }),
+      )
+    })
+  })
+})
+
+describe('UserAddressesPanel (mobile) — resolved place line', () => {
+  it('shows the resolved city/state/ZIP line when the address has city and state', () => {
+    mockAddresses.mockReturnValue(
+      queryResult([
+        { ...addresses[0], city: 'Elizabeth', state: 'NJ', postalCode: '07201' },
+      ]),
+    )
+    renderWithProviders(<UserAddressesPanel userId="user-abc" />)
+
+    expect(screen.getByText('Elizabeth, NJ 07201')).toBeTruthy()
+  })
+
+  it('does not show a resolved line when the address has no city/state', () => {
+    mockAddresses.mockReturnValue(queryResult(addresses))
+    renderWithProviders(<UserAddressesPanel userId="user-abc" />)
+
+    expect(screen.queryByText('Elizabeth, NJ 07201')).toBeNull()
+  })
+})

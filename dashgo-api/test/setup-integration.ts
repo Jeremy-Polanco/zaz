@@ -129,6 +129,12 @@ export default async function globalSetup(): Promise<void> {
   process.env.TWILIO_API_KEY_SID = process.env.TWILIO_API_KEY_SID ?? '';
   process.env.TWILIO_API_KEY_SECRET = process.env.TWILIO_API_KEY_SECRET ?? '';
   process.env.TWILIO_FROM_NUMBER = process.env.TWILIO_FROM_NUMBER ?? '';
+  // La suite NO sale a internet. Con esto GeocodingService.reverse() devuelve
+  // null sin abrir un socket: ni un test se cuelga esperando a Nominatim, ni la
+  // suite gasta la cuota de 1 request/segundo de su política de uso. Las
+  // direcciones quedan sin estado y la tasa se resuelve por el ZIP, que es
+  // exactamente el camino de las filas viejas sin backfillear.
+  process.env.GEOCODING_ENABLED = 'false';
 
   loadEnvTest();
 

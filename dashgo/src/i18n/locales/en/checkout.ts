@@ -57,6 +57,8 @@ export default {
     shipping: 'Shipping',
     toQuote: 'To be quoted',
     taxes: 'Taxes',
+    taxesWithRate: 'Taxes ({{rate}})',
+    taxesWithJurisdiction: 'Taxes {{jurisdiction}} ({{rate}})',
     atQuote: 'When quoted',
     tipLine: 'Tip ({{percent}}%)',
     total: 'Total',
