@@ -5,7 +5,7 @@
  * injected as jest mocks. No real DB or Stripe connection.
  */
 
-import { ConflictException, HttpException, HttpStatus, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
+import { ConflictException, HttpException, HttpStatus, Logger, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { ConfigService } from '@nestjs/config';
@@ -2391,6 +2391,33 @@ describe('SubscriptionService — coverage completion', () => {
       await runOrphanWebhook();
 
       expect(subscriptionsRepo.upsert).not.toHaveBeenCalled();
+    });
+
+    it('cuando nadie cruza, deja en el log el customer con email y teléfono enmascarados para ubicarlo en Stripe', async () => {
+      await buildService();
+      subscriptionsRepo.upsert.mockResolvedValue({} as never);
+      stubUsers({});
+      const warn = jest
+        .spyOn(Logger.prototype, 'warn')
+        .mockImplementation(() => undefined);
+      mockStripeInstance.customers.retrieve.mockResolvedValueOnce({
+        id: 'cus_orphan',
+        email: 'nobody@example.com',
+        phone: '+16462456579',
+        metadata: {},
+      } as never);
+
+      await runOrphanWebhook();
+
+      const line = warn.mock.calls
+        .map((c) => String(c[0]))
+        .find((m) => m.includes('cus_orphan matches no app user'));
+      expect(line).toBeDefined();
+      expect(line).toContain('n***@example.com');
+      expect(line).toContain('***6579');
+      expect(line).not.toContain('nobody@example.com');
+      expect(line).not.toContain('+16462456579');
+      warn.mockRestore();
     });
   });
 

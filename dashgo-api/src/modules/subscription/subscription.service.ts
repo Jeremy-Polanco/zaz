@@ -99,6 +99,19 @@ function normalizeE164(raw: string | null | undefined): string | null {
   return digits ? `+${digits}` : null;
 }
 
+/** `luis@x.com` → `l***@x.com`; sin email → `-`. */
+function maskEmail(raw: string | null | undefined): string {
+  const email = (raw ?? '').trim();
+  const at = email.indexOf('@');
+  if (at < 1) return email ? '***' : '-';
+  return `${email[0]}***${email.slice(at)}`;
+}
+
+/** `+16462456579` → `***6579`; sin teléfono → `-`. */
+function maskPhone(e164: string | null): string {
+  return e164 ? `***${e164.slice(-4)}` : '-';
+}
+
 const SUBSCRIPTION_ALLOWLIST = [
   'https://www.dashgo.dev/subscription?session=success',
   'https://www.dashgo.dev/subscription?session=canceled',
@@ -997,7 +1010,10 @@ export class SubscriptionService implements OnModuleInit {
       );
       return null;
     }
-    if (customer.deleted) return null;
+    if (customer.deleted) {
+      this.logger.warn(`stripe customer ${customerId} is deleted in Stripe`);
+      return null;
+    }
 
     const select: (keyof User)[] = ['id', 'stripeCustomerId'];
     let user: User | null = null;
@@ -1026,7 +1042,14 @@ export class SubscriptionService implements OnModuleInit {
       via = 'customer phone';
     }
 
-    if (!user) return null;
+    if (!user) {
+      // Enmascarado a propósito: alcanza para ubicar el customer en el
+      // Dashboard sin volcar datos personales al log.
+      this.logger.warn(
+        `stripe customer ${customerId} matches no app user (email ${maskEmail(customer.email)}, phone ${maskPhone(phone)}, metadata.userId ${metaUserId ?? '-'})`,
+      );
+      return null;
+    }
 
     if (!user.stripeCustomerId) {
       await this.users.update(user.id, { stripeCustomerId: customerId });
