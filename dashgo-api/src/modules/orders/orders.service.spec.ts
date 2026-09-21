@@ -221,6 +221,7 @@ describe('OrdersService', () => {
     shippingService = {
       computeQuote: jest.fn().mockResolvedValue({ shippingCents: 0 }),
       getOrigin: jest.fn().mockResolvedValue(null),
+      getOriginForUser: jest.fn().mockResolvedValue(null),
     } as unknown as jest.Mocked<ShippingService>;
 
     // La tarifa plana ya no es una constante: la lee OrdersService en cada
@@ -4275,42 +4276,98 @@ describe('OrdersService', () => {
       createdAt: new Date('2026-09-14T10:00:00Z'),
     });
 
-    it('super admin → pide el origen del repartidor y ordena por distancia', async () => {
+    it('super admin → sin coords de dispositivo, cae al origen del propio staff y ordena por distancia', async () => {
       // El dueño reportaba la lista "por más reciente": el pedido nuevo y lejos
       // salía antes que el viejo de la otra cuadra.
       ordersRepo.find.mockResolvedValue([farOrder, nearOrder]);
-      (shippingService.getOrigin as jest.Mock).mockResolvedValue(ORIGIN);
+      (shippingService.getOriginForUser as jest.Mock).mockResolvedValue(ORIGIN);
 
-      const result = await service.findAll(
+      const { orders, originSource } = await service.findAll(
         fakeUser(UserRole.SUPER_ADMIN_DELIVERY),
       );
 
-      expect(shippingService.getOrigin).toHaveBeenCalled();
-      expect(result.map((o) => o.id)).toEqual(['near', 'far']);
-      expect(result[0].distanceMiles).toBe(0.7);
-      expect(result[1].distanceMiles).toBe(13.8);
+      expect(shippingService.getOriginForUser).toHaveBeenCalledWith('user-1');
+      expect(orders.map((o) => o.id)).toEqual(['near', 'far']);
+      expect(orders[0].distanceMiles).toBe(0.7);
+      expect(orders[1].distanceMiles).toBe(13.8);
+      expect(originSource).toBe('saved');
     });
 
     it('vendedor → misma ruta ordenada, dentro de su cartera', async () => {
       ordersRepo.find.mockResolvedValue([farOrder, nearOrder]);
-      (shippingService.getOrigin as jest.Mock).mockResolvedValue(ORIGIN);
+      (shippingService.getOriginForUser as jest.Mock).mockResolvedValue(ORIGIN);
 
-      const result = await service.findAll(fakeUser(UserRole.SELLER));
+      const { orders, originSource } = await service.findAll(
+        fakeUser(UserRole.SELLER),
+      );
 
-      expect(shippingService.getOrigin).toHaveBeenCalled();
-      expect(result.map((o) => o.id)).toEqual(['near', 'far']);
+      expect(shippingService.getOriginForUser).toHaveBeenCalledWith('user-1');
+      expect(orders.map((o) => o.id)).toEqual(['near', 'far']);
+      expect(originSource).toBe('saved');
     });
 
-    it('cliente → la lista queda como vino y no se consulta el origen', async () => {
+    it('coords del dispositivo en la query → tienen prioridad sobre el origen guardado del staff', async () => {
+      // Regla del dueño: la ruta sale de donde está el repartidor AHORA, no
+      // de la dirección guardada — esa es sólo el respaldo.
+      ordersRepo.find.mockResolvedValue([farOrder, nearOrder]);
+      (shippingService.getOriginForUser as jest.Mock).mockResolvedValue({
+        lat: 0,
+        lng: 0,
+      });
+
+      const { orders, originSource } = await service.findAll(
+        fakeUser(UserRole.SUPER_ADMIN_DELIVERY),
+        { origin: ORIGIN },
+      );
+
+      expect(shippingService.getOriginForUser).not.toHaveBeenCalled();
+      expect(shippingService.getOrigin).not.toHaveBeenCalled();
+      expect(orders.map((o) => o.id)).toEqual(['near', 'far']);
+      expect(originSource).toBe('device');
+    });
+
+    it('sin coords de dispositivo y sin origen propio → cae al fallback del admin primario', async () => {
+      ordersRepo.find.mockResolvedValue([farOrder, nearOrder]);
+      (shippingService.getOriginForUser as jest.Mock).mockResolvedValue(null);
+      (shippingService.getOrigin as jest.Mock).mockResolvedValue(ORIGIN);
+
+      const { orders, originSource } = await service.findAll(
+        fakeUser(UserRole.SELLER),
+      );
+
+      expect(shippingService.getOriginForUser).toHaveBeenCalledWith('user-1');
+      expect(shippingService.getOrigin).toHaveBeenCalled();
+      expect(orders.map((o) => o.id)).toEqual(['near', 'far']);
+      expect(originSource).toBe('saved');
+    });
+
+    it('sin ningún origen resoluble → distanceMiles null y originSource "none"', async () => {
+      ordersRepo.find.mockResolvedValue([farOrder, nearOrder]);
+      (shippingService.getOriginForUser as jest.Mock).mockResolvedValue(null);
+      (shippingService.getOrigin as jest.Mock).mockResolvedValue(null);
+
+      const { orders, originSource } = await service.findAll(
+        fakeUser(UserRole.SUPER_ADMIN_DELIVERY),
+      );
+
+      expect(orders.every((o) => o.distanceMiles === null)).toBe(true);
+      expect(originSource).toBe('none');
+    });
+
+    it('cliente → la lista queda como vino y no se consulta ningún origen', async () => {
       // El cliente ve SUS pedidos: la distancia al depósito no le dice nada y
       // pedir el origen sería una consulta de más en cada apertura de la app.
       ordersRepo.find.mockResolvedValue([farOrder, nearOrder]);
 
-      const result = await service.findAll(fakeUser(UserRole.CLIENT));
+      const { orders, originSource } = await service.findAll(
+        fakeUser(UserRole.CLIENT),
+      );
 
       expect(shippingService.getOrigin).not.toHaveBeenCalled();
-      expect(result.map((o) => o.id)).toEqual(['far', 'near']);
-      expect(result[0].distanceMiles).toBeUndefined();
+      expect(shippingService.getOriginForUser).not.toHaveBeenCalled();
+      expect(orders.map((o) => o.id)).toEqual(['far', 'near']);
+      expect(orders[0].distanceMiles).toBeUndefined();
+      expect(originSource).toBeNull();
     });
   });
 
@@ -4536,13 +4593,13 @@ describe('OrdersService', () => {
       const list = [fakeOrder(), fakeOrder({ id: 'order-2' })];
       ordersRepo.find.mockResolvedValue(list);
 
-      const result = await service.findAll(
+      const { orders } = await service.findAll(
         fakeUser(UserRole.SUPER_ADMIN_DELIVERY),
       );
 
       // El staff recibe la lista REORDENADA para despacho, así que ya no es el
       // mismo array que devolvió el repo — pero sí los mismos pedidos.
-      expect(result.map((o) => o.id).sort()).toEqual(['order-1', 'order-2']);
+      expect(orders.map((o) => o.id).sort()).toEqual(['order-1', 'order-2']);
       const callArg = ordersRepo.find.mock.calls[0][0] as Record<
         string,
         unknown

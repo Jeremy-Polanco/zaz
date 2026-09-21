@@ -13,6 +13,7 @@ import { SafeAreaView } from 'react-native-safe-area-context'
 import { router } from 'expo-router'
 import { SymbolView } from 'expo-symbols'
 import { useCustomerActivity, useOrders, useUpdateOrderStatus } from '../../lib/queries'
+import { useDevicePosition } from '../../lib/use-device-position'
 import { formatDate, formatMoney } from '../../lib/format'
 import { formatAddressLine } from '../../lib/address'
 import type {
@@ -290,7 +291,14 @@ type RouteFilter =
   | 'history'
 
 export default function SuperOrdersScreen() {
-  const { data: orders, isPending, refetch, isRefetching } = useOrders()
+  // Dispatch sorts nearest-first from where the repartidor's phone actually
+  // IS right now (GPS), not a saved address — see lib/use-device-position.ts.
+  // Without a position (denied/unavailable) useOrders falls back to its
+  // customer-facing behavior: newest-first, no distance.
+  const devicePosition = useDevicePosition()
+  const { data: orders, isPending, refetch, isRefetching } = useOrders(
+    devicePosition.position ?? undefined,
+  )
   const updateStatus = useUpdateOrderStatus()
   const [quotingOrder, setQuotingOrder] = useState<Order | null>(null)
   const [filter, setFilter] = useState<RouteFilter>('all')
@@ -366,6 +374,13 @@ export default function SuperOrdersScreen() {
     )
   }
 
+  // Pull-to-refresh re-locates the device too — the driver may have moved
+  // (or just granted the permission) since the screen mounted.
+  const handleRefresh = () => {
+    refetch()
+    devicePosition.refresh()
+  }
+
   const handleCancel = (id: string) => {
     Alert.alert('Cancelar pedido', '¿Seguro que quieres cancelar este pedido?', [
       { text: 'Volver', style: 'cancel' },
@@ -410,6 +425,13 @@ export default function SuperOrdersScreen() {
             </Text>
 
             <LocationSelector />
+
+            {(devicePosition.status === 'denied' ||
+              devicePosition.status === 'unavailable') && (
+              <Text className="mt-3 font-sans text-[12px] leading-[18px] text-ink-muted">
+                {'Sin tu ubicación, los pedidos salen por fecha. Activá la ubicación para verlos por cercanía.'}
+              </Text>
+            )}
 
             <View className="mt-6 flex-row gap-2">
               <KpiCard label="Cotizar" value={stats.pendingQuote} tone="warn" />
@@ -568,7 +590,7 @@ export default function SuperOrdersScreen() {
           </View>
         }
         refreshing={isRefetching}
-        onRefresh={refetch}
+        onRefresh={handleRefresh}
       />
 
       {quotingOrder && (

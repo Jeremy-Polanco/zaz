@@ -276,14 +276,30 @@ export function useSellersPayable() {
   })
 }
 
-export function useOrders() {
+/**
+ * `lat`/`lng` are the dispatcher's CURRENT device position (see
+ * lib/use-device-position.ts) — when both are numbers the API sorts staff
+ * orders nearest-first from that point and adds `distanceMiles`. Customer
+ * screens call this with no args, unchanged.
+ */
+export function useOrders(params?: { lat?: number; lng?: number }) {
   // Account-only endpoint — disabled for guests so public browse screens
   // (home, catálogo) never fire 401s while logged out.
   const { data: user } = useCurrentUser()
+  const { lat, lng } = params ?? {}
+  const coords =
+    typeof lat === 'number' && typeof lng === 'number'
+      ? { lat: roundCoord(lat), lng: roundCoord(lng) }
+      : undefined
   return useQuery<Order[]>({
-    queryKey: ['orders'],
-    queryFn: async () => (await api.get<Order[]>('/orders')).data,
+    queryKey: coords ? ['orders', coords] : ['orders'],
+    queryFn: async () =>
+      (await api.get<Order[]>('/orders', { params: coords })).data,
     enabled: !!user,
+    // Keep showing the previous list while a new coords-bearing query key
+    // fetches, instead of flashing back to the full-screen loader once the
+    // driver's GPS position resolves after mount.
+    placeholderData: (previous) => previous,
   })
 }
 

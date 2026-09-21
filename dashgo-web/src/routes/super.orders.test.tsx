@@ -17,12 +17,16 @@ vi.mock('@tanstack/react-router', async (importOriginal) => {
 
 vi.mock('../lib/queries', () => ({
   useOrders: vi.fn(),
+  useOrdersDispatchOrigin: vi.fn(),
   useUpdateOrderStatus: vi.fn(),
   useSetDeliveryDate: vi.fn(),
 }))
 vi.mock('../lib/api', () => ({
   api: { get: vi.fn(), patch: vi.fn() },
   TOKEN_KEY: 'dashgo.token',
+}))
+vi.mock('../lib/use-device-position', () => ({
+  useDevicePosition: vi.fn(),
 }))
 
 // The three drawers/modals are collaborators with their own suites
@@ -46,12 +50,20 @@ vi.mock('../components/QuoteDrawer', () => ({
   ),
 }))
 
-import { useOrders, useUpdateOrderStatus, useSetDeliveryDate } from '../lib/queries'
+import {
+  useOrders,
+  useOrdersDispatchOrigin,
+  useUpdateOrderStatus,
+  useSetDeliveryDate,
+} from '../lib/queries'
+import { useDevicePosition } from '../lib/use-device-position'
 import { SuperOrdersPage } from './super.orders'
 
 const mockUseOrders = vi.mocked(useOrders)
+const mockUseOrdersDispatchOrigin = vi.mocked(useOrdersDispatchOrigin)
 const mockUseUpdateOrderStatus = vi.mocked(useUpdateOrderStatus)
 const mockUseSetDeliveryDate = vi.mocked(useSetDeliveryDate)
+const mockUseDevicePosition = vi.mocked(useDevicePosition)
 
 // ── Fixtures ───────────────────────────────────────────────────────────────────
 
@@ -92,6 +104,13 @@ function setup(
     isPending?: boolean
     mutate?: ReturnType<typeof vi.fn>
     setDeliveryDateMutateAsync?: ReturnType<typeof vi.fn>
+    devicePosition?: {
+      position?: { lat: number; lng: number } | null
+      status?: 'idle' | 'locating' | 'granted' | 'denied' | 'unavailable'
+      refresh?: ReturnType<typeof vi.fn>
+    }
+    /** X-Dispatch-Origin as read by useOrdersDispatchOrigin. */
+    dispatchOrigin?: 'device' | 'saved' | 'none' | null
   } = {},
 ) {
   mockUseOrders.mockReturnValue({
@@ -100,6 +119,13 @@ function setup(
     isError: false,
     error: null,
   } as unknown as ReturnType<typeof useOrders>)
+
+  mockUseOrdersDispatchOrigin.mockReturnValue({
+    data: opts.dispatchOrigin ?? null,
+    isPending: false,
+    isError: false,
+    error: null,
+  } as unknown as ReturnType<typeof useOrdersDispatchOrigin>)
 
   mockUseUpdateOrderStatus.mockReturnValue({
     mutate: opts.mutate ?? vi.fn(),
@@ -114,6 +140,12 @@ function setup(
     isPending: false,
     reset: vi.fn(),
   } as unknown as ReturnType<typeof useSetDeliveryDate>)
+
+  mockUseDevicePosition.mockReturnValue({
+    position: opts.devicePosition?.position ?? null,
+    status: opts.devicePosition?.status ?? 'idle',
+    refresh: opts.devicePosition?.refresh ?? vi.fn(),
+  })
 }
 
 /**
@@ -504,5 +536,167 @@ describe('SuperOrdersPage — Acciones column, asignar día de entrega', () => {
     expect(
       within(row).queryByRole('button', { name: /Asignar día|^📅/ }),
     ).not.toBeInTheDocument()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Dispatch desde la ubicación del repartidor — API contract: GET
+// /orders?lat&lng ordena nearest-first desde ESE punto; sin ellos cae a la
+// ubicación guardada del admin y, si tampoco hay, a más reciente primero
+// (X-Dispatch-Origin: device | saved | none).
+// ---------------------------------------------------------------------------
+
+describe('SuperOrdersPage — ubicación del repartidor', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  it('sends the device position to useOrders once geolocation is granted', async () => {
+    setup({
+      devicePosition: {
+        status: 'granted',
+        position: { lat: 18.47, lng: -69.9 },
+      },
+    })
+    await renderOrders()
+
+    const lastCall = mockUseOrders.mock.calls.at(-1)?.[0]
+    expect(lastCall).toEqual({ lat: 18.47, lng: -69.9 })
+  })
+
+  it('requests orders without coords and shows a notice when location is denied', async () => {
+    setup({ devicePosition: { status: 'denied', position: null } })
+    await renderOrders()
+
+    const lastCall = mockUseOrders.mock.calls.at(-1)?.[0]
+    expect(lastCall).toBeUndefined()
+    expect(
+      screen.getByText(
+        'Sin tu ubicación, los pedidos salen por fecha. Activá la ubicación para verlos por cercanía.',
+      ),
+    ).toBeInTheDocument()
+  })
+
+  it('shows the same notice when geolocation is unavailable', async () => {
+    setup({ devicePosition: { status: 'unavailable', position: null } })
+    await renderOrders()
+
+    expect(
+      screen.getByText(/Sin tu ubicación, los pedidos salen por fecha/),
+    ).toBeInTheDocument()
+  })
+
+  it('does not show the notice while a position is idle/locating with no verdict yet', async () => {
+    setup({ devicePosition: { status: 'locating', position: null } })
+    await renderOrders()
+
+    expect(
+      screen.queryByText(/Sin tu ubicación, los pedidos salen por fecha/),
+    ).not.toBeInTheDocument()
+  })
+
+  it('shows the notice when the API answers X-Dispatch-Origin: none even with a granted position', async () => {
+    setup({
+      devicePosition: { status: 'granted', position: { lat: 1, lng: 2 } },
+      dispatchOrigin: 'none',
+    })
+    await renderOrders()
+
+    expect(
+      screen.getByText(/Sin tu ubicación, los pedidos salen por fecha/),
+    ).toBeInTheDocument()
+  })
+
+  it('no notice when the API used the device or the admin\'s saved location', async () => {
+    setup({
+      devicePosition: { status: 'granted', position: { lat: 1, lng: 2 } },
+      dispatchOrigin: 'device',
+    })
+    await renderOrders()
+
+    expect(
+      screen.queryByText(/Sin tu ubicación, los pedidos salen por fecha/),
+    ).not.toBeInTheDocument()
+  })
+
+  it('"Actualizar mi ubicación" re-requests the device position', async () => {
+    const refresh = vi.fn()
+    setup({ devicePosition: { status: 'granted', position: { lat: 1, lng: 2 }, refresh } })
+    await renderOrders()
+
+    await userEvent.click(
+      screen.getByRole('button', { name: /Actualizar mi ubicación/ }),
+    )
+
+    expect(refresh).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('SuperOrdersPage — orden por cercanía (columna Distancia)', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  it('clicking Fecha then the "Cercanía" reset control restores the API order', async () => {
+    setup({
+      orders: [
+        // The API order (e.g. nearest-first) is deliberately the OPPOSITE of
+        // date order, so a date sort is guaranteed to visibly reorder rows.
+        makeOrder({
+          id: 'o1',
+          customer: makeCustomer('Primero'),
+          createdAt: '2026-09-05T00:00:00.000Z',
+        }),
+        makeOrder({
+          id: 'o2',
+          customer: makeCustomer('Segundo'),
+          createdAt: '2026-09-01T00:00:00.000Z',
+        }),
+      ],
+    })
+    await renderOrders()
+
+    const namesInOrder = () =>
+      screen.getAllByText(/Primero|Segundo/).map((el) => el.textContent)
+
+    expect(namesInOrder()).toEqual(['Primero', 'Segundo'])
+
+    await userEvent.click(screen.getByText('Fecha'))
+    expect(namesInOrder()).not.toEqual(['Primero', 'Segundo'])
+
+    await userEvent.click(screen.getByRole('button', { name: 'Cercanía' }))
+    expect(namesInOrder()).toEqual(['Primero', 'Segundo'])
+  })
+
+  it('sorts the Distancia column with distance-less orders last', async () => {
+    setup({
+      orders: [
+        makeOrder({
+          id: 'o1',
+          status: 'in_delivery_route',
+          customer: makeCustomer('SinGPS'),
+          distanceMiles: null,
+        }),
+        makeOrder({
+          id: 'o2',
+          status: 'in_delivery_route',
+          customer: makeCustomer('Cercano'),
+          distanceMiles: 1.2,
+        }),
+        makeOrder({
+          id: 'o3',
+          status: 'in_delivery_route',
+          customer: makeCustomer('Lejano'),
+          distanceMiles: 8.5,
+        }),
+      ],
+    })
+    await renderOrders()
+
+    // This table's default toggle order is desc → asc (see DataTable.test.tsx);
+    // asc is where "nulls/no-distance sort last" is observable.
+    await userEvent.click(screen.getByText('Distancia'))
+    await userEvent.click(screen.getByText(/Distancia/))
+
+    const names = screen
+      .getAllByText(/SinGPS|Cercano|Lejano/)
+      .map((el) => el.textContent)
+    expect(names).toEqual(['Cercano', 'Lejano', 'SinGPS'])
   })
 })

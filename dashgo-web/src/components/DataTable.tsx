@@ -6,6 +6,7 @@ import {
   getSortedRowModel,
   useReactTable,
   type ColumnDef,
+  type OnChangeFn,
   type SortingState,
 } from '@tanstack/react-table'
 import { useState } from 'react'
@@ -17,6 +18,13 @@ interface Props<T> {
   columns: ColumnDef<T, unknown>[]
   filterPlaceholder?: string
   emptyMessage?: string
+  /**
+   * Controlled sorting — pass both together (e.g. super.orders.tsx needs an
+   * external "Cercanía" button that resets sorting to []). Omit both to keep
+   * the table's own internal state, unaffected for every other page.
+   */
+  sorting?: SortingState
+  onSortingChange?: OnChangeFn<SortingState>
 }
 
 export function DataTable<T>({
@@ -24,9 +32,14 @@ export function DataTable<T>({
   columns,
   filterPlaceholder,
   emptyMessage = 'Sin datos',
+  sorting: controlledSorting,
+  onSortingChange: controlledOnSortingChange,
 }: Props<T>) {
-  const [sorting, setSorting] = useState<SortingState>([])
+  const [internalSorting, setInternalSorting] = useState<SortingState>([])
   const [globalFilter, setGlobalFilter] = useState('')
+
+  const sorting = controlledSorting ?? internalSorting
+  const setSorting = controlledOnSortingChange ?? setInternalSorting
 
   const table = useReactTable({
     data,
