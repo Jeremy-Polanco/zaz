@@ -116,6 +116,9 @@ export function LocationBottomSheet({
             lat: pin.lat,
             lng: pin.lng,
             building: building.trim() || undefined,
+            houseNumber: houseNumber.trim() || undefined,
+            line2: unit.trim() || undefined,
+            instructions: reference.trim() || undefined,
             postalCode: postalCode.trim() || undefined,
           })
         } catch {

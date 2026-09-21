@@ -14,7 +14,9 @@ export const deliveryAddressSchema = z.object({
   lat: z.number(),
   lng: z.number(),
   building: z.string().optional(),
-  houseNumber: z.string().optional(),
+  // userAddressToGeoAddress() emits null (not undefined) when the saved
+  // address has no house number — see lib/address.ts.
+  houseNumber: z.string().max(40).nullable().optional(),
   unit: z.string().optional(),
   reference: z.string().optional(),
   postalCode: z.string().optional(),
@@ -140,11 +142,15 @@ export const savedAddressSchema = z.object({
   label: z.string().min(1, 'Nombre requerido').max(60),
   line1: z.string().min(1, 'Dirección requerida').max(255),
   line2: z.string().max(255).optional(),
+  // House/door number — optional; the geocoder prefills it from the pin, and
+  // the server also auto-fills it when left empty (see reverseGeocode()).
+  houseNumber: z.string().max(40).optional(),
   lat: z.number().min(-90).max(90),
   lng: z.number().min(-180).max(180),
   instructions: z.string().max(500).optional(),
-  // Customer must enter the ZIP — prefilled from the geocoder when possible.
-  postalCode: z.string().regex(/^\d{5}$/, 'Ingresá un ZIP de 5 dígitos'),
+  // Optional — the server now auto-fills the ZIP from geocoding when left
+  // empty, but a customer-typed value must still be a 5-digit ZIP.
+  postalCode: z.string().regex(/^\d{5}$/, 'Ingresá un ZIP de 5 dígitos').optional(),
 })
 
 export const updateSavedAddressSchema = savedAddressSchema.partial()

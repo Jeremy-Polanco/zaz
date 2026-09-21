@@ -20,7 +20,7 @@ import { CardAuthForm } from '../components/CardAuthForm'
 import { useCurrentUser } from '../lib/auth'
 import { useCart, clearCart } from '../lib/cart'
 import { Button, SectionHeading } from '../components/ui'
-import { userAddressToGeoAddress } from '../lib/address'
+import { userAddressToGeoAddress, formatResolvedPlace } from '../lib/address'
 import { cn, formatCents } from '../lib/utils'
 import {
   DEFAULT_FLAT_SHIPPING_CENTS,
@@ -210,6 +210,12 @@ export function CheckoutPage() {
   // taxRate. El server vuelve a congelar la tasa real al crear la orden;
   // esto es solo el preview.
   const previewTaxRate = selectedAddress?.taxRate ?? TAX_RATE
+  // "Impuestos NJ (6.625%)" / "Impuestos NYC (8.875%)" once the selected
+  // address resolved to a jurisdiction; plain "Impuestos (X%)" otherwise
+  // (older address, or one outside a recognized zone).
+  const taxLabel = selectedAddress?.taxJurisdiction
+    ? `Impuestos ${selectedAddress.taxJurisdiction} (${formatTaxRatePct(previewTaxRate)})`
+    : `Impuestos (${formatTaxRatePct(previewTaxRate)})`
   const skipQuoteTaxCents = allSkipQuote
     ? computeQuotePreviewCents({
         subtotalCents,
@@ -418,6 +424,11 @@ export function CheckoutPage() {
                     )
                   })}
                 </div>
+                {selectedAddress && (selectedAddress.city || selectedAddress.state) && (
+                  <p className="mt-2 text-xs text-ink-muted">
+                    {formatResolvedPlace(selectedAddress)}
+                  </p>
+                )}
               </section>
             )}
 
@@ -736,9 +747,7 @@ export function CheckoutPage() {
               </div>
               <div className="flex items-baseline justify-between">
                 <span className="text-[0.7rem] uppercase tracking-[0.15em] text-ink-muted">
-                  {allSkipQuote
-                    ? `Impuestos (${formatTaxRatePct(previewTaxRate)})`
-                    : 'Impuestos'}
+                  {allSkipQuote ? taxLabel : 'Impuestos'}
                 </span>
                 {allSkipQuote ? (
                   <span className="nums text-sm font-medium text-ink">

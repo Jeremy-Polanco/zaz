@@ -58,6 +58,8 @@ export async function createTestingApp(
   process.env.STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET ?? 'whsec_test';
   process.env.STRIPE_SUBSCRIPTION_PRICE_ID =
     process.env.STRIPE_SUBSCRIPTION_PRICE_ID ?? 'price_test_monthly';
+  // Ningún test sale a la red. Ver test/setup-integration.ts.
+  process.env.GEOCODING_ENABLED = process.env.GEOCODING_ENABLED ?? 'false';
   process.env.TWILIO_ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID ?? 'ACtest';
   process.env.TWILIO_API_KEY_SID = process.env.TWILIO_API_KEY_SID ?? 'SKtest';
   process.env.TWILIO_API_KEY_SECRET = process.env.TWILIO_API_KEY_SECRET ?? 'test-secret';

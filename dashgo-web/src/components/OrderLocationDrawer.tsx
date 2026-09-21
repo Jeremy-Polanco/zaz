@@ -127,6 +127,9 @@ export function OrderLocationDrawer({
             lat: pin.lat,
             lng: pin.lng,
             building: building.trim() || undefined,
+            houseNumber: houseNumber.trim() || undefined,
+            line2: unit.trim() || undefined,
+            instructions: reference.trim() || undefined,
             postalCode: zipResult.data,
           })
         } catch {

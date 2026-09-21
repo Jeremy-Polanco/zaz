@@ -22,3 +22,4 @@ export * from './push-token.entity';
 export * from './app-setting.entity';
 export * from './seller-product.entity';
 export * from './delivery-zone.entity';
+export * from './tax-jurisdiction.entity';

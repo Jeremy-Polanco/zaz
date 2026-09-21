@@ -46,7 +46,8 @@ import { AddressesModule } from '../addresses/addresses.module';
     CreditModule,
     SubscriptionModule,
     TwilioModule,
-    // La tasa de impuesto sale de la zona de la dirección (DeliveryZonesService).
+    // La tasa de impuesto sale de la jurisdicción del destino (TaxJurisdictionService)
+    // y la geocodificación inversa del snapshot (GeocodingService, re-exportado).
     // Import directo, sin forwardRef: AddressesModule no importa ningún módulo
     // de la app, así que no hay ciclo posible.
     AddressesModule,

@@ -40,6 +40,10 @@ function fakeAddress(overrides: Partial<UserAddress> = {}): UserAddress {
   return {
     id: 'addr-1',
     userId: 'admin-1',
+    houseNumber: null,
+    state: null,
+    county: null,
+    geocodedAt: null,
     label: 'Colmado',
     line1: 'Calle 1',
     line2: null,

@@ -254,4 +254,47 @@ describe('UserAddressesPanel', () => {
 
     expect(screen.getByText(/cargando direcciones/i)).toBeInTheDocument()
   })
+
+  it('edits an address: includes the house number typed in the edit form', async () => {
+    mockAddresses.mockReturnValue(
+      queryResult(addresses) as unknown as ReturnType<typeof useSuperUserAddresses>,
+    )
+    renderWithProviders(<UserAddressesPanel userId="user-abc" />)
+
+    const items = screen.getAllByRole('listitem')
+    await userEvent.click(
+      within(items[0]).getByRole('button', { name: /editar/i }),
+    )
+
+    const houseInput = screen.getByLabelText(/n° de casa/i)
+    await userEvent.type(houseInput, '24')
+    await userEvent.click(screen.getByRole('button', { name: 'Guardar' }))
+
+    expect(updateMutateAsync).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'addr-1',
+        input: expect.objectContaining({ houseNumber: '24' }),
+      }),
+    )
+  })
+
+  it('shows the resolved city/state/ZIP line under the address when the server has geocoded it', () => {
+    mockAddresses.mockReturnValue(
+      queryResult([
+        { ...addresses[0], city: 'Elizabeth', state: 'NJ', postalCode: '07201' },
+      ]) as unknown as ReturnType<typeof useSuperUserAddresses>,
+    )
+    renderWithProviders(<UserAddressesPanel userId="user-abc" />)
+
+    expect(screen.getByText('Elizabeth, NJ 07201')).toBeInTheDocument()
+  })
+
+  it('does not show a resolved-place line when the server has not geocoded the address', () => {
+    mockAddresses.mockReturnValue(
+      queryResult([addresses[1]]) as unknown as ReturnType<typeof useSuperUserAddresses>,
+    )
+    renderWithProviders(<UserAddressesPanel userId="user-abc" />)
+
+    expect(screen.queryByText(/, NJ|, NY/)).not.toBeInTheDocument()
+  })
 })

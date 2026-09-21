@@ -79,7 +79,9 @@ export class AdminAddressesController {
   /**
    * PATCH /admin/users/:userId/addresses/:id
    * Updates whitelisted fields (label, line1, line2, building, lat, lng,
-   * instructions, postalCode — cambiar el ZIP vuelve a resolver la zona).
+   * instructions, postalCode, houseNumber). Mover la chincheta vuelve a
+   * geocodificar (ciudad/estado/condado) y a resolver la zona. `state`, `city`
+   * y `county` los deriva el servidor y no se aceptan del cliente.
    * isDefault cannot be changed here. Returns 200.
    */
   @Patch(':userId/addresses/:id')

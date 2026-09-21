@@ -20,7 +20,10 @@ import { CreditService } from '../credit/credit.service';
 import { SubscriptionService } from '../subscription/subscription.service';
 import { assertStripeProductionConfig } from '../../common/stripe/stripe-runtime-guard';
 import { TAX_RATE, computeTaxableBase } from '../../common/tax';
-import { DeliveryZonesService } from '../addresses/delivery-zones.service';
+import { TaxJurisdictionService } from '../addresses/tax-jurisdiction.service';
+import { resolveDestination } from '../addresses/destination';
+import { GeocodingService } from '../geocoding/geocoding.service';
+import { UserAddress } from '../../entities/user-address.entity';
 import type { TaxableLine } from '../../common/tax';
 
 type StripeClient = InstanceType<typeof Stripe>;
@@ -39,6 +42,12 @@ export interface CreateIntentInput {
      */
     postalCode?: string | null;
   };
+  /**
+   * Id de la dirección guardada del cliente. Le gana al ZIP posteado para fijar
+   * la tasa — es el mismo contrato que POST /orders, y tiene que serlo: este
+   * intent es la plata que Stripe cobra y la orden se cotiza un segundo después.
+   */
+  deliveryAddressId?: string;
 }
 
 export interface CreatedIntent {
@@ -68,12 +77,15 @@ export class PaymentsService implements OnModuleInit {
     @InjectRepository(Product)
     private readonly products: Repository<Product>,
     @InjectRepository(Order) private readonly orders: Repository<Order>,
+    @InjectRepository(UserAddress)
+    private readonly userAddresses: Repository<UserAddress>,
     private readonly points: PointsService,
     private readonly shipping: ShippingService,
     private readonly credit: CreditService,
     @Inject(forwardRef(() => SubscriptionService))
     private readonly subscription: SubscriptionService,
-    private readonly deliveryZones: DeliveryZonesService,
+    private readonly taxJurisdiction: TaxJurisdictionService,
+    private readonly geocoding: GeocodingService,
   ) {}
 
   onModuleInit() {
@@ -156,14 +168,29 @@ export class PaymentsService implements OnModuleInit {
     });
     const shippingCents = quote.shippingCents;
 
-    // La TASA sale de la zona del destino, igual que en OrdersService.create:
-    // este intent es la plata que Stripe cobra, y la orden se crea un segundo
-    // después con la tasa de la MISMA dirección. Si acá se cobrara la global,
-    // el cliente de New Jersey vería 8.887% en el cobro y 6.625% en su orden.
-    // Sin código postal esto devuelve el fallback histórico.
-    const { taxRate } = await this.deliveryZones.resolveTaxRate({
-      postalCode: input.deliveryAddress?.postalCode ?? null,
-    });
+    // El DESTINO se resuelve con EL MISMO helper que usa OrdersService.create
+    // (addresses/destination.ts): fila guardada del cliente → geocodificación
+    // de la chincheta → ZIP posteado. Compartirlo no es prolijidad: este intent
+    // es la plata que Stripe cobra y la orden se crea un segundo después con la
+    // tasa de la MISMA dirección. Dos resoluciones distintas = el cliente ve un
+    // precio y paga otro.
+    //
+    // Nunca lanza: sin nada utilizable devuelve el fallback histórico.
+    const destination = await resolveDestination(
+      {
+        addresses: this.userAddresses,
+        geocoding: this.geocoding,
+        logger: this.logger,
+      },
+      {
+        userId: input.userId,
+        deliveryAddressId: input.deliveryAddressId,
+        posted: input.deliveryAddress,
+      },
+    );
+    const { taxRate } = await this.taxJurisdiction.resolveTaxRate(
+      destination.taxQuery,
+    );
 
     // Solo las líneas 'standard' pagan impuesto; envío y puntos se prorratean
     // por la parte gravable (ver common/tax.ts). Tiene que coincidir con lo que

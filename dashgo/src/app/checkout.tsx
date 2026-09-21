@@ -588,6 +588,13 @@ export default function CheckoutScreen() {
                 )
               })}
             </View>
+            {selectedAddress?.city && selectedAddress?.state ? (
+              <Text className="mt-2 font-sans text-[13px] text-ink-muted">
+                {`${selectedAddress.city}, ${selectedAddress.state}${
+                  selectedAddress.postalCode ? ` ${selectedAddress.postalCode}` : ''
+                }`}
+              </Text>
+            ) : null}
           </View>
         ) : null}
 
@@ -858,9 +865,14 @@ export default function CheckoutScreen() {
           <View className="mb-3 flex-row items-baseline justify-between">
             <Text className="font-sans text-[13px] uppercase tracking-label text-ink-muted">
               {allSkipQuote
-                ? t('totals.taxesWithRate', {
-                    rate: formatTaxRatePct(effectiveTaxRate),
-                  })
+                ? selectedAddress?.taxJurisdiction
+                  ? t('totals.taxesWithJurisdiction', {
+                      jurisdiction: selectedAddress.taxJurisdiction,
+                      rate: formatTaxRatePct(effectiveTaxRate),
+                    })
+                  : t('totals.taxesWithRate', {
+                      rate: formatTaxRatePct(effectiveTaxRate),
+                    })
                 : t('totals.taxes')}
             </Text>
             {allSkipQuote ? (

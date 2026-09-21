@@ -119,6 +119,53 @@ describe('reverseGeocode — postalCode extraction', () => {
   })
 })
 
+describe('reverseGeocode — houseNumber extraction', () => {
+  afterEach(() => {
+    jest.restoreAllMocks()
+  })
+
+  it('returns the house number from Nominatim address details', async () => {
+    mockFetchOnce({
+      display_name: '24 Main St, Elizabeth, NJ 07201',
+      address: { house_number: '24', postcode: '07201' },
+    })
+
+    const result = await reverseGeocode(40.66, -74.2)
+
+    expect(result.houseNumber).toBe('24')
+  })
+
+  it('returns null houseNumber when Nominatim has none', async () => {
+    mockFetchOnce({
+      display_name: '123 Main St',
+      address: { postcode: '10451' },
+    })
+
+    const result = await reverseGeocode(40.8404, -73.9397)
+
+    expect(result.houseNumber).toBeNull()
+  })
+
+  it('returns null houseNumber when there is no address block at all', async () => {
+    mockFetchOnce({ display_name: '123 Main St' })
+
+    const result = await reverseGeocode(40.8404, -73.9397)
+
+    expect(result.houseNumber).toBeNull()
+  })
+
+  it('trims a house number with surrounding whitespace', async () => {
+    mockFetchOnce({
+      display_name: 'x',
+      address: { house_number: ' 24 ' },
+    })
+
+    const result = await reverseGeocode(40.66, -74.2)
+
+    expect(result.houseNumber).toBe('24')
+  })
+})
+
 describe('forwardGeocode — postalCode extraction', () => {
   afterEach(() => {
     jest.restoreAllMocks()

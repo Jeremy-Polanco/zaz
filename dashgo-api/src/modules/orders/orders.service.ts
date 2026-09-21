@@ -13,7 +13,12 @@ import { Order, OrderItem, Product } from '../../entities';
 import { UserAddress } from '../../entities/user-address.entity';
 import { DeliveryZone } from '../../entities/delivery-zone.entity';
 import { resolveZoneId } from '../addresses/resolve-zone';
-import { DeliveryZonesService } from '../addresses/delivery-zones.service';
+import { TaxJurisdictionService } from '../addresses/tax-jurisdiction.service';
+import type { TaxRateQuery } from '../addresses/tax-jurisdiction.service';
+import { GeocodingService } from '../geocoding/geocoding.service';
+import { resolveDestination } from '../addresses/destination';
+import type { TaxJurisdictionCode } from '../../entities/tax-jurisdiction.entity';
+import type { GeocodedPlace } from '../geocoding/nominatim';
 import {
   OrderStatus,
   PaymentMethod,
@@ -101,7 +106,8 @@ export class OrdersService {
     private readonly twilio: TwilioService,
     private readonly rentalsService: RentalsService,
     private readonly orderNotifications: OrderNotificationsService,
-    private readonly deliveryZonesService: DeliveryZonesService,
+    private readonly taxJurisdictionService: TaxJurisdictionService,
+    private readonly geocoding: GeocodingService,
   ) {}
 
   /**
@@ -468,6 +474,68 @@ export class OrdersService {
       taxCategory: i.taxCategory,
     }));
 
+    // ── El DESTINO, resuelto AFUERA de la transacción ─────────────────────
+    // Es una lectura a la base y (a veces) una llamada de red a un tercero: una
+    // transacción abierta esperando a Nominatim bloquea filas de `orders` y
+    // `products` por lo que tarde el DNS de otro.
+    //
+    // El mismo helper lo usa el intent de Stripe (ver addresses/destination.ts):
+    // si los dos caminos resolvieran distinto, el cliente vería un precio en el
+    // cobro y otro en su pedido.
+    const destination = await resolveDestination(
+      {
+        addresses: this.userAddresses,
+        geocoding: this.geocoding,
+        logger: this.logger,
+      },
+      {
+        userId: user.id,
+        deliveryAddressId: dto.deliveryAddressId,
+        posted: dto.deliveryAddress,
+      },
+    );
+    let bookAddress: UserAddress | null = destination.bookAddress;
+
+    // Sin snapshot y sin fila elegida: la dirección por DEFECTO del cliente, así
+    // los pedidos siguientes la heredan solos (el colmado igual puede
+    // re-pinchar al llegar).
+    if (!dto.deliveryAddress && !bookAddress) {
+      bookAddress = await this.userAddresses.findOne({
+        where: { userId: user.id, isDefault: true },
+      });
+    }
+
+    // El snapshot se guarda YA COMPLETO: ciudad, estado y condado adentro del
+    // JSONB. No se leen de la libreta al consultarlo porque la dirección de un
+    // pedido se CONGELA — si el cliente borra o edita esa dirección mañana, el
+    // pedido tiene que poder seguir explicando por qué pagó lo que pagó.
+    //
+    // Y se congela con los MISMOS datos con los que se resuelve el impuesto:
+    // `setQuote` vuelve a resolver leyendo este JSONB, así que un snapshot más
+    // pobre que la consulta original hace que la tasa se mueva sola entre que
+    // el cliente pide y el admin cotiza.
+    const resolvedDeliveryAddress: GeoAddress | null = dto.deliveryAddress
+      ? bookAddress
+        ? mergeSavedAddressIntoSnapshot(dto.deliveryAddress, bookAddress)
+        : mergeGeocodedIntoSnapshot(dto.deliveryAddress, destination.place)
+      : bookAddress
+        ? this.userAddressToDeliveryAddress(bookAddress)
+        : null;
+
+    // La consulta de impuesto se arma DESDE EL SNAPSHOT que se va a congelar,
+    // no desde la fila por separado: es la única forma de garantizar que
+    // `setQuote` —que re-resuelve leyendo ese mismo JSONB— llegue al mismo
+    // resultado. Lo único que se agrega es el `zoneId` cacheado de la libreta,
+    // que el snapshot no guarda (la zona es un dato de la libreta, no del
+    // pedido).
+    //
+    // Sin zona y sin ZIP esto devuelve TAX_RATE: el pedido de una dirección que
+    // no cae en ninguna zona sigue pagando lo que pagaba siempre.
+    const destinationTaxQuery: TaxRateQuery = {
+      ...snapshotTaxQuery(resolvedDeliveryAddress),
+      zoneId: bookAddress?.zoneId ?? null,
+    };
+
     const saved = await this.dataSource.transaction(async (tx) => {
       const orderRepo = tx.getRepository(Order);
       const itemRepo = tx.getRepository(OrderItem);
@@ -540,58 +608,11 @@ export class OrdersService {
       // location so subsequent orders auto-inherit it (the colmado can still
       // re-pin at delivery). Mirrors the frontend userAddressToGeoAddress map.
       //
-      // El `postalCode` del snapshot lo ESCRIBE el cliente: si fuera la única
-      // fuente de la tasa, el cliente elegiría cuánto impuesto paga. Por eso,
-      // cuando manda `deliveryAddressId`, la plata sale de la fila real de su
-      // libreta — leída con el userId adentro del where, que es el chequeo de
-      // propiedad.
-      let bookAddress: UserAddress | null = null;
-      if (dto.deliveryAddressId) {
-        bookAddress = await this.userAddresses.findOne({
-          where: { id: dto.deliveryAddressId, userId: user.id },
-        });
-        if (!bookAddress) {
-          // Id de otro, o borrado entre que el cliente abrió el checkout y
-          // mandó el pedido. No se rompe la compra: se cobra con el ZIP
-          // posteado, igual que antes de que el campo existiera.
-          this.logger.warn(
-            `deliveryAddressId ${dto.deliveryAddressId} no pertenece al usuario ${user.id} — la tasa sale del ZIP posteado`,
-          );
-        }
-      }
-
-      let resolvedDeliveryAddress: GeoAddress | null =
-        dto.deliveryAddress ?? null;
-      if (!resolvedDeliveryAddress) {
-        // Sin snapshot: la fila elegida, y si no hay, la dirección por defecto.
-        const source =
-          bookAddress ??
-          (await this.userAddresses.findOne({
-            where: { userId: user.id, isDefault: true },
-          }));
-        if (source) {
-          bookAddress = source;
-          resolvedDeliveryAddress = this.userAddressToDeliveryAddress(source);
-        }
-      }
-
-      // Sin zona y sin ZIP esto devuelve TAX_RATE: el pedido de una dirección
-      // que no cae en ninguna zona sigue pagando lo que pagaba siempre.
-      //
-      // Con fila de libreta se pregunta por SUS datos (el ZIP manda, el
-      // `zone_id` es el respaldo — ver delivery-zones.service.ts) y el ZIP
-      // posteado se ignora para la plata.
-      const { taxRate } = await this.deliveryZonesService.resolveTaxRate(
-        bookAddress
-          ? {
-              zoneId: bookAddress.zoneId ?? null,
-              postalCode: bookAddress.postalCode ?? null,
-            }
-          : {
-              zoneId: null,
-              postalCode: resolvedDeliveryAddress?.postalCode ?? null,
-            },
-      );
+      // Con fila de libreta se pregunta por SUS datos — incluido el ESTADO que
+      // derivó el servidor al guardarla — y el ZIP posteado se ignora para la
+      // plata (ver tax-jurisdiction.service.ts y addresses/destination.ts).
+      const { taxRate, jurisdiction } =
+        await this.taxJurisdictionService.resolveTaxRate(destinationTaxQuery);
 
       const flatShippingCents = await this.shippingRate.getFlatShippingCents();
       const shippingCents = opts.provisioned ? 0 : flatShippingCents;
@@ -629,6 +650,9 @@ export class OrdersService {
         // decorativa y pasa a explicar, años después, por qué este pedido pagó
         // lo que pagó. Cambiar la tasa de la zona no re-cotiza lo ya vendido.
         taxRate: taxRate.toFixed(5),
+        // Y con qué LEY. El número solo no se explica: un 0.06625 en 2029 no
+        // dice si fue New Jersey, un override de zona o un error.
+        taxJurisdiction: jurisdiction,
         // Congela la base gravable — sin esto el impuesto de un pedido mixto
         // no se puede reconstruir después.
         taxableSubtotal: ((skipQuote ? base.taxableCents : 0) / 100).toFixed(2),
@@ -858,27 +882,62 @@ export class OrdersService {
    * congelada; ilegible (columna vacía, pedido viejo) cae en la constante
    * histórica y NUNCA en 0, que sería cobrar de menos.
    *
-   * Se pregunta por ZIP y no por el `zone_id` de la libreta a propósito: la
-   * dirección de un pedido es un snapshot JSONB que sólo tiene el código
-   * postal, y ése es igual el dato primario en todo el sistema (ver
-   * delivery-zones.service.ts).
+   * Se pregunta por el SNAPSHOT y no por la libreta a propósito: la dirección
+   * de un pedido se congela, y desde la migración 1809 ese JSONB ya lleva
+   * adentro la ciudad, el estado y el condado que derivó el servidor. Leer la
+   * libreta haría que editar una dirección re-cotizara pedidos viejos.
    */
   private async currentTaxRate(
     order: Order,
-    postalCode: string | null = order.deliveryAddress?.postalCode ?? null,
-  ): Promise<{ taxRate: number; repriced: boolean }> {
+    destination: TaxRateQuery = snapshotTaxQuery(order.deliveryAddress),
+  ): Promise<{
+    taxRate: number;
+    jurisdiction: TaxJurisdictionCode | null;
+    repriced: boolean;
+  }> {
     if (!this.isTaxRateRepriceable(order)) {
       const frozen = parseFloat(order.taxRate ?? '');
       return {
         taxRate: Number.isFinite(frozen) ? frozen : TAX_RATE,
+        jurisdiction:
+          (order.taxJurisdiction as TaxJurisdictionCode | null) ?? null,
         repriced: false,
       };
     }
-    const { taxRate } = await this.deliveryZonesService.resolveTaxRate({
-      zoneId: null,
-      postalCode,
-    });
-    return { taxRate, repriced: true };
+    const { taxRate, jurisdiction } =
+      await this.taxJurisdictionService.resolveTaxRate(destination);
+    return { taxRate, jurisdiction, repriced: true };
+  }
+
+  /**
+   * Segundo intento de geocodificación para un pedido cuyo snapshot tiene
+   * chincheta pero no tiene estado.
+   *
+   * Existe porque la geocodificación es un ADORNO de un camino que mueve plata:
+   * si Nominatim no contesta cuando el cliente pide, el pedido se crea igual —
+   * con la jurisdicción en null y la tasa resuelta por el ZIP. Este método le
+   * da una segunda oportunidad en el único momento que queda antes de que el
+   * precio se cierre: la cotización.
+   *
+   * Devuelve el snapshot COMPLETADO, o `null` si no hay nada que hacer (no es
+   * repreciable, no hay chincheta, ya tiene estado, o el geocoder tampoco
+   * contestó esta vez). El caché de `GeocodingService` hace que re-cotizar el
+   * mismo pedido no vuelva a salir a la red.
+   */
+  private async rescueSnapshotJurisdiction(
+    order: Order,
+  ): Promise<GeoAddress | null> {
+    const snapshot = order.deliveryAddress;
+    if (!snapshot) return null;
+    if (snapshot.state) return null;
+    if (!this.isTaxRateRepriceable(order)) return null;
+    const { lat, lng } = snapshot;
+    if (typeof lat !== 'number' || typeof lng !== 'number') return null;
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+
+    const place = await this.geocoding.reverse(lat, lng);
+    if (!place) return null;
+    return mergeGeocodedIntoSnapshot(snapshot, place);
   }
 
   /** Envío + recargo por distancia, que para el impuesto son el mismo cargo. */
@@ -1020,7 +1079,21 @@ export class OrdersService {
     // congelaba el fallback. Ya autorizado (o confirmado, si es efectivo) manda
     // la tasa congelada: re-resolver ahí re-cotizaría una venta cerrada, y
     // encima con la zona de hoy y no con la de entonces.
-    const { taxRate, repriced } = await this.currentTaxRate(order);
+    // AUTOCURACIÓN: si el snapshot tiene chincheta pero no tiene estado, el
+    // pedido nació mientras Nominatim estaba caído (o antes de la migración
+    // 1809). Cotizar es el último momento en que la tasa todavía se puede
+    // mover sin re-preciar una venta, así que se reintenta ACÁ — con caché y
+    // con timeout, y ANTES de cualquier escritura, para que la tasa que se
+    // congela y el snapshot que se guarda salgan del mismo dato.
+    //
+    // Sólo mientras el pedido siga siendo repreciable: en una venta cerrada
+    // manda la tasa congelada y la llamada de red sería gasto puro.
+    const rescued = await this.rescueSnapshotJurisdiction(order);
+
+    const { taxRate, jurisdiction, repriced } = await this.currentTaxRate(
+      order,
+      snapshotTaxQuery(rescued ?? order.deliveryAddress),
+    );
     const { taxCents, taxableCents, totalCents } = this.quoteTotals(
       order,
       deliveryCents,
@@ -1029,6 +1102,10 @@ export class OrdersService {
 
     await this.orders.update(id, {
       shipping: (effectiveShippingCents / 100).toFixed(2),
+      // El snapshot completado se guarda en la MISMA escritura que la tasa que
+      // salió de él: separados, un error entre medio dejaría el pedido diciendo
+      // que cobró una jurisdicción que su dirección no respalda.
+      ...(rescued ? { deliveryAddress: rescued } : {}),
       deliverySurcharge: (surchargeCents / 100).toFixed(2),
       // `undefined` deja el día como estaba; `null` lo desasigna.
       ...(opts.scheduledDeliveryDate !== undefined
@@ -1038,7 +1115,9 @@ export class OrdersService {
       // La tasa re-resuelta se CONGELA en la misma escritura que el impuesto
       // que la usó: separadas, un error entre medio dejaría la orden diciendo
       // que cobró una tasa distinta de la que aplicó.
-      ...(repriced ? { taxRate: taxRate.toFixed(5) } : {}),
+      ...(repriced
+        ? { taxRate: taxRate.toFixed(5), taxJurisdiction: jurisdiction }
+        : {}),
       taxableSubtotal: (taxableCents / 100).toFixed(2),
       totalAmount: (totalCents / 100).toFixed(2),
       status: OrderStatus.QUOTED,
@@ -1134,13 +1213,22 @@ export class OrdersService {
       lat: a.lat,
       lng: a.lng,
       building: building || null,
-      houseNumber: null,
+      // El número de puerta VIAJA desde la libreta. Antes salía siempre en
+      // null: el cliente lo escribía una vez, se guardaba en la fila, y el
+      // pedido siguiente llegaba sin él.
+      houseNumber: a.houseNumber ?? null,
       unit: null,
       reference: reference || null,
       // El ZIP viaja al snapshot para que la ruta del día lo muestre sin tener
       // que abrir la libreta del cliente. Las direcciones viejas todavía no lo
       // tienen: null es un valor esperado, no un faltante.
       postalCode: a.postalCode ?? null,
+      // Lo que derivó el servidor cuando se guardó la dirección. Se copia al
+      // snapshot para que el pedido quede autoexplicado sin depender de que la
+      // fila siga existiendo.
+      city: a.city ?? null,
+      state: a.state ?? null,
+      county: a.county ?? null,
     };
   }
 
@@ -1171,14 +1259,33 @@ export class OrdersService {
     );
     const order = await this.findOne(id, user);
 
-    // La tasa sale del ZIP que se está pinchando AHORA, no del que traía el
-    // pedido. El `zone_id` de la dirección que se auto-guarda más abajo no hace
-    // falta: se deriva de este mismo código postal con el mismo resolutor, y el
-    // ZIP es el dato primario (ver delivery-zones.service.ts) — sin ZIP esa
-    // fila tampoco tendría zona.
-    const { taxRate, repriced } = await this.currentTaxRate(
+    // La chincheta que se está pinchando AHORA es la que decide el impuesto, y
+    // quien sabe en qué estado cae esa chincheta es el geocoder, no el ZIP que
+    // el admin pudo no escribir. Null-tolerante: si Nominatim no contesta, la
+    // dirección se fija igual.
+    const place = await this.geocoding.reverse(address.lat, address.lng);
+    const snapshot = mergeGeocodedIntoSnapshot(address, place);
+
+    // Pero "no contestó" NO puede significar "ya no sabemos dónde es". Sin
+    // esto, una caída de Nominatim nulleaba estado/ciudad/condado, el pedido se
+    // re-resolvía por el ZIP y una orden YA COTIZADA del Bronx se recalculaba
+    // al fallback: el tercero se cae y la casa paga la diferencia. Al
+    // re-pinchar se afina la ubicación de una dirección que casi siempre es la
+    // misma, así que arrastrar la jurisdicción anterior es lo correcto y lo
+    // conservador.
+    const previous = order.deliveryAddress;
+    if (!place && (previous?.state || previous?.city || previous?.county)) {
+      this.logger.warn(
+        `Geocodificación no disponible al re-pinchar el pedido ${order.id} — se arrastra la jurisdicción anterior (${previous.state ?? '??'}/${previous.county ?? '??'})`,
+      );
+      snapshot.city = previous.city ?? null;
+      snapshot.state = previous.state ?? null;
+      snapshot.county = previous.county ?? null;
+    }
+
+    const { taxRate, jurisdiction, repriced } = await this.currentTaxRate(
       order,
-      address.postalCode ?? null,
+      snapshotTaxQuery(snapshot),
     );
     // Un pedido ya COTIZADO tiene impuesto calculado: moverle la tasa sin
     // rehacer la cuenta lo dejaría diciendo que cobró 6.625% sobre un monto
@@ -1190,17 +1297,10 @@ export class OrdersService {
         : null;
 
     await this.orders.update(order.id, {
-      deliveryAddress: {
-        text: address.text,
-        lat: address.lat,
-        lng: address.lng,
-        building: address.building ?? null,
-        houseNumber: address.houseNumber ?? null,
-        unit: address.unit ?? null,
-        reference: address.reference ?? null,
-        postalCode: address.postalCode ?? null,
-      },
-      ...(repriced ? { taxRate: taxRate.toFixed(5) } : {}),
+      deliveryAddress: snapshot,
+      ...(repriced
+        ? { taxRate: taxRate.toFixed(5), taxJurisdiction: jurisdiction }
+        : {}),
       ...(requote
         ? {
             tax: (requote.taxCents / 100).toFixed(2),
@@ -1219,15 +1319,15 @@ export class OrdersService {
         where: { userId: order.customerId },
       });
       if (existing === 0) {
-        const houseNumber = (address.houseNumber ?? '').trim();
+        const houseNumber = (snapshot.houseNumber ?? '').trim();
         const line1 =
-          address.text?.trim() ||
+          snapshot.text?.trim() ||
           (houseNumber ? `Casa ${houseNumber}` : 'Ubicación');
         // En la web el cliente no carga direcciones: esta chincheta ES su
         // libreta. Si no viajara el ZIP (y la zona que se deriva de él), el
         // cliente quedaría sin código postal aunque el admin lo haya escrito.
         // Misma regla que AddressesService: sin ZIP no se consultan zonas.
-        const postalCode = address.postalCode?.trim() || null;
+        const postalCode = snapshot.postalCode?.trim() || null;
         const zoneId = postalCode
           ? resolveZoneId(
               postalCode,
@@ -1239,12 +1339,28 @@ export class OrdersService {
             userId: order.customerId,
             label: 'Principal',
             line1,
-            line2: address.unit?.trim() || null,
-            building: address.building?.trim() || null,
-            instructions: address.reference?.trim() || null,
+            line2: snapshot.unit?.trim() || null,
+            building: snapshot.building?.trim() || null,
+            instructions: snapshot.reference?.trim() || null,
             lat: address.lat,
             lng: address.lng,
             postalCode,
+            // El número de puerta y lo que derivó el geocoder viajan a la fila:
+            // esta chincheta ES la libreta del cliente web, y una libreta que
+            // nace sin estado es una libreta que el backfill tiene que volver a
+            // recorrer.
+            //
+            // Se copia de `place` y NO del snapshot: el snapshot puede traer la
+            // jurisdicción ARRASTRADA del pedido anterior (ver arriba), que es
+            // un dato de OTRA chincheta. En la fila nueva eso quedaría como un
+            // estado geocodificado que nadie geocodificó, y el backfill no lo
+            // volvería a mirar. Sin geocodificación nace sin estado y sin
+            // sello: el backfill la completa.
+            houseNumber: houseNumber || null,
+            city: place?.city ?? null,
+            state: place?.state ?? null,
+            county: place?.county ?? null,
+            geocodedAt: place ? new Date() : null,
             zoneId,
             isDefault: true,
           }),
@@ -1905,4 +2021,100 @@ export class OrdersService {
       throw new ForbiddenException('Cliente no puede ejecutar esta transición');
     }
   }
+}
+
+/**
+ * Mete lo que derivó el geocoder DENTRO del snapshot de la orden.
+ *
+ * Reglas, y las tres importan:
+ *  - `city`/`state`/`county` salen SIEMPRE del geocoder. Son hechos del
+ *    servidor: el estado decide la tasa de impuesto, y un dato que manda el
+ *    cliente es un dato que el cliente elige.
+ *  - `postalCode` y `houseNumber` sólo se rellenan cuando NO vinieron escritos.
+ *    El cliente (o el admin al pinchar) sabe cosas que el polígono no: en el
+ *    borde de dos ZIP, el geocoder devuelve el de al lado.
+ *  - Sin geocodificación (`place` null) los tres derivados quedan en null y el
+ *    snapshot se guarda igual. Nominatim caído no puede impedir un pedido.
+ */
+function mergeGeocodedIntoSnapshot(
+  address: GeoAddress,
+  place: GeocodedPlace | null,
+): GeoAddress {
+  const typedZip = (address.postalCode ?? '').trim() || null;
+  const typedHouse = (address.houseNumber ?? '').trim() || null;
+  return {
+    text: address.text,
+    lat: address.lat,
+    lng: address.lng,
+    building: address.building ?? null,
+    houseNumber: typedHouse ?? place?.houseNumber ?? null,
+    unit: address.unit ?? null,
+    reference: address.reference ?? null,
+    postalCode: typedZip ?? place?.postalCode ?? null,
+    city: place?.city ?? null,
+    state: place?.state ?? null,
+    county: place?.county ?? null,
+  };
+}
+
+/**
+ * Mete la FILA GUARDADA del cliente dentro del snapshot que él posteó.
+ *
+ * Producción postea las dos cosas juntas —`deliveryAddressId` Y
+ * `deliveryAddress`— porque el snapshot es el registro histórico del pedido y
+ * el id es la prueba de propiedad. Antes ganaba sólo el snapshot y el JSONB
+ * quedaba con `state: null`: al cotizar, el pedido se re-resolvía con el ZIP
+ * que había escrito el cliente y la tasa se movía sola.
+ *
+ * Precedencia, y cada línea es una decisión de plata:
+ *  - `city`/`state`/`county` salen SIEMPRE de la fila. Son hechos del servidor
+ *    (geocodificación inversa al guardar la dirección); el cliente no los manda
+ *    ni los puede mandar.
+ *  - `postalCode` sale de la fila cuando la fila tiene uno. El ZIP del snapshot
+ *    lo escribe el cliente, y con él se resuelve la zona (que puede traer un
+ *    override de tasa): teniendo la fila propia, la fila manda. Sólo si la fila
+ *    no tiene ZIP se usa el posteado, que es mejor que nada.
+ *  - `houseNumber`: gana el posteado si vino; si no, el de la fila. Hasta acá
+ *    se perdía siempre — `userAddressToGeoAddress` (web y mobile) no lo mapea,
+ *    así que el pedido llegaba sin número de puerta aunque el cliente lo
+ *    hubiera escrito una vez.
+ *  - `text`/`lat`/`lng`/`building`/`unit`/`reference` son del snapshot: el
+ *    cliente pudo refinar cómo llegar (el portón, el timbre) para ESTE pedido.
+ */
+function mergeSavedAddressIntoSnapshot(
+  address: GeoAddress,
+  book: UserAddress,
+): GeoAddress {
+  const typedZip = (address.postalCode ?? '').trim() || null;
+  const typedHouse = (address.houseNumber ?? '').trim() || null;
+  return {
+    text: address.text,
+    lat: address.lat,
+    lng: address.lng,
+    building: address.building ?? null,
+    houseNumber: typedHouse ?? book.houseNumber ?? null,
+    unit: address.unit ?? null,
+    reference: address.reference ?? null,
+    postalCode: book.postalCode ?? typedZip,
+    city: book.city ?? null,
+    state: book.state ?? null,
+    county: book.county ?? null,
+  };
+}
+
+/**
+ * Lo que el resolutor de impuesto necesita saber de un snapshot congelado.
+ *
+ * `zoneId` va siempre en null a propósito: la zona es un cache de la LIBRETA y
+ * el pedido no la guarda. Lo que el pedido guarda — y lo que tiene que decidir
+ * — es dónde se entrega.
+ */
+function snapshotTaxQuery(address: GeoAddress | null): TaxRateQuery {
+  return {
+    zoneId: null,
+    postalCode: address?.postalCode ?? null,
+    state: address?.state ?? null,
+    city: address?.city ?? null,
+    county: address?.county ?? null,
+  };
 }

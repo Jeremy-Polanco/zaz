@@ -162,10 +162,12 @@ describe('CheckoutPage — tasa de impuesto por dirección', () => {
     expect(screen.getByText('Impuestos (8.887%)')).toBeInTheDocument()
   })
 
-  it('includes postalCode in the order-create payload when the selected address has one', async () => {
+  it('includes postalCode and houseNumber in the order-create payload when the selected address has them', async () => {
+    // houseNumber viaja en el snapshot congelado de la orden (deliveryAddress)
+    // desde antes del merge en el servidor — ver DeliveryAddressDto.houseNumber.
     const user = userEvent.setup()
     mockUseMyAddresses.mockReturnValue({
-      data: [makeAddress({ postalCode: '07208' })],
+      data: [makeAddress({ postalCode: '07208', houseNumber: '1101' })],
     } as unknown as ReturnType<typeof useMyAddresses>)
     const mutateAsync = vi.fn().mockResolvedValue(makeCreatedOrder())
     mockUseCreateOrder.mockReturnValue({
@@ -186,7 +188,32 @@ describe('CheckoutPage — tasa de impuesto por dirección', () => {
           lat: 18.47,
           lng: -69.9,
           postalCode: '07208',
+          houseNumber: '1101',
         }),
+      }),
+    )
+  })
+
+  it('sends houseNumber as null (not omitted) when the selected address has none', async () => {
+    const user = userEvent.setup()
+    mockUseMyAddresses.mockReturnValue({
+      data: [makeAddress({ houseNumber: undefined })],
+    } as unknown as ReturnType<typeof useMyAddresses>)
+    const mutateAsync = vi.fn().mockResolvedValue(makeCreatedOrder())
+    mockUseCreateOrder.mockReturnValue({
+      mutateAsync,
+      isPending: false,
+      isError: false,
+      error: null,
+    } as unknown as ReturnType<typeof useCreateOrder>)
+
+    renderWithRouter(CheckoutPage)
+    await screen.findByText('Resumen')
+    await user.click(screen.getByRole('button', { name: /confirmar pedido/i }))
+
+    expect(mutateAsync).toHaveBeenCalledWith(
+      expect.objectContaining({
+        deliveryAddress: expect.objectContaining({ houseNumber: null }),
       }),
     )
   })
@@ -224,5 +251,62 @@ describe('CheckoutPage — tasa de impuesto por dirección', () => {
         }),
       }),
     )
+  })
+
+  it('labels the tax line with the NJ jurisdiction when the selected address resolved to one', async () => {
+    mockUseMyAddresses.mockReturnValue({
+      data: [makeAddress({ taxRate: 0.06625, taxJurisdiction: 'NJ' })],
+    } as unknown as ReturnType<typeof useMyAddresses>)
+
+    renderWithRouter(CheckoutPage)
+    await screen.findByText('Resumen')
+
+    expect(screen.getByText('Impuestos NJ (6.625%)')).toBeInTheDocument()
+  })
+
+  it('labels the tax line with the NYC jurisdiction when the selected address resolved to one', async () => {
+    mockUseMyAddresses.mockReturnValue({
+      data: [makeAddress({ taxRate: 0.08875, taxJurisdiction: 'NYC' })],
+    } as unknown as ReturnType<typeof useMyAddresses>)
+
+    renderWithRouter(CheckoutPage)
+    await screen.findByText('Resumen')
+
+    expect(screen.getByText('Impuestos NYC (8.875%)')).toBeInTheDocument()
+  })
+
+  it('keeps the plain tax label when the address has no resolved jurisdiction', async () => {
+    mockUseMyAddresses.mockReturnValue({
+      data: [makeAddress({ taxRate: 0.06625, taxJurisdiction: undefined })],
+    } as unknown as ReturnType<typeof useMyAddresses>)
+
+    renderWithRouter(CheckoutPage)
+    await screen.findByText('Resumen')
+
+    expect(screen.getByText('Impuestos (6.625%)')).toBeInTheDocument()
+  })
+
+  it('shows the resolved city/state/ZIP line next to the selected address when available', async () => {
+    mockUseMyAddresses.mockReturnValue({
+      data: [
+        makeAddress({ city: 'Elizabeth', state: 'NJ', postalCode: '07201' }),
+      ],
+    } as unknown as ReturnType<typeof useMyAddresses>)
+
+    renderWithRouter(CheckoutPage)
+    await screen.findByText('Resumen')
+
+    expect(screen.getByText('Elizabeth, NJ 07201')).toBeInTheDocument()
+  })
+
+  it('does not show a resolved place line when the address has not been geocoded', async () => {
+    mockUseMyAddresses.mockReturnValue({
+      data: [makeAddress({ city: undefined, state: undefined })],
+    } as unknown as ReturnType<typeof useMyAddresses>)
+
+    renderWithRouter(CheckoutPage)
+    await screen.findByText('Resumen')
+
+    expect(screen.queryByText(/, NJ|, NY/)).not.toBeInTheDocument()
   })
 })

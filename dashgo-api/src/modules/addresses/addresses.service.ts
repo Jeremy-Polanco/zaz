@@ -11,19 +11,28 @@ import { DeliveryZone } from '../../entities/delivery-zone.entity';
 import { CreateAddressDto } from './dto/create-address.dto';
 import { UpdateAddressDto } from './dto/update-address.dto';
 import { resolveZoneId } from './resolve-zone';
-import { DeliveryZonesService } from './delivery-zones.service';
-import type { TaxRateQuery } from './delivery-zones.service';
+import { TaxJurisdictionService } from './tax-jurisdiction.service';
+import type { TaxRateQuery } from './tax-jurisdiction.service';
+import { GeocodingService } from '../geocoding/geocoding.service';
+import type { GeocodedPlace } from '../geocoding/nominatim';
+import type { TaxJurisdictionCode } from '../../entities/tax-jurisdiction.entity';
 
 /**
  * La dirección como la ve el cliente: la fila más la TASA de impuesto que le
- * corresponde.
+ * corresponde y la LEY que la fijó.
  *
- * La tasa NO es columna a propósito. La fija la zona (`delivery_zones.tax_rate`)
- * y la zona la edita el admin: copiada en cada dirección habría que
- * rebackfillear la libreta entera cada vez que un estado cambia un decimal.
- * Se calcula al responder, que es cuando importa.
+ * Ninguna de las dos es columna a propósito. Salen de `tax_jurisdictions` (y,
+ * si alguien lo cargó, del override de la zona), y eso se edita: copiadas en
+ * cada dirección habría que rebackfillear la libreta entera cada vez que un
+ * estado cambia un decimal. Se calculan al responder, que es cuando importan.
+ *
+ * `taxJurisdiction` viaja al lado de `taxRate` para que la app pueda decir
+ * "6.625% (New Jersey)" y no sólo un número suelto.
  */
-export type AddressResponse = UserAddress & { taxRate: number };
+export type AddressResponse = UserAddress & {
+  taxRate: number;
+  taxJurisdiction: TaxJurisdictionCode | null;
+};
 
 @Injectable()
 export class AddressesService {
@@ -35,7 +44,8 @@ export class AddressesService {
     @InjectRepository(DeliveryZone)
     private readonly zones: Repository<DeliveryZone>,
     private readonly dataSource: DataSource,
-    private readonly deliveryZonesService: DeliveryZonesService,
+    private readonly taxJurisdictionService: TaxJurisdictionService,
+    private readonly geocoding: GeocodingService,
   ) {}
 
   /**
@@ -64,12 +74,35 @@ export class AddressesService {
       });
     }
     const isFirst = count === 0;
-    const postalCode = normalizeZip(dto.postalCode);
+
+    // La chincheta se convierte en jurisdicción ACÁ, en el servidor. El cliente
+    // manda un punto en el mapa; la ciudad, el estado y el condado los deriva
+    // el servidor porque el estado decide la tasa de impuesto: un dato que
+    // manda el cliente es un dato que el cliente elige.
+    //
+    // Nunca bloquea: si Nominatim no contesta, `place` es null y la dirección
+    // se guarda igual, sólo que sin los campos derivados.
+    const place = await this.geocoding.reverse(dto.lat, dto.lng);
+
+    // El ZIP y el número de puerta que ESCRIBIÓ el cliente mandan sobre los
+    // geocodificados: el cliente sabe por qué código postal le entra el correo,
+    // y en el borde de dos polígonos el geocoder puede devolver el de al lado.
+    const postalCode = normalizeZip(dto.postalCode) ?? place?.postalCode ?? null;
     const entity = this.addresses.create({
       ...dto,
       userId,
       isDefault: isFirst,
       postalCode,
+      houseNumber: normalizeText(dto.houseNumber) ?? place?.houseNumber ?? null,
+      // Estos tres se escriben SIEMPRE desde el geocoder — nunca desde el DTO,
+      // aunque el cliente los mande (el ValidationPipe ya los rechaza, esto es
+      // el cinturón además de los tirantes).
+      ...geocodedFacts(place),
+      // El sello de "acá ya miró el geocoder". Se pone cuando CONTESTÓ, aunque
+      // no se haya podido mapear el estado (un punto de Pennsylvania contesta
+      // pero no está en el mapa de siglas): si no, el backfill —que busca
+      // `state IS NULL`— volvería a pedir esa misma fila en cada vuelta.
+      geocodedAt: place ? new Date() : null,
       // La zona se guarda RESUELTA, no se calcula al vuelo: agrupar clientes
       // por zona es una pantalla que pagina y recalcular prefijos por fila la
       // haría inútil.
@@ -97,6 +130,11 @@ export class AddressesService {
       });
     }
     // Defensive: apply only whitelisted fields — never copy isDefault through
+    const previousZip = addr.postalCode;
+    const pinMoved =
+      (dto.lat !== undefined && dto.lat !== addr.lat) ||
+      (dto.lng !== undefined && dto.lng !== addr.lng);
+
     if (dto.label !== undefined) addr.label = dto.label;
     if (dto.line1 !== undefined) addr.line1 = dto.line1;
     if (dto.line2 !== undefined) addr.line2 = dto.line2 ?? null;
@@ -104,15 +142,64 @@ export class AddressesService {
     if (dto.lat !== undefined) addr.lat = dto.lat;
     if (dto.lng !== undefined) addr.lng = dto.lng;
     if (dto.instructions !== undefined) addr.instructions = dto.instructions ?? null;
-    // El ZIP sólo se re-resuelve cuando CAMBIA: guardar el formulario entero sin
-    // haber tocado el código postal es el caso normal y no tiene por qué pegarle
-    // a la tabla de zonas.
-    if (dto.postalCode !== undefined) {
-      const postalCode = normalizeZip(dto.postalCode);
-      if (postalCode !== addr.postalCode) {
-        addr.postalCode = postalCode;
-        addr.zoneId = await this.resolveZone(postalCode);
+    if (dto.houseNumber !== undefined) {
+      addr.houseNumber = normalizeText(dto.houseNumber);
+    }
+    if (dto.postalCode !== undefined) addr.postalCode = normalizeZip(dto.postalCode);
+
+    // Se vuelve a geocodificar en DOS casos, y en ninguno más:
+    //  - la chincheta se movió: el estado guardado es el del punto viejo;
+    //  - la fila todavía no tiene estado (dirección anterior a la migración
+    //    1809): editarla es la oportunidad de completarla sin esperar al
+    //    backfill.
+    // Guardar el formulario sin mover nada NO gasta una llamada: la política de
+    // Nominatim es 1 request/segundo y cada llamada de más acerca el bloqueo.
+    if (pinMoved || addr.state === null) {
+      const place = await this.geocoding.reverse(addr.lat, addr.lng);
+      if (place) {
+        Object.assign(addr, geocodedFacts(place));
+        addr.geocodedAt = new Date();
+        // Si la chincheta se movió, el ZIP y el número de puerta guardados son
+        // los del punto VIEJO: mudarse de Elizabeth al Bronx sin que el ZIP
+        // siga al punto dejaría la dirección cobrando New Jersey. Si no se
+        // movió, sólo se rellena lo que está vacío — no se pisa lo que el
+        // cliente escribió alguna vez.
+        if (dto.postalCode === undefined && (pinMoved || !addr.postalCode)) {
+          addr.postalCode = place.postalCode ?? addr.postalCode;
+        }
+        if (dto.houseNumber === undefined && (pinMoved || !addr.houseNumber)) {
+          addr.houseNumber = place.houseNumber ?? addr.houseNumber;
+        }
+      } else if (pinMoved) {
+        // El geocoder no contestó Y la chincheta se movió: lo que está guardado
+        // describe el punto VIEJO. Dejarlo puesto es peor que borrarlo —
+        // quedaría una dirección del Bronx cobrando New Jersey, y para siempre:
+        // como la fila TIENE estado, ni el próximo `update()` ni el backfill
+        // (`state IS NULL`) la vuelven a mirar.
+        //
+        // Se borra también el ZIP geocodificado y la zona que salía de él, SALVO
+        // que el cliente haya escrito un ZIP en este mismo request: eso no es un
+        // dato viejo, lo acaba de tipear.
+        addr.city = null;
+        addr.state = null;
+        addr.county = null;
+        if (dto.postalCode === undefined) {
+          addr.postalCode = null;
+          addr.zoneId = null;
+        }
+        // `geocodedAt` queda como estaba en null (o se vuelve a null si la fila
+        // venía sellada): un fallo del geocoder NO es un "ya lo miramos", y esta
+        // fila tiene que volver a intentarse — en el próximo update y en el
+        // backfill.
+        addr.geocodedAt = null;
       }
+    }
+
+    // La zona sólo se re-resuelve cuando el ZIP TERMINÓ distinto del que había:
+    // guardar el formulario entero sin tocar el código postal es el caso normal
+    // y no tiene por qué pegarle a la tabla de zonas.
+    if (addr.postalCode !== previousZip) {
+      addr.zoneId = await this.resolveZone(addr.postalCode);
     }
     return this.withTaxRate(await this.addresses.save(addr));
   }
@@ -214,26 +301,36 @@ export class AddressesService {
    * prefijo, es el único dato que queda.
    */
   private static taxRateQuery(address: UserAddress): TaxRateQuery {
-    return { zoneId: address.zoneId ?? null, postalCode: address.postalCode };
+    return {
+      zoneId: address.zoneId ?? null,
+      postalCode: address.postalCode,
+      // Lo que derivó el servidor. El estado es el dato que decide la ley; el
+      // ZIP queda como respaldo para las filas que todavía no se geocodificaron.
+      state: address.state,
+      city: address.city,
+      county: address.county,
+    };
   }
 
   private async withTaxRate(address: UserAddress): Promise<AddressResponse> {
-    const { taxRate } = await this.deliveryZonesService.resolveTaxRate(
-      AddressesService.taxRateQuery(address),
-    );
-    return { ...address, taxRate };
+    const { taxRate, jurisdiction } =
+      await this.taxJurisdictionService.resolveTaxRate(
+        AddressesService.taxRateQuery(address),
+      );
+    return { ...address, taxRate, taxJurisdiction: jurisdiction };
   }
 
   /** En lote: diez direcciones no pueden ser diez consultas a la tabla. */
   private async withTaxRates(
     addresses: UserAddress[],
   ): Promise<AddressResponse[]> {
-    const rates = await this.deliveryZonesService.resolveTaxRates(
+    const rates = await this.taxJurisdictionService.resolveTaxRates(
       addresses.map((a) => AddressesService.taxRateQuery(a)),
     );
     return addresses.map((address, i) => ({
       ...address,
       taxRate: rates[i].taxRate,
+      taxJurisdiction: rates[i].jurisdiction,
     }));
   }
 
@@ -258,4 +355,30 @@ export class AddressesService {
 function normalizeZip(value: string | null | undefined): string | null {
   const zip = (value ?? '').trim();
   return zip || null;
+}
+
+/** Mismo borde para cualquier texto opcional: vacío es "no lo mandó". */
+function normalizeText(value: string | null | undefined): string | null {
+  const text = (value ?? '').trim();
+  return text || null;
+}
+
+/**
+ * Los tres campos que SON del servidor. Se devuelven juntos para que no haya
+ * forma de escribir uno y olvidarse de otro — y para que quede en un solo lugar
+ * la regla de que estos NUNCA salen del DTO.
+ *
+ * Sin geocodificación quedan en null: una dirección sin estado resuelve la tasa
+ * por el ZIP y, si tampoco hay ZIP, cae en el fallback histórico. Nunca 0.
+ */
+function geocodedFacts(place: GeocodedPlace | null): {
+  city: string | null;
+  state: string | null;
+  county: string | null;
+} {
+  return {
+    city: place?.city ?? null,
+    state: place?.state ?? null,
+    county: place?.county ?? null,
+  };
 }

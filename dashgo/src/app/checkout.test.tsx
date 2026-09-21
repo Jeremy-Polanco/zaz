@@ -267,6 +267,76 @@ describe('Checkout — selected address summary', () => {
 
     expect(getByText('Calle Duarte 100')).toBeTruthy()
   })
+
+  it('shows the resolved city/state/ZIP line under the address list when present', () => {
+    setupCheckoutMocks([MOCK_PRODUCT], { 'product-1': 2 })
+    mockUseMyAddresses.mockReturnValue({
+      data: [{ ...ADDRESS_WITH_ZIP, city: 'Elizabeth', state: 'NJ' }],
+    } as unknown as ReturnType<typeof useMyAddresses>)
+
+    const { getByText } = renderWithProviders(<CheckoutScreen />)
+
+    expect(getByText('Elizabeth, NJ 10451')).toBeTruthy()
+  })
+
+  it('does not show a resolved place line when the address has no city/state', () => {
+    setupCheckoutMocks([MOCK_PRODUCT], { 'product-1': 2 })
+    mockUseMyAddresses.mockReturnValue({
+      data: [ADDRESS_WITH_ZIP],
+    } as unknown as ReturnType<typeof useMyAddresses>)
+
+    const { queryByText } = renderWithProviders(<CheckoutScreen />)
+
+    expect(queryByText('Elizabeth, NJ 10451')).toBeNull()
+  })
+})
+
+// ── Jurisdiction-specific tax label ────────────────────────────────────────────
+
+describe('Checkout — jurisdiction-specific tax label', () => {
+  it('shows "Impuestos NJ (6.625%)" when the selected address has taxJurisdiction NJ', () => {
+    setupCheckoutMocks([WATER_PRODUCT as unknown as typeof MOCK_PRODUCT], { 'product-water': 1 })
+    mockUseMyAddresses.mockReturnValue({
+      data: [{ ...ADDRESS_WITH_ZIP, taxRate: 0.06625, taxJurisdiction: 'NJ' }],
+    } as unknown as ReturnType<typeof useMyAddresses>)
+
+    const { getByText } = renderWithProviders(<CheckoutScreen />)
+
+    expect(getByText('Impuestos NJ (6.625%)')).toBeTruthy()
+  })
+
+  it('shows "Impuestos NYC (8.875%)" when the selected address has taxJurisdiction NYC', () => {
+    setupCheckoutMocks([WATER_PRODUCT as unknown as typeof MOCK_PRODUCT], { 'product-water': 1 })
+    mockUseMyAddresses.mockReturnValue({
+      data: [{ ...ADDRESS_WITH_ZIP, taxRate: 0.08875, taxJurisdiction: 'NYC' }],
+    } as unknown as ReturnType<typeof useMyAddresses>)
+
+    const { getByText } = renderWithProviders(<CheckoutScreen />)
+
+    expect(getByText('Impuestos NYC (8.875%)')).toBeTruthy()
+  })
+
+  it('falls back to the plain rate label when the address has no taxJurisdiction', () => {
+    setupCheckoutMocks([WATER_PRODUCT as unknown as typeof MOCK_PRODUCT], { 'product-water': 1 })
+    mockUseMyAddresses.mockReturnValue({
+      data: [{ ...ADDRESS_WITH_ZIP, taxRate: 0.08887, taxJurisdiction: null }],
+    } as unknown as ReturnType<typeof useMyAddresses>)
+
+    const { getByText } = renderWithProviders(<CheckoutScreen />)
+
+    expect(getByText('Impuestos (8.887%)')).toBeTruthy()
+  })
+
+  it('falls back to the plain rate label when there are no saved addresses at all', () => {
+    setupCheckoutMocks([WATER_PRODUCT as unknown as typeof MOCK_PRODUCT], { 'product-water': 1 })
+    mockUseMyAddresses.mockReturnValue({
+      data: [],
+    } as unknown as ReturnType<typeof useMyAddresses>)
+
+    const { getByText } = renderWithProviders(<CheckoutScreen />)
+
+    expect(getByText('Impuestos (8.887%)')).toBeTruthy()
+  })
 })
 
 describe('Checkout — create-order payload', () => {
@@ -750,6 +820,52 @@ describe('Checkout — per-zone tax rate (selected address.taxRate)', () => {
     })
     const payload = mockCreateOrderMutateAsync.mock.calls[0][0]
     expect(payload.deliveryAddress).toMatchObject({ postalCode: '10451' })
+  })
+
+  it('includes the selected address\'s houseNumber in the create-order deliveryAddress payload', async () => {
+    setupCheckoutMocks([SINGLE_PRODUCT as unknown as typeof MOCK_PRODUCT], { 'product-single': 1 })
+    mockUseMyAddresses.mockReturnValue({
+      data: [{ ...ADDRESS_WITH_ZIP, taxRate: 0.06625, houseNumber: '24' }],
+    } as unknown as ReturnType<typeof useMyAddresses>)
+
+    const { getByText } = renderWithProviders(<CheckoutScreen />)
+
+    await waitFor(() => {
+      expect(getByText('Calle Duarte 100 · ZIP 10451')).toBeTruthy()
+    })
+
+    await act(async () => {
+      fireEvent.press(getByText(/Confirmar pedido/i))
+    })
+
+    await waitFor(() => {
+      expect(mockCreateOrderMutateAsync).toHaveBeenCalled()
+    })
+    const payload = mockCreateOrderMutateAsync.mock.calls[0][0]
+    expect(payload.deliveryAddress).toMatchObject({ houseNumber: '24' })
+  })
+
+  it('sends houseNumber as null when the selected address has none', async () => {
+    setupCheckoutMocks([SINGLE_PRODUCT as unknown as typeof MOCK_PRODUCT], { 'product-single': 1 })
+    mockUseMyAddresses.mockReturnValue({
+      data: [{ ...ADDRESS_WITH_ZIP, taxRate: 0.06625 }],
+    } as unknown as ReturnType<typeof useMyAddresses>)
+
+    const { getByText } = renderWithProviders(<CheckoutScreen />)
+
+    await waitFor(() => {
+      expect(getByText('Calle Duarte 100 · ZIP 10451')).toBeTruthy()
+    })
+
+    await act(async () => {
+      fireEvent.press(getByText(/Confirmar pedido/i))
+    })
+
+    await waitFor(() => {
+      expect(mockCreateOrderMutateAsync).toHaveBeenCalled()
+    })
+    const payload = mockCreateOrderMutateAsync.mock.calls[0][0]
+    expect(payload.deliveryAddress.houseNumber).toBeNull()
   })
 
   it('includes deliveryAddressId (the saved address id) alongside the deliveryAddress snapshot', async () => {

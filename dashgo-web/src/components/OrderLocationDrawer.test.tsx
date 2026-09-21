@@ -195,4 +195,48 @@ describe('OrderLocationDrawer — ZIP', () => {
       expect.objectContaining({ postalCode: '10451' }),
     )
   })
+
+  it('includes houseNumber, unit (as line2) and reference (as instructions) in the saved-address payload', async () => {
+    renderWithProviders(
+      <OrderLocationDrawer order={makeOrder()} onClose={vi.fn()} />,
+    )
+
+    await userEvent.type(screen.getByLabelText(/n° de casa/i), '24')
+    await userEvent.type(screen.getByLabelText(/apto \/ piso/i), 'Apto 3B')
+    await userEvent.type(
+      screen.getByLabelText(/referencia \/ punto/i),
+      'frente al colmado',
+    )
+
+    mockRequestLocation.mockResolvedValue({ lat: 18.47, lng: -69.9 })
+    mockReverseGeocode.mockResolvedValue({
+      text: '',
+      lat: 18.47,
+      lng: -69.9,
+      postalCode: null,
+    })
+    await userEvent.click(
+      screen.getByRole('button', { name: /usar mi ubicación/i }),
+    )
+    await screen.findByText(/18\.47000/)
+
+    await userEvent.click(
+      screen.getByLabelText(/guardar esta dirección al cliente/i),
+    )
+    await userEvent.type(
+      screen.getByLabelText(/nombre de la dirección/i),
+      'Casa',
+    )
+    await userEvent.click(
+      screen.getByRole('button', { name: /guardar ubicación/i }),
+    )
+
+    expect(createForUserMutateAsync).toHaveBeenCalledWith(
+      expect.objectContaining({
+        houseNumber: '24',
+        line2: 'Apto 3B',
+        instructions: 'frente al colmado',
+      }),
+    )
+  })
 })

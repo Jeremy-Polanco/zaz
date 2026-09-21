@@ -1,6 +1,7 @@
 import { forwardRef, Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { Order, Product, StripeWebhookEvent } from '../../entities';
+import { UserAddress } from '../../entities/user-address.entity';
 import { PaymentsService } from './payments.service';
 import { PaymentsController } from './payments.controller';
 import { StripeWebhookIdempotencyService } from './stripe-webhook-idempotency.service';
@@ -15,11 +16,14 @@ import { AddressesModule } from '../addresses/addresses.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Product, Order, StripeWebhookEvent]),
+    // UserAddress: el intent resuelve la tasa por la fila GUARDADA del cliente
+    // cuando el checkout manda `deliveryAddressId`, igual que la orden.
+    TypeOrmModule.forFeature([Product, Order, StripeWebhookEvent, UserAddress]),
     PointsModule,
     ShippingModule,
     // El intent tiene que cobrar la MISMA tasa que después cotiza la orden.
     // Import directo: AddressesModule no importa nada de la app, no hay ciclo.
+    // Re-exporta GeocodingModule, que es de donde sale GeocodingService.
     AddressesModule,
     forwardRef(() => CreditModule),
     forwardRef(() => SubscriptionModule),

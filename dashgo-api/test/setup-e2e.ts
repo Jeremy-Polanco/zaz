@@ -67,6 +67,9 @@ export default async function globalSetup(): Promise<void> {
   process.env.STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY ?? 'sk_test_dummy';
   process.env.STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET ?? 'whsec_test';
   process.env.STRIPE_SUBSCRIPTION_PRICE_ID = process.env.STRIPE_SUBSCRIPTION_PRICE_ID ?? 'price_test_monthly';
+  // Ningún test sale a la red: GeocodingService.reverse() devuelve null sin
+  // abrir un socket. Ver test/setup-integration.ts.
+  process.env.GEOCODING_ENABLED = 'false';
 
   // Fail fast if Docker Postgres is not reachable
   await checkDockerReachable();

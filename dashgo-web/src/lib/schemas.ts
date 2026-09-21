@@ -94,7 +94,10 @@ export const deliveryAddressSchema = z.object({
   lat: z.number(),
   lng: z.number(),
   building: z.string().optional(),
-  houseNumber: z.string().optional(),
+  // Unlike the other optional fields, userAddressToGeoAddress() always emits
+  // this key (null rather than omitted) so the frozen snapshot carries the
+  // house number even before the server-side merge — see its docstring.
+  houseNumber: z.string().nullable().optional(),
   unit: z.string().optional(),
   reference: z.string().optional(),
   // Plain optional regex (no transform): userAddressToGeoAddress() already

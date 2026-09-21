@@ -30,6 +30,12 @@ export interface GeoAddress {
   reference?: string | null
   /** ZIP code (5 digits, e.g. "10451"). */
   postalCode?: string | null
+  /** Server-derived (reverse-geocoded) city, e.g. "Elizabeth". */
+  city?: string | null
+  /** Server-derived (reverse-geocoded) 2-letter state, e.g. "NJ". */
+  state?: string | null
+  /** Server-derived (reverse-geocoded) county, e.g. "Union". */
+  county?: string | null
 }
 
 export interface AuthUser {
@@ -633,6 +639,16 @@ export type UserAddress = {
    * `TAX_RATE` in `lib/tax.ts` when absent.
    */
   taxRate?: number
+  /** House / door number (e.g. "24"). */
+  houseNumber?: string | null
+  /** Server-derived (reverse-geocoded) city, e.g. "Elizabeth". */
+  city?: string | null
+  /** Server-derived (reverse-geocoded) 2-letter state, e.g. "NJ". */
+  state?: string | null
+  /** Server-derived (reverse-geocoded) county, e.g. "Union". */
+  county?: string | null
+  /** Tax jurisdiction the address resolved to — drives the checkout tax label. */
+  taxJurisdiction?: 'NJ' | 'NYC' | null
 }
 
 export type CreateAddressInput = {
@@ -645,6 +661,8 @@ export type CreateAddressInput = {
   instructions?: string
   /** 5-digit ZIP, e.g. "10451". */
   postalCode?: string
+  /** House / door number (e.g. "24"), max 40 chars. */
+  houseNumber?: string
 }
 
 export type UpdateAddressInput = Partial<CreateAddressInput>

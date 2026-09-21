@@ -569,4 +569,158 @@ describe('AddressesService (integration)', () => {
       expect(created.zoneId).toBeNull();
     });
   });
+  // ---------------------------------------------------------------------------
+  // La jurisdicción fiscal contra Postgres real
+  //
+  // Con mocks el prefijo de ZIP y el numeric(6,5) siempre salen perfectos. Acá
+  // se prueba lo que la migración 1809 dejó EN LA BASE: las cuatro zonas
+  // sembradas volvieron a `tax_rate = NULL` (ya no fijan nada) y la tasa sale
+  // de `tax_jurisdictions`. Si alguien vuelve a poner un valor en la zona por
+  // error, estos tests lo ven.
+  //
+  // La geocodificación está APAGADA en la suite (GEOCODING_ENABLED=false), así
+  // que el estado queda en null y la jurisdicción se resuelve por el ZIP — que
+  // es exactamente el camino de las direcciones viejas sin backfillear.
+  // ---------------------------------------------------------------------------
+
+  describe('jurisdicción fiscal (tax_jurisdictions)', () => {
+    it('las zonas sembradas ya NO fijan tasa: la 1809 las dejó en NULL', async () => {
+      const rows: Array<{ name: string; tax_rate: string | null }> =
+        await dataSource.query(
+          `SELECT name, tax_rate FROM delivery_zones ORDER BY name`,
+        );
+      expect(rows.length).toBeGreaterThan(0);
+      for (const row of rows) {
+        expect(row.tax_rate).toBeNull();
+      }
+    });
+
+    it('la ley está sembrada con su cita legal', async () => {
+      const rows: Array<{ code: string; tax_rate: string; source: string }> =
+        await dataSource.query(
+          `SELECT code, tax_rate, source FROM tax_jurisdictions ORDER BY code`,
+        );
+      expect(rows.map((r) => r.code)).toEqual(['NJ', 'NYC']);
+      expect(parseFloat(rows[0].tax_rate)).toBeCloseTo(0.06625, 5);
+      expect(parseFloat(rows[1].tax_rate)).toBeCloseTo(0.08875, 5);
+      // Sin la norma al lado, el número no se puede auditar.
+      expect(rows[0].source).toContain('54:32B-3');
+      expect(rows[1].source).toContain('MCTD');
+    });
+
+    it('Elizabeth NJ (07201) → jurisdicción NJ al 6.625%', async () => {
+      const created = await service.create(user1.id, {
+        label: 'Casa NJ',
+        line1: '1101 Elizabeth Ave',
+        lat: 40.6639,
+        lng: -74.2107,
+        postalCode: '07201',
+      });
+
+      expect(created.taxJurisdiction).toBe('NJ');
+      expect(created.taxRate).toBeCloseTo(0.06625, 5);
+    });
+
+    it('Bronx NY (10462) → jurisdicción NYC al 8.875%', async () => {
+      const created = await service.create(user1.id, {
+        label: 'Casa Bronx',
+        line1: '1728 Williamsbridge Rd',
+        lat: 40.8448,
+        lng: -73.8648,
+        postalCode: '10462',
+      });
+
+      expect(created.taxJurisdiction).toBe('NYC');
+      expect(created.taxRate).toBeCloseTo(0.08875, 5);
+    });
+
+    it('un ZIP que no es de nadie (90210) → sin jurisdicción, fallback histórico', async () => {
+      const created = await service.create(user1.id, {
+        label: 'Beverly Hills',
+        line1: '456 Beverly Dr',
+        lat: 34.0901,
+        lng: -118.4065,
+        postalCode: '90210',
+      });
+
+      expect(created.taxJurisdiction).toBeNull();
+      expect(created.taxRate).toBeCloseTo(0.08887, 5);
+    });
+
+    it('el listado devuelve tasa y jurisdicción de cada dirección en una sola pasada', async () => {
+      await service.create(user1.id, {
+        label: 'NJ',
+        line1: 'Elizabeth Ave',
+        lat: 40.6639,
+        lng: -74.2107,
+        postalCode: '07201',
+      });
+      await service.create(user1.id, {
+        label: 'NYC',
+        line1: 'Williamsbridge Rd',
+        lat: 40.8448,
+        lng: -73.8648,
+        postalCode: '10462',
+      });
+
+      const list = await service.list(user1.id);
+
+      expect(
+        list.map((a) => [a.label, a.taxJurisdiction, Number(a.taxRate.toFixed(5))]),
+      ).toEqual(
+        expect.arrayContaining([
+          ['NJ', 'NJ', 0.06625],
+          ['NYC', 'NYC', 0.08875],
+        ]),
+      );
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // El número de puerta ahora VIVE en la libreta
+  // ---------------------------------------------------------------------------
+
+  describe('houseNumber', () => {
+    it('se guarda, vuelve en la respuesta y sobrevive al round-trip por Postgres', async () => {
+      const created = await service.create(user1.id, {
+        label: 'Casa',
+        line1: '1101 Elizabeth Ave',
+        lat: 40.6639,
+        lng: -74.2107,
+        postalCode: '07201',
+        houseNumber: '1101-A',
+      });
+
+      expect(created.houseNumber).toBe('1101-A');
+
+      const fromDb = await dataSource
+        .getRepository(UserAddress)
+        .findOneOrFail({ where: { id: created.id } });
+      expect(fromDb.houseNumber).toBe('1101-A');
+      // Con la geocodificación apagada, los campos del servidor quedan en null
+      // y la dirección se guarda igual: Nominatim caído no bloquea a nadie.
+      expect(fromDb.state).toBeNull();
+      expect(fromDb.city).toBeNull();
+      expect(fromDb.county).toBeNull();
+    });
+
+    it('se puede editar sin tocar el resto', async () => {
+      const created = await service.create(user1.id, {
+        label: 'Casa',
+        line1: '1101 Elizabeth Ave',
+        lat: 40.6639,
+        lng: -74.2107,
+        postalCode: '07201',
+      });
+      expect(created.houseNumber).toBeNull();
+
+      const updated = await service.update(user1.id, created.id, {
+        houseNumber: '120-05',
+      });
+
+      expect(updated.houseNumber).toBe('120-05');
+      expect(updated.postalCode).toBe('07201');
+      expect(updated.taxJurisdiction).toBe('NJ');
+    });
+  });
 });

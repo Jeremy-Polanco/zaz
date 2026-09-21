@@ -153,6 +153,29 @@ describe('AddressesIndex — ZIP display', () => {
   })
 })
 
+describe('AddressesIndex — house number', () => {
+  it('shows the house number first, then the line, then the ZIP', () => {
+    setupMocks([
+      makeAddress({
+        id: 'addr-1',
+        label: 'Casa',
+        houseNumber: '24',
+        postalCode: '07201',
+      }),
+    ])
+    const { getByText } = renderWithProviders(<AddressesIndex />)
+    expect(
+      getByText('Casa 24 · Av. 27 de Febrero 123 · ZIP 07201'),
+    ).toBeTruthy()
+  })
+
+  it('omits the house number segment when the address has none', () => {
+    setupMocks([makeAddress({ id: 'addr-1', label: 'Casa', postalCode: '07201' })])
+    const { getByText } = renderWithProviders(<AddressesIndex />)
+    expect(getByText('Av. 27 de Febrero 123 · ZIP 07201')).toBeTruthy()
+  })
+})
+
 describe('AddressesIndex — empty state', () => {
   beforeEach(() => setupMocks([]))
 

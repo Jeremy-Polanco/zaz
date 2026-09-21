@@ -131,6 +131,24 @@ export const envSchema = z
     API_PORT: z.coerce.number().default(3001),
     PUBLIC_WEB_URL: z.string().default('http://localhost:5173'),
 
+    // ─────────────────────────────────────────────────────────────────────
+    // Geocodificación inversa (Nominatim / OpenStreetMap)
+    //
+    // De dónde sale el ESTADO de una dirección, que es lo que decide la tasa de
+    // impuesto (NJ 6.625% vs. NYC 8.875%). Ver modules/geocoding.
+    //
+    //   NOMINATIM_BASE_URL — instancia a usar. Por defecto la pública; se puede
+    //     apuntar a una propia (self-hosted) sin tocar código.
+    //   GEOCODING_ENABLED — 'false' apaga la red por completo y `reverse()`
+    //     devuelve null. Lo usan los tests de integración: la suite NO puede
+    //     depender de un servicio de terceros ni gastar la cuota de 1 req/s.
+    //     Apagarlo NO rompe nada: sin estado, la tasa se resuelve por el ZIP y,
+    //     si tampoco hay, cae en el fallback histórico. Nunca en 0.
+    NOMINATIM_BASE_URL: z
+      .string()
+      .default('https://nominatim.openstreetmap.org'),
+    GEOCODING_ENABLED: z.enum(['true', 'false']).default('true'),
+
     // Sentry
     // Optional by design — dev/test boots without it. But if set, the value
     // must be a real DSN: a URL starting with `https://`. We reject `http://`

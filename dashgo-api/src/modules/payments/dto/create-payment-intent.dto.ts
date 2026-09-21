@@ -70,4 +70,21 @@ export class CreatePaymentIntentDto {
   @ValidateNested()
   @Type(() => PaymentIntentAddressInput)
   deliveryAddress?: PaymentIntentAddressInput;
+
+  /**
+   * Id de la dirección GUARDADA del cliente de la que sale este cobro.
+   *
+   * Existe por la misma razón que en `CreateOrderDto`: el `postalCode` de
+   * arriba lo escribe el cliente, y con la tasa de impuesto saliendo de ahí el
+   * cliente elegiría cuánto impuesto paga. Con el id, el servidor lee la fila
+   * real (validando que sea suya) y esa fila fija la tasa — la MISMA que va a
+   * cotizar la orden un segundo después. Sin esto, el intent y la orden podían
+   * resolver distinto y el cliente veía un precio y pagaba otro.
+   *
+   * Opcional: las versiones viejas de la app no lo mandan y siguen resolviendo
+   * por el ZIP posteado.
+   */
+  @IsOptional()
+  @IsUUID()
+  deliveryAddressId?: string;
 }

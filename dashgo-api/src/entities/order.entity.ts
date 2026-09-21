@@ -130,6 +130,25 @@ export class Order {
   taxRate!: string;
 
   /**
+   * QUÉ LEY le puso precio a este pedido: 'NJ', 'NYC' o NULL (ninguna — se
+   * cobró el fallback histórico).
+   *
+   * Se congela junto con `tax_rate` porque el número solo no se explica: un
+   * 0.06625 en 2029 no dice si fue New Jersey, una zona con override, o un
+   * error. Con el código al lado, una auditoría se contesta leyendo la fila.
+   *
+   * NULL en todos los pedidos anteriores a la migración 1809 — es un dato
+   * esperado, no un faltante.
+   */
+  @Column({
+    name: 'tax_jurisdiction',
+    type: 'varchar',
+    length: 16,
+    nullable: true,
+  })
+  taxJurisdiction!: string | null;
+
+  /**
    * Base gravable congelada al cotizar: la parte del pedido sobre la que se
    * aplicó `tax_rate`, ya con el envío y los puntos prorrateados.
    *

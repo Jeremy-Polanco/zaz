@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import type { UserAddress } from '../lib/types'
 import { optionalPostalCodeSchema } from '../lib/schemas'
+import { formatResolvedPlace } from '../lib/address'
 import {
   useSuperUserAddresses,
   useSetDefaultAddressForUser,
@@ -12,6 +13,7 @@ import { Button, FieldError, Input, Label } from './ui'
 type EditForm = {
   label: string
   line1: string
+  houseNumber: string
   line2: string
   building: string
   instructions: string
@@ -22,6 +24,7 @@ function toForm(a: UserAddress): EditForm {
   return {
     label: a.label,
     line1: a.line1,
+    houseNumber: a.houseNumber ?? '',
     line2: a.line2 ?? '',
     building: a.building ?? '',
     instructions: a.instructions ?? '',
@@ -83,6 +86,7 @@ export function UserAddressesPanel({ userId }: { userId: string }) {
       input: {
         label: form.label.trim(),
         line1: form.line1.trim(),
+        houseNumber: form.houseNumber.trim() || undefined,
         line2: form.line2.trim() || undefined,
         building: form.building.trim() || undefined,
         instructions: form.instructions.trim() || undefined,
@@ -112,6 +116,16 @@ export function UserAddressesPanel({ userId }: { userId: string }) {
                   id={`l1-${a.id}`}
                   value={form.line1}
                   onChange={(e) => setForm({ ...form, line1: e.target.value })}
+                />
+              </div>
+              <div>
+                <Label htmlFor={`house-${a.id}`}>N° de casa</Label>
+                <Input
+                  id={`house-${a.id}`}
+                  value={form.houseNumber}
+                  onChange={(e) =>
+                    setForm({ ...form, houseNumber: e.target.value })
+                  }
                 />
               </div>
               <div className="grid grid-cols-2 gap-3">
@@ -194,6 +208,11 @@ export function UserAddressesPanel({ userId }: { userId: string }) {
                 )}
                 {a.postalCode && (
                   <p className="text-xs text-ink-muted">ZIP {a.postalCode}</p>
+                )}
+                {(a.city || a.state) && (
+                  <p className="text-xs text-ink-muted">
+                    {formatResolvedPlace(a)}
+                  </p>
                 )}
                 {a.instructions && (
                   <p className="text-xs text-ink-muted">{a.instructions}</p>

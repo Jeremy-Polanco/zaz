@@ -5,7 +5,6 @@ import {
   PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from 'typeorm';
-import { TAX_RATE } from '../common/tax';
 
 /**
  * Postgres devuelve `numeric` como string; la tasa se usa como NÚMERO en toda
@@ -15,8 +14,14 @@ import { TAX_RATE } from '../common/tax';
  */
 export const taxRateTransformer = {
   to: (value: number | null | undefined): number | null | undefined => value,
-  from: (value: string | number | null): number =>
-    typeof value === 'number' ? value : parseFloat(value ?? ''),
+  from: (value: string | number | null): number | null => {
+    // NULL es un valor con significado propio en `delivery_zones.tax_rate`:
+    // "esta zona no pisa nada, cobrá lo que diga la ley". Convertirlo a NaN
+    // (que es lo que devolvía parseFloat) lo volvía indistinguible de un dato
+    // corrupto y hacía que la zona se comiera la jurisdicción.
+    if (value === null || value === undefined) return null;
+    return typeof value === 'number' ? value : parseFloat(value);
+  },
 };
 
 /**
@@ -78,15 +83,19 @@ export class DeliveryZone {
   isActive!: boolean;
 
   /**
-   * Tasa de impuesto sobre la venta de la zona, como fracción (0.06625 = 6.625%).
+   * OVERRIDE opcional de la tasa de impuesto, como fracción (0.06625 = 6.625%).
    *
-   * Por qué vive en la ZONA y no en una constante: New Jersey cobra 6.625% y
-   * NYC 8.875%. Con una sola tasa global se le cobraba de más a uno y de menos
-   * al otro, y cobrar de menos se paga de la caja propia.
+   * NULL — y es lo normal — significa "usá la ley": la tasa sale de
+   * `tax_jurisdictions` según el estado/ciudad/condado del destino (ver
+   * tax-jurisdiction.service.ts). La zona es un concepto de LOGÍSTICA (la
+   * dibuja el dueño con prefijos de ZIP para agrupar el reparto y cobrar
+   * distancia); que el impuesto colgara de ella significaba que partir o
+   * renombrar una zona podía cambiarle la tasa a un cliente sin que nadie lo
+   * decidiera.
    *
-   * El DEFAULT es la constante histórica (TAX_RATE, 8.887%) a propósito: una
-   * zona que el admin cargue y no configure sigue cobrando exactamente lo que
-   * cobraba el sistema antes. El faltante nunca cae en 0.
+   * Un valor NO nulo es una decisión deliberada de alguien: esa zona cobra otra
+   * cosa y le gana a la jurisdicción. Es la salida de emergencia para un
+   * régimen especial, no el camino normal.
    *
    * La orden congela la tasa en `orders.tax_rate` al crearse — cambiar esto
    * acá no re-cotiza nada de lo ya vendido.
@@ -96,10 +105,10 @@ export class DeliveryZone {
     type: 'numeric',
     precision: 6,
     scale: 5,
-    default: TAX_RATE,
+    nullable: true,
     transformer: taxRateTransformer,
   })
-  taxRate!: number;
+  taxRate!: number | null;
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt!: Date;
