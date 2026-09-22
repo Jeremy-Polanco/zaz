@@ -10,6 +10,7 @@ import {
   SubscriptionStatusChangedEvent,
   SubscriptionReconciledEvent,
 } from '../../common/events/subscription.events';
+import { pickLivePlan } from '../subscription/pick-live-plan';
 
 /** Rentals que un plan puede mover. pending_setup y canceled no se tocan nunca. */
 const MIRRORABLE_STATUSES = [
@@ -204,32 +205,14 @@ export class PlanDelinquencyListener {
 
   /**
    * Resuelve el status "efectivo" del plan del usuario cuando hay varias
-   * filas en `subscriptions` (cancelación + re-suscripción). Una fila VIEJA
-   * nunca debe ganarle a una VIVA: se prioriza cualquier fila ACTIVE con
-   * `currentPeriodEnd` futuro, después cualquier PAST_DUE con
-   * `currentPeriodEnd` futuro, y solo si ninguna sigue viva se cae a "la más
-   * nueva por currentPeriodEnd" — la regla previa, que sigue siendo correcta
-   * cuando el usuario tiene una sola fila viva (o ninguna).
+   * filas en `subscriptions` (cancelación + re-suscripción). Delegado a
+   * `pickLivePlan` (R1, bebedero-precio-del-plan) — misma regla de
+   * prioridad, extraída a una función pura porque `RentalsService` también
+   * la necesita (para resolver el TIER del plan, no solo su status). Import
+   * de una función suelta, no de `SubscriptionModule`: el grafo de módulos
+   * sigue acíclico.
    */
   private resolvePlanStatus(rows: Subscription[]): SubscriptionStatus | null {
-    if (rows.length === 0) return null;
-
-    const now = new Date();
-    const isLive = (r: Subscription): boolean => r.currentPeriodEnd > now;
-
-    const liveActive = rows.some(
-      (r) => r.status === SubscriptionStatus.ACTIVE && isLive(r),
-    );
-    if (liveActive) return SubscriptionStatus.ACTIVE;
-
-    const livePastDue = rows.some(
-      (r) => r.status === SubscriptionStatus.PAST_DUE && isLive(r),
-    );
-    if (livePastDue) return SubscriptionStatus.PAST_DUE;
-
-    const newest = [...rows].sort(
-      (a, b) => b.currentPeriodEnd.getTime() - a.currentPeriodEnd.getTime(),
-    )[0];
-    return newest.status;
+    return pickLivePlan(rows)?.status ?? null;
   }
 }

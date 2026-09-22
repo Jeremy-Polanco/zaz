@@ -200,10 +200,21 @@ function RentalRow({
             Suscripción con pago fallido desde {planPastDueStr}
           </p>
         ) : null}
-        <div className="flex flex-wrap gap-3 text-[0.7rem] uppercase tracking-[0.12em] text-ink-muted">
+        <div className="flex flex-wrap items-center gap-3 text-[0.7rem] uppercase tracking-[0.12em] text-ink-muted">
           <span>{rental.productName}</span>
           <span>·</span>
-          <span className="nums">{formatCents(rental.monthlyRentCents)}/mes</span>
+          <span className="nums">
+            {formatCents(rental.planMonthlyRentCents ?? rental.monthlyRentCents)}/mes
+          </span>
+          {rental.planMonthlyRentCents != null ? (
+            // R9 — "la suscripción ES el bebedero": un alquiler de $0 pagado
+            // por un plan muestra el precio de ESE plan en vez de $0.00, con
+            // un tag subtle (mismos tokens que "Sin suscripción" en
+            // super.users.tsx) para que el admin entienda de dónde sale.
+            <span className="inline-flex items-center whitespace-nowrap border border-ink/15 bg-ink/5 px-1.5 py-0.5 text-[0.6rem] font-medium uppercase tracking-[0.10em] text-ink-muted">
+              {rental.planTier === 'premium' ? 'Suscripción premium' : 'Suscripción'}
+            </span>
+          ) : null}
           {rental.currentPeriodEnd ? (
             <>
               <span>·</span>

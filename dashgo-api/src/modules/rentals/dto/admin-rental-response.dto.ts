@@ -1,3 +1,5 @@
+import { SubscriptionTier } from '../../../entities/subscription-plan.entity';
+
 /**
  * Response shape returned by admin rental endpoints.
  * `daysDelinquent` is computed server-side:
@@ -27,6 +29,21 @@ export class AdminRentalResponseDto {
    * own Stripe subscription. Null for rentals that pay for themselves.
    */
   planPastDueSince!: Date | null;
+  /**
+   * "La suscripción ES el bebedero" — para un alquiler de $0 (monthlyRentCents
+   * === 0), el TIER del plan vivo del usuario que lo paga (resuelto vía
+   * SubscriptionService.resolvePlanRowsByUserIds). Null para alquileres que
+   * pagan su propia suscripción de Stripe, o para un usuario de $0 sin plan.
+   */
+  planTier!: SubscriptionTier | null;
+  /**
+   * Precio NETO mensual (centavos, pre-tax) del plan de arriba — lo que el
+   * panel muestra en vez de "$0.00/mes". Va junto con `planTier`: ambos null
+   * o ambos con valor. `monthlyRentCents` NO cambia — sigue siendo lo que
+   * realmente cobra Stripe (y lo que usa PlanDelinquencyListener/summarizeAdmin);
+   * esto es solo un enriquecimiento de DISPLAY.
+   */
+  planMonthlyRentCents!: number | null;
   lastLateFeeAt!: Date | null;
   activatedAt!: Date | null;
   canceledAt!: Date | null;

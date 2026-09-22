@@ -11,7 +11,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { InjectRepository } from '@nestjs/typeorm';
-import { ILike, Repository } from 'typeorm';
+import { ILike, In, Repository } from 'typeorm';
 import {
   SUBSCRIPTION_ACTIVATED,
   SUBSCRIPTION_STATUS_CHANGED,
@@ -37,6 +37,7 @@ import { AdminPlanResponseDto } from './dto/admin-plan-response.dto';
 import { plainToInstance } from 'class-transformer';
 import { assertStripeProductionConfig } from '../../common/stripe/stripe-runtime-guard';
 import { computeGrossCents } from '../../common/tax';
+import { pickLivePlan } from './pick-live-plan';
 
 type StripeClient = InstanceType<typeof Stripe>;
 
@@ -377,6 +378,48 @@ export class SubscriptionService implements OnModuleInit {
   ): Promise<number | null> {
     const plan = await this.plans.findOne({ where: { tier } });
     return plan ? plan.unitAmountCents : null;
+  }
+
+  /**
+   * Fila "viva" (`pickLivePlan`) del plan de cada usuario en `userIds`, en un
+   * solo `find({ where: { userId: In(...) } })`. Usado por
+   * `RentalsService.toAdminDtos` para resolver — sin N+1 — qué plan paga cada
+   * bebedero de $0 del batch: "la suscripción ES el bebedero", el precio a
+   * mostrar es el del PLAN vivo, no el de la suscripción de Stripe de $0 del
+   * rental (que nunca cambia).
+   */
+  async resolvePlanRowsByUserIds(
+    userIds: string[],
+  ): Promise<Map<string, Subscription>> {
+    if (userIds.length === 0) return new Map();
+
+    const rows = await this.subscriptions.find({
+      where: { userId: In(userIds) },
+    });
+
+    const byUser = new Map<string, Subscription[]>();
+    for (const row of rows) {
+      const group = byUser.get(row.userId);
+      if (group) group.push(row);
+      else byUser.set(row.userId, [row]);
+    }
+
+    const result = new Map<string, Subscription>();
+    for (const [userId, group] of byUser) {
+      const live = pickLivePlan(group);
+      if (live) result.set(userId, live);
+    }
+    return result;
+  }
+
+  /**
+   * Precio NETO mensual (pre-tax, en centavos) de cada tier configurado, en
+   * un solo `plans.find()`. Versión batched de `getPlanNetCents` para
+   * enriquecer varias filas a la vez sin una query por tier.
+   */
+  async getPlanNetCentsByTier(): Promise<Map<SubscriptionTier, number>> {
+    const rows = await this.plans.find();
+    return new Map(rows.map((p) => [p.tier, p.unitAmountCents]));
   }
 
   /**

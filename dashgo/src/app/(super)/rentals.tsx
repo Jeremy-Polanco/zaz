@@ -212,8 +212,19 @@ function RentalRow({
           className="font-sans text-[10px] uppercase tracking-label text-ink-muted"
           style={{ fontVariant: ['tabular-nums'] }}
         >
-          {formatCents(rental.monthlyRentCents)}/mes
+          {formatCents(rental.planMonthlyRentCents ?? rental.monthlyRentCents)}/mes
         </Text>
+        {rental.planMonthlyRentCents != null ? (
+          // R9 — "la suscripción ES el bebedero": un alquiler de $0 pagado
+          // por un plan muestra el precio de ESE plan en vez de $0, con un
+          // tag subtle (mismos tokens que STATUS_BADGE de pending_setup) para
+          // que el admin entienda de dónde sale.
+          <View className="border border-ink/15 bg-ink/5 px-1.5 py-0.5">
+            <Text className="font-sans text-[10px] uppercase tracking-label text-ink-muted">
+              {rental.planTier === 'premium' ? 'Suscripción premium' : 'Suscripción'}
+            </Text>
+          </View>
+        ) : null}
         {rental.currentPeriodEnd ? (
           <>
             <Text className="text-ink-muted">·</Text>

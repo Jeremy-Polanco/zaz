@@ -654,6 +654,95 @@ describe('SubscriptionService', () => {
       );
     });
   });
+
+  // -------------------------------------------------------------------------
+  // resolvePlanRowsByUserIds / getPlanNetCentsByTier (R2, bebedero-precio-del-plan)
+  //
+  // Batched helpers RentalsService uses to enrich $0 rentals with the price
+  // of the PLAN that pays for them — "la suscripción ES el bebedero".
+  // -------------------------------------------------------------------------
+
+  describe('resolvePlanRowsByUserIds', () => {
+    it('empty input → empty map, no query', async () => {
+      const result = await service.resolvePlanRowsByUserIds([]);
+
+      expect(result.size).toBe(0);
+      expect(subscriptionsRepo.find).not.toHaveBeenCalled();
+    });
+
+    it('one find({ where: { userId: In(...) } }) — a live ACTIVE row beats a stale CANCELED row', async () => {
+      const liveActive = fakeSubscription({
+        id: 'live-active',
+        userId: 'user-1',
+        status: SubscriptionStatus.ACTIVE,
+        tier: SubscriptionTier.STANDARD,
+        currentPeriodEnd: new Date(Date.now() + 30 * 86400 * 1000),
+      });
+      const staleCanceled = fakeSubscription({
+        id: 'stale-canceled',
+        userId: 'user-1',
+        status: SubscriptionStatus.CANCELED,
+        currentPeriodEnd: new Date(Date.now() + 365 * 86400 * 1000),
+      });
+      const premiumUser = fakeSubscription({
+        id: 'premium-live',
+        userId: 'user-2',
+        status: SubscriptionStatus.ACTIVE,
+        tier: SubscriptionTier.PREMIUM,
+        currentPeriodEnd: new Date(Date.now() + 30 * 86400 * 1000),
+      });
+      subscriptionsRepo.find.mockResolvedValueOnce([
+        staleCanceled,
+        liveActive,
+        premiumUser,
+      ]);
+
+      const result = await service.resolvePlanRowsByUserIds(['user-1', 'user-2']);
+
+      expect(subscriptionsRepo.find).toHaveBeenCalledTimes(1);
+      expect(result.get('user-1')?.id).toBe('live-active');
+      expect(result.get('user-2')?.tier).toBe(SubscriptionTier.PREMIUM);
+    });
+
+    it('a user with no plan row at all is absent from the map', async () => {
+      subscriptionsRepo.find.mockResolvedValueOnce([]);
+
+      const result = await service.resolvePlanRowsByUserIds(['user-without-plan']);
+
+      expect(result.has('user-without-plan')).toBe(false);
+    });
+  });
+
+  describe('getPlanNetCentsByTier', () => {
+    it('one plans.find() → map keyed by tier with the NET (pre-tax) amount', async () => {
+      plansRepo.find.mockResolvedValueOnce([
+        {
+          id: 'plan-standard',
+          tier: SubscriptionTier.STANDARD,
+          stripeProductId: 'prod_standard',
+          activeStripePriceId: 'price_standard',
+          unitAmountCents: 699,
+          currency: 'usd',
+          interval: 'month',
+        } as SubscriptionPlan,
+        {
+          id: 'plan-premium',
+          tier: SubscriptionTier.PREMIUM,
+          stripeProductId: 'prod_premium',
+          activeStripePriceId: 'price_premium',
+          unitAmountCents: 1999,
+          currency: 'usd',
+          interval: 'month',
+        } as SubscriptionPlan,
+      ]);
+
+      const result = await service.getPlanNetCentsByTier();
+
+      expect(plansRepo.find).toHaveBeenCalledTimes(1);
+      expect(result.get(SubscriptionTier.STANDARD)).toBe(699);
+      expect(result.get(SubscriptionTier.PREMIUM)).toBe(1999);
+    });
+  });
 });
 
 // ---------------------------------------------------------------------------
