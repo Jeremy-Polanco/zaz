@@ -403,7 +403,7 @@ export class RentalsService implements OnModuleInit {
   //
   // Called by OrdersService.markDelivered when a delivered order contained a
   // maintenance-service product. Resets the 90-day maintenance countdown on
-  // every ACTIVE rental of this user that tracks maintenance (next_maintenance_at
+  // every rental of this user that tracks maintenance (next_maintenance_at
   // is non-null). Returns the number of rentals reset.
   // ─────────────────────────────────────────────────────────────────────────
 
@@ -417,10 +417,18 @@ export class RentalsService implements OnModuleInit {
       return 0;
     }
 
-    const active = await this.rentals.find({
-      where: { userId, status: RentalStatus.ACTIVE },
+    // Incluye PAST_DUE/UNPAID: un bebedero de $0 espejado por
+    // PlanDelinquencyListener (el plan que lo paga está en mora) sigue siendo
+    // el mismo bebedero físico — si el técnico entregó la visita, el timer se
+    // reinicia igual. Filtrar solo ACTIVE dejaba sin reset cualquier bebedero
+    // que estuviera marcado por mora del plan al momento de la entrega.
+    const candidates = await this.rentals.find({
+      where: {
+        userId,
+        status: In([RentalStatus.ACTIVE, RentalStatus.PAST_DUE, RentalStatus.UNPAID]),
+      },
     });
-    const toReset = active.filter((r) => r.nextMaintenanceAt !== null);
+    const toReset = candidates.filter((r) => r.nextMaintenanceAt !== null);
     if (toReset.length === 0) return 0;
 
     const now = new Date();
@@ -892,6 +900,10 @@ export class RentalsService implements OnModuleInit {
   //   (status IN past_due/unpaid AND currentPeriodEnd < NOW)
   //   OR
   //   (status = pending_setup AND createdAt < NOW - 24h)
+  //   OR
+  //   (planPastDueSince IS NOT NULL AND status IN past_due/unpaid)  — R6: a
+  //     rental mirrored from a delinquent PLAN must show up regardless of its
+  //     OWN currentPeriodEnd (the $0 subscription's period rarely lapses).
   // ─────────────────────────────────────────────────────────────────────────
 
   async listDelinquent(): Promise<AdminRentalResponseDto[]> {
@@ -903,7 +915,7 @@ export class RentalsService implements OnModuleInit {
       .leftJoinAndSelect('rental.user', 'user')
       .leftJoinAndSelect('rental.product', 'product')
       .where(
-        '(rental.status IN (:...delinquentStatuses) AND rental.currentPeriodEnd < :now) OR (rental.status = :pendingSetup AND rental.createdAt < :cutoff24h)',
+        '(rental.status IN (:...delinquentStatuses) AND rental.currentPeriodEnd < :now) OR (rental.status = :pendingSetup AND rental.createdAt < :cutoff24h) OR (rental.planPastDueSince IS NOT NULL AND rental.status IN (:...delinquentStatuses))',
         {
           delinquentStatuses: [RentalStatus.PAST_DUE, RentalStatus.UNPAID],
           now,
@@ -1288,7 +1300,17 @@ export class RentalsService implements OnModuleInit {
       rental.pastDueSince = new Date();
     }
 
-    rental.status = newStatus;
+    // R4 — plan-delinquency guard: this rental's OWN Stripe subscription is
+    // $0 for a subscriber's first bebedero, so it basically never fails on
+    // its own — "active" from ITS webhook does not mean the PLAN that pays
+    // for it recovered. Don't downgrade a status PlanDelinquencyListener put
+    // here; it is the one that restores ACTIVE once the PLAN itself does.
+    // Mapped past_due/unpaid/canceled from the own subscription still apply.
+    const blockedByPlanDelinquency =
+      rental.planPastDueSince != null && newStatus === RentalStatus.ACTIVE;
+    if (!blockedByPlanDelinquency) {
+      rental.status = newStatus;
+    }
     if (sub.current_period_start != null) {
       rental.currentPeriodStart = new Date(sub.current_period_start * 1000);
     }
@@ -1451,17 +1473,23 @@ export class RentalsService implements OnModuleInit {
     dto.stripeSubscriptionId = r.stripeSubscriptionId;
     dto.currentPeriodEnd = r.currentPeriodEnd;
     dto.pastDueSince = r.pastDueSince;
+    dto.planPastDueSince = r.planPastDueSince ?? null;
     dto.lastLateFeeAt = r.lastLateFeeAt;
     dto.activatedAt = r.activatedAt;
     dto.canceledAt = r.canceledAt;
     dto.nextMaintenanceAt = r.nextMaintenanceAt ?? null;
     dto.createdAt = r.createdAt;
 
-    // daysDelinquent: computed from currentPeriodEnd
-    if (
-      r.currentPeriodEnd &&
-      (r.status === RentalStatus.PAST_DUE || r.status === RentalStatus.UNPAID)
-    ) {
+    // daysDelinquent: a rental mirrored from a delinquent PLAN (planPastDueSince
+    // set) reports days since the PLAN went delinquent — its OWN
+    // currentPeriodEnd (the $0 subscription's period) is irrelevant here.
+    // Otherwise, fall back to the pre-existing currentPeriodEnd rule.
+    const isDelinquentStatus =
+      r.status === RentalStatus.PAST_DUE || r.status === RentalStatus.UNPAID;
+    if (isDelinquentStatus && r.planPastDueSince) {
+      const msOverdue = Date.now() - r.planPastDueSince.getTime();
+      dto.daysDelinquent = Math.max(0, Math.floor(msOverdue / 86400000));
+    } else if (isDelinquentStatus && r.currentPeriodEnd) {
       const msOverdue = Date.now() - r.currentPeriodEnd.getTime();
       dto.daysDelinquent = Math.max(0, Math.floor(msOverdue / 86400000));
     } else {

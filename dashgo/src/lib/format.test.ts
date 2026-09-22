@@ -3,7 +3,13 @@
  * always show both cent digits ("$5.44", never "$5.4" or a rounded "$20"
  * for $19.99). Mirrors web's two-decimal precision without padding wholes.
  */
-import { formatMoney, formatCents, formatDeliveryDay, isoDayFromDate } from './format'
+import {
+  formatMoney,
+  formatCents,
+  formatDeliveryDay,
+  formatDateOnly,
+  isoDayFromDate,
+} from './format'
 
 describe('formatMoney', () => {
   it('renders whole dollars without decimals', () => {
@@ -66,5 +72,25 @@ describe('formatDeliveryDay', () => {
     // (parsed as UTC) rolls back to Dec 31 in any negative-offset timezone.
     expect(formatDeliveryDay('2026-01-01')).toContain('1 de enero')
     expect(isoDayFromDate(new Date(2026, 0, 1))).toBe('2026-01-01')
+  })
+})
+
+/**
+ * formatDateOnly — same locale conventions as formatDate (es-AR, DD/MM/YYYY)
+ * but WITHOUT the time. Used for the plan-delinquency hint on the "Alquileres"
+ * admin screen, where "desde 15/01/2026, 14:30" reads worse than "desde
+ * 15/01/2026" — the hour the sync ran is not information the operator needs.
+ */
+describe('formatDateOnly', () => {
+  // Noon UTC keeps the same calendar day for every real-world UTC offset this
+  // suite runs under (Mac sandbox UTC-4, CI UTC — see jest-TZ gotcha memory),
+  // unlike a midnight or late-evening instant which can roll to the
+  // neighboring day depending on the machine's local timezone.
+  it('formats an ISO instant as DD/MM/YYYY with no time', () => {
+    expect(formatDateOnly('2026-01-15T12:00:00Z')).toBe('15/01/2026')
+  })
+
+  it('pads single-digit day and month', () => {
+    expect(formatDateOnly('2026-03-05T12:00:00Z')).toBe('05/03/2026')
   })
 })

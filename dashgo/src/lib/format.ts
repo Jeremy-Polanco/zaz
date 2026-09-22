@@ -26,6 +26,21 @@ export function formatDate(iso: string): string {
 }
 
 /**
+ * Same locale conventions as formatDate (es-AR, DD/MM/YYYY) but WITHOUT the
+ * time. Used where the hour an instant was recorded isn't useful to show —
+ * e.g. "Suscripción con pago fallido desde 15/01/2026" reads better than
+ * appending the hour PlanDelinquencyListener happened to run.
+ */
+export function formatDateOnly(iso: string): string {
+  const d = new Date(iso)
+  return d.toLocaleDateString('es-AR', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+  })
+}
+
+/**
  * Local-day ISO string ('YYYY-MM-DD') from a Date, using the LOCAL calendar
  * fields (getFullYear/getMonth/getDate) — never toISOString(), which reads
  * UTC and would roll the day backwards in negative-UTC-offset timezones.

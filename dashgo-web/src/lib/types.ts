@@ -513,6 +513,12 @@ export interface AdminRentalResponse {
   canceledAt: string | null
   /** Next bebedero maintenance due date, or null if not a maintenance rental. */
   nextMaintenanceAt: string | null
+  /**
+   * Set when the SUBSCRIPTION PLAN that pays for this ($0) rental is
+   * delinquent — mirrored server-side, not from this rental's own Stripe
+   * subscription. Null for rentals that pay for themselves.
+   */
+  planPastDueSince: string | null
   daysDelinquent: number
   createdAt: string
 }

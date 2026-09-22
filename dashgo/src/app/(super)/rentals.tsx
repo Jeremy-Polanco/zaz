@@ -19,7 +19,7 @@ import {
   useResetMaintenance,
   useRetryRentalSetup,
 } from '../../lib/queries'
-import { formatCents, formatDate } from '../../lib/format'
+import { formatCents, formatDate, formatDateOnly } from '../../lib/format'
 import type { AdminRentalResponse, RentalFilter, RentalStatus } from '../../lib/types'
 import { Button, Eyebrow, KpiCard, SectionHead } from '../../components/ui'
 
@@ -163,6 +163,13 @@ function RentalRow({
   const canCancel = CANCELABLE_STATES.includes(rental.status)
   const canRetry = rental.status === 'pending_setup'
   const canResetMaintenance = !!rental.nextMaintenanceAt
+  // F3 — planPastDueSince es un marker write-once: solo se limpia cuando el
+  // PLAN se recupera, así que sigue seteado en un alquiler que un admin
+  // canceló después. Sin este gate el hint quedaba mostrando "pago fallido
+  // desde…" para siempre en un alquiler ya cancelado.
+  const showPlanPastDueHint =
+    rental.planPastDueSince !== null &&
+    (rental.status === 'past_due' || rental.status === 'unpaid')
 
   return (
     <View className="border border-ink/10 bg-paper p-4">
@@ -184,6 +191,16 @@ function RentalRow({
           </Text>
         </View>
       </View>
+
+      {/* R9 — el bebedero de $0 no falla solo; cuando aparece past_due/unpaid
+          casi siempre es porque el PLAN que lo paga está atrasado. Sin este
+          aviso el operador ve un bebedero "atrasado" sin razón visible. */}
+      {showPlanPastDueHint ? (
+        <Text className="mt-1 font-sans text-[12px] text-warn">
+          Suscripción con pago fallido desde{' '}
+          {formatDateOnly(rental.planPastDueSince as string)}
+        </Text>
+      ) : null}
 
       {/* Meta */}
       <View className="mt-2 flex-row flex-wrap items-center gap-x-2 gap-y-1">

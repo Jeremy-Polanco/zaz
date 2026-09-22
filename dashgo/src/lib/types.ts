@@ -176,6 +176,12 @@ export interface AdminRentalResponse {
   activatedAt: string | null
   canceledAt: string | null
   nextMaintenanceAt: string | null
+  /**
+   * Set when the SUBSCRIPTION PLAN that pays for this ($0) rental is
+   * delinquent — mirrored server-side, not from this rental's own Stripe
+   * subscription. Null for rentals that pay for themselves.
+   */
+  planPastDueSince: string | null
   daysDelinquent: number
   createdAt: string
 }

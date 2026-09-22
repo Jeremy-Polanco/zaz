@@ -160,6 +160,26 @@ function RentalRow({
       })
     : '—'
 
+  // R9 — the $0 bebedero this rental IS doesn't fail on its own; when it shows
+  // past_due/unpaid it's almost always because the PLAN that pays for it is
+  // delinquent. Without this hint the operator sees a bebedero "atrasado" with
+  // no visible reason.
+  //
+  // F3 — planPastDueSince is a write-once marker: it only clears when the
+  // PLAN recovers, so it stays set on a rental an admin later cancels. Gate
+  // the hint on the CURRENT status too, or a canceled rental keeps showing a
+  // stale "pago fallido desde…" forever.
+  const showPlanPastDueHint =
+    rental.planPastDueSince !== null &&
+    (rental.status === 'past_due' || rental.status === 'unpaid')
+  const planPastDueStr = showPlanPastDueHint
+    ? new Date(rental.planPastDueSince as string).toLocaleDateString('es', {
+        day: 'numeric',
+        month: 'short',
+        year: 'numeric',
+      })
+    : null
+
   return (
     <div className="flex flex-col gap-3 border border-ink/10 bg-paper p-4 sm:flex-row sm:items-center sm:justify-between">
       {/* Left: customer + product */}
@@ -175,6 +195,11 @@ function RentalRow({
             {badge.label}
           </span>
         </div>
+        {planPastDueStr ? (
+          <p className="text-[0.7rem] text-warn">
+            Suscripción con pago fallido desde {planPastDueStr}
+          </p>
+        ) : null}
         <div className="flex flex-wrap gap-3 text-[0.7rem] uppercase tracking-[0.12em] text-ink-muted">
           <span>{rental.productName}</span>
           <span>·</span>

@@ -133,6 +133,18 @@ export class Rental {
   lastLateFeeAt!: Date | null;
 
   /**
+   * "La suscripción ES el bebedero": este alquiler no tiene subscripción de
+   * Stripe propia que pueda fallar (monthlyRentCents=0 para el primer
+   * bebedero del suscriptor), así que su mora no la marca su propio webhook
+   * sino el PLAN que lo paga (tabla `subscriptions`). Escrito por
+   * PlanDelinquencyListener cuando el plan pasa a past_due/unpaid/canceled
+   * (write-once, igual que pastDueSince) y vuelto a null cuando el plan
+   * recupera `active`. NULL siempre para alquileres que se pagan solos.
+   */
+  @Column({ name: 'plan_past_due_since', type: 'timestamptz', nullable: true })
+  planPastDueSince!: Date | null;
+
+  /**
    * When the next bebedero maintenance is due (countdown anchor).
    * The 30-day clock = next_maintenance_at − now. NULL means this rental does
    * not track maintenance (its product has requires_maintenance = false).

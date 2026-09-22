@@ -12,7 +12,11 @@ import { ConfigService } from '@nestjs/config';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { InjectRepository } from '@nestjs/typeorm';
 import { ILike, Repository } from 'typeorm';
-import { SUBSCRIPTION_ACTIVATED } from '../../common/events/subscription.events';
+import {
+  SUBSCRIPTION_ACTIVATED,
+  SUBSCRIPTION_STATUS_CHANGED,
+  SUBSCRIPTION_RECONCILED,
+} from '../../common/events/subscription.events';
 import Stripe = require('stripe');
 import {
   Subscription,
@@ -864,6 +868,11 @@ export class SubscriptionService implements OnModuleInit {
     this.logger.log(
       `reconciled subscriptions vs Stripe: ${JSON.stringify(result)}`,
     );
+    // Listeners (p. ej. PlanDelinquencyListener.syncAll) re-barren estado
+    // derivado con la foto FINAL de este reconcile — no en cada upsert
+    // individual, porque durante la corrida el estado de una suscripción
+    // puede pasar por varios valores intermedios sin que importe.
+    this.events.emit(SUBSCRIPTION_RECONCILED, result);
     return result;
   }
 
@@ -937,6 +946,18 @@ export class SubscriptionService implements OnModuleInit {
     this.logger.log(
       `upserted subscription ${stripeSub.id} for user ${userId} — status: ${stripeSub.status}`,
     );
+
+    // Cualquier transición de status (incluida la primera fila, previousStatus
+    // null) — a diferencia de SUBSCRIPTION_ACTIVATED, que solo mira la entrada
+    // a active. La necesita PlanDelinquencyListener para espejar también
+    // past_due/unpaid/canceled sobre el bebedero de $0 que este plan paga.
+    if (previous?.status !== normalizedStatus) {
+      this.events.emit(SUBSCRIPTION_STATUS_CHANGED, {
+        userId,
+        status: normalizedStatus,
+        previousStatus: previous?.status ?? null,
+      });
+    }
 
     // Auto-bebedero al activarse. El listener (OrdersModule) es idempotente
     // igual; event-driven para mantener el grafo de módulos acíclico
