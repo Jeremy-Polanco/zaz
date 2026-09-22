@@ -65,6 +65,7 @@ function makeRental(
     activatedAt: '2026-05-01T00:00:00Z',
     canceledAt: null,
     nextMaintenanceAt: null,
+    planPastDueSince: null,
     daysDelinquent: 0,
     createdAt: '2026-05-01T00:00:00Z',
     ...overrides,
@@ -246,5 +247,69 @@ describe('SuperRentalsScreen (mobile) — truncated first page', () => {
     renderWithProviders(<SuperRentalsScreen />)
 
     expect(screen.queryByText('Siguiente')).toBeNull()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// R9 — a rental mirrored from a delinquent PLAN gets a warning hint so the
+// operator understands WHY a $0 bebedero shows as past_due/unpaid.
+// ---------------------------------------------------------------------------
+
+describe('SuperRentalsScreen (mobile) — plan-delinquency hint', () => {
+  beforeEach(() => {
+    jest.clearAllMocks()
+  })
+
+  it('shows a plan-delinquency hint when planPastDueSince is set', () => {
+    setup({
+      rentals: [
+        makeRental({ status: 'past_due', planPastDueSince: '2026-01-10T00:00:00Z' }),
+      ],
+    })
+    renderWithProviders(<SuperRentalsScreen />)
+
+    expect(
+      screen.getByText(/Suscripción con pago fallido desde/),
+    ).toBeTruthy()
+  })
+
+  it('hides the plan-delinquency hint when planPastDueSince is null', () => {
+    setup({ rentals: [makeRental({ status: 'past_due', planPastDueSince: null })] })
+    renderWithProviders(<SuperRentalsScreen />)
+
+    expect(
+      screen.queryByText(/Suscripción con pago fallido desde/),
+    ).toBeNull()
+  })
+
+  // F3 — planPastDueSince es un marker write-once: sigue seteado aunque un
+  // admin cancele el alquiler (solo se limpia cuando el PLAN se recupera, no
+  // al cancelar). Mostrar "pago fallido desde…" en un alquiler ya cancelado
+  // queda obsoleto y confunde — el hint solo tiene sentido mientras el
+  // alquiler sigue past_due/unpaid.
+  it('hides the plan-delinquency hint on a canceled rental even if planPastDueSince is set', () => {
+    setup({
+      rentals: [
+        makeRental({ status: 'canceled', planPastDueSince: '2026-01-10T00:00:00Z' }),
+      ],
+    })
+    renderWithProviders(<SuperRentalsScreen />)
+
+    expect(
+      screen.queryByText(/Suscripción con pago fallido desde/),
+    ).toBeNull()
+  })
+
+  it('shows the plan-delinquency hint on an unpaid rental with the marker set', () => {
+    setup({
+      rentals: [
+        makeRental({ status: 'unpaid', planPastDueSince: '2026-01-10T00:00:00Z' }),
+      ],
+    })
+    renderWithProviders(<SuperRentalsScreen />)
+
+    expect(
+      screen.getByText(/Suscripción con pago fallido desde/),
+    ).toBeTruthy()
   })
 })

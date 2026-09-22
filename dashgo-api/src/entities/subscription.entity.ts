@@ -2,6 +2,7 @@ import {
   Column,
   CreateDateColumn,
   Entity,
+  Index,
   JoinColumn,
   ManyToOne,
   PrimaryGeneratedColumn,
@@ -26,13 +27,23 @@ export enum SubscriptionStatus {
  * tarifa de suscriptor), el precio de suscriptor por producto, el producto
  * premium y el mantenimiento. El ENVÍO no: desde 2026-09-14 el envío fijo lo
  * paga toda orden de cliente, suscriptor o no.
+ *
+ * `user_id` NO es único (ver migración
+ * 1811000000000-DropSubscriptionsUserIdUnique): un usuario acumula una fila
+ * por cada suscripción de Stripe que tuvo — cancelar y volver a suscribirse
+ * crea una fila nueva con un `stripe_subscription_id` distinto. Todo el
+ * código ya asumía esto (la más nueva por `current_period_end` gana en
+ * `getMySubscription`, cancel/reactivate, el listado admin de usuarios y
+ * `PlanDelinquencyListener`); la unique constraint original solo servía para
+ * romper la re-suscripción con un duplicate key.
  */
 @Entity('subscriptions')
+@Index('IDX_subscriptions_user_id', ['userId'])
 export class Subscription {
   @PrimaryGeneratedColumn('uuid')
   id!: string;
 
-  @Column({ name: 'user_id', type: 'uuid', unique: true })
+  @Column({ name: 'user_id', type: 'uuid' })
   userId!: string;
 
   @ManyToOne(() => User, { onDelete: 'RESTRICT' })

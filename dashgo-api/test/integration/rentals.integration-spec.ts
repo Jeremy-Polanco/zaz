@@ -92,8 +92,13 @@ import { makeUser } from '../../src/test-utils/fixtures';
 import { User } from '../../src/entities/user.entity';
 import { Product } from '../../src/entities/product.entity';
 import { Rental, RentalStatus } from '../../src/entities/rental.entity';
+import {
+  Subscription,
+  SubscriptionStatus,
+} from '../../src/entities/subscription.entity';
 import { UserRole } from '../../src/entities/enums';
 import { RentalsService } from '../../src/modules/rentals/rentals.service';
+import { PlanDelinquencyListener } from '../../src/modules/rentals/plan-delinquency.listener';
 
 function loadEnvTest(): void {
   const envTestPath = path.resolve(__dirname, '../../.env.test');
@@ -156,6 +161,9 @@ describe('RentalsService (integration)', () => {
       }
       // Extra cleanup: any stray rentals pointing to our test product
       await dataSource.getRepository(Rental).delete({ productId: testProduct.id });
+      // El plan del usuario de prueba: subscriptions.user_id tiene FK RESTRICT,
+      // así que borrarlo ANTES del user o el delete de abajo falla.
+      await dataSource.getRepository(Subscription).delete({ userId: testUser.id });
       await dataSource.getRepository(Product).delete({ id: testProduct.id });
       await dataSource.getRepository(User).delete({ id: testUser.id });
     }
@@ -515,6 +523,224 @@ describe('RentalsService (integration)', () => {
       const results = await rentalsService.listDelinquent();
       const ids = results.map((r) => r.id);
       expect(ids).toContain(rental.id);
+    });
+
+    // El bebedero gratuito de un suscriptor ($0/mes) tiene su PROPIA suscripción
+    // de Stripe de $0: su `currentPeriodEnd` se renueva siempre y jamás vence.
+    // Quien se atrasa es el PLAN que lo paga, y eso se marca con
+    // `planPastDueSince`. Sin la tercera rama del WHERE el alquiler moroso nunca
+    // aparecía en el panel. Este caso corre contra Postgres REAL a propósito:
+    // el WHERE es un string crudo que ni el compilador ni los tests con mocks
+    // validan (la misma clase de bug que ya causó dos 500 en producción).
+    it('incluye un alquiler marcado por mora del PLAN aunque su propio currentPeriodEnd sea futuro', async () => {
+      const futureDate = new Date(Date.now() + 25 * 86400 * 1000);
+
+      const mirrored = await dataSource.getRepository(Rental).save({
+        userId: testUser.id,
+        productId: testProduct.id,
+        orderId: null,
+        stripePriceId: 'price_int_test',
+        monthlyRentCents: 0,
+        lateFeeCents: 500,
+        status: RentalStatus.PAST_DUE,
+        stripeSubscriptionId: 'sub_plan_mirrored_int',
+        currentPeriodEnd: futureDate,
+        planPastDueSince: new Date(Date.now() - 6 * 86400 * 1000),
+        pastDueSince: new Date(Date.now() - 6 * 86400 * 1000),
+      } as unknown as Rental);
+      createdRentalIds.push(mirrored.id);
+
+      // Control: mismo alquiler de $0 con período futuro pero SIN el marcador.
+      const unmarked = await dataSource.getRepository(Rental).save({
+        userId: testUser.id,
+        productId: testProduct.id,
+        orderId: null,
+        stripePriceId: 'price_int_test',
+        monthlyRentCents: 0,
+        lateFeeCents: 500,
+        status: RentalStatus.PAST_DUE,
+        stripeSubscriptionId: 'sub_plan_unmarked_int',
+        currentPeriodEnd: futureDate,
+        planPastDueSince: null,
+      } as unknown as Rental);
+      createdRentalIds.push(unmarked.id);
+
+      const results = await rentalsService.listDelinquent();
+      const ids = results.map((r) => r.id);
+
+      expect(ids).toContain(mirrored.id);
+      expect(ids).not.toContain(unmarked.id);
+
+      // daysDelinquent se cuenta desde la mora del PLAN, no desde el período
+      // (futuro) de la suscripción de $0 del propio alquiler.
+      const dto = results.find((r) => r.id === mirrored.id)!;
+      expect(dto.daysDelinquent).toBe(6);
+      expect(dto.planPastDueSince).not.toBeNull();
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // 7b. PlanDelinquencyListener — el barrido del reconcile contra Postgres real
+  //
+  // `syncAll` arranca con un `.select('DISTINCT rental.userId', 'userId')`:
+  // string crudo, sin tipar, que TypeORM tiene que traducir a `rental.user_id`.
+  // El spec unitario del listener mockea el QueryBuilder entero, así que es
+  // ciego a esa traducción — y un error ahí no rompe nada visible: el listener
+  // atrapa la excepción, la loguea y el barrido horario deja de curar moras en
+  // silencio. Por eso este caso lo ejecuta de verdad.
+  // ─────────────────────────────────────────────────────────────────────────
+
+  describe('PlanDelinquencyListener (integration)', () => {
+    let listener: PlanDelinquencyListener;
+
+    beforeAll(() => {
+      listener = app.get(PlanDelinquencyListener);
+    });
+
+    afterEach(async () => {
+      await dataSource
+        .getRepository(Subscription)
+        .delete({ userId: testUser.id });
+    });
+
+    async function givenPlan(status: SubscriptionStatus): Promise<void> {
+      await dataSource.getRepository(Subscription).delete({ userId: testUser.id });
+      await dataSource.getRepository(Subscription).save({
+        userId: testUser.id,
+        stripeSubscriptionId: 'sub_plan_int_test',
+        status,
+        tier: 'standard',
+        currentPeriodStart: new Date(Date.now() - 30 * 86400 * 1000),
+        currentPeriodEnd: new Date(Date.now() + 86400 * 1000),
+        cancelAtPeriodEnd: false,
+        canceledAt: null,
+      } as unknown as Subscription);
+    }
+
+    async function givenZeroRental(status: RentalStatus, subId: string): Promise<Rental> {
+      const r = await dataSource.getRepository(Rental).save({
+        userId: testUser.id,
+        productId: testProduct.id,
+        orderId: null,
+        stripePriceId: 'price_int_test',
+        monthlyRentCents: 0,
+        lateFeeCents: 500,
+        status,
+        stripeSubscriptionId: subId,
+        currentPeriodEnd: new Date(Date.now() + 25 * 86400 * 1000),
+      } as unknown as Rental);
+      createdRentalIds.push(r.id);
+      return r;
+    }
+
+    it('syncAll marca el bebedero de $0 cuando el plan del usuario está en mora', async () => {
+      const rental = await givenZeroRental(RentalStatus.ACTIVE, 'sub_zero_sweep_1');
+      await givenPlan(SubscriptionStatus.PAST_DUE);
+
+      await listener.syncAll();
+
+      const after = await dataSource
+        .getRepository(Rental)
+        .findOneByOrFail({ id: rental.id });
+      expect(after.status).toBe(RentalStatus.PAST_DUE);
+      expect(after.planPastDueSince).not.toBeNull();
+      // pastDueSince es lo que mira el cron de recargos: sin él, la mora
+      // espejada nunca acumularía el recargo diario tras los 3 días de gracia.
+      expect(after.pastDueSince).not.toBeNull();
+    });
+
+    it('syncAll restaura el bebedero marcado cuando el plan vuelve a active', async () => {
+      const rental = await givenZeroRental(RentalStatus.ACTIVE, 'sub_zero_sweep_2');
+      await givenPlan(SubscriptionStatus.PAST_DUE);
+      await listener.syncAll();
+
+      // Precondición explícita: si el barrido no marcó nada, el "restaurado"
+      // de abajo sería un falso verde (el alquiler ya estaba ACTIVE).
+      const marked = await dataSource
+        .getRepository(Rental)
+        .findOneByOrFail({ id: rental.id });
+      expect(marked.status).toBe(RentalStatus.PAST_DUE);
+      expect(marked.planPastDueSince).not.toBeNull();
+
+      await givenPlan(SubscriptionStatus.ACTIVE);
+      await listener.syncAll();
+
+      const after = await dataSource
+        .getRepository(Rental)
+        .findOneByOrFail({ id: rental.id });
+      expect(after.status).toBe(RentalStatus.ACTIVE);
+      expect(after.planPastDueSince).toBeNull();
+      expect(after.pastDueSince).toBeNull();
+    });
+
+    it('syncAll no toca un alquiler en pending_setup ni uno cancelado', async () => {
+      const pending = await givenZeroRental(RentalStatus.PENDING_SETUP, 'sub_zero_sweep_3');
+      const canceled = await givenZeroRental(RentalStatus.CANCELED, 'sub_zero_sweep_4');
+      await givenPlan(SubscriptionStatus.CANCELED);
+
+      await listener.syncAll();
+
+      const rentalsRepo = dataSource.getRepository(Rental);
+      const afterPending = await rentalsRepo.findOneByOrFail({ id: pending.id });
+      const afterCanceled = await rentalsRepo.findOneByOrFail({ id: canceled.id });
+      expect(afterPending.status).toBe(RentalStatus.PENDING_SETUP);
+      expect(afterPending.planPastDueSince).toBeNull();
+      expect(afterCanceled.status).toBe(RentalStatus.CANCELED);
+      expect(afterCanceled.planPastDueSince).toBeNull();
+    });
+
+    // F1 — `subscriptions.user_id` YA NO es UNIQUE (migración
+    // 1811000000000-DropSubscriptionsUserIdUnique). Antes, cancelar y
+    // volver a suscribirse hacía que el segundo INSERT tirara duplicate key
+    // sobre "user_id" (upsertSubscription conflictea por
+    // stripe_subscription_id, nunca por user_id) — la fila `canceled` vieja
+    // quedaba como única fila del usuario y el bebedero de $0 de un cliente
+    // que SÍ pagaba terminaba UNPAID. Este caso corre contra Postgres REAL
+    // porque es justo la constraint la que hay que probar, no algo que un
+    // repo mockeado pueda validar.
+    it('permite una fila canceled + una fila active para el mismo usuario, y syncForUser resuelve ACTIVE', async () => {
+      const subsRepo = dataSource.getRepository(Subscription);
+
+      const canceledRow = await subsRepo.save({
+        userId: testUser.id,
+        stripeSubscriptionId: 'sub_plan_old_canceled',
+        status: SubscriptionStatus.CANCELED,
+        tier: 'standard',
+        currentPeriodStart: new Date(Date.now() - 60 * 86400 * 1000),
+        currentPeriodEnd: new Date(Date.now() - 30 * 86400 * 1000),
+        cancelAtPeriodEnd: false,
+        canceledAt: new Date(Date.now() - 30 * 86400 * 1000),
+      } as unknown as Subscription);
+
+      // Antes de la migración, este segundo INSERT para el MISMO user_id
+      // tiraba "duplicate key value violates unique constraint
+      // UQ_d0a95ef8a28188364c546eb65c1".
+      const activeRow = await subsRepo.save({
+        userId: testUser.id,
+        stripeSubscriptionId: 'sub_plan_new_active',
+        status: SubscriptionStatus.ACTIVE,
+        tier: 'standard',
+        currentPeriodStart: new Date(Date.now() - 86400 * 1000),
+        currentPeriodEnd: new Date(Date.now() + 29 * 86400 * 1000),
+        cancelAtPeriodEnd: false,
+        canceledAt: null,
+      } as unknown as Subscription);
+
+      const rowsForUser = await subsRepo.find({ where: { userId: testUser.id } });
+      expect(rowsForUser.map((r) => r.id).sort()).toEqual(
+        [canceledRow.id, activeRow.id].sort(),
+      );
+
+      const rental = await givenZeroRental(RentalStatus.ACTIVE, 'sub_zero_resub_1');
+
+      const outcome = await listener.syncForUser(testUser.id);
+
+      expect(outcome).toEqual({ marked: 0, unpaid: 0, restored: 0 });
+      const after = await dataSource
+        .getRepository(Rental)
+        .findOneByOrFail({ id: rental.id });
+      expect(after.status).toBe(RentalStatus.ACTIVE);
+      expect(after.planPastDueSince).toBeNull();
     });
   });
 

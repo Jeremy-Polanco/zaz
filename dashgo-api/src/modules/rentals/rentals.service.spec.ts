@@ -135,6 +135,7 @@ function fakeRental(overrides: Partial<Rental> = {}): Rental {
     activatedAt: null,
     canceledAt: null,
     pastDueSince: null,
+    planPastDueSince: null,
     lastLateFeeAt: null,
     createdAt: new Date('2024-01-01T10:00:00Z'),
     updatedAt: new Date('2024-01-01T10:00:00Z'),
@@ -425,6 +426,43 @@ describe('RentalsService', () => {
 
       expect(reset).toBe(0);
       expect(rentalRepo.find).not.toHaveBeenCalled();
+    });
+
+    // F2 — un bebedero espejado desde un plan en mora (PlanDelinquencyListener)
+    // sigue siendo el mismo bebedero físico: si el técnico entregó la visita de
+    // mantenimiento, el timer se reinicia igual que en uno ACTIVE. Filtrar solo
+    // por ACTIVE dejaba sin reset cualquier rental PAST_DUE/UNPAID aunque la
+    // visita sí ocurrió.
+    it('resets the maintenance countdown on a PAST_DUE rental too (mirrored by a delinquent plan)', async () => {
+      userRepo.findOne.mockResolvedValueOnce(
+        fakeUser({ id: 'u4', maintenanceTimerDisabled: false }),
+      );
+      const pastDueRental = fakeRental({
+        id: 'rental-past-due-mt',
+        userId: 'u4',
+        status: RentalStatus.PAST_DUE,
+        nextMaintenanceAt: new Date('2026-01-01T00:00:00Z'),
+        planPastDueSince: new Date('2025-12-01T00:00:00Z'),
+      });
+      (rentalRepo.find as jest.Mock).mockResolvedValueOnce([pastDueRental]);
+      (rentalRepo.save as jest.Mock).mockImplementationOnce(async (r: Rental) => r);
+
+      const reset = await service.resetMaintenanceForUser('u4');
+
+      expect(reset).toBe(1);
+      const findArgs = (rentalRepo.find as jest.Mock).mock.calls[0][0];
+      expect(findArgs.where.userId).toBe('u4');
+      // El filtro debe incluir ACTIVE, PAST_DUE y UNPAID — nunca solo ACTIVE.
+      expect(findArgs.where.status.value).toEqual(
+        expect.arrayContaining([
+          RentalStatus.ACTIVE,
+          RentalStatus.PAST_DUE,
+          RentalStatus.UNPAID,
+        ]),
+      );
+      const saved = (rentalRepo.save as jest.Mock).mock.calls[0][0] as Rental;
+      expect(saved.nextMaintenanceAt).toBeInstanceOf(Date);
+      expect(saved.lastMaintenanceAt).toBeInstanceOf(Date);
     });
   });
 
@@ -775,6 +813,59 @@ describe('RentalsService', () => {
   });
 
   // ─────────────────────────────────────────────────────────────────────────
+  // R5 — toAdminDto: planPastDueSince field + daysDelinquent computed from it
+  // when present, so a rental mirrored from a delinquent PLAN reports how long
+  // the PLAN has been down instead of a stale/irrelevant currentPeriodEnd.
+  // ─────────────────────────────────────────────────────────────────────────
+
+  describe('toAdminDto — planPastDueSince (R5)', () => {
+    it('exposes planPastDueSince on the admin DTO', async () => {
+      const marker = new Date('2026-01-10T00:00:00Z');
+      const rental = fakeRental({
+        status: RentalStatus.PAST_DUE,
+        planPastDueSince: marker,
+      });
+      const qb = rentalRepo._qb;
+      (qb.getManyAndCount as jest.Mock).mockResolvedValueOnce([[rental], 1]);
+
+      const result = await service.listAdmin({});
+
+      expect(result.items[0].planPastDueSince).toEqual(marker);
+    });
+
+    it('daysDelinquent is computed from planPastDueSince when it is set, ignoring currentPeriodEnd', async () => {
+      const tenDaysAgo = new Date(Date.now() - 10 * 86400 * 1000);
+      const rental = fakeRental({
+        status: RentalStatus.PAST_DUE,
+        planPastDueSince: tenDaysAgo,
+        // currentPeriodEnd still in the future — must NOT be used for this rental
+        currentPeriodEnd: new Date(Date.now() + 30 * 86400 * 1000),
+      });
+      const qb = rentalRepo._qb;
+      (qb.getManyAndCount as jest.Mock).mockResolvedValueOnce([[rental], 1]);
+
+      const result = await service.listAdmin({});
+
+      expect(result.items[0].daysDelinquent).toBe(10);
+    });
+
+    it('falls back to the currentPeriodEnd rule when planPastDueSince is null', async () => {
+      const twoDaysAgo = new Date(Date.now() - 2 * 86400 * 1000);
+      const rental = fakeRental({
+        status: RentalStatus.PAST_DUE,
+        planPastDueSince: null,
+        currentPeriodEnd: twoDaysAgo,
+      });
+      const qb = rentalRepo._qb;
+      (qb.getManyAndCount as jest.Mock).mockResolvedValueOnce([[rental], 1]);
+
+      const result = await service.listAdmin({});
+
+      expect(result.items[0].daysDelinquent).toBe(2);
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────
   // summarizeAdmin — global KPIs, independent of the list's page/filters.
   //
   // The admin screens used to compute "Al día / Debiendo / En riesgo" from the
@@ -908,6 +999,37 @@ describe('RentalsService', () => {
       const result = await service.listDelinquent();
 
       expect(result).toHaveLength(0);
+    });
+
+    // R6 — a rental mirrored from a delinquent PLAN must show up even when its
+    // OWN currentPeriodEnd (the $0 Stripe subscription's period) has not
+    // lapsed — the plan's delinquency, not the rental's own period, is what
+    // matters here.
+    it('R6: WHERE clause includes the planPastDueSince marker condition', async () => {
+      const qb = rentalRepo._qb;
+      (qb.getMany as jest.Mock).mockResolvedValueOnce([]);
+
+      await service.listDelinquent();
+
+      expect(qb.where).toHaveBeenCalledWith(
+        expect.stringContaining('planPastDueSince'),
+        expect.anything(),
+      );
+    });
+
+    it('R6: a rental with planPastDueSince set is returned regardless of currentPeriodEnd', async () => {
+      const mirrored = fakeRental({
+        id: 'r-plan-marked',
+        status: RentalStatus.PAST_DUE,
+        planPastDueSince: new Date('2026-01-10T00:00:00Z'),
+        currentPeriodEnd: new Date(Date.now() + 30 * 86400 * 1000), // still "in the future"
+      });
+      const qb = rentalRepo._qb;
+      (qb.getMany as jest.Mock).mockResolvedValueOnce([mirrored]);
+
+      const result = await service.listDelinquent();
+
+      expect(result.some((r) => r.id === 'r-plan-marked')).toBe(true);
     });
   });
 
@@ -1601,6 +1723,116 @@ describe('RentalsService', () => {
 
       await expect(service.handleWebhook(event)).resolves.toBeUndefined();
       expect(rentalRepo.save).not.toHaveBeenCalled();
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // R4 — plan-delinquency guard: the rental's OWN $0 Stripe subscription
+  // basically never fails, so "active" from ITS webhook must not override a
+  // status the PLAN put there (PlanDelinquencyListener). Mapped
+  // past_due/unpaid/canceled from the own subscription still apply as today.
+  // ─────────────────────────────────────────────────────────────────────────
+
+  describe('handleWebhook — customer.subscription.updated — plan delinquency guard (R4)', () => {
+    it('does NOT clear PAST_DUE when planPastDueSince is set and the own-sub event maps to ACTIVE, but still refreshes period bounds', async () => {
+      const now = Math.floor(Date.now() / 1000);
+      const periodEnd = now + 30 * 86400;
+      const rental = fakeRental({
+        id: 'rental-plan-marked',
+        stripeSubscriptionId: 'sub_own_zero',
+        status: RentalStatus.PAST_DUE,
+        planPastDueSince: new Date('2026-01-10T00:00:00Z'),
+        pastDueSince: new Date('2026-01-10T00:00:00Z'),
+        currentPeriodEnd: new Date(now * 1000),
+      });
+
+      rentalRepo.findOne.mockResolvedValueOnce(rental);
+      rentalRepo.save.mockResolvedValueOnce(rental);
+
+      const event = {
+        type: 'customer.subscription.updated',
+        data: {
+          object: {
+            id: 'sub_own_zero',
+            status: 'active', // the $0 subscription's own webhook — irrelevant, it never really fails
+            metadata: { rentalId: 'rental-plan-marked' },
+            current_period_start: now,
+            current_period_end: periodEnd,
+          },
+        },
+      };
+
+      await service.handleWebhook(event);
+
+      expect(rentalRepo.save).toHaveBeenCalledTimes(1);
+      const savedArg = rentalRepo.save.mock.calls[0][0] as Partial<Rental>;
+      // Status is NOT downgraded to ACTIVE — PlanDelinquencyListener owns the restore.
+      expect(savedArg.status).toBe(RentalStatus.PAST_DUE);
+      // Period bounds still refresh regardless.
+      expect(savedArg.currentPeriodStart).toBeInstanceOf(Date);
+      expect(savedArg.currentPeriodEnd).toBeInstanceOf(Date);
+    });
+
+    it('still applies a past_due mapped status from the own subscription even when planPastDueSince is set', async () => {
+      const now = Math.floor(Date.now() / 1000);
+      const rental = fakeRental({
+        id: 'rental-plan-marked-2',
+        stripeSubscriptionId: 'sub_own_zero_2',
+        status: RentalStatus.PAST_DUE,
+        planPastDueSince: new Date('2026-01-10T00:00:00Z'),
+      });
+
+      rentalRepo.findOne.mockResolvedValueOnce(rental);
+      rentalRepo.save.mockResolvedValueOnce(rental);
+
+      const event = {
+        type: 'customer.subscription.updated',
+        data: {
+          object: {
+            id: 'sub_own_zero_2',
+            status: 'past_due',
+            metadata: { rentalId: 'rental-plan-marked-2' },
+            current_period_start: now,
+            current_period_end: now + 86400,
+          },
+        },
+      };
+
+      await service.handleWebhook(event);
+
+      const savedArg = rentalRepo.save.mock.calls[0][0] as Partial<Rental>;
+      expect(savedArg.status).toBe(RentalStatus.PAST_DUE);
+    });
+
+    it('applies ACTIVE normally when planPastDueSince is null (no plan delinquency)', async () => {
+      const now = Math.floor(Date.now() / 1000);
+      const rental = fakeRental({
+        id: 'rental-no-marker',
+        stripeSubscriptionId: 'sub_no_marker',
+        status: RentalStatus.PAST_DUE,
+        planPastDueSince: null,
+      });
+
+      rentalRepo.findOne.mockResolvedValueOnce(rental);
+      rentalRepo.save.mockResolvedValueOnce(rental);
+
+      const event = {
+        type: 'customer.subscription.updated',
+        data: {
+          object: {
+            id: 'sub_no_marker',
+            status: 'active',
+            metadata: { rentalId: 'rental-no-marker' },
+            current_period_start: now,
+            current_period_end: now + 86400,
+          },
+        },
+      };
+
+      await service.handleWebhook(event);
+
+      const savedArg = rentalRepo.save.mock.calls[0][0] as Partial<Rental>;
+      expect(savedArg.status).toBe(RentalStatus.ACTIVE);
     });
   });
 

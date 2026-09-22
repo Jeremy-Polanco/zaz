@@ -12,7 +12,11 @@ import { ConfigService } from '@nestjs/config';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { ILike, Repository } from 'typeorm';
 import { SubscriptionService } from './subscription.service';
-import { SUBSCRIPTION_ACTIVATED } from '../../common/events/subscription.events';
+import {
+  SUBSCRIPTION_ACTIVATED,
+  SUBSCRIPTION_STATUS_CHANGED,
+  SUBSCRIPTION_RECONCILED,
+} from '../../common/events/subscription.events';
 import { Subscription, SubscriptionStatus } from '../../entities/subscription.entity';
 import { SubscriptionTier } from '../../entities/subscription-plan.entity';
 import { User } from '../../entities/user.entity';
@@ -510,6 +514,84 @@ describe('SubscriptionService', () => {
         SUBSCRIPTION_ACTIVATED,
         expect.objectContaining({ userId: 'user-1' }),
       );
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // SUBSCRIPTION_STATUS_CHANGED — se emite en CUALQUIER transición de status,
+  // incluyendo la primera fila (previousStatus null). A diferencia de
+  // SUBSCRIPTION_ACTIVATED (solo entra a active), esto lo necesita
+  // PlanDelinquencyListener para espejar past_due/unpaid/canceled también.
+  // -------------------------------------------------------------------------
+
+  describe('SUBSCRIPTION_STATUS_CHANGED — en cualquier transición de status', () => {
+    beforeEach(() => {
+      subscriptionsRepo.upsert.mockResolvedValue({} as never);
+    });
+
+    it('emite con previousStatus=null cuando la suscripción es nueva (primer upsert)', async () => {
+      subscriptionsRepo.findOne.mockResolvedValue(null);
+
+      await service.handleWebhook({
+        type: 'customer.subscription.created',
+        data: { object: fakeStripeSub({ status: 'active' }) },
+      });
+
+      expect(events.emit).toHaveBeenCalledWith(SUBSCRIPTION_STATUS_CHANGED, {
+        userId: 'user-1',
+        status: SubscriptionStatus.ACTIVE,
+        previousStatus: null,
+      });
+    });
+
+    it('emite en la transición active → past_due', async () => {
+      subscriptionsRepo.findOne.mockResolvedValue(
+        fakeSubscription({ status: SubscriptionStatus.ACTIVE }),
+      );
+
+      await service.handleWebhook({
+        type: 'customer.subscription.updated',
+        data: { object: fakeStripeSub({ status: 'past_due' }) },
+      });
+
+      expect(events.emit).toHaveBeenCalledWith(SUBSCRIPTION_STATUS_CHANGED, {
+        userId: 'user-1',
+        status: SubscriptionStatus.PAST_DUE,
+        previousStatus: SubscriptionStatus.ACTIVE,
+      });
+    });
+
+    it('NO emite en un re-upsert con el mismo status (renovación active → active)', async () => {
+      subscriptionsRepo.findOne.mockResolvedValue(
+        fakeSubscription({ status: SubscriptionStatus.ACTIVE }),
+      );
+
+      await service.handleWebhook({
+        type: 'customer.subscription.updated',
+        data: { object: fakeStripeSub({ status: 'active' }) },
+      });
+
+      expect(events.emit).not.toHaveBeenCalledWith(
+        SUBSCRIPTION_STATUS_CHANGED,
+        expect.anything(),
+      );
+    });
+
+    it('emite en la transición past_due → unpaid', async () => {
+      subscriptionsRepo.findOne.mockResolvedValue(
+        fakeSubscription({ status: SubscriptionStatus.PAST_DUE }),
+      );
+
+      await service.handleWebhook({
+        type: 'customer.subscription.updated',
+        data: { object: fakeStripeSub({ status: 'unpaid' }) },
+      });
+
+      expect(events.emit).toHaveBeenCalledWith(SUBSCRIPTION_STATUS_CHANGED, {
+        userId: 'user-1',
+        status: SubscriptionStatus.UNPAID,
+        previousStatus: SubscriptionStatus.PAST_DUE,
+      });
     });
   });
 
@@ -2251,6 +2333,107 @@ describe('SubscriptionService — coverage completion', () => {
         failed: 0,
       });
       expect(mockStripeInstance.subscriptions.list).not.toHaveBeenCalled();
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // SUBSCRIPTION_RECONCILED — emitido al final de CADA corrida de reconcile,
+  // salvo con Stripe deshabilitado (nada que reconciliar). Payload = el mismo
+  // resultado que reconcileWithStripe devuelve, para que un listener (p. ej.
+  // PlanDelinquencyListener.syncAll) no tenga que volver a listarlo.
+  // ---------------------------------------------------------------------------
+  describe('SUBSCRIPTION_RECONCILED — se emite al final del reconcile', () => {
+    let localEvents: { emit: jest.Mock };
+
+    async function buildServiceWithEvents(): Promise<void> {
+      mockStripeInstance = createMockStripe();
+      plansRepo = makeRepoMockLocal<SubscriptionPlan>();
+      subscriptionsRepo = makeRepoMockLocal<Subscription>();
+      usersRepo = makeRepoMockLocal<User>();
+      configService = {
+        get: jest.fn(),
+        getOrThrow: jest.fn(),
+      } as unknown as jest.Mocked<ConfigService>;
+      configService.get.mockImplementation((key: string) => {
+        if (key === 'STRIPE_SECRET_KEY') return 'sk_test_dummy';
+        if (key === 'STRIPE_SUBSCRIPTION_PRICE_ID') return 'price_test_monthly';
+        return undefined;
+      });
+      plansRepo.findOne.mockResolvedValue({
+        id: 'plan-uuid',
+        tier: SubscriptionTier.STANDARD,
+        stripeProductId: 'prod_x',
+        activeStripePriceId: 'price_x',
+        unitAmountCents: 1000,
+        currency: 'usd',
+        interval: 'month',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      } as SubscriptionPlan);
+
+      localEvents = { emit: jest.fn() };
+      const module: TestingModule = await Test.createTestingModule({
+        providers: [
+          SubscriptionService,
+          { provide: getRepositoryToken(Subscription), useValue: subscriptionsRepo },
+          { provide: getRepositoryToken(User), useValue: usersRepo },
+          { provide: getRepositoryToken(SubscriptionPlan), useValue: plansRepo },
+          { provide: ConfigService, useValue: configService },
+          { provide: EventEmitter2, useValue: localEvents },
+        ],
+      }).compile();
+
+      service = module.get<SubscriptionService>(SubscriptionService);
+      await service.onModuleInit();
+    }
+
+    it('emite SUBSCRIPTION_RECONCILED con el resultado del reconcile', async () => {
+      await buildServiceWithEvents();
+      subscriptionsRepo.upsert.mockResolvedValue({} as never);
+      mockStripeInstance.subscriptions.list.mockResolvedValue({
+        data: [fakeStripeSub({ id: 'sub_a' })],
+        has_more: false,
+      } as never);
+
+      const result = await service.reconcileWithStripe();
+
+      expect(localEvents.emit).toHaveBeenCalledWith(SUBSCRIPTION_RECONCILED, result);
+    });
+
+    it('NO emite SUBSCRIPTION_RECONCILED cuando Stripe está deshabilitado', async () => {
+      mockStripeInstance = createMockStripe();
+      plansRepo = makeRepoMockLocal<SubscriptionPlan>();
+      subscriptionsRepo = makeRepoMockLocal<Subscription>();
+      usersRepo = makeRepoMockLocal<User>();
+      configService = {
+        get: jest.fn(),
+        getOrThrow: jest.fn(),
+      } as unknown as jest.Mocked<ConfigService>;
+      configService.get.mockImplementation((key: string) => {
+        if (key === 'STRIPE_SUBSCRIPTION_PRICE_ID') return 'price_test_monthly';
+        return undefined; // no STRIPE_SECRET_KEY → Stripe disabled
+      });
+
+      localEvents = { emit: jest.fn() };
+      const module: TestingModule = await Test.createTestingModule({
+        providers: [
+          SubscriptionService,
+          { provide: getRepositoryToken(Subscription), useValue: subscriptionsRepo },
+          { provide: getRepositoryToken(User), useValue: usersRepo },
+          { provide: getRepositoryToken(SubscriptionPlan), useValue: plansRepo },
+          { provide: ConfigService, useValue: configService },
+          { provide: EventEmitter2, useValue: localEvents },
+        ],
+      }).compile();
+      service = module.get<SubscriptionService>(SubscriptionService);
+      await service.onModuleInit();
+
+      await service.reconcileWithStripe();
+
+      expect(localEvents.emit).not.toHaveBeenCalledWith(
+        SUBSCRIPTION_RECONCILED,
+        expect.anything(),
+      );
     });
   });
 

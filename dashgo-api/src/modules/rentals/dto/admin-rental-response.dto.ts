@@ -21,6 +21,12 @@ export class AdminRentalResponseDto {
   stripeSubscriptionId!: string | null;
   currentPeriodEnd!: Date | null;
   pastDueSince!: Date | null;
+  /**
+   * Set when the SUBSCRIPTION PLAN that pays for this ($0) rental is
+   * delinquent — mirrored by PlanDelinquencyListener, not by this rental's
+   * own Stripe subscription. Null for rentals that pay for themselves.
+   */
+  planPastDueSince!: Date | null;
   lastLateFeeAt!: Date | null;
   activatedAt!: Date | null;
   canceledAt!: Date | null;
