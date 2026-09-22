@@ -182,6 +182,15 @@ export interface AdminRentalResponse {
    * subscription. Null for rentals that pay for themselves.
    */
   planPastDueSince: string | null
+  /**
+   * "La suscripción ES el bebedero" — para un alquiler de $0
+   * (monthlyRentCents === 0), el tier del plan vivo del usuario que lo paga.
+   * Null para alquileres que pagan su propia suscripción, o un usuario de $0
+   * sin plan.
+   */
+  planTier: 'standard' | 'premium' | null
+  /** Precio NETO mensual (centavos) del plan de arriba. Va junto con planTier. */
+  planMonthlyRentCents: number | null
   daysDelinquent: number
   createdAt: string
 }

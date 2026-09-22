@@ -22,6 +22,7 @@ import { ChargeTheftFeeResponseDto } from './dto/charge-theft-fee-response.dto';
 import { RentalsSummaryResponseDto } from './dto/rentals-summary-response.dto';
 import { assertStripeProductionConfig } from '../../common/stripe/stripe-runtime-guard';
 import { PREMIUM_BEBEDERO_CATALOG_SURCHARGE_CENTS } from '../products/pricing';
+import { SubscriptionService } from '../subscription/subscription.service';
 
 type StripeClient = InstanceType<typeof Stripe>;
 
@@ -114,6 +115,7 @@ export class RentalsService implements OnModuleInit {
     private readonly products: Repository<Product>,
     private readonly dataSource: DataSource,
     private readonly config: ConfigService,
+    private readonly subscriptionService: SubscriptionService,
   ) {}
 
   async onModuleInit(): Promise<void> {
@@ -841,7 +843,7 @@ export class RentalsService implements OnModuleInit {
 
     const [rows, total] = await qb.getManyAndCount();
     return {
-      items: rows.map((r) => this.toAdminDto(r)),
+      items: await this.toAdminDtos(rows),
       total,
     };
   }
@@ -926,7 +928,7 @@ export class RentalsService implements OnModuleInit {
       .orderBy('rental.createdAt', 'ASC');
 
     const rows = await qb.getMany();
-    return rows.map((r) => this.toAdminDto(r));
+    return this.toAdminDtos(rows);
   }
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -1139,7 +1141,7 @@ export class RentalsService implements OnModuleInit {
 
     // T44: idempotency — already canceled, return as-is
     if (rental.status === RentalStatus.CANCELED) {
-      return this.toAdminDto(rental);
+      return (await this.toAdminDtos([rental]))[0];
     }
 
     // Cancel Stripe subscription if one exists
@@ -1155,7 +1157,7 @@ export class RentalsService implements OnModuleInit {
     rental.canceledAt = new Date();
     const updated = await this.rentals.save(rental);
 
-    return this.toAdminDto(updated);
+    return (await this.toAdminDtos([updated]))[0];
   }
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -1195,7 +1197,7 @@ export class RentalsService implements OnModuleInit {
 
     try {
       const updated = await this.performActivation(rental, user);
-      return this.toAdminDto(updated);
+      return (await this.toAdminDtos([updated]))[0];
     } catch (err) {
       this.logger.error(
         `retrySetup: Stripe subscriptions.create failed for rental ${rentalId}: ${(err as Error).message}`,
@@ -1231,7 +1233,7 @@ export class RentalsService implements OnModuleInit {
     rental.lastMaintenanceAt = now;
     rental.nextMaintenanceAt = new Date(now.getTime() + MAINTENANCE_INTERVAL_MS);
     const saved = await this.rentals.save(rental);
-    return this.toAdminDto(saved);
+    return (await this.toAdminDtos([saved]))[0];
   }
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -1474,6 +1476,10 @@ export class RentalsService implements OnModuleInit {
     dto.currentPeriodEnd = r.currentPeriodEnd;
     dto.pastDueSince = r.pastDueSince;
     dto.planPastDueSince = r.planPastDueSince ?? null;
+    // Enriquecidos SOLO por toAdminDtos (batched) para las filas de $0 que
+    // tienen un plan vivo — acá siempre arrancan en null.
+    dto.planTier = null;
+    dto.planMonthlyRentCents = null;
     dto.lastLateFeeAt = r.lastLateFeeAt;
     dto.activatedAt = r.activatedAt;
     dto.canceledAt = r.canceledAt;
@@ -1497,5 +1503,44 @@ export class RentalsService implements OnModuleInit {
     }
 
     return dto;
+  }
+
+  /**
+   * Versión batched de `toAdminDto`: además del mapeo síncrono, resuelve
+   * `planTier`/`planMonthlyRentCents` para las filas de $0 del batch —
+   * "la suscripción ES el bebedero": el precio a mostrar es el del PLAN vivo
+   * del usuario, no el de la suscripción de Stripe de $0 del rental (que
+   * nunca cambia, y sigue siendo lo que summarizeAdmin/el listener usan).
+   *
+   * Nunca N+1: como mucho DOS queries batched (una por
+   * `resolvePlanRowsByUserIds`, otra por `getPlanNetCentsByTier`) para TODO
+   * el array, y NINGUNA si el batch no trae filas de $0 (el caso común de
+   * listAdmin/listDelinquent, donde la mayoría de los alquileres pagan su
+   * propia suscripción).
+   */
+  async toAdminDtos(rows: Rental[]): Promise<AdminRentalResponseDto[]> {
+    const dtos = rows.map((r) => this.toAdminDto(r));
+
+    const zeroRentUserIds = [
+      ...new Set(
+        rows.filter((r) => r.monthlyRentCents === 0).map((r) => r.userId),
+      ),
+    ];
+    if (zeroRentUserIds.length === 0) return dtos;
+
+    const [planRowsByUser, netCentsByTier] = await Promise.all([
+      this.subscriptionService.resolvePlanRowsByUserIds(zeroRentUserIds),
+      this.subscriptionService.getPlanNetCentsByTier(),
+    ]);
+
+    rows.forEach((r, i) => {
+      if (r.monthlyRentCents !== 0) return;
+      const plan = planRowsByUser.get(r.userId);
+      if (!plan) return; // usuario de $0 sin fila de plan — queda null/null
+      dtos[i].planTier = plan.tier;
+      dtos[i].planMonthlyRentCents = netCentsByTier.get(plan.tier) ?? null;
+    });
+
+    return dtos;
   }
 }

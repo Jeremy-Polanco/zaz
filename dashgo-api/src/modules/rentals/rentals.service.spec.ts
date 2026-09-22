@@ -33,6 +33,9 @@ import { RentalsService } from './rentals.service';
 import { Rental, RentalStatus } from '../../entities/rental.entity';
 import { User } from '../../entities/user.entity';
 import { Product } from '../../entities/product.entity';
+import { Subscription } from '../../entities/subscription.entity';
+import { SubscriptionTier } from '../../entities/subscription-plan.entity';
+import { SubscriptionService } from '../subscription/subscription.service';
 import { createMockStripe, MockStripe } from '../../test-utils/stripe';
 
 // ---------------------------------------------------------------------------
@@ -185,6 +188,10 @@ describe('RentalsService', () => {
   let userRepo: ReturnType<typeof makeRepoMock>;
   let productRepo: ReturnType<typeof makeRepoMock>;
   let dataSource: ReturnType<typeof makeDataSourceMock>;
+  let subscriptionServiceMock: {
+    resolvePlanRowsByUserIds: jest.Mock;
+    getPlanNetCentsByTier: jest.Mock;
+  };
 
   beforeEach(async () => {
     mockStripeInstance = createMockStripe();
@@ -193,6 +200,13 @@ describe('RentalsService', () => {
     userRepo = makeRepoMock<User>();
     productRepo = makeRepoMock<Product>();
     dataSource = makeDataSourceMock();
+    // R3 (bebedero-precio-del-plan) — RentalsService now injects
+    // SubscriptionService to resolve the plan price of $0 rentals. Defaults
+    // to "nothing to enrich" so specs that don't care about it stay green.
+    subscriptionServiceMock = {
+      resolvePlanRowsByUserIds: jest.fn().mockResolvedValue(new Map()),
+      getPlanNetCentsByTier: jest.fn().mockResolvedValue(new Map()),
+    };
 
     // Default: entity manager save returns the object it receives (with an id)
     dataSource._mockEntityManager.save.mockImplementation(async (entity: unknown) => {
@@ -215,6 +229,7 @@ describe('RentalsService', () => {
             get: jest.fn().mockReturnValue('sk_test_stripe_key'),
           },
         },
+        { provide: SubscriptionService, useValue: subscriptionServiceMock },
       ],
     }).compile();
 
@@ -862,6 +877,130 @@ describe('RentalsService', () => {
       const result = await service.listAdmin({});
 
       expect(result.items[0].daysDelinquent).toBe(2);
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // toAdminDtos — bebedero de $0 muestra el precio del PLAN (R4,
+  // bebedero-precio-del-plan): "la suscripción ES el bebedero".
+  // ─────────────────────────────────────────────────────────────────────────
+
+  describe('toAdminDtos — el bebedero de $0 muestra el precio del plan', () => {
+    function fakeSubscriptionRow(overrides: Partial<Subscription> = {}): Subscription {
+      return {
+        id: 'sub-db-1',
+        userId: 'user-1',
+        stripeSubscriptionId: 'sub_plan_1',
+        tier: SubscriptionTier.STANDARD,
+        currentPeriodEnd: new Date(Date.now() + 30 * 86400 * 1000),
+        ...overrides,
+      } as Subscription;
+    }
+
+    it('rental de $0 + usuario en el plan standard → planTier standard, planMonthlyRentCents = precio neto standard', async () => {
+      const rental = fakeRental({ userId: 'user-1', monthlyRentCents: 0 });
+      const qb = rentalRepo._qb;
+      (qb.getManyAndCount as jest.Mock).mockResolvedValueOnce([[rental], 1]);
+
+      subscriptionServiceMock.resolvePlanRowsByUserIds.mockResolvedValueOnce(
+        new Map([['user-1', fakeSubscriptionRow({ tier: SubscriptionTier.STANDARD })]]),
+      );
+      subscriptionServiceMock.getPlanNetCentsByTier.mockResolvedValueOnce(
+        new Map([
+          [SubscriptionTier.STANDARD, 699],
+          [SubscriptionTier.PREMIUM, 1999],
+        ]),
+      );
+
+      const result = await service.listAdmin({});
+
+      expect(subscriptionServiceMock.resolvePlanRowsByUserIds).toHaveBeenCalledWith(['user-1']);
+      expect(result.items[0].planTier).toBe(SubscriptionTier.STANDARD);
+      expect(result.items[0].planMonthlyRentCents).toBe(699);
+      // monthlyRentCents itself never changes — it's what Stripe actually
+      // charges and what summarizeAdmin/the listener rely on.
+      expect(result.items[0].monthlyRentCents).toBe(0);
+    });
+
+    it('rental de $0 + usuario en el plan premium → planTier premium, planMonthlyRentCents = precio neto premium', async () => {
+      const rental = fakeRental({ userId: 'user-premium', monthlyRentCents: 0 });
+      const qb = rentalRepo._qb;
+      (qb.getManyAndCount as jest.Mock).mockResolvedValueOnce([[rental], 1]);
+
+      subscriptionServiceMock.resolvePlanRowsByUserIds.mockResolvedValueOnce(
+        new Map([
+          ['user-premium', fakeSubscriptionRow({ userId: 'user-premium', tier: SubscriptionTier.PREMIUM })],
+        ]),
+      );
+      subscriptionServiceMock.getPlanNetCentsByTier.mockResolvedValueOnce(
+        new Map([
+          [SubscriptionTier.STANDARD, 699],
+          [SubscriptionTier.PREMIUM, 1999],
+        ]),
+      );
+
+      const result = await service.listAdmin({});
+
+      expect(result.items[0].planTier).toBe(SubscriptionTier.PREMIUM);
+      expect(result.items[0].planMonthlyRentCents).toBe(1999);
+    });
+
+    it('rental que paga su propia suscripción ($15/mes) → planTier/planMonthlyRentCents null, sin consultar SubscriptionService', async () => {
+      const rental = fakeRental({ userId: 'user-1', monthlyRentCents: 1500 });
+      const qb = rentalRepo._qb;
+      (qb.getManyAndCount as jest.Mock).mockResolvedValueOnce([[rental], 1]);
+
+      const result = await service.listAdmin({});
+
+      expect(result.items[0].planTier).toBeNull();
+      expect(result.items[0].planMonthlyRentCents).toBeNull();
+      expect(subscriptionServiceMock.resolvePlanRowsByUserIds).not.toHaveBeenCalled();
+      expect(subscriptionServiceMock.getPlanNetCentsByTier).not.toHaveBeenCalled();
+    });
+
+    it('rental de $0 de un usuario sin fila de plan → planTier/planMonthlyRentCents null', async () => {
+      const rental = fakeRental({ userId: 'user-sin-plan', monthlyRentCents: 0 });
+      const qb = rentalRepo._qb;
+      (qb.getManyAndCount as jest.Mock).mockResolvedValueOnce([[rental], 1]);
+
+      subscriptionServiceMock.resolvePlanRowsByUserIds.mockResolvedValueOnce(new Map());
+      subscriptionServiceMock.getPlanNetCentsByTier.mockResolvedValueOnce(
+        new Map([[SubscriptionTier.STANDARD, 699]]),
+      );
+
+      const result = await service.listAdmin({});
+
+      expect(result.items[0].planTier).toBeNull();
+      expect(result.items[0].planMonthlyRentCents).toBeNull();
+    });
+
+    it('cancelAdmin devuelve el resultado enriquecido cuando el rental es de $0 (no vuelve a $0 sin plan)', async () => {
+      const rental = fakeRental({
+        id: 'rental-9',
+        userId: 'user-1',
+        status: RentalStatus.PAST_DUE,
+        monthlyRentCents: 0,
+        stripeSubscriptionId: 'sub_free',
+      });
+      rentalRepo.findOne.mockResolvedValueOnce(rental);
+      const saved = {
+        ...rental,
+        status: RentalStatus.CANCELED,
+        canceledAt: new Date(),
+      };
+      rentalRepo.save.mockResolvedValueOnce(saved);
+
+      subscriptionServiceMock.resolvePlanRowsByUserIds.mockResolvedValueOnce(
+        new Map([['user-1', fakeSubscriptionRow({ tier: SubscriptionTier.STANDARD })]]),
+      );
+      subscriptionServiceMock.getPlanNetCentsByTier.mockResolvedValueOnce(
+        new Map([[SubscriptionTier.STANDARD, 699]]),
+      );
+
+      const result = await service.cancelAdmin('rental-9');
+
+      expect(result.planTier).toBe(SubscriptionTier.STANDARD);
+      expect(result.planMonthlyRentCents).toBe(699);
     });
   });
 

@@ -66,6 +66,8 @@ function makeRental(
     canceledAt: null,
     nextMaintenanceAt: null,
     planPastDueSince: null,
+    planTier: null,
+    planMonthlyRentCents: null,
     daysDelinquent: 0,
     createdAt: '2026-05-01T00:00:00Z',
     ...overrides,
@@ -311,5 +313,51 @@ describe('SuperRentalsScreen (mobile) — plan-delinquency hint', () => {
     expect(
       screen.getByText(/Suscripción con pago fallido desde/),
     ).toBeTruthy()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// "La suscripción ES el bebedero" (bebedero-precio-del-plan) — a $0 rental
+// paid by a subscription plan shows the PLAN's price instead of $0, plus a
+// small "Suscripción" tag. monthlyRentCents itself never changes.
+// ---------------------------------------------------------------------------
+
+describe('SuperRentalsScreen — plan price on a $0 bebedero', () => {
+  it('shows the plan price (not $0) and a "Suscripción" tag for a standard plan', () => {
+    setup({
+      rentals: [
+        makeRental({ monthlyRentCents: 0, planTier: 'standard', planMonthlyRentCents: 699 }),
+      ],
+    })
+    renderWithProviders(<SuperRentalsScreen />)
+
+    expect(screen.getByText(/6\.99\/mes/)).toBeTruthy()
+    expect(screen.queryByText(/\$0\/mes/)).toBeNull()
+    expect(screen.getByText('Suscripción')).toBeTruthy()
+  })
+
+  it('shows "Suscripción premium" for a premium plan', () => {
+    setup({
+      rentals: [
+        makeRental({ monthlyRentCents: 0, planTier: 'premium', planMonthlyRentCents: 1999 }),
+      ],
+    })
+    renderWithProviders(<SuperRentalsScreen />)
+
+    expect(screen.getByText(/19\.99\/mes/)).toBeTruthy()
+    expect(screen.getByText('Suscripción premium')).toBeTruthy()
+  })
+
+  it('shows $0/mes and no tag for a $0 rental without a plan', () => {
+    setup({
+      rentals: [
+        makeRental({ monthlyRentCents: 0, planTier: null, planMonthlyRentCents: null }),
+      ],
+    })
+    renderWithProviders(<SuperRentalsScreen />)
+
+    expect(screen.getByText(/\$0\/mes/)).toBeTruthy()
+    expect(screen.queryByText('Suscripción')).toBeNull()
+    expect(screen.queryByText('Suscripción premium')).toBeNull()
   })
 })

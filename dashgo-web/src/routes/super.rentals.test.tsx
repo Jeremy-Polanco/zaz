@@ -89,6 +89,8 @@ function makeRental(
     canceledAt: null,
     nextMaintenanceAt: null,
     planPastDueSince: null,
+    planTier: null,
+    planMonthlyRentCents: null,
     daysDelinquent: 0,
     createdAt: '2026-05-01T00:00:00Z',
     ...overrides,
@@ -290,6 +292,73 @@ describe('SuperRentalsPage — list rendering', () => {
     expect(
       screen.getByText(/Suscripción con pago fallido desde/),
     ).toBeInTheDocument()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// "La suscripción ES el bebedero" (bebedero-precio-del-plan) — a $0 rental
+// paid by a subscription plan shows the PLAN's price instead of $0.00, plus a
+// small "Suscripción" tag. monthlyRentCents itself (what Stripe actually
+// charges) never changes.
+// ---------------------------------------------------------------------------
+
+describe('SuperRentalsPage — plan price on a $0 bebedero', () => {
+  it('shows the plan price (not $0.00) and a "Suscripción" tag for a standard plan', () => {
+    setup({
+      rentals: [
+        makeRental({
+          monthlyRentCents: 0,
+          planTier: 'standard',
+          planMonthlyRentCents: 699,
+        }),
+      ],
+    })
+    renderWithProviders(<SuperRentalsPage />)
+
+    expect(screen.getByText(/6\.99\/mes/)).toBeInTheDocument()
+    expect(screen.queryByText(/\$0\.00\/mes/)).not.toBeInTheDocument()
+    expect(screen.getByText('Suscripción')).toBeInTheDocument()
+  })
+
+  it('shows "Suscripción premium" for a premium plan', () => {
+    setup({
+      rentals: [
+        makeRental({
+          monthlyRentCents: 0,
+          planTier: 'premium',
+          planMonthlyRentCents: 1999,
+        }),
+      ],
+    })
+    renderWithProviders(<SuperRentalsPage />)
+
+    expect(screen.getByText(/19\.99\/mes/)).toBeInTheDocument()
+    expect(screen.getByText('Suscripción premium')).toBeInTheDocument()
+  })
+
+  it('shows $0.00/mes and no tag for a $0 rental without a plan', () => {
+    setup({
+      rentals: [
+        makeRental({
+          monthlyRentCents: 0,
+          planTier: null,
+          planMonthlyRentCents: null,
+        }),
+      ],
+    })
+    renderWithProviders(<SuperRentalsPage />)
+
+    expect(screen.getByText(/\$0\.00\/mes/)).toBeInTheDocument()
+    expect(screen.queryByText('Suscripción')).not.toBeInTheDocument()
+    expect(screen.queryByText('Suscripción premium')).not.toBeInTheDocument()
+  })
+
+  it('a regular ($20/mes) rental is unaffected', () => {
+    setup({ rentals: [makeRental({ monthlyRentCents: 2000 })] })
+    renderWithProviders(<SuperRentalsPage />)
+
+    expect(screen.getByText(/\$20\.00\/mes/)).toBeInTheDocument()
+    expect(screen.queryByText('Suscripción')).not.toBeInTheDocument()
   })
 })
 

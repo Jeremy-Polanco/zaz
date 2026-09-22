@@ -11,6 +11,7 @@ import { LateFeeCron } from './late-fee.cron';
 import { PlanDelinquencyListener } from './plan-delinquency.listener';
 import { AdminRentalsController } from './admin-rentals.controller';
 import { MeRentalsController } from './me-rentals.controller';
+import { SubscriptionModule } from '../subscription/subscription.module';
 
 /**
  * RentalsModule — Phase 3+.
@@ -21,9 +22,16 @@ import { MeRentalsController } from './me-rentals.controller';
  *
  * PlanDelinquencyListener needs the Subscription entity to READ the plan a $0
  * rental belongs to — this is a `TypeOrmModule.forFeature` entity import, NOT
- * a `SubscriptionModule` import, so the module graph stays acyclic
+ * a `SubscriptionModule` import, so its own module graph stays acyclic
  * (SubscriptionModule must never import RentalsModule/OrdersModule; the
  * cross-module side effect travels via @nestjs/event-emitter instead).
+ *
+ * `SubscriptionModule` IS imported here (direct, no forwardRef needed) for
+ * `RentalsService.toAdminDtos` — "la suscripción ES el bebedero": a $0 rental
+ * displays the price of the PLAN that pays for it, resolved via
+ * `SubscriptionService.resolvePlanRowsByUserIds` /
+ * `getPlanNetCentsByTier`. Safe: `SubscriptionModule` only imports
+ * TypeOrm/Config, so RentalsModule → SubscriptionModule cannot cycle back.
  *
  * - AdminRentalsController: GET /admin/rentals, GET /admin/rentals/delinquent,
  *   POST /admin/rentals/:id/charge-late-fee, POST /admin/rentals/:id/cancel,
@@ -34,6 +42,7 @@ import { MeRentalsController } from './me-rentals.controller';
   imports: [
     TypeOrmModule.forFeature([Rental, User, Product, Order, Subscription]),
     ConfigModule,
+    SubscriptionModule,
   ],
   providers: [RentalsService, LateFeeCron, PlanDelinquencyListener],
   controllers: [AdminRentalsController, MeRentalsController],
