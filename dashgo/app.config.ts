@@ -96,10 +96,13 @@ function resolveIosBuildNumber(): string {
   // 2026-09-08 cuando la 1.0.6 (18) ya estaba aprobada, y 1.0.8 (build 20)
   // el 2026-09-14 con envío fijo, día de entrega y traspaso de cartera, y
   // 1.0.9 (build 21) el 2026-09-21 con impuesto por jurisdicción real, número
-  // de casa, ZIP opcional y ruta del repartidor ordenada por GPS.
+  // de casa, ZIP opcional y ruta del repartidor ordenada por GPS, y build 22
+  // (misma 1.0.9: Apple nunca la aprobó, su tren sigue abierto) el 2026-09-22
+  // con la mora del plan espejada en el bebedero y el precio del plan en
+  // Alquileres.
   const fromEas = process.env.EAS_BUILD_NUMBER
   if (fromEas && fromEas.length > 0) return fromEas
-  return '21'
+  return '22'
 }
 
 function resolveAndroidVersionCode(): number {
@@ -112,7 +115,7 @@ function resolveAndroidVersionCode(): number {
   }
   // appVersionSource is 'local' — BUMP THIS by 1 before each Play upload,
   // same ritual as the iOS buildNumber above.
-  return 7
+  return 8
 }
 
 export default ({ config }: ConfigContext): ExpoConfig => {
