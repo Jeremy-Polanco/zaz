@@ -4354,6 +4354,125 @@ describe('OrdersService', () => {
       expect(originSource).toBe('none');
     });
 
+    describe('pedidos programados (regla del dueño, 2026-09-29)', () => {
+      // Sólo se finge la FECHA: si se congelaran también los timers, las
+      // promesas de los mocks del repo dejarían de resolverse.
+      const fakeOnlyDate = (now: string) =>
+        jest.useFakeTimers({
+          now: new Date(now),
+          doNotFake: [
+            'hrtime',
+            'nextTick',
+            'performance',
+            'queueMicrotask',
+            'requestAnimationFrame',
+            'cancelAnimationFrame',
+            'requestIdleCallback',
+            'cancelIdleCallback',
+            'setImmediate',
+            'clearImmediate',
+            'setInterval',
+            'clearInterval',
+            'setTimeout',
+            'clearTimeout',
+          ],
+        });
+
+      afterEach(() => {
+        jest.useRealTimers();
+      });
+
+      const scheduledOn = (id: string, day: string) =>
+        fakeOrder({
+          id,
+          status: OrderStatus.QUOTED,
+          deliveryAddress: { text: id, lat: 40.001, lng: -74 },
+          createdAt: new Date('2026-09-10T10:00:00Z'),
+          scheduledDeliveryDate: day,
+        });
+
+      it('staff → un pedido programado a futuro sale de la ruta y va tras los de hoy, aunque esté más cerca', async () => {
+        fakeOnlyDate('2026-09-29T15:00:00Z');
+        ordersRepo.find.mockResolvedValue([
+          scheduledOn('future-near', '2026-10-05'),
+          farOrder,
+        ]);
+        (shippingService.getOriginForUser as jest.Mock).mockResolvedValue(
+          ORIGIN,
+        );
+
+        const { orders } = await service.findAll(
+          fakeUser(UserRole.SUPER_ADMIN_DELIVERY),
+        );
+
+        expect(orders.map((o) => o.id)).toEqual(['far', 'future-near']);
+        expect(orders.map((o) => o.dispatchBucket)).toEqual([
+          'due',
+          'scheduled',
+        ]);
+      });
+
+      it('"hoy" es el día de Nueva York: a las 03:30 UTC del 29 todavía es 28, así que lo del 29 sigue programado', async () => {
+        // Con el día UTC (29) este pedido volvería a la ruta la noche anterior.
+        fakeOnlyDate('2026-09-29T03:30:00Z');
+        ordersRepo.find.mockResolvedValue([scheduledOn('on-29th', '2026-09-29')]);
+        (shippingService.getOriginForUser as jest.Mock).mockResolvedValue(
+          ORIGIN,
+        );
+
+        const { orders } = await service.findAll(
+          fakeUser(UserRole.SUPER_ADMIN_DELIVERY),
+        );
+
+        expect(orders[0].dispatchBucket).toBe('scheduled');
+      });
+
+      it('el mismo pedido vuelve a la ruta cuando ya es su día en Nueva York', async () => {
+        fakeOnlyDate('2026-09-29T12:00:00Z');
+        ordersRepo.find.mockResolvedValue([scheduledOn('on-29th', '2026-09-29')]);
+        (shippingService.getOriginForUser as jest.Mock).mockResolvedValue(
+          ORIGIN,
+        );
+
+        const { orders } = await service.findAll(
+          fakeUser(UserRole.SUPER_ADMIN_DELIVERY),
+        );
+
+        expect(orders[0].dispatchBucket).toBe('due');
+      });
+
+      it('vendedor → recibe la misma partición', async () => {
+        fakeOnlyDate('2026-09-29T15:00:00Z');
+        ordersRepo.find.mockResolvedValue([
+          scheduledOn('future', '2026-10-05'),
+          scheduledOn('overdue', '2026-09-20'),
+        ]);
+        (shippingService.getOriginForUser as jest.Mock).mockResolvedValue(
+          ORIGIN,
+        );
+
+        const { orders } = await service.findAll(fakeUser(UserRole.SELLER));
+
+        expect(orders.map((o) => [o.id, o.dispatchBucket])).toEqual([
+          ['overdue', 'due'],
+          ['future', 'scheduled'],
+        ]);
+      });
+
+      it('cliente → su lista no se parte ni se decora con dispatchBucket', async () => {
+        fakeOnlyDate('2026-09-29T15:00:00Z');
+        ordersRepo.find.mockResolvedValue([
+          scheduledOn('future', '2026-10-05'),
+          farOrder,
+        ]);
+
+        const { orders } = await service.findAll(fakeUser(UserRole.CLIENT));
+
+        expect(orders.map((o) => o.id)).toEqual(['future', 'far']);
+        expect(orders[0]).not.toHaveProperty('dispatchBucket');
+      });
+    });
+
     it('cliente → la lista queda como vino y no se consulta ningún origen', async () => {
       // El cliente ve SUS pedidos: la distancia al depósito no le dice nada y
       // pedir el origen sería una consulta de más en cada apertura de la app.

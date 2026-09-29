@@ -6,8 +6,13 @@
  * sorted by the API (active nearest-first, history newest-first). The screen
  * must show the distance next to the address when present and render
  * nothing extra when it's null — it must NOT re-sort visibleOrders.
+ *
+ * Regla del dueño (2026-09-29): un pedido programado a un día FUTURO sale de
+ * la ruta de hoy ("Activos") y vive en el filtro "Programados" hasta que le
+ * toca. La API decide (`dispatchBucket`); la pantalla sólo lo respeta.
  */
 import React from 'react'
+import { fireEvent, within } from '@testing-library/react-native'
 import { renderWithProviders } from '../../test/test-utils'
 import type { Order } from '../../lib/types'
 
@@ -258,5 +263,193 @@ describe('SuperOrdersScreen — dispatch sorted from the driver device position'
 
     expect(refetch).toHaveBeenCalledTimes(1)
     expect(refreshPosition).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('SuperOrdersScreen — pedidos programados fuera de la ruta', () => {
+  const NAMES = /^(De Hoy|Programado Uno|Programado Dos|Programado Tres|Entregado)$/
+
+  function withOrders(orders: Order[]) {
+    mockUseOrders.mockReturnValue({
+      data: orders,
+      isPending: false,
+      refetch: jest.fn(),
+      isRefetching: false,
+    } as unknown as ReturnType<typeof useOrders>)
+  }
+
+  const named = (id: string, fullName: string, overrides: Partial<Order> = {}) =>
+    makeOrder({
+      id,
+      customer: { id: `u-${id}`, fullName } as Order['customer'],
+      ...overrides,
+    })
+
+  const dueOrder = () =>
+    named('due', 'De Hoy', { status: 'pending_validation', dispatchBucket: 'due' })
+  const scheduled = (id: string, fullName: string, day: string) =>
+    named(id, fullName, {
+      status: 'quoted',
+      dispatchBucket: 'scheduled',
+      scheduledDeliveryDate: day,
+    })
+
+  it('un pedido programado a futuro NO aparece en la lista por defecto (Activos)', () => {
+    withOrders([dueOrder(), scheduled('s1', 'Programado Uno', '2099-01-05')])
+
+    const { getByText, queryByText } = renderWithProviders(<SuperOrdersScreen />)
+
+    expect(getByText('De Hoy')).toBeTruthy()
+    expect(queryByText('Programado Uno')).toBeNull()
+  })
+
+  it('el filtro "Programados" lista sólo los programados', () => {
+    withOrders([dueOrder(), scheduled('s1', 'Programado Uno', '2099-01-05')])
+
+    const { getByText, queryByText, getByTestId } = renderWithProviders(
+      <SuperOrdersScreen />,
+    )
+    fireEvent.press(getByTestId('route-filter-scheduled'))
+
+    expect(getByText('Programado Uno')).toBeTruthy()
+    expect(queryByText('De Hoy')).toBeNull()
+  })
+
+  it('"Programados" conserva el orden de la API (por día) sin reordenar', () => {
+    withOrders([
+      scheduled('s1', 'Programado Uno', '2099-01-05'),
+      scheduled('s2', 'Programado Dos', '2099-01-09'),
+      scheduled('s3', 'Programado Tres', '2099-02-01'),
+    ])
+
+    const { getAllByText, getByTestId } = renderWithProviders(<SuperOrdersScreen />)
+    fireEvent.press(getByTestId('route-filter-scheduled'))
+
+    expect(getAllByText(NAMES).map((n) => n.props.children)).toEqual([
+      'Programado Uno',
+      'Programado Dos',
+      'Programado Tres',
+    ])
+  })
+
+  it('el chip "Programados" va justo después del chip por defecto', () => {
+    withOrders([])
+
+    const { getAllByTestId } = renderWithProviders(<SuperOrdersScreen />)
+    const ids = getAllByTestId(/^route-filter-/).map((c) => c.props.testID)
+
+    expect(ids.slice(0, 2)).toEqual(['route-filter-all', 'route-filter-scheduled'])
+  })
+
+  it('el KPI "Programados" cuenta los programados', () => {
+    withOrders([
+      dueOrder(),
+      scheduled('s1', 'Programado Uno', '2099-01-05'),
+      scheduled('s2', 'Programado Dos', '2099-01-09'),
+      scheduled('s3', 'Programado Tres', '2099-02-01'),
+    ])
+
+    const { getByTestId } = renderWithProviders(<SuperOrdersScreen />)
+    const kpi = getByTestId('kpi-scheduled')
+
+    expect(within(kpi).getByText('Programados')).toBeTruthy()
+    expect(within(kpi).getByText('3')).toBeTruthy()
+  })
+
+  it('el KPI "Programados" queda en 0 cuando nada está programado', () => {
+    withOrders([dueOrder()])
+
+    const { getByTestId } = renderWithProviders(<SuperOrdersScreen />)
+
+    expect(within(getByTestId('kpi-scheduled')).getByText('0')).toBeTruthy()
+  })
+
+  it('los KPI por etapa siguen contando por estado, programados incluidos', () => {
+    // "Cotizar" es trabajo por ETAPA: un pedido por cotizar que además está
+    // programado sigue faltando cotizar.
+    withOrders([
+      named('q1', 'Programado Uno', {
+        status: 'pending_quote',
+        dispatchBucket: 'scheduled',
+        scheduledDeliveryDate: '2099-01-05',
+      }),
+    ])
+
+    const { getByText } = renderWithProviders(<SuperOrdersScreen />)
+
+    expect(getByText(/^1 por cotizar/)).toBeTruthy()
+  })
+
+  it('los sub-filtros por estado actúan sólo dentro de la ruta de hoy', () => {
+    // "Por confirmar" no debe traer un pedido programado a futuro aunque su
+    // estado sea pending_validation.
+    withOrders([
+      dueOrder(),
+      named('s1', 'Programado Uno', {
+        status: 'pending_validation',
+        dispatchBucket: 'scheduled',
+        scheduledDeliveryDate: '2099-01-05',
+      }),
+    ])
+
+    const { getByText, queryByText, getByTestId } = renderWithProviders(
+      <SuperOrdersScreen />,
+    )
+    fireEvent.press(getByTestId('route-filter-pending_validation'))
+
+    expect(getByText('De Hoy')).toBeTruthy()
+    expect(queryByText('Programado Uno')).toBeNull()
+  })
+
+  it('el Historial sigue mostrando el programado (sólo se excluyen los cancelados)', () => {
+    withOrders([
+      dueOrder(),
+      scheduled('s1', 'Programado Uno', '2099-01-05'),
+      named('c1', 'Cancelado', { status: 'cancelled', dispatchBucket: 'history' }),
+    ])
+
+    const { getByText, queryByText, getByTestId } = renderWithProviders(
+      <SuperOrdersScreen />,
+    )
+    fireEvent.press(getByTestId('route-filter-history'))
+
+    expect(getByText('De Hoy')).toBeTruthy()
+    expect(getByText('Programado Uno')).toBeTruthy()
+    expect(queryByText('Cancelado')).toBeNull()
+  })
+
+  it('el pedido que la API devuelve como "due" (le llegó su día) vuelve a Activos', () => {
+    withOrders([
+      named('back', 'De Hoy', {
+        status: 'quoted',
+        dispatchBucket: 'due',
+        scheduledDeliveryDate: '2026-09-29',
+      }),
+    ])
+
+    const { getByText } = renderWithProviders(<SuperOrdersScreen />)
+
+    expect(getByText('De Hoy')).toBeTruthy()
+  })
+
+  describe('API anterior, sin dispatchBucket', () => {
+    it('un pedido vivo sin bucket cuenta como de hoy y sale en Activos', () => {
+      withOrders([named('o1', 'De Hoy', { status: 'in_delivery_route' })])
+
+      const { getByText, getByTestId } = renderWithProviders(<SuperOrdersScreen />)
+
+      expect(getByText('De Hoy')).toBeTruthy()
+      expect(within(getByTestId('kpi-scheduled')).getByText('0')).toBeTruthy()
+    })
+
+    it('un pedido entregado sin bucket es histórico: ni en Activos ni en Programados', () => {
+      withOrders([named('o1', 'Entregado', { status: 'delivered', createdAt: '2020-01-01T00:00:00Z' })])
+
+      const { queryByText, getByTestId } = renderWithProviders(<SuperOrdersScreen />)
+      expect(queryByText('Entregado')).toBeNull()
+
+      fireEvent.press(getByTestId('route-filter-scheduled'))
+      expect(queryByText('Entregado')).toBeNull()
+    })
   })
 })

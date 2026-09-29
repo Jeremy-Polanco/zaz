@@ -81,7 +81,25 @@ function isToday(iso: string): boolean {
   )
 }
 
-type ListFilter = 'pending' | 'delivered' | 'all'
+type ListFilter = 'pending' | 'scheduled' | 'delivered' | 'all'
+
+const ACTIVE_STATUSES: OrderStatus[] = [
+  'pending_quote',
+  'quoted',
+  'pending_validation',
+  'confirmed_by_colmado',
+  'in_delivery_route',
+]
+
+// Where the order sits in the dispatch list. The API decides (it knows "today"
+// in New York and which orders are scheduled for a later day); this fallback
+// only exists so an older API that does not send `dispatchBucket` keeps working
+// — without it every live order counts as due and every finished one as history,
+// which is exactly how the list behaved before scheduled orders left the route.
+function bucketOf(order: Order): NonNullable<Order['dispatchBucket']> {
+  if (order.dispatchBucket) return order.dispatchBucket
+  return ACTIVE_STATUSES.includes(order.status) ? 'due' : 'history'
+}
 
 // Exported so super.orders.test.tsx renders THIS component instead of a
 // test-local copy of its logic — a copy passes while production breaks.
@@ -115,15 +133,11 @@ export function SuperOrdersPage() {
   // resetear el orden a como lo mandó la API (nearest-first o por fecha).
   const [sorting, setSorting] = useState<SortingState>([])
 
-  const activeStatuses: OrderStatus[] = [
-    'pending_quote',
-    'quoted',
-    'pending_validation',
-    'confirmed_by_colmado',
-    'in_delivery_route',
-  ]
-  const pendingRoute = (orders ?? []).filter((o) =>
-    activeStatuses.includes(o.status),
+  // Today's route: only what is DUE. An order the admin scheduled for a future
+  // day leaves the route and comes back on its day (the API re-buckets it).
+  const pendingRoute = (orders ?? []).filter((o) => bucketOf(o) === 'due')
+  const scheduledOrders = (orders ?? []).filter(
+    (o) => bucketOf(o) === 'scheduled',
   )
   const pendingQuote = (orders ?? []).filter(
     (o) => o.status === 'pending_quote',
@@ -141,7 +155,9 @@ export function SuperOrdersPage() {
   // List defaults to pending/active work (any day); the filter is the escape
   // hatch to look at today's deliveries or the full history.
   const visibleOrders = (orders ?? []).filter((o) => {
-    if (listFilter === 'pending') return activeStatuses.includes(o.status)
+    if (listFilter === 'pending') return bucketOf(o) === 'due'
+    // Already in API order: by delivery day, then nearest-first.
+    if (listFilter === 'scheduled') return bucketOf(o) === 'scheduled'
     if (listFilter === 'delivered')
       return o.status === 'delivered' && isToday(o.createdAt)
     // 'all' — everything EXCEPT cancelled. A cancelled order is dead weight in a
@@ -211,7 +227,8 @@ export function SuperOrdersPage() {
       {
         // Miles from the driver's active dispatch location to the delivery
         // address, computed by the API. The list arrives pre-sorted
-        // (active orders nearest-first, then history newest-first) — the
+        // (due orders nearest-first, then scheduled by day, then history
+        // newest-first) — the
         // table renders that order by default (sorting === []). Sorting is
         // opt-in via this header or the "Cercanía" control resets it.
         header: 'Distancia',
@@ -447,7 +464,7 @@ export function SuperOrdersPage() {
           subtitle={`${pendingRoute.length} pedido${pendingRoute.length === 1 ? '' : 's'} en ruta · ${todayOrders.length} totales hoy.`}
         />
 
-        <div className="mb-10 grid grid-cols-2 gap-4 sm:grid-cols-5">
+        <div className="mb-10 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">
           <Metric
             label="Por cotizar"
             value={pendingQuote}
@@ -460,6 +477,11 @@ export function SuperOrdersPage() {
           />
           <Metric label="Listos para salir" value={readyToGo} accent={readyToGo > 0} />
           <Metric label="En camino" value={inRoute} />
+          <Metric
+            label="Programados"
+            value={scheduledOrders.length}
+            accent={scheduledOrders.length > 0}
+          />
           <Metric label="Entregados hoy" value={delivered} />
         </div>
 
@@ -467,6 +489,7 @@ export function SuperOrdersPage() {
           {(
             [
               { value: 'pending', label: 'Pendientes' },
+              { value: 'scheduled', label: 'Programados' },
               { value: 'delivered', label: 'Entregados hoy' },
               { value: 'all', label: 'Todos' },
             ] as const
@@ -521,9 +544,11 @@ export function SuperOrdersPage() {
           emptyMessage={
             listFilter === 'pending'
               ? 'No hay pedidos pendientes.'
-              : listFilter === 'delivered'
-                ? 'No se entregó ningún pedido hoy.'
-                : 'No hay pedidos.'
+              : listFilter === 'scheduled'
+                ? 'No hay pedidos programados.'
+                : listFilter === 'delivered'
+                  ? 'No se entregó ningún pedido hoy.'
+                  : 'No hay pedidos.'
           }
         />
       </div>

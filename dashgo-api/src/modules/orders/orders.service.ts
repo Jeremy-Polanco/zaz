@@ -27,8 +27,10 @@ import {
 } from '../../entities/enums';
 import { AuthenticatedUser } from '../../common/types/authenticated-user';
 import { TAX_RATE, computeTaxableBase } from '../../common/tax';
+import { todayIsoDay } from '../../common/delivery-day';
 import type { TaxableLine } from '../../common/tax';
 import { sortOrdersForDispatch } from './dispatch-sort';
+import type { DispatchBucket } from './dispatch-sort';
 import { CreateOrderDto, DeliveryAddressDto } from './dto/create-order.dto';
 import { UpdateOrderStatusDto } from './dto/update-order-status.dto';
 import { PaymentsService } from '../payments/payments.service';
@@ -185,6 +187,10 @@ export class OrdersService {
    *   4) `null` — no hay origen; `sortOrdersForDispatch` degrada a
    *      `distanceMiles: null` y orden por fecha.
    *
+   * Además, cada pedido del staff sale decorado con `dispatchBucket`
+   * (`due` | `scheduled` | `history`): los programados a un día futuro no se
+   * mezclan con la ruta de hoy. El cliente NO recibe esa decoración.
+   *
    * `originSource` viaja aparte (no en cada order) para que el controller
    * lo exponga en un header sin tocar el shape del array que consumen web y
    * mobile.
@@ -193,7 +199,12 @@ export class OrdersService {
     user: AuthenticatedUser,
     opts: { origin?: { lat: number; lng: number } | null } = {},
   ): Promise<{
-    orders: Array<Order & { distanceMiles?: number | null }>;
+    orders: Array<
+      Order & {
+        distanceMiles?: number | null;
+        dispatchBucket?: DispatchBucket;
+      }
+    >;
     originSource: DispatchOriginSource | null;
   }> {
     const orders = await this.orders.find({
@@ -221,7 +232,12 @@ export class OrdersService {
       originSource = origin ? 'saved' : 'none';
     }
 
-    return { orders: sortOrdersForDispatch(orders, origin), originSource };
+    // "Hoy" es el día calendario de Nueva York (no el UTC): con él, los pedidos
+    // programados a futuro salen de la ruta y vuelven solos el día que les toca.
+    return {
+      orders: sortOrdersForDispatch(orders, origin, todayIsoDay()),
+      originSource,
+    };
   }
 
   async findOne(id: string, user: AuthenticatedUser) {

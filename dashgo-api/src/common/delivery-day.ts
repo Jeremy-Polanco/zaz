@@ -33,3 +33,33 @@ export function formatDeliveryDay(isoDay: string): string {
     // separa el día de la semana y sobra dentro de la frase del push.
     .replace(',', '');
 }
+
+/**
+ * "Hoy" para el negocio, como día 'YYYY-MM-DD': el día calendario de ESTE
+ * instante en la zona del negocio (America/New_York), no el día UTC.
+ *
+ * Sirve para decidir si un pedido programado ya le toca a la ruta: de las 20:00
+ * a la medianoche en Nueva York el día UTC ya es el siguiente, y con `toISOString`
+ * un pedido programado para "mañana" volvería a la ruta la noche anterior.
+ *
+ * Se arma con `formatToParts` y la zona FIJADA en el propio Intl (nunca con
+ * `process.env.TZ`, que no hace nada dentro de Jest y haría pasar el test en la
+ * Mac y fallar en el CI). Devuelve una cadena, no un `Date`, porque el día de
+ * reparto es una fecha y no un instante: se compara como texto ISO.
+ */
+export function todayIsoDay(
+  now: Date = new Date(),
+  timeZone = 'America/New_York',
+): string {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(now);
+
+  const pick = (type: 'year' | 'month' | 'day'): string =>
+    parts.find((p) => p.type === type)?.value ?? '';
+
+  return `${pick('year')}-${pick('month')}-${pick('day')}`;
+}

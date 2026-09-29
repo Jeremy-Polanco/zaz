@@ -283,12 +283,32 @@ function OrderCard({
 
 type RouteFilter =
   | 'all'
+  | 'scheduled'
   | 'pending_quote'
   | 'quoted'
   | 'pending_validation'
   | 'in_delivery_route'
   | 'delivered'
   | 'history'
+
+// Estados que todavía hay que repartir (el resto es histórico).
+const ACTIVE_STATUSES: OrderStatus[] = [
+  'pending_quote',
+  'quoted',
+  'pending_validation',
+  'confirmed_by_colmado',
+  'in_delivery_route',
+]
+
+// Dónde cae el pedido en la lista de reparto. Lo decide la API (conoce el "hoy"
+// de Nueva York y qué pedidos están programados a un día futuro); este respaldo
+// existe sólo para que una API anterior, sin `dispatchBucket`, siga andando:
+// todo pedido vivo cuenta como de hoy y todo el resto como histórico — justo
+// como se comportaba la lista antes de que lo programado saliera de la ruta.
+function bucketOf(order: Order): NonNullable<Order['dispatchBucket']> {
+  if (order.dispatchBucket) return order.dispatchBucket
+  return ACTIVE_STATUSES.includes(order.status) ? 'due' : 'history'
+}
 
 export default function SuperOrdersScreen() {
   // Dispatch sorts nearest-first from where the repartidor's phone actually
@@ -330,6 +350,9 @@ export default function SuperOrdersScreen() {
       delivered: list.filter(
         (o) => o.status === 'delivered' && isToday(o.createdAt),
       ).length,
+      // Programados a un día futuro: fuera de la ruta de hoy. Los contadores por
+      // etapa de arriba siguen siendo por estado (igual que web).
+      scheduled: list.filter((o) => bucketOf(o) === 'scheduled').length,
     }
   }, [orders])
 
@@ -342,14 +365,13 @@ export default function SuperOrdersScreen() {
       // Historial: todo menos cancelados (igual que el filtro "all" de la web).
       return list.filter((o) => o.status !== 'cancelled')
     }
-    const baseActive = list.filter(
-      (o) =>
-        o.status === 'pending_quote' ||
-        o.status === 'quoted' ||
-        o.status === 'pending_validation' ||
-        o.status === 'confirmed_by_colmado' ||
-        o.status === 'in_delivery_route',
-    )
+    // Programados: ya vienen en el orden de la API (por día, luego cercanía).
+    if (filter === 'scheduled') return list.filter((o) => bucketOf(o) === 'scheduled')
+    // La ruta de hoy es sólo lo que hay que repartir YA: un pedido programado a
+    // un día futuro sale de aquí y vuelve solo el día que le toca (la API lo
+    // vuelve a clasificar en cada consulta). Los sub-filtros por estado actúan
+    // dentro de esta base.
+    const baseActive = list.filter((o) => bucketOf(o) === 'due')
     if (filter === 'all') return baseActive
     if (filter === 'in_delivery_route') {
       // "En ruta" agrupa confirmados + en_ruta para no esconder pedidos listos.
@@ -438,6 +460,15 @@ export default function SuperOrdersScreen() {
               <KpiCard label="Confirmar" value={stats.pendingConfirm} tone="warn" />
               <KpiCard label="En ruta" value={stats.inRoute + stats.readyToGo} tone="attn" />
               <KpiCard label="Entregados" value={stats.delivered} tone="ok" />
+            </View>
+            {/* Fila propia: con cinco tarjetas en una sola fila "PROGRAMADOS"
+                no cabe en el ancho de un teléfono. */}
+            <View testID="kpi-scheduled" className="mt-2 flex-row gap-2">
+              <KpiCard
+                label="Programados"
+                value={stats.scheduled}
+                tone={stats.scheduled > 0 ? 'warn' : 'idle'}
+              />
             </View>
 
             {/* Clientes — actividad: pidieron hoy / fríos hace 7 y 30 días.
@@ -539,6 +570,7 @@ export default function SuperOrdersScreen() {
                 {(
                   [
                     { id: 'all', label: 'Activos' },
+                    { id: 'scheduled', label: 'Programados' },
                     { id: 'pending_quote', label: 'Por cotizar' },
                     { id: 'quoted', label: 'Cotizados' },
                     { id: 'pending_validation', label: 'Por confirmar' },
@@ -551,6 +583,7 @@ export default function SuperOrdersScreen() {
                   return (
                     <Pressable
                       key={f.id}
+                      testID={`route-filter-${f.id}`}
                       onPress={() => selectFilter(f.id)}
                       className={`px-4 py-2.5 ${
                         sel ? 'bg-ink' : 'border border-ink/15 bg-transparent'
