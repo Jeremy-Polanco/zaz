@@ -30,6 +30,20 @@ describe('SetDeliveryDateDto', () => {
     await expect(validate(make('16-09-2026'))).resolves.toHaveLength(1);
   });
 
+  it('rechaza un día con forma válida pero que NO existe en el calendario', async () => {
+    // El regex sólo mira la forma. Sin esto, '2026-02-30' pasaba la validación,
+    // Postgres lo rechazaba al escribir la columna `date` y el admin recibía un
+    // 500 en vez de un 400 que le explicara el error (lo cazó el e2e).
+    await expect(validate(make('2026-02-30'))).resolves.toHaveLength(1);
+    await expect(validate(make('2026-13-01'))).resolves.toHaveLength(1);
+    await expect(validate(make('2027-02-29'))).resolves.toHaveLength(1);
+    await expect(validate(make('2026-04-31'))).resolves.toHaveLength(1);
+  });
+
+  it('acepta el 29 de febrero de un año bisiesto', async () => {
+    await expect(validate(make('2028-02-29'))).resolves.toHaveLength(0);
+  });
+
   it('rechaza que falte el campo — null y ausente no son lo mismo', async () => {
     // `null` es una orden explícita ("sacale el día"); ausente es un cliente
     // mal escrito, y no puede pasar como si fuese lo mismo.

@@ -67,6 +67,15 @@ export default async function globalSetup(): Promise<void> {
   process.env.STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY ?? 'sk_test_dummy';
   process.env.STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET ?? 'whsec_test';
   process.env.STRIPE_SUBSCRIPTION_PRICE_ID = process.env.STRIPE_SUBSCRIPTION_PRICE_ID ?? 'price_test_monthly';
+  // Twilio: envSchema (z.string()) se valida al IMPORTAR app.module, y los
+  // workers heredan el env de este globalSetup — setearlo dentro de
+  // createTestingApp llega tarde. Sin esto TODOS los e2e-spec mueren con un
+  // ZodError antes de correr un solo test. Vacíos = TwilioService no construye
+  // cliente (mismo criterio que test/setup-integration.ts).
+  process.env.TWILIO_ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID ?? '';
+  process.env.TWILIO_API_KEY_SID = process.env.TWILIO_API_KEY_SID ?? '';
+  process.env.TWILIO_API_KEY_SECRET = process.env.TWILIO_API_KEY_SECRET ?? '';
+  process.env.TWILIO_FROM_NUMBER = process.env.TWILIO_FROM_NUMBER ?? '';
   // Ningún test sale a la red: GeocodingService.reverse() devuelve null sin
   // abrir un socket. Ver test/setup-integration.ts.
   process.env.GEOCODING_ENABLED = 'false';

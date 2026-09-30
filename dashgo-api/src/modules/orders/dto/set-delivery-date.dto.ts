@@ -1,4 +1,4 @@
-import { Matches, ValidateIf } from 'class-validator';
+import { IsISO8601, Matches, ValidateIf } from 'class-validator';
 
 export class SetDeliveryDateDto {
   /**
@@ -16,5 +16,11 @@ export class SetDeliveryDateDto {
   @Matches(/^\d{4}-\d{2}-\d{2}$/, {
     message: 'scheduledDeliveryDate debe tener formato YYYY-MM-DD',
   })
+  // El regex sólo valida la FORMA: '2026-02-30' la cumple y Postgres lo rechaza
+  // al escribir la columna `date` (500). `strict` exige que el día exista.
+  @IsISO8601(
+    { strict: true },
+    { message: 'scheduledDeliveryDate debe ser un día real del calendario' },
+  )
   scheduledDeliveryDate!: string | null;
 }
