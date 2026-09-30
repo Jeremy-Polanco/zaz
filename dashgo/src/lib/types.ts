@@ -279,6 +279,15 @@ export interface Order {
    */
   distanceMiles?: number | null
   /**
+   * Solo staff. Dónde puso la API el pedido en la lista de reparto:
+   * 'due' (hay que entregarlo hoy: sin día, con día de hoy o ya vencido),
+   * 'scheduled' (vivo pero con un día FUTURO: salió de la ruta de hoy y
+   * vuelve el día que le toca, día calendario de Nueva York) o 'history'
+   * (entregado / cancelado). Opcional para que una API anterior —o la lista
+   * de un cliente— siga parseando; la pantalla cae al estado si falta.
+   */
+  dispatchBucket?: 'due' | 'scheduled' | 'history'
+  /**
    * Día de reparto que el super admin le asigna a la orden, 'YYYY-MM-DD'
    * (sin hora, sin zona horaria — es un DÍA, no un instante). null = sin
    * asignar todavía. Editable en cualquier estado salvo delivered/cancelled.

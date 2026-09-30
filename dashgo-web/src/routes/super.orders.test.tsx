@@ -332,6 +332,58 @@ describe('SuperOrdersPage — route metrics', () => {
   })
 })
 
+describe('SuperOrdersPage — pedidos programados: métricas', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  it('"Programados" cuenta los pedidos que la API marcó como programados', async () => {
+    setup({
+      orders: [
+        makeOrder({ id: 'o1', status: 'quoted', dispatchBucket: 'scheduled' }),
+        makeOrder({ id: 'o2', status: 'quoted', dispatchBucket: 'scheduled' }),
+        makeOrder({ id: 'o3', status: 'quoted', dispatchBucket: 'due' }),
+      ],
+    })
+    await renderOrders()
+
+    expect(within(metric('Programados')).getByText('2')).toBeInTheDocument()
+  })
+
+  it('"Programados" queda en 0 cuando nada está programado', async () => {
+    setup({
+      orders: [makeOrder({ id: 'o1', status: 'quoted', dispatchBucket: 'due' })],
+    })
+    await renderOrders()
+
+    expect(within(metric('Programados')).getByText('0')).toBeInTheDocument()
+  })
+
+  it('el subtítulo cuenta sólo los pedidos de la ruta de hoy, no los programados', async () => {
+    setup({
+      orders: [
+        makeOrder({ id: 'o1', status: 'quoted', dispatchBucket: 'due' }),
+        makeOrder({ id: 'o2', status: 'quoted', dispatchBucket: 'scheduled' }),
+      ],
+    })
+    await renderOrders()
+
+    expect(screen.getByText(/^1 pedido en ruta/)).toBeInTheDocument()
+  })
+
+  it('los contadores por etapa siguen siendo por estado, programados incluidos', async () => {
+    // Por cotizar / por confirmar / listos / en camino cuentan trabajo por
+    // ETAPA; que el pedido esté programado no lo saca de su etapa.
+    setup({
+      orders: [
+        makeOrder({ id: 'o1', status: 'pending_quote', dispatchBucket: 'scheduled' }),
+        makeOrder({ id: 'o2', status: 'pending_quote', dispatchBucket: 'due' }),
+      ],
+    })
+    await renderOrders()
+
+    expect(within(metric('Por cotizar')).getByText('2')).toBeInTheDocument()
+  })
+})
+
 describe('SuperOrdersPage — list filter', () => {
   beforeEach(() => vi.clearAllMocks())
 
@@ -390,6 +442,156 @@ describe('SuperOrdersPage — list filter', () => {
 
     await userEvent.click(screen.getByRole('button', { name: 'Todos' }))
     expect(screen.getByText('No hay pedidos.')).toBeInTheDocument()
+  })
+})
+
+describe('SuperOrdersPage — pedidos programados: filtro', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  const dueOrder = () =>
+    makeOrder({
+      id: 'due',
+      status: 'quoted',
+      dispatchBucket: 'due',
+      customer: makeCustomer('De Hoy'),
+    })
+  const scheduledOrder = (id: string, name: string, day: string) =>
+    makeOrder({
+      id,
+      status: 'quoted',
+      dispatchBucket: 'scheduled',
+      scheduledDeliveryDate: day,
+      customer: makeCustomer(name),
+    })
+
+  it('un pedido programado a futuro NO aparece en Pendientes', async () => {
+    setup({
+      orders: [dueOrder(), scheduledOrder('s1', 'Para Después', '2099-01-05')],
+    })
+    await renderOrders()
+
+    expect(screen.getByText('De Hoy')).toBeInTheDocument()
+    expect(screen.queryByText('Para Después')).not.toBeInTheDocument()
+  })
+
+  it('el filtro "Programados" muestra sólo los programados', async () => {
+    setup({
+      orders: [dueOrder(), scheduledOrder('s1', 'Para Después', '2099-01-05')],
+    })
+    await renderOrders()
+
+    await userEvent.click(screen.getByRole('button', { name: 'Programados' }))
+
+    expect(screen.getByText('Para Después')).toBeInTheDocument()
+    expect(screen.queryByText('De Hoy')).not.toBeInTheDocument()
+  })
+
+  it('"Programados" respeta el orden de la API (por día) sin reordenar', async () => {
+    setup({
+      orders: [
+        scheduledOrder('s1', 'Primero', '2099-01-05'),
+        scheduledOrder('s2', 'Segundo', '2099-01-09'),
+        scheduledOrder('s3', 'Tercero', '2099-02-01'),
+      ],
+    })
+    await renderOrders()
+
+    await userEvent.click(screen.getByRole('button', { name: 'Programados' }))
+
+    const names = screen
+      .getAllByText(/^(Primero|Segundo|Tercero)$/)
+      .map((el) => el.textContent)
+    expect(names).toEqual(['Primero', 'Segundo', 'Tercero'])
+  })
+
+  it('el pedido programado sigue visible bajo "Todos"', async () => {
+    setup({
+      orders: [dueOrder(), scheduledOrder('s1', 'Para Después', '2099-01-05')],
+    })
+    await renderOrders()
+
+    await userEvent.click(screen.getByRole('button', { name: 'Todos' }))
+
+    expect(screen.getByText('De Hoy')).toBeInTheDocument()
+    expect(screen.getByText('Para Después')).toBeInTheDocument()
+  })
+
+  it('un pedido que la API ya devuelve como "due" (le llegó su día) vuelve a Pendientes', async () => {
+    // El servidor recalcula el bucket con el día de hoy de Nueva York en cada
+    // consulta: cuando llega su día el mismo pedido viene como `due`.
+    setup({
+      orders: [
+        makeOrder({
+          id: 'back',
+          status: 'quoted',
+          dispatchBucket: 'due',
+          scheduledDeliveryDate: '2026-09-29',
+          customer: makeCustomer('Ya Le Toca'),
+        }),
+      ],
+    })
+    await renderOrders()
+
+    expect(screen.getByText('Ya Le Toca')).toBeInTheDocument()
+  })
+
+  it('explica la lista vacía de "Programados"', async () => {
+    setup({ orders: [dueOrder()] })
+    await renderOrders()
+
+    await userEvent.click(screen.getByRole('button', { name: 'Programados' }))
+
+    expect(screen.getByText('No hay pedidos programados.')).toBeInTheDocument()
+  })
+
+  it('ofrece los filtros en este orden: Pendientes, Programados, Entregados hoy, Todos', async () => {
+    setup({ orders: [] })
+    await renderOrders()
+
+    const labels = ['Pendientes', 'Programados', 'Entregados hoy', 'Todos']
+    const buttons = labels.map((name) => screen.getByRole('button', { name }))
+    for (let i = 0; i < buttons.length - 1; i++) {
+      expect(
+        buttons[i].compareDocumentPosition(buttons[i + 1]) &
+          Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy()
+    }
+  })
+
+  describe('API anterior, sin dispatchBucket', () => {
+    it('un pedido vivo sin bucket cuenta como de hoy y sale en Pendientes', async () => {
+      setup({
+        orders: [
+          makeOrder({
+            id: 'o1',
+            status: 'in_delivery_route',
+            customer: makeCustomer('Vivo Sin Bucket'),
+          }),
+        ],
+      })
+      await renderOrders()
+
+      expect(screen.getByText('Vivo Sin Bucket')).toBeInTheDocument()
+      expect(within(metric('Programados')).getByText('0')).toBeInTheDocument()
+    })
+
+    it('un pedido entregado sin bucket es histórico: no sale en Pendientes ni en Programados', async () => {
+      setup({
+        orders: [
+          makeOrder({
+            id: 'o1',
+            status: 'delivered',
+            customer: makeCustomer('Entregado Sin Bucket'),
+          }),
+        ],
+      })
+      await renderOrders()
+
+      expect(screen.queryByText('Entregado Sin Bucket')).not.toBeInTheDocument()
+
+      await userEvent.click(screen.getByRole('button', { name: 'Programados' }))
+      expect(screen.queryByText('Entregado Sin Bucket')).not.toBeInTheDocument()
+    })
   })
 })
 

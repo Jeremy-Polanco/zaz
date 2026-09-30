@@ -206,6 +206,15 @@ export interface Order {
    */
   distanceMiles?: number | null
   /**
+   * Staff only. Where the API put the order in the dispatch list:
+   * 'due' (deliver today: unscheduled, scheduled for today, or overdue),
+   * 'scheduled' (alive but assigned to a FUTURE day — it left today's route and
+   * comes back on its day, New York calendar) or 'history' (delivered /
+   * cancelled). Optional so an older API — or a customer's list — still parses;
+   * the dispatch screen falls back to the status when it is missing.
+   */
+  dispatchBucket?: 'due' | 'scheduled' | 'history'
+  /**
    * Day the order is scheduled to be delivered — 'YYYY-MM-DD', a DAY with no
    * time and no timezone. null when staff hasn't assigned one yet. Staff sets
    * it via PATCH /orders/:id/delivery-date or as part of the quote; the API
