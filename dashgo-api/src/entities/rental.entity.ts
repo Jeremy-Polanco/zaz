@@ -154,6 +154,24 @@ export class Rental {
   @Column({ name: 'next_maintenance_at', type: 'timestamptz', nullable: true })
   nextMaintenanceAt!: Date | null;
 
+  /**
+   * La orden de mantenimiento ABIERTA de este bebedero, generada por
+   * MaintenanceCron cuando vence el contador. Es la idempotencia del cron (si
+   * ya hay una orden viva no se crea otra) y lo que la app del cliente muestra
+   * como "Mantenimiento programado para …". NULL = no hay visita en curso.
+   *
+   * Una orden CANCELADA aquí significa "la visita no ocurrió, sigue vencida":
+   * el cron la regenera. Se vuelve NULL al entregar la visita (ver
+   * resetMaintenanceForUser) y por ON DELETE SET NULL si el admin borra la
+   * orden.
+   */
+  @Column({ name: 'maintenance_order_id', type: 'uuid', nullable: true })
+  maintenanceOrderId!: string | null;
+
+  @ManyToOne(() => Order, { onDelete: 'SET NULL', nullable: true })
+  @JoinColumn({ name: 'maintenance_order_id' })
+  maintenanceOrder!: Order | null;
+
   /** Timestamp of the most recent completed maintenance (NULL until the first one). */
   @Column({ name: 'last_maintenance_at', type: 'timestamptz', nullable: true })
   lastMaintenanceAt!: Date | null;

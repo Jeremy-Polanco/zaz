@@ -15,6 +15,7 @@ import Stripe = require('stripe');
 import { Rental, RentalStatus } from '../../entities/rental.entity';
 import { User } from '../../entities/user.entity';
 import { Product } from '../../entities/product.entity';
+import { OrderStatus } from '../../entities/enums';
 import { CustomerRentalResponseDto } from './dto/customer-rental-response.dto';
 import { AdminRentalResponseDto } from './dto/admin-rental-response.dto';
 import { ChargeLateFeeResponseDto } from './dto/charge-late-fee-response.dto';
@@ -413,6 +414,14 @@ export class RentalsService implements OnModuleInit {
     // Respect the per-user disable switch — no maintenance scheduling at all.
     const user = await this.users.findOne({ where: { id: userId } });
     if (user?.maintenanceTimerDisabled) {
+      // El contador no se toca, pero la visita YA se entregó: el enlace (que
+      // significa "visita abierta") se suelta igual. Si quedara apuntando a la
+      // orden entregada, al volver a prender el contador MaintenanceCron la
+      // tomaría por una visita en curso y no generaría nunca la siguiente.
+      await this.rentals.update(
+        { userId, maintenanceOrderId: Not(IsNull()) },
+        { maintenanceOrderId: null },
+      );
       this.logger.log(
         `resetMaintenanceForUser: user ${userId} has maintenance timer disabled — skipping`,
       );
@@ -438,6 +447,11 @@ export class RentalsService implements OnModuleInit {
     for (const r of toReset) {
       r.lastMaintenanceAt = now;
       r.nextMaintenanceAt = next;
+      // La visita que generó MaintenanceCron ya se entregó: se suelta la
+      // referencia. Si quedara apuntando a la orden entregada, el cron del
+      // próximo ciclo creería que "ya hay una visita" y nunca crearía la siguiente.
+      r.maintenanceOrderId = null;
+      r.maintenanceOrder = null;
       await this.rentals.save(r);
     }
     this.logger.log(
@@ -799,7 +813,11 @@ export class RentalsService implements OnModuleInit {
   async listMine(userId: string): Promise<CustomerRentalResponseDto[]> {
     const rows = await this.rentals.find({
       where: { userId },
-      relations: ['product'],
+      // `maintenanceOrder` trae sólo la orden de la visita (estado + día) para el
+      // banner del cliente. `loadEagerRelations: false` evita que la orden arrastre
+      // sus ítems: product y maintenanceOrder se piden explícitos arriba.
+      relations: ['product', 'maintenanceOrder'],
+      loadEagerRelations: false,
       order: { activatedAt: 'DESC' },
     });
     return rows.map((r) => this.toCustomerDto(r));
@@ -1455,6 +1473,21 @@ export class RentalsService implements OnModuleInit {
     dto.activatedAt = r.activatedAt;
     dto.nextMaintenanceAt = r.nextMaintenanceAt;
     dto.lastMaintenanceAt = r.lastMaintenanceAt;
+
+    // La visita sólo cuenta mientras está ABIERTA. Cancelada = no ocurrió (el
+    // cron la regenera) y entregada = ya ocurrió: en ambos casos no hay nada
+    // programado que mostrarle al cliente, así que el banner vuelve a su estado
+    // normal. Si la relación no vino cargada (maintenanceOrder undefined) también
+    // se trata como "sin visita".
+    const visit = r.maintenanceOrder;
+    const open =
+      visit != null &&
+      visit.status !== OrderStatus.CANCELLED &&
+      visit.status !== OrderStatus.DELIVERED;
+    dto.maintenanceOrderId = open ? visit.id : null;
+    dto.maintenanceScheduledFor = open
+      ? (visit.scheduledDeliveryDate ?? null)
+      : null;
     return dto;
   }
 

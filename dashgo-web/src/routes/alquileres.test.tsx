@@ -42,6 +42,8 @@ const sample: Rental[] = [
     activatedAt: '2026-06-01T00:00:00.000Z',
     nextMaintenanceAt: null,
     lastMaintenanceAt: null,
+    maintenanceOrderId: null,
+    maintenanceScheduledFor: null,
   },
   {
     id: 'r-2',
@@ -54,6 +56,8 @@ const sample: Rental[] = [
     activatedAt: null,
     nextMaintenanceAt: null,
     lastMaintenanceAt: null,
+    maintenanceOrderId: null,
+    maintenanceScheduledFor: null,
   },
 ]
 

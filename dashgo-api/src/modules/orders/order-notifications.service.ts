@@ -34,6 +34,20 @@ const STATUS_MESSAGES: Partial<Record<OrderStatus, string>> = {
     'tu pedido fue cancelado. Si no lo esperabas, escríbenos por aquí.',
 };
 
+/**
+ * ¿La orden es SÓLO la visita de mantenimiento del bebedero? Todos sus ítems
+ * tienen que ser el producto de servicio: un pedido mixto (agua + visita) sí
+ * lleva una entrega y conserva el texto de siempre. Sin ítems cargados no se
+ * puede afirmar nada, así que también conserva el texto de entrega.
+ */
+function isMaintenanceVisit(order: Order): boolean {
+  const items = order.items ?? [];
+  return (
+    items.length > 0 &&
+    items.every((item) => item.product?.isMaintenanceService === true)
+  );
+}
+
 @Injectable()
 export class OrderNotificationsService {
   private readonly logger = new Logger(OrderNotificationsService.name);
@@ -110,7 +124,13 @@ export class OrderNotificationsService {
     const phrase = `tu entrega quedó programada para el ${day}.`;
 
     if (order.customerId) {
-      const body = phrase.charAt(0).toUpperCase() + phrase.slice(1);
+      // La visita que genera MaintenanceCron nace con el día puesto: para ese
+      // cliente no hay ninguna "entrega" (no pidió nada), hay una visita al
+      // bebedero. Sólo cambia el PUSH, que es texto libre; el WhatsApp de abajo
+      // sigue con `phrase` porque va dentro del template aprobado por Meta.
+      const body = isMaintenanceVisit(order)
+        ? `Tu mantenimiento de bebedero quedó programado para el ${day}.`
+        : phrase.charAt(0).toUpperCase() + phrase.slice(1);
       void this.push
         .sendToUser(order.customerId, 'Tu pedido Udash', body, {
           orderId: order.id,

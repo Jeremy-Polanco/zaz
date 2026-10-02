@@ -246,6 +246,20 @@ export class Order {
   @Column({ name: 'skip_quote', type: 'boolean', default: false })
   skipQuote!: boolean;
 
+  /**
+   * True cuando la orden la creó EL SISTEMA para entregar un beneficio de la
+   * suscripción (bebedero gratis, instalación premium, mantenimiento
+   * automático) y no un cliente por checkout.
+   *
+   * Se persiste —y no vive sólo como `opts.provisioned` de `create()`— para que
+   * la guarda "un pedido activo a la vez" las ignore en los DOS sentidos: una
+   * visita programada para dentro de unos días no debe bloquear el agua del
+   * cliente, ni el pedido de agua del cliente impedir que el sistema genere su
+   * visita.
+   */
+  @Column({ name: 'provisioned', type: 'boolean', default: false })
+  provisioned!: boolean;
+
   @CreateDateColumn({ name: 'created_at' })
   createdAt!: Date;
 

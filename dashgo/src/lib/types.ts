@@ -156,6 +156,17 @@ export interface Rental {
   nextMaintenanceAt: string | null
   /** When the last maintenance was completed. NULL until the first one. */
   lastMaintenanceAt: string | null
+  /**
+   * La visita de mantenimiento que el sistema ya generó para este bebedero
+   * (orden abierta). NULL si no hay visita en curso.
+   */
+  maintenanceOrderId: string | null
+  /**
+   * Día de esa visita como 'YYYY-MM-DD' (día de Nueva York, NO un instante: se
+   * formatea con formatDeliveryDay, nunca con `new Date(...)`). NULL si no hay
+   * visita abierta o todavía no tiene día asignado.
+   */
+  maintenanceScheduledFor: string | null
 }
 
 /** Super-admin rental row, enriched with operational + customer detail. Mirrors web. */

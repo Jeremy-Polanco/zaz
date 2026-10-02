@@ -3,6 +3,7 @@ import { View, Text } from 'react-native'
 import { useTranslation } from 'react-i18next'
 import { router } from 'expo-router'
 import { useMyRentals, useProducts, useRequestMaintenance } from '../lib/queries'
+import { formatDeliveryDay } from '../lib/format'
 import { Button } from './ui'
 
 /** Whole days from now until `iso` (negative when overdue). */
@@ -13,13 +14,16 @@ function daysUntil(iso: string): number {
 /**
  * Bebedero maintenance countdown.
  *
- * Shows a 30-day countdown for the customer's most-due active rental that
- * tracks maintenance. When the countdown expires it turns into an alert with a
- * one-tap button that creates the maintenance-service order. Renders nothing
- * when the customer has no maintenance-tracked rental.
+ * Shows a 90-day countdown for the customer's most-due active rental that
+ * tracks maintenance. When it expires the SYSTEM creates the maintenance visit
+ * by itself (MaintenanceCron), so while a visit is open the banner just tells
+ * the customer which day it's scheduled for, with a link to the order — a calm
+ * notice, not an alert. Only when there's no scheduled visit does an expired
+ * countdown fall back to the alert with a one-tap button to request it
+ * manually. Renders nothing when the customer has no maintenance-tracked rental.
  */
 export function MaintenanceBanner() {
-  const { t } = useTranslation('banners')
+  const { t, i18n } = useTranslation('banners')
   const { data: rentals } = useMyRentals()
   const { data: products } = useProducts()
   const requestMaintenance = useRequestMaintenance()
@@ -44,6 +48,36 @@ export function MaintenanceBanner() {
   )
 
   if (!due) return null
+
+  // Visita ya generada por el sistema: tiene prioridad sobre la cuenta
+  // regresiva y sobre la alerta de vencido (pedir otra no tendría sentido).
+  if (due.maintenanceOrderId && due.maintenanceScheduledFor) {
+    const orderId = due.maintenanceOrderId
+    return (
+      <View className="mt-6 border-l-4 border-ink bg-paper-deep/40 p-4">
+        <Text className="font-sans-semibold text-[16px] text-ink">
+          {t('maintenance.title')}
+        </Text>
+        <Text className="mt-2 font-sans-semibold text-[14px] text-ink">
+          {t('maintenance.scheduledFor', {
+            day: formatDeliveryDay(due.maintenanceScheduledFor, i18n.language),
+          })}
+        </Text>
+        <Button
+          variant="outline"
+          onPress={() =>
+            router.push({
+              pathname: '/orders/[orderId]',
+              params: { orderId },
+            })
+          }
+          className="mt-3"
+        >
+          {t('maintenance.viewOrder')}
+        </Button>
+      </View>
+    )
+  }
 
   const daysLeft = daysUntil(due.nextMaintenanceAt!)
   const overdue = daysLeft <= 0

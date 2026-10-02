@@ -86,6 +86,8 @@ function makeRental(overrides: Partial<Rental> = {}): Rental {
     activatedAt: '2025-05-11T00:00:00Z',
     nextMaintenanceAt: null,
     lastMaintenanceAt: null,
+    maintenanceOrderId: null,
+    maintenanceScheduledFor: null,
     ...overrides,
   }
 }
