@@ -77,6 +77,7 @@ function fakeOrder(overrides: Partial<Order> = {}): Order {
     capturedAt: null,
     wasSubscriberAtQuote: false,
     skipQuote: false,
+    provisioned: false,
     createdAt: new Date(),
     items: [],
     customer: {} as never,

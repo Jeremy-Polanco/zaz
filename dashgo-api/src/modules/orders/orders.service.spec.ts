@@ -133,6 +133,7 @@ function fakeOrder(overrides: Partial<Order> = {}): Order {
     capturedAt: null,
     wasSubscriberAtQuote: false,
     skipQuote: false,
+    provisioned: false,
     createdAt: new Date(),
     items: [],
     customer: {} as never,
@@ -4253,6 +4254,319 @@ describe('OrdersService', () => {
       expect(subscriptionService.isActiveSubscriber).toHaveBeenCalledWith(
         'user-1',
       );
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Órdenes del SISTEMA (provisioned) y día de reparto desde el nacimiento
+  //
+  // Mantenimiento automático (dueño, 2026-10-02): MaintenanceCron crea la visita
+  // del bebedero por su cuenta, programada para HOY. Tres cosas tienen que ser
+  // ciertas para que eso no rompa el flujo del cliente:
+  //  - la orden queda marcada `provisioned` (persistida, no sólo un flag de
+  //    runtime) para poder distinguirla después;
+  //  - la guarda "un pedido activo a la vez" no la cuenta, y ella no cuenta a
+  //    los pedidos del cliente: una visita abierta por días no puede bloquear su
+  //    agua, ni su agua impedir que el sistema genere la visita;
+  //  - nace con su día de reparto y el cliente recibe el aviso del día.
+  // ─────────────────────────────────────────────────────────────────────────
+
+  describe('create — órdenes provisionadas y día programado', () => {
+    const dto = {
+      items: [{ productId: 'prod-1', quantity: 1 }],
+      deliveryAddress: { text: '123 Test', lat: 18.4861, lng: -69.9312 },
+      paymentMethod: PaymentMethod.CASH,
+      usePoints: false,
+      useCredit: false,
+    } as import('./dto/create-order.dto').CreateOrderDto;
+
+    /** Corre create() y devuelve lo que recibió orderRepo.create() + la orden devuelta. */
+    async function runCreate(
+      opts: Parameters<OrdersService['create']>[2] = {},
+    ): Promise<{ captured: Partial<Order>; returned: Order }> {
+      productsRepo.find.mockResolvedValue([
+        fakeProduct({ requiresQuote: false, priceToPublic: '0.00' }),
+      ]);
+      let captured: Partial<Order> = {};
+
+      (dataSource.transaction as jest.Mock).mockImplementation(
+        async (cb: (mgr: EntityManager) => Promise<unknown>) => {
+          const orderRepo = makeRepoMock<Order>();
+          const itemRepo = makeRepoMock<OrderItem>();
+          orderRepo.create.mockImplementation((d) => {
+            captured = d as Partial<Order>;
+            return { ...d, id: 'order-1' } as Order;
+          });
+          orderRepo.save.mockResolvedValue(fakeOrder());
+          orderRepo.update.mockResolvedValue({ affected: 1 } as never);
+          itemRepo.save.mockResolvedValue({} as never);
+          itemRepo.create.mockImplementation((d) => d as OrderItem);
+          const mgr = {
+            getRepository: (entity: unknown) => {
+              if (entity === Order) return orderRepo;
+              if (entity === OrderItem) return itemRepo;
+              return makeRepoMock();
+            },
+          };
+          return cb(mgr as unknown as EntityManager);
+        },
+      );
+
+      const returned = fakeOrder({
+        customer: fakeUser() as never,
+        items: [],
+        scheduledDeliveryDate: opts.scheduledDeliveryDate ?? null,
+      });
+      ordersRepo.findOne.mockResolvedValue(returned);
+      ordersRepo.count.mockResolvedValue(0);
+
+      await service.create(fakeUser(UserRole.CLIENT), dto, opts);
+      return { captured, returned };
+    }
+
+    describe('persistencia de `provisioned`', () => {
+      it('persiste provisioned=true cuando la crea el sistema', async () => {
+        const { captured } = await runCreate({ provisioned: true });
+
+        expect(captured.provisioned).toBe(true);
+      });
+
+      it('una orden normal de cliente nace con provisioned=false', async () => {
+        const { captured } = await runCreate();
+
+        expect(captured.provisioned).toBe(false);
+      });
+    });
+
+    describe('guarda "un pedido activo a la vez"', () => {
+      it('la orden del sistema se salta la guarda: ni cuenta ni choca con el pedido en curso del cliente', async () => {
+        // El cliente tiene su pedido de agua en la calle (count devolvería 1)…
+        ordersRepo.count.mockResolvedValue(1);
+        productsRepo.find.mockResolvedValue([
+          fakeProduct({ requiresQuote: false, priceToPublic: '0.00' }),
+        ]);
+        (dataSource.transaction as jest.Mock).mockImplementation(
+          async (cb: (mgr: EntityManager) => Promise<unknown>) => {
+            const orderRepo = makeRepoMock<Order>();
+            const itemRepo = makeRepoMock<OrderItem>();
+            orderRepo.create.mockImplementation(
+              (d) => ({ ...d, id: 'order-1' }) as Order,
+            );
+            orderRepo.save.mockResolvedValue(fakeOrder());
+            orderRepo.update.mockResolvedValue({ affected: 1 } as never);
+            itemRepo.save.mockResolvedValue({} as never);
+            itemRepo.create.mockImplementation((d) => d as OrderItem);
+            return cb({
+              getRepository: (entity: unknown) =>
+                entity === Order
+                  ? orderRepo
+                  : entity === OrderItem
+                    ? itemRepo
+                    : makeRepoMock(),
+            } as unknown as EntityManager);
+          },
+        );
+        ordersRepo.findOne.mockResolvedValue(
+          fakeOrder({ customer: fakeUser() as never, items: [] }),
+        );
+
+        // …y aun así la visita del sistema se crea: no se consulta la guarda.
+        await expect(
+          service.create(fakeUser(UserRole.CLIENT), dto, { provisioned: true }),
+        ).resolves.toBeDefined();
+        expect(ordersRepo.count).not.toHaveBeenCalled();
+      });
+
+      it('cuando la guarda corre, sólo cuenta los pedidos NO provisionados', async () => {
+        // Una visita del sistema abierta por días no puede bloquear el agua del
+        // cliente: la consulta filtra provisioned=false.
+        await runCreate();
+
+        expect(ordersRepo.count).toHaveBeenCalledTimes(1);
+        const arg = ordersRepo.count.mock.calls[0][0] as {
+          where: Record<string, unknown>;
+        };
+        expect(arg.where.customerId).toBe('user-1');
+        expect(arg.where.provisioned).toBe(false);
+      });
+
+      it('un pedido normal en curso sigue bloqueando otro pedido normal', async () => {
+        // Regresión: el filtro nuevo no puede aflojar la regla original.
+        ordersRepo.count.mockResolvedValueOnce(1);
+
+        await expect(
+          service.create(fakeUser(UserRole.CLIENT), dto),
+        ).rejects.toMatchObject({ response: { code: 'ACTIVE_ORDER_EXISTS' } });
+      });
+    });
+
+    describe('mantenimiento pedido a mano con una visita ya abierta', () => {
+      // La visita del sistema es `provisioned` y la guarda de arriba NO la
+      // cuenta. Sin esta otra guarda, el botón "Solicitar mantenimiento" —que
+      // las versiones viejas de la app siguen mostrando porque no conocen
+      // `maintenanceOrderId`— crea una SEGUNDA visita y el repartidor va dos
+      // veces.
+      const maintenanceDto = {
+        items: [{ productId: 'prod-maint', quantity: 1 }],
+        paymentMethod: PaymentMethod.CASH,
+        usePoints: false,
+        useCredit: false,
+      } as import('./dto/create-order.dto').CreateOrderDto;
+
+      beforeEach(() => {
+        productsRepo.find.mockResolvedValue([
+          fakeProduct({
+            id: 'prod-maint',
+            requiresQuote: false,
+            priceToPublic: '0.00',
+            isMaintenanceService: true,
+          } as Partial<Product>),
+        ]);
+      });
+
+      it('rechaza con MAINTENANCE_ALREADY_SCHEDULED si ya hay un mantenimiento abierto', async () => {
+        // 1ª consulta: la guarda de pedido activo (0 pedidos normales). 2ª: los
+        // mantenimientos abiertos del cliente (la visita del sistema).
+        ordersRepo.count.mockResolvedValueOnce(0).mockResolvedValueOnce(1);
+
+        await expect(
+          service.create(fakeUser(UserRole.CLIENT), maintenanceDto),
+        ).rejects.toMatchObject({
+          response: { code: 'MAINTENANCE_ALREADY_SCHEDULED' },
+        });
+        expect(dataSource.transaction).not.toHaveBeenCalled();
+
+        const where = (
+          ordersRepo.count.mock.calls[1][0] as { where: Record<string, unknown> }
+        ).where;
+        expect(where.customerId).toBe('user-1');
+        expect(where.items).toEqual({ product: { isMaintenanceService: true } });
+      });
+
+      it('un pedido SIN el servicio de mantenimiento no hace esa consulta', async () => {
+        await runCreate();
+
+        // Sólo la guarda de pedido activo.
+        expect(ordersRepo.count).toHaveBeenCalledTimes(1);
+      });
+
+      it('la visita que crea el sistema (provisioned) no pasa por esta guarda', async () => {
+        ordersRepo.count.mockResolvedValue(1);
+        (dataSource.transaction as jest.Mock).mockResolvedValue(fakeOrder());
+        ordersRepo.findOne.mockResolvedValue(
+          fakeOrder({ customer: fakeUser() as never, items: [] }),
+        );
+
+        await expect(
+          service.create(fakeUser(UserRole.CLIENT), maintenanceDto, {
+            provisioned: true,
+          }),
+        ).resolves.toBeDefined();
+        expect(ordersRepo.count).not.toHaveBeenCalled();
+      });
+    });
+
+    describe('día de reparto (opts.scheduledDeliveryDate)', () => {
+      it('persiste el día al insertar la orden', async () => {
+        const { captured } = await runCreate({
+          provisioned: true,
+          scheduledDeliveryDate: '2026-10-05',
+        });
+
+        expect(captured.scheduledDeliveryDate).toBe('2026-10-05');
+      });
+
+      it('sin el opt no toca el día (queda sin programar)', async () => {
+        const { captured } = await runCreate();
+
+        expect(captured.scheduledDeliveryDate).toBeUndefined();
+      });
+
+      it('avisa UNA vez del día programado, con la orden ya creada', async () => {
+        const { returned } = await runCreate({
+          provisioned: true,
+          scheduledDeliveryDate: '2026-10-05',
+        });
+
+        expect(orderNotifications.notifyScheduledDelivery).toHaveBeenCalledTimes(
+          1,
+        );
+        expect(orderNotifications.notifyScheduledDelivery).toHaveBeenCalledWith(
+          returned,
+        );
+      });
+
+      it('no avisa del día cuando la orden nace sin día programado', async () => {
+        await runCreate();
+
+        expect(
+          orderNotifications.notifyScheduledDelivery,
+        ).not.toHaveBeenCalled();
+      });
+    });
+
+    // El cliente NO pidió la visita de mantenimiento: la creó el sistema. El
+    // push genérico de creación ("Tu pedido fue confirmado y ya lo estamos
+    // preparando…") le anunciaría un pedido que nunca hizo, justo antes del
+    // aviso real ("Tu mantenimiento de bebedero quedó programado para el …").
+    // El aviso del día es el ÚNICO mensaje al cliente; el SMS al dueño se queda.
+    describe('aviso al cliente de una visita del sistema con día programado', () => {
+      it('provisionada + día programado: NO manda el push genérico de pedido confirmado', async () => {
+        await runCreate({
+          provisioned: true,
+          scheduledDeliveryDate: '2026-10-05',
+        });
+
+        expect(orderNotifications.notifyStatus).not.toHaveBeenCalled();
+      });
+
+      it('provisionada + día programado: el aviso del día es el único mensaje al cliente', async () => {
+        const { returned } = await runCreate({
+          provisioned: true,
+          scheduledDeliveryDate: '2026-10-05',
+        });
+
+        expect(orderNotifications.notifyScheduledDelivery).toHaveBeenCalledTimes(
+          1,
+        );
+        expect(orderNotifications.notifyScheduledDelivery).toHaveBeenCalledWith(
+          returned,
+        );
+      });
+
+      it('provisionada + día programado: el SMS al dueño se sigue enviando', async () => {
+        const { returned } = await runCreate({
+          provisioned: true,
+          scheduledDeliveryDate: '2026-10-05',
+        });
+
+        expect(twilioService.sendOrderNotificationSms).toHaveBeenCalledTimes(1);
+        expect(twilioService.sendOrderNotificationSms).toHaveBeenCalledWith(
+          returned,
+        );
+      });
+
+      it('provisionada SIN día programado (bebedero gratis, unidad premium): conserva el push de creación', async () => {
+        await runCreate({ provisioned: true });
+
+        expect(orderNotifications.notifyStatus).toHaveBeenCalledTimes(1);
+        expect(orderNotifications.notifyScheduledDelivery).not.toHaveBeenCalled();
+      });
+
+      it('orden normal del cliente: conserva el push de creación', async () => {
+        await runCreate();
+
+        expect(orderNotifications.notifyStatus).toHaveBeenCalledTimes(1);
+      });
+
+      it('NO provisionada aunque traiga día programado: el cliente SÍ pidió el pedido, conserva el push de creación', async () => {
+        await runCreate({ scheduledDeliveryDate: '2026-10-05' });
+
+        expect(orderNotifications.notifyStatus).toHaveBeenCalledTimes(1);
+        expect(orderNotifications.notifyScheduledDelivery).toHaveBeenCalledTimes(
+          1,
+        );
+      });
     });
   });
 

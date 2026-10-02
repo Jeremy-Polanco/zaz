@@ -16,5 +16,7 @@ export default {
     requestCta: 'Solicitar mantenimiento →',
     contactSupport: 'Contactá a soporte para agendar el mantenimiento.',
     createOrderError: 'No pudimos crear la orden. Intentá de nuevo.',
+    scheduledFor: 'Mantenimiento programado para el {{day}}.',
+    viewOrder: 'Ver pedido →',
   },
 }

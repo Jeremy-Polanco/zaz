@@ -263,8 +263,20 @@ export class OrdersService {
        * No es un descuento al suscriptor —el envío fijo lo paga todo el
        * mundo—: es que estas órdenes tienen que quedar en $0 o
        * `deliverProvisionedOrder` las rechaza y el alquiler no se activa nunca.
+       *
+       * Además se PERSISTE (`orders.provisioned`) y la guarda "un pedido activo
+       * a la vez" las ignora en los dos sentidos: ni una orden de sistema abierta
+       * por días bloquea el agua del cliente, ni el pedido del cliente impide que
+       * el sistema genere su visita de mantenimiento.
        */
       provisioned?: boolean;
+      /**
+       * Día de reparto ('YYYY-MM-DD', día de Nueva York) con el que NACE la
+       * orden. Lo usa el mantenimiento automático para dejar la visita
+       * programada para hoy y que caiga directo en "Pendientes" de la ruta; en
+       * ese caso el cliente recibe el aviso del día una vez creada la orden.
+       */
+      scheduledDeliveryDate?: string;
     } = {},
   ) {
     if (user.role !== UserRole.CLIENT && user.role !== UserRole.PROMOTER) {
@@ -283,11 +295,18 @@ export class OrdersService {
     // One active order at a time (clients only): block a new order while the
     // customer still has one in progress (anything not delivered/cancelled).
     // Stops the duplicate/repeated orders the colmado was seeing.
-    if (user.role === UserRole.CLIENT) {
+    //
+    // Las órdenes del SISTEMA (`provisioned`) quedan fuera en los dos sentidos:
+    // la que crea el sistema no pasa por la guarda (puede nacer aunque el cliente
+    // tenga su agua en camino) y, cuando la guarda corre para un pedido del
+    // cliente, no cuenta las provisionadas — una visita de mantenimiento abierta
+    // por días no puede dejarlo sin poder pedir agua.
+    if (user.role === UserRole.CLIENT && !opts.provisioned) {
       const activeCount = await this.orders.count({
         where: {
           customerId: user.id,
           status: Not(In([OrderStatus.DELIVERED, OrderStatus.CANCELLED])),
+          provisioned: false,
         },
       });
       if (activeCount > 0) {
@@ -322,6 +341,33 @@ export class OrdersService {
         throw new BadRequestException(
           `Stock insuficiente para "${product.name}" (disponible: ${product.stock})`,
         );
+      }
+    }
+
+    // Una visita de mantenimiento a la vez. La que genera MaintenanceCron es
+    // `provisioned` y la guarda de "un pedido activo" NO la cuenta, así que sin
+    // esto el botón "Solicitar mantenimiento" —que las versiones viejas de la
+    // app siguen mostrando porque no conocen `maintenanceOrderId`, y la web
+    // cuando el admin le quita el día a la visita— crearía una SEGUNDA visita y
+    // el repartidor iría dos veces. La orden del sistema no pasa por acá: el
+    // cron ya adopta cualquier mantenimiento abierto en vez de duplicarlo.
+    if (
+      !opts.provisioned &&
+      products.some((product) => product.isMaintenanceService)
+    ) {
+      const openMaintenance = await this.orders.count({
+        where: {
+          customerId: user.id,
+          status: Not(In([OrderStatus.DELIVERED, OrderStatus.CANCELLED])),
+          items: { product: { isMaintenanceService: true } },
+        },
+      });
+      if (openMaintenance > 0) {
+        throw new ConflictException({
+          code: 'MAINTENANCE_ALREADY_SCHEDULED',
+          message:
+            'Ya tenés una visita de mantenimiento programada. La podés ver en tus pedidos.',
+        });
       }
     }
 
@@ -725,6 +771,13 @@ export class OrdersService {
         totalAmount: (totalCents / 100).toFixed(2),
         quotedAt: skipQuote ? now : null,
         skipQuote,
+        // Persistido para distinguirla después (ver la guarda de arriba).
+        provisioned: opts.provisioned === true,
+        // Sólo se escribe cuando viene: sin el opt la columna queda en NULL
+        // (sin programar), exactamente como antes.
+        ...(opts.scheduledDeliveryDate
+          ? { scheduledDeliveryDate: opts.scheduledDeliveryDate }
+          : {}),
         wasSubscriberAtQuote: isSubscriber,
         paymentMethod: dto.paymentMethod,
         stripePaymentIntentId: null,
@@ -813,7 +866,26 @@ export class OrdersService {
 
     // Customer-facing tracking: "recibimos tu pedido" (or "confirmado" if the
     // order auto-confirmed above). Fire-and-forget like the SMS.
-    this.orderNotifications.notifyStatus(order);
+    //
+    // Se omite para la visita que el SISTEMA agenda por su cuenta (provisionada
+    // + día programado, o sea el mantenimiento automático): el cliente no pidió
+    // nada, y un "Tu pedido fue confirmado y ya lo estamos preparando…" le
+    // anunciaría un pedido que nunca hizo, justo antes del aviso real. Ahí el
+    // aviso del día (abajo) es el único mensaje; el SMS al dueño se conserva. Las
+    // provisionadas SIN día (bebedero gratis, unidad premium) y los pedidos
+    // normales siguen avisando como siempre.
+    const systemScheduledVisit =
+      opts.provisioned === true && !!opts.scheduledDeliveryDate;
+    if (!systemScheduledVisit) {
+      this.orderNotifications.notifyStatus(order);
+    }
+
+    // Nació con día de reparto (mantenimiento automático): se le avisa UNA vez,
+    // con la orden ya creada y —si aplicaba— auto-confirmada, igual que cuando
+    // el admin le asigna el día a mano (ver setScheduledDeliveryDate).
+    if (opts.scheduledDeliveryDate) {
+      this.orderNotifications.notifyScheduledDelivery(order);
+    }
 
     return order;
   }

@@ -222,5 +222,56 @@ describe('OrderNotificationsService', () => {
       ).not.toThrow();
       await new Promise((r) => setImmediate(r));
     });
+
+    // Mantenimiento automático (2026-10-02): MaintenanceCron crea la visita del
+    // bebedero con el día ya puesto. "Tu entrega quedó programada" confunde a un
+    // cliente que no pidió nada: no hay entrega, hay una visita. El PUSH lo dice;
+    // el WhatsApp NO cambia (template aprobado por Meta, misma frase de siempre).
+    describe('visita de mantenimiento (todos los ítems son el servicio)', () => {
+      const withItems = (items: unknown[]): Order =>
+        ({ ...scheduledOrder('2026-10-02'), items }) as unknown as Order;
+      const maintenanceItem = { product: { isMaintenanceService: true } };
+      const waterItem = { product: { isMaintenanceService: false } };
+
+      it('el push habla del mantenimiento, no de una entrega', async () => {
+        service.notifyScheduledDelivery(withItems([maintenanceItem]));
+        await Promise.resolve();
+
+        const body = push.sendToUser.mock.calls[0][2] as string;
+        expect(body).toBe(
+          'Tu mantenimiento de bebedero quedó programado para el viernes 2 de octubre.',
+        );
+      });
+
+      it('el WhatsApp sigue mandando la frase de entrega del template aprobado', async () => {
+        service.notifyScheduledDelivery(withItems([maintenanceItem]));
+        await Promise.resolve();
+
+        const params = whatsapp.sendTemplate.mock.calls[0][2] as string[];
+        expect(params[1]).toBe(
+          'tu entrega quedó programada para el viernes 2 de octubre.',
+        );
+      });
+
+      it('un pedido mixto (agua + mantenimiento) conserva el texto de entrega', async () => {
+        service.notifyScheduledDelivery(
+          withItems([maintenanceItem, waterItem]),
+        );
+        await Promise.resolve();
+
+        const body = push.sendToUser.mock.calls[0][2] as string;
+        expect(body).toBe(
+          'Tu entrega quedó programada para el viernes 2 de octubre.',
+        );
+      });
+
+      it('sin ítems cargados conserva el texto de entrega', async () => {
+        service.notifyScheduledDelivery(withItems([]));
+        await Promise.resolve();
+
+        const body = push.sendToUser.mock.calls[0][2] as string;
+        expect(body).toContain('Tu entrega quedó programada');
+      });
+    });
   });
 });

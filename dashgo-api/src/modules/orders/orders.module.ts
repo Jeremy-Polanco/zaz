@@ -1,6 +1,6 @@
 import { forwardRef, Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { Order, OrderItem, Product } from '../../entities';
+import { Order, OrderItem, Product, Rental } from '../../entities';
 import { UserAddress } from '../../entities/user-address.entity';
 import { DeliveryZone } from '../../entities/delivery-zone.entity';
 import { User } from '../../entities/user.entity';
@@ -11,6 +11,7 @@ import { PremiumProductListener } from './premium-product.listener';
 import { OrderNotificationsService } from './order-notifications.service';
 import { WinBackCron } from './win-back.cron';
 import { PaymentReconciliationCron } from './payment-reconciliation.cron';
+import { MaintenanceCron } from './maintenance.cron';
 import { WhatsAppModule } from '../whatsapp/whatsapp.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { PaymentsModule } from '../payments/payments.module';
@@ -34,6 +35,8 @@ import { AddressesModule } from '../addresses/addresses.module';
       UserAddress,
       User,
       DeliveryZone,
+      // MaintenanceCron lee los bebederos vencidos y les enlaza la visita.
+      Rental,
     ]),
     WhatsAppModule,
     NotificationsModule,
@@ -64,6 +67,7 @@ import { AddressesModule } from '../addresses/addresses.module';
     OrderNotificationsService,
     WinBackCron,
     PaymentReconciliationCron,
+    MaintenanceCron,
   ],
   exports: [OrdersService],
 })
