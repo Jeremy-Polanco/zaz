@@ -33,6 +33,8 @@ import { RentalsService } from './rentals.service';
 import { Rental, RentalStatus } from '../../entities/rental.entity';
 import { User } from '../../entities/user.entity';
 import { Product } from '../../entities/product.entity';
+import { Order } from '../../entities/order.entity';
+import { OrderStatus } from '../../entities/enums';
 import { Subscription } from '../../entities/subscription.entity';
 import { SubscriptionTier } from '../../entities/subscription-plan.entity';
 import { SubscriptionService } from '../subscription/subscription.service';
@@ -443,6 +445,27 @@ describe('RentalsService', () => {
       expect(rentalRepo.find).not.toHaveBeenCalled();
     });
 
+    // Mantenimiento automático: el enlace `maintenance_order_id` es "la visita
+    // ABIERTA". Si el admin apagó el contador con una visita en curso y esa
+    // visita se entrega igual, el enlace tiene que soltarse aunque el contador
+    // no se reinicie: si no, al volver a prender el contador el cron vería una
+    // orden ENTREGADA enlazada, la tomaría por visita abierta y no generaría
+    // nunca más la siguiente.
+    it('con el contador apagado igual suelta el enlace a la visita entregada', async () => {
+      userRepo.findOne.mockResolvedValueOnce(
+        fakeUser({ id: 'u3b', maintenanceTimerDisabled: true }),
+      );
+
+      const reset = await service.resetMaintenanceForUser('u3b');
+
+      expect(reset).toBe(0);
+      expect(rentalRepo.update).toHaveBeenCalledTimes(1);
+      const [criteria, patch] = (rentalRepo.update as jest.Mock).mock.calls[0];
+      expect(criteria.userId).toBe('u3b');
+      expect(criteria.maintenanceOrderId.type).toBe('not');
+      expect(patch).toEqual({ maintenanceOrderId: null });
+    });
+
     // F2 — un bebedero espejado desde un plan en mora (PlanDelinquencyListener)
     // sigue siendo el mismo bebedero físico: si el técnico entregó la visita de
     // mantenimiento, el timer se reinicia igual que en uno ACTIVE. Filtrar solo
@@ -478,6 +501,44 @@ describe('RentalsService', () => {
       const saved = (rentalRepo.save as jest.Mock).mock.calls[0][0] as Rental;
       expect(saved.nextMaintenanceAt).toBeInstanceOf(Date);
       expect(saved.lastMaintenanceAt).toBeInstanceOf(Date);
+    });
+
+    // Mantenimiento automático: MaintenanceCron deja `maintenanceOrderId`
+    // apuntando a la visita abierta. Al entregarla el contador se reinicia y la
+    // referencia TIENE que limpiarse: si quedara, el cron del próximo ciclo vería
+    // "ya hay una orden" (aunque entregada) y nunca generaría la siguiente visita.
+    it('limpia maintenanceOrderId en TODOS los bebederos que reinicia (la visita ya se entregó)', async () => {
+      userRepo.findOne.mockResolvedValueOnce(
+        fakeUser({ id: 'u5', maintenanceTimerDisabled: false }),
+      );
+      const first = fakeRental({
+        id: 'rental-mt-a',
+        userId: 'u5',
+        status: RentalStatus.ACTIVE,
+        nextMaintenanceAt: new Date('2026-01-01T00:00:00Z'),
+        maintenanceOrderId: 'order-visit',
+      });
+      const second = fakeRental({
+        id: 'rental-mt-b',
+        userId: 'u5',
+        status: RentalStatus.ACTIVE,
+        nextMaintenanceAt: new Date('2026-01-02T00:00:00Z'),
+        maintenanceOrderId: 'order-visit',
+      });
+      (rentalRepo.find as jest.Mock).mockResolvedValueOnce([first, second]);
+      (rentalRepo.save as jest.Mock).mockImplementation(async (r: Rental) => r);
+
+      const reset = await service.resetMaintenanceForUser('u5');
+
+      expect(reset).toBe(2);
+      const savedRows = (rentalRepo.save as jest.Mock).mock.calls.map(
+        (c) => c[0] as Rental,
+      );
+      expect(savedRows).toHaveLength(2);
+      for (const row of savedRows) {
+        expect(row.maintenanceOrderId).toBeNull();
+        expect(row.nextMaintenanceAt).toBeInstanceOf(Date);
+      }
     });
   });
 
@@ -760,6 +821,93 @@ describe('RentalsService', () => {
       // Isolation: User B's rentals not returned
       const ids = result.map((d) => d.id);
       expect(ids).not.toContain('r-b-1');
+    });
+
+    // Mantenimiento automático: la app del cliente necesita saber que YA hay una
+    // visita en camino (y para qué día) en vez de mostrar "Solicitar
+    // mantenimiento". El día sale de la orden referenciada por la relación.
+    describe('visita de mantenimiento programada', () => {
+      const rentalWithVisit = (order: Partial<Order> | null) =>
+        fakeRental({
+          id: 'r-visit',
+          userId: 'user-A',
+          status: RentalStatus.ACTIVE,
+          activatedAt: new Date(),
+          product: fakeProduct({ id: 'p-1' }),
+          maintenanceOrderId: order ? 'order-visit' : null,
+          maintenanceOrder: order as Order | null,
+        });
+
+      it('carga la orden de mantenimiento junto con el producto', async () => {
+        rentalRepo.find.mockResolvedValueOnce([rentalWithVisit(null)]);
+
+        await service.listMine('user-A');
+
+        const args = (rentalRepo.find as jest.Mock).mock.calls[0][0];
+        expect(args.relations).toEqual(
+          expect.arrayContaining(['product', 'maintenanceOrder']),
+        );
+      });
+
+      it('expone el id y el día programado de la visita abierta', async () => {
+        rentalRepo.find.mockResolvedValueOnce([
+          rentalWithVisit({
+            id: 'order-visit',
+            status: OrderStatus.CONFIRMED_BY_COLMADO,
+            scheduledDeliveryDate: '2026-10-05',
+          }),
+        ]);
+
+        const [dto] = await service.listMine('user-A');
+
+        expect(dto.maintenanceOrderId).toBe('order-visit');
+        expect(dto.maintenanceScheduledFor).toBe('2026-10-05');
+      });
+
+      it('sin visita: ambos campos son null', async () => {
+        rentalRepo.find.mockResolvedValueOnce([rentalWithVisit(null)]);
+
+        const [dto] = await service.listMine('user-A');
+
+        expect(dto.maintenanceOrderId).toBeNull();
+        expect(dto.maintenanceScheduledFor).toBeNull();
+      });
+
+      it.each([OrderStatus.CANCELLED, OrderStatus.DELIVERED])(
+        'una visita %s ya no está "en camino": ambos campos son null',
+        async (status) => {
+          // CANCELLED = la visita no ocurrió (el cron la regenera); DELIVERED =
+          // ya ocurrió. En ninguno de los dos casos hay nada que prometerle al
+          // cliente, así que el banner vuelve a su estado normal.
+          rentalRepo.find.mockResolvedValueOnce([
+            rentalWithVisit({
+              id: 'order-visit',
+              status,
+              scheduledDeliveryDate: '2026-10-05',
+            }),
+          ]);
+
+          const [dto] = await service.listMine('user-A');
+
+          expect(dto.maintenanceOrderId).toBeNull();
+          expect(dto.maintenanceScheduledFor).toBeNull();
+        },
+      );
+
+      it('una visita abierta sin día asignado expone el id pero no el día', async () => {
+        rentalRepo.find.mockResolvedValueOnce([
+          rentalWithVisit({
+            id: 'order-visit',
+            status: OrderStatus.CONFIRMED_BY_COLMADO,
+            scheduledDeliveryDate: null,
+          }),
+        ]);
+
+        const [dto] = await service.listMine('user-A');
+
+        expect(dto.maintenanceOrderId).toBe('order-visit');
+        expect(dto.maintenanceScheduledFor).toBeNull();
+      });
     });
   });
 

@@ -16,5 +16,7 @@ export default {
     requestCta: 'Request maintenance →',
     contactSupport: 'Contact support to schedule maintenance.',
     createOrderError: "We couldn't create the order. Try again.",
+    scheduledFor: 'Maintenance scheduled for {{day}}.',
+    viewOrder: 'View order →',
   },
 }
