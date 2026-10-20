@@ -21,11 +21,12 @@ import * as fs from 'fs';
 // Stripe module mock — MUST be declared with var and before any imports.
 // eslint-disable-next-line no-var
 var mockStripe: {
-  customers: { create: jest.Mock; search: jest.Mock; update: jest.Mock; list: jest.Mock };
+  customers: { create: jest.Mock; search: jest.Mock; update: jest.Mock; list: jest.Mock; retrieve: jest.Mock };
   subscriptions: { create: jest.Mock; retrieve: jest.Mock; update: jest.Mock; list: jest.Mock; cancel: jest.Mock };
   checkout: { sessions: { create: jest.Mock } };
   billingPortal: { sessions: { create: jest.Mock } };
   paymentIntents: { create: jest.Mock; retrieve: jest.Mock; cancel: jest.Mock; capture: jest.Mock };
+  paymentMethods: { list: jest.Mock };
   webhooks: { constructEvent: jest.Mock };
   prices: { retrieve: jest.Mock; create: jest.Mock; update: jest.Mock };
   products: { create: jest.Mock; update: jest.Mock };
@@ -46,6 +47,11 @@ mockStripe = {
     search: jest.fn().mockResolvedValue({ data: [] }),
     update: jest.fn().mockResolvedValue({}),
     list: jest.fn().mockResolvedValue({ data: [] }),
+    // StripePaymentMethodResolver: el cliente ya tiene tarjeta por defecto.
+    retrieve: jest.fn().mockResolvedValue({
+      id: 'cus_rentals_int_test',
+      invoice_settings: { default_payment_method: 'pm_test_late_fee' },
+    }),
   },
   subscriptions: {
     create: jest.fn().mockResolvedValue({
@@ -73,6 +79,8 @@ mockStripe = {
     cancel: jest.fn().mockResolvedValue({}),
     capture: jest.fn().mockResolvedValue({}),
   },
+  // Fallback 3 del resolver (tarjetas adjuntas): vacío por defecto.
+  paymentMethods: { list: jest.fn().mockResolvedValue({ data: [] }) },
   webhooks: { constructEvent: jest.fn() },
   prices: {
     retrieve: jest.fn().mockResolvedValue({ id: 'price_int_test', product: 'prod_int_test', unit_amount: 2000, currency: 'usd', recurring: { interval: 'month' } }),
@@ -183,6 +191,12 @@ describe('RentalsService (integration)', () => {
     }
 
     // Reset Stripe mocks to defaults
+    mockStripe.customers.retrieve.mockResolvedValue({
+      id: 'cus_rentals_int_test',
+      invoice_settings: { default_payment_method: 'pm_test_late_fee' },
+    });
+    mockStripe.subscriptions.list.mockResolvedValue({ data: [] });
+    mockStripe.paymentMethods.list.mockResolvedValue({ data: [] });
     mockStripe.subscriptions.create.mockResolvedValue({
       id: 'sub_rentals_int_test',
       status: 'active',
@@ -329,9 +343,41 @@ describe('RentalsService (integration)', () => {
       expect(result.paymentIntentId).toBe('pi_late_fee_integration');
       expect(result.subscriptionCanceled).toBe(false);
       expect(mockStripe.paymentIntents.create).toHaveBeenCalledWith(
-        expect.objectContaining({ amount: 500, customer: 'cus_rentals_int_test' }),
+        expect.objectContaining({
+          amount: 500,
+          customer: 'cus_rentals_int_test',
+          payment_method: 'pm_test_late_fee',
+          off_session: true,
+          confirm: true,
+        }),
         expect.anything(),
       );
+    });
+
+    it('sin método de pago resoluble → 400 NO_PAYMENT_METHOD y NO crea el PaymentIntent', async () => {
+      const rental = await dataSource.getRepository(Rental).save({
+        userId: testUser.id,
+        productId: testProduct.id,
+        orderId: null,
+        stripePriceId: 'price_int_test',
+        monthlyRentCents: 2000,
+        lateFeeCents: 500,
+        status: RentalStatus.PAST_DUE,
+        stripeSubscriptionId: 'sub_no_pm_test',
+      } as unknown as Rental);
+      createdRentalIds.push(rental.id);
+
+      // Cliente sin default; suscripciones y tarjetas adjuntas vacías (ya son el default).
+      mockStripe.customers.retrieve.mockResolvedValueOnce({
+        id: 'cus_rentals_int_test',
+        invoice_settings: { default_payment_method: null },
+      });
+
+      await expect(rentalsService.chargeLateFee(rental.id, false)).rejects.toMatchObject({
+        message: 'NO_PAYMENT_METHOD',
+        status: 400,
+      });
+      expect(mockStripe.paymentIntents.create).not.toHaveBeenCalled();
     });
 
     it('alsoCancel=true — charges fee and cancels Rental', async () => {
