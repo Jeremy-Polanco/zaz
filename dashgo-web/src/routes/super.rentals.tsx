@@ -8,12 +8,13 @@ import {
   useChargeTheftFee,
   useCancelRental,
   useRetryRentalSetup,
+  useReviveRental,
   useResetMaintenance,
 } from '../lib/queries'
 import { TOKEN_KEY, api } from '../lib/api'
 import type { AuthUser } from '../lib/types'
 import type { AdminRentalResponse, RentalFilter, RentalStatus } from '../lib/types'
-import { formatCents } from '../lib/utils'
+import { formatCents, serverMessage } from '../lib/utils'
 
 // ── Route definition ───────────────────────────────────────────────────────────
 
@@ -68,6 +69,7 @@ type ModalAction = {
     | 'charge-theft-cancel'
     | 'cancel'
     | 'retry'
+    | 'revive'
     | 'reset-maintenance'
   rentalId: string
   label: string
@@ -149,6 +151,11 @@ function RentalRow({
     rental.status,
   )
   const canRetry = rental.status === 'pending_setup'
+  // Stripe canceló la suscripción por pago fallido (bug de método de pago,
+  // 2026-10-20) y el dueño decide si se reactiva. No sabemos desde la lista QUIÉN
+  // la canceló (costaría una llamada a Stripe por fila), así que se ofrece en todo
+  // cancelado que tuvo suscripción y el servidor rechaza los que no aplican.
+  const canRevive = rental.status === 'canceled' && !!rental.stripeSubscriptionId
   // Only bebederos that have a running maintenance timer can have it reset.
   const canResetMaintenance = !!rental.nextMaintenanceAt
 
@@ -292,6 +299,21 @@ function RentalRow({
             Reintentar setup
           </Button>
         ) : null}
+        {canRevive ? (
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={() =>
+              onAction({
+                type: 'revive',
+                rentalId: rental.id,
+                label: `Reactivar el alquiler de ${rental.userName} — ${rental.productName}: se crea una suscripción nueva y se le cobra ya ${formatCents(rental.monthlyRentCents)}/mes`,
+              })
+            }
+          >
+            Reactivar
+          </Button>
+        ) : null}
         {canResetMaintenance ? (
           <Button
             size="sm"
@@ -359,6 +381,7 @@ export function SuperRentalsPage() {
   const theftMutation = useChargeTheftFee()
   const cancelMutation = useCancelRental()
   const retryMutation = useRetryRentalSetup()
+  const reviveMutation = useReviveRental()
   const resetMaintenanceMutation = useResetMaintenance()
 
   const isMutating =
@@ -366,6 +389,7 @@ export function SuperRentalsPage() {
     theftMutation.isPending ||
     cancelMutation.isPending ||
     retryMutation.isPending ||
+    reviveMutation.isPending ||
     resetMaintenanceMutation.isPending
 
   const handleStatusChange = (value: string) => {
@@ -393,14 +417,13 @@ export function SuperRentalsPage() {
         await cancelMutation.mutateAsync(pendingAction.rentalId)
       } else if (pendingAction.type === 'retry') {
         await retryMutation.mutateAsync(pendingAction.rentalId)
+      } else if (pendingAction.type === 'revive') {
+        await reviveMutation.mutateAsync(pendingAction.rentalId)
       } else if (pendingAction.type === 'reset-maintenance') {
         await resetMaintenanceMutation.mutateAsync(pendingAction.rentalId)
       }
     } catch (e) {
-      const msg =
-        (e as { response?: { data?: { message?: string } } })?.response?.data?.message ??
-        'No se pudo completar la acción'
-      alert(msg)
+      alert(serverMessage(e, 'No se pudo completar la acción'))
     } finally {
       setPendingAction(null)
     }

@@ -24,6 +24,7 @@ import { RentalsSummaryResponseDto } from './dto/rentals-summary-response.dto';
 import { assertStripeProductionConfig } from '../../common/stripe/stripe-runtime-guard';
 import { PREMIUM_BEBEDERO_CATALOG_SURCHARGE_CENTS } from '../products/pricing';
 import { SubscriptionService } from '../subscription/subscription.service';
+import { StripePaymentMethodResolver } from './stripe-payment-method.resolver';
 
 type StripeClient = InstanceType<typeof Stripe>;
 
@@ -117,6 +118,7 @@ export class RentalsService implements OnModuleInit {
     private readonly dataSource: DataSource,
     private readonly config: ConfigService,
     private readonly subscriptionService: SubscriptionService,
+    private readonly paymentMethods: StripePaymentMethodResolver,
   ) {}
 
   async onModuleInit(): Promise<void> {
@@ -329,12 +331,39 @@ export class RentalsService implements OnModuleInit {
     // call: Stripe returns the ORIGINAL subscription instead of either rejecting
     // on mismatched params ("can only be used with the same parameters") or —
     // worse — minting a second subscription and double-billing the customer.
+    //
+    // MÉTODO DE PAGO (bug 2026-10-20): esta suscripción la crea la API, no
+    // Checkout, así que NO hereda la tarjeta del plan. Sin `default_payment_method`
+    // la primera factura de $6.99 (al terminar el trial) fallaba → past_due ~1 h
+    // después → el dunning de Stripe la cancelaba ("se cae al mes"). Resolvemos
+    // la tarjeta ANTES de llamar a Stripe (nunca dentro de una transacción de BD)
+    // y la dejamos también como default del cliente. Es estable entre reintentos:
+    // el cliente sigue resolviendo a la misma tarjeta, así que los params del
+    // reintento coinciden con los de la llamada original (idempotencia intacta).
+    const paymentMethodId = await this.paymentMethods.ensureCustomerDefault(
+      user.stripeCustomerId,
+    );
+    if (!paymentMethodId) {
+      // Se crea igual (comportamiento previo) para no dejar al cliente sin
+      // alquiler, pero queda a la vista: el cron de reparación lo parchea apenas
+      // el cliente agregue una tarjeta.
+      this.logger.warn(
+        `performActivation: alquiler creado sin método de pago: el primer cobro va a fallar (rental ${rentalId}, customer ${user.stripeCustomerId})`,
+      );
+    }
+
     const sub = await stripe.subscriptions.create(
       {
         customer: user.stripeCustomerId,
         items: [{ price: rental.stripePriceId }],
         trial_period_days: 30,
         proration_behavior: 'none',
+        ...(paymentMethodId ? { default_payment_method: paymentMethodId } : {}),
+        // Si al terminar el trial sigue sin haber tarjeta, que Stripe genere la
+        // factura (y aplique su reintento/dunning) en vez de pausar la suscripción.
+        trial_settings: {
+          end_behavior: { missing_payment_method: 'create_invoice' },
+        },
         metadata: {
           rentalId,
           userId: rental.userId,
@@ -981,6 +1010,16 @@ export class RentalsService implements OnModuleInit {
       throw new HttpException('NO_PAYMENT_METHOD', HttpStatus.BAD_REQUEST);
     }
 
+    // Un PaymentIntent off_session + confirm NO se puede confirmar sin
+    // payment_method (la multa nunca funcionó por eso). Se resuelve ANTES de
+    // tocar el cobro; sin tarjeta no se llama a Stripe.
+    const paymentMethodId = await this.paymentMethods.resolveForCustomer(
+      user.stripeCustomerId,
+    );
+    if (!paymentMethodId) {
+      throw new HttpException('NO_PAYMENT_METHOD', HttpStatus.BAD_REQUEST);
+    }
+
     const stripe = this.requireStripe();
 
     // Day-keyed idempotency: one late-fee charge per rental per day
@@ -995,6 +1034,7 @@ export class RentalsService implements OnModuleInit {
           customer: user.stripeCustomerId,
           amount: rental.lateFeeCents,
           currency: 'usd',
+          payment_method: paymentMethodId,
           off_session: true,
           confirm: true,
           metadata: {
@@ -1068,6 +1108,15 @@ export class RentalsService implements OnModuleInit {
       throw new HttpException('NO_PAYMENT_METHOD', HttpStatus.BAD_REQUEST);
     }
 
+    // Igual que la multa por mora: sin payment_method el PaymentIntent
+    // off_session no se puede confirmar. Se corta antes de llamar a Stripe.
+    const paymentMethodId = await this.paymentMethods.resolveForCustomer(
+      user.stripeCustomerId,
+    );
+    if (!paymentMethodId) {
+      throw new HttpException('NO_PAYMENT_METHOD', HttpStatus.BAD_REQUEST);
+    }
+
     const stripe = this.requireStripe();
 
     let pi: { id: string };
@@ -1077,6 +1126,7 @@ export class RentalsService implements OnModuleInit {
           customer: user.stripeCustomerId,
           amount: rental.theftFeeCents,
           currency: 'usd',
+          payment_method: paymentMethodId,
           off_session: true,
           confirm: true,
           metadata: {
@@ -1225,6 +1275,234 @@ export class RentalsService implements OnModuleInit {
   }
 
   // ─────────────────────────────────────────────────────────────────────────
+  // reviveCanceled — el dueño reactiva, a mano, un alquiler que Stripe canceló
+  // por pago fallido.
+  //
+  // Contexto (bug 2026-10-20): la suscripción del alquiler se creó SIN método
+  // de pago; la primera factura de $6.99 falló y el dunning de Stripe la
+  // canceló (`customer.subscription.deleted` → alquiler CANCELED). Esos clientes
+  // perdieron su bebedero sin culpa. NADA automático debe volver a cobrarles:
+  // la decisión es del dueño, alquiler por alquiler, desde el panel.
+  //
+  // Una suscripción cancelada en Stripe no se puede reabrir, así que se crea
+  // una NUEVA y el alquiler pasa a apuntar a ella. Sin trial: el cliente ya
+  // disfrutó el suyo, el cobro se retoma ya.
+  //
+  // Reglas (cada una con su 4xx y mensaje en español):
+  //  - existir, estar CANCELED y tener `stripeSubscriptionId`  → 409
+  //  - que la haya cancelado Stripe por `payment_failed`        → 409
+  //    (si el cliente o un admin la canceló a propósito, NO se revive: se crea
+  //     un alquiler nuevo)
+  //  - el usuario sigue siendo suscriptor vigente               → 409
+  //  - el producto sigue disponible                             → 409
+  //  - hay un método de pago resoluble                          → 400
+  //
+  // La llamada a Stripe va FUERA de cualquier transacción de BD (nunca se
+  // sostiene una transacción abierta durante una llamada de red).
+  // ─────────────────────────────────────────────────────────────────────────
+
+  async reviveCanceled(rentalId: string): Promise<AdminRentalResponseDto> {
+    const rental = await this.rentals.findOne({
+      where: { id: rentalId },
+      relations: ['user', 'product'],
+    });
+    if (!rental) {
+      throw new NotFoundException(`Rental ${rentalId} not found`);
+    }
+
+    const oldSubId = rental.stripeSubscriptionId;
+    if (rental.status !== RentalStatus.CANCELED || !oldSubId) {
+      throw new HttpException(
+        {
+          code: 'RENTAL_NOT_REVIVABLE',
+          message:
+            'Solo se puede reactivar un alquiler cancelado que tenga una suscripción en Stripe.',
+        },
+        HttpStatus.CONFLICT,
+      );
+    }
+
+    const stripe = this.requireStripe();
+
+    // ¿La canceló Stripe por cobro fallido (dunning)? Si no, fue decisión de
+    // alguien y reactivarla sería cobrarle a quien pidió irse.
+    let oldSub: {
+      status?: string;
+      cancellation_details?: { reason?: string | null } | null;
+    };
+    try {
+      oldSub = (await stripe.subscriptions.retrieve(oldSubId)) as typeof oldSub;
+    } catch (err) {
+      this.logger.error(
+        `reviveCanceled: no se pudo leer la suscripción ${oldSubId} del alquiler ${rentalId}: ${(err as Error).message}`,
+      );
+      throw new HttpException('STRIPE_PAYMENT_FAILED', HttpStatus.BAD_GATEWAY);
+    }
+    if (
+      oldSub.status !== 'canceled' ||
+      oldSub.cancellation_details?.reason !== 'payment_failed'
+    ) {
+      throw new HttpException(
+        {
+          code: 'RENTAL_NOT_CANCELED_BY_STRIPE',
+          message:
+            'Este alquiler no lo canceló Stripe por pago fallido; si hay que reactivarlo, creá un alquiler nuevo',
+        },
+        HttpStatus.CONFLICT,
+      );
+    }
+
+    // Reactivar el cobro de un 2º bebedero sólo tiene sentido si el cliente
+    // sigue en el plan (el bebedero es parte de la suscripción).
+    if (!(await this.subscriptionService.isActiveSubscriber(rental.userId))) {
+      throw new HttpException(
+        {
+          code: 'USER_NOT_SUBSCRIBER',
+          message:
+            'El cliente ya no tiene una suscripción vigente; no se puede reactivar el alquiler.',
+        },
+        HttpStatus.CONFLICT,
+      );
+    }
+
+    if (!rental.product?.isAvailable) {
+      throw new HttpException(
+        {
+          code: 'PRODUCT_UNAVAILABLE',
+          message: 'El producto de este alquiler ya no está disponible.',
+        },
+        HttpStatus.CONFLICT,
+      );
+    }
+
+    const user = await this.users.findOne({ where: { id: rental.userId } });
+    const paymentMethodId = user?.stripeCustomerId
+      ? await this.paymentMethods.ensureCustomerDefault(user.stripeCustomerId)
+      : null;
+    if (!user?.stripeCustomerId || !paymentMethodId) {
+      // La causa original del bug: sin tarjeta la nueva suscripción volvería a
+      // fallar y a cancelarse. Mejor negarse que repetirlo.
+      throw new HttpException(
+        {
+          code: 'NO_PAYMENT_METHOD',
+          message:
+            'El cliente no tiene una tarjeta guardada; pedile que agregue una antes de reactivar el alquiler.',
+        },
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    const chargeFailed = (stripeReason?: string) =>
+      new HttpException(
+        {
+          code: 'STRIPE_PAYMENT_FAILED',
+          message: stripeReason
+            ? `Stripe no pudo crear la suscripción nueva (${stripeReason}); el alquiler sigue cancelado.`
+            : 'Stripe no pudo cobrar la tarjeta del cliente; el alquiler sigue cancelado. Pedile que actualice su tarjeta y volvé a intentar.',
+        },
+        HttpStatus.BAD_GATEWAY,
+      );
+
+    let sub: unknown;
+    try {
+      sub = await stripe.subscriptions.create(
+        {
+          customer: user.stripeCustomerId,
+          items: [{ price: rental.stripePriceId }],
+          default_payment_method: paymentMethodId,
+          proration_behavior: 'none',
+          // Sin trial la primera factura se cobra en esta misma llamada. Con el
+          // default de Stripe (`allow_incomplete`) una tarjeta rechazada NO
+          // lanza: devuelve la suscripción en `incomplete` (expira en 23 h) y
+          // el alquiler quedaba ACTIVE sin haber cobrado nada.
+          // `error_if_incomplete` → 402 y no se crea la suscripción.
+          payment_behavior: 'error_if_incomplete',
+          // El cliente no está presente: la tarjeta se guardó para cobros
+          // off-session (Checkout del plan / pedido del alquiler).
+          off_session: true,
+          metadata: {
+            rentalId,
+            userId: rental.userId,
+            productId: rental.productId,
+            revivedFrom: oldSubId,
+          },
+        },
+        // Clave estable por (alquiler, suscripción vieja, tarjeta): si Stripe
+        // creó la nueva pero falló el guardado en BD, el reintento del dueño
+        // resuelve la misma tarjeta y devuelve LA MISMA suscripción en vez de
+        // cobrar dos veces. La tarjeta va en la clave porque Stripe guarda 24 h
+        // también el 402 de un rechazo: sin ella, después de que el cliente
+        // cambie de tarjeta el reintento chocaría con "mismos params" y fallaría
+        // todo el día. Si la nueva se vuelve a cancelar, el alquiler apunta a
+        // otra id y la clave cambia.
+        {
+          idempotencyKey: `rental-revive-${rentalId}-${oldSubId}-${paymentMethodId}`,
+        },
+      );
+    } catch (err) {
+      this.logger.error(
+        `reviveCanceled: Stripe subscriptions.create falló para el alquiler ${rentalId}: ${(err as Error).message}`,
+      );
+      Sentry.captureException(err, {
+        tags: { module: 'rentals', phase: 'revive' },
+        extra: { rentalId, userId: rental.userId, oldSubId },
+      });
+      // Rechazo de la tarjeta (402) → mensaje para el dueño. Cualquier otra
+      // cosa (precio del snapshot archivado, clave de idempotencia, red) no es
+      // culpa de la tarjeta: se muestra el motivo de Stripe tal cual.
+      const e = err as { type?: string; statusCode?: number; message?: string };
+      const isCardError = e.type === 'StripeCardError' || e.statusCode === 402;
+      throw chargeFailed(isCardError ? undefined : e.message || 'error desconocido');
+    }
+
+    // Cinturón y tirantes: con error_if_incomplete no debería pasar, pero si la
+    // suscripción no quedó cobrando, el alquiler NO se marca ACTIVE.
+    const createdStatus = (sub as { status?: string }).status;
+    if (createdStatus !== 'active' && createdStatus !== 'trialing') {
+      this.logger.error(
+        `reviveCanceled: la suscripción nueva ${(sub as { id?: string }).id} del alquiler ${rentalId} quedó en ${createdStatus}; no se reactiva`,
+      );
+      throw chargeFailed();
+    }
+
+    const subObj = sub as {
+      id: string;
+      current_period_start?: number;
+      current_period_end?: number;
+      items?: {
+        data?: Array<{
+          current_period_start?: number;
+          current_period_end?: number;
+        }>;
+      };
+    };
+    const periodStart =
+      subObj.items?.data?.[0]?.current_period_start ??
+      subObj.current_period_start ??
+      null;
+    const periodEnd =
+      subObj.items?.data?.[0]?.current_period_end ??
+      subObj.current_period_end ??
+      null;
+
+    rental.status = RentalStatus.ACTIVE;
+    rental.stripeSubscriptionId = subObj.id;
+    rental.canceledAt = null;
+    rental.pastDueSince = null;
+    rental.currentPeriodStart = periodStart
+      ? new Date(periodStart * 1000)
+      : null;
+    rental.currentPeriodEnd = periodEnd ? new Date(periodEnd * 1000) : null;
+    const saved = await this.rentals.save(rental);
+
+    this.logger.warn(
+      `reviveCanceled: alquiler ${rentalId} reactivado por el admin (usuario ${rental.userId}): suscripción vieja ${oldSubId} → nueva ${subObj.id}; el cobro se retoma ya`,
+    );
+
+    return (await this.toAdminDtos([saved]))[0];
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
   // resetMaintenance — admin: restart a single rental's maintenance countdown
   // to MAINTENANCE_INTERVAL_DAYS from now (e.g. after a manual visit, or to
   // apply a new interval to a rental whose timer was stamped under the old one).
@@ -1330,6 +1608,14 @@ export class RentalsService implements OnModuleInit {
       rental.planPastDueSince != null && newStatus === RentalStatus.ACTIVE;
     if (!blockedByPlanDelinquency) {
       rental.status = newStatus;
+      // Recuperado (pagó): se borra el Día 0 de la mora. Si quedara la fecha
+      // vieja, la PRÓXIMA mora real cobraría la multa la primera noche, sin los
+      // 3 días de gracia (findEligibleForLateFee compara contra esta fecha).
+      // Mismo criterio que PlanDelinquencyListener al restaurar un alquiler de
+      // $0. Bajo la guarda de arriba NO se toca: ese Día 0 es del listener.
+      if (newStatus === RentalStatus.ACTIVE) {
+        rental.pastDueSince = null;
+      }
     }
     if (sub.current_period_start != null) {
       rental.currentPeriodStart = new Date(sub.current_period_start * 1000);
@@ -1363,6 +1649,16 @@ export class RentalsService implements OnModuleInit {
     if (!rental) {
       this.logger.warn(
         `handleSubscriptionDeleted: no rental found for sub ${sub.id}`,
+      );
+      return;
+    }
+
+    // Webhook tardío de una suscripción que ya fue REEMPLAZADA (reviveCanceled
+    // apunta el alquiler a una suscripción nueva): cancelar el alquiler aquí
+    // lo dejaría sin servicio mientras Stripe sigue cobrando la nueva.
+    if (rental.stripeSubscriptionId !== sub.id) {
+      this.logger.warn(
+        `handleSubscriptionDeleted: ignorado, la suscripción ${sub.id} ya no es la del alquiler ${rental.id} (actual: ${rental.stripeSubscriptionId})`,
       );
       return;
     }

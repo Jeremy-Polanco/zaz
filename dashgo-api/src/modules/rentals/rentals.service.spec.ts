@@ -39,6 +39,7 @@ import { Subscription } from '../../entities/subscription.entity';
 import { SubscriptionTier } from '../../entities/subscription-plan.entity';
 import { SubscriptionService } from '../subscription/subscription.service';
 import { createMockStripe, MockStripe } from '../../test-utils/stripe';
+import { StripePaymentMethodResolver } from './stripe-payment-method.resolver';
 
 // ---------------------------------------------------------------------------
 // Module-level Stripe mock
@@ -193,6 +194,11 @@ describe('RentalsService', () => {
   let subscriptionServiceMock: {
     resolvePlanRowsByUserIds: jest.Mock;
     getPlanNetCentsByTier: jest.Mock;
+    isActiveSubscriber: jest.Mock;
+  };
+  let pmResolverMock: {
+    resolveForCustomer: jest.Mock;
+    ensureCustomerDefault: jest.Mock;
   };
 
   beforeEach(async () => {
@@ -208,6 +214,15 @@ describe('RentalsService', () => {
     subscriptionServiceMock = {
       resolvePlanRowsByUserIds: jest.fn().mockResolvedValue(new Map()),
       getPlanNetCentsByTier: jest.fn().mockResolvedValue(new Map()),
+      // reviveCanceled exige un suscriptor vigente; por defecto lo es.
+      isActiveSubscriber: jest.fn().mockResolvedValue(true),
+    };
+
+    // Por defecto el cliente SÍ tiene método de pago: los cobros que crea la API
+    // lo necesitan (bug 2026-10-20). Cada spec de "sin PM" lo pisa con null.
+    pmResolverMock = {
+      resolveForCustomer: jest.fn().mockResolvedValue('pm_resolved'),
+      ensureCustomerDefault: jest.fn().mockResolvedValue('pm_resolved'),
     };
 
     // Default: entity manager save returns the object it receives (with an id)
@@ -232,6 +247,7 @@ describe('RentalsService', () => {
           },
         },
         { provide: SubscriptionService, useValue: subscriptionServiceMock },
+        { provide: StripePaymentMethodResolver, useValue: pmResolverMock },
       ],
     }).compile();
 
@@ -356,6 +372,55 @@ describe('RentalsService', () => {
       expect(result.activatedAt).toBeInstanceOf(Date);
       expect(result.currentPeriodStart).toBeInstanceOf(Date);
       expect(result.currentPeriodEnd).toBeInstanceOf(Date);
+    });
+
+    it('pasa el método de pago del cliente a la suscripción y fija el default antes de crearla', async () => {
+      const user = fakeUser({ stripeCustomerId: 'cus_abc' });
+      const rental = fakeRental({ id: 'rental-pm', status: RentalStatus.PENDING_SETUP });
+      rentalRepo.findOne.mockResolvedValueOnce(rental);
+      userRepo.findOne.mockResolvedValueOnce(user);
+      rentalRepo.save.mockResolvedValueOnce({ ...rental, status: RentalStatus.ACTIVE });
+      pmResolverMock.ensureCustomerDefault.mockResolvedValueOnce('pm_plan');
+
+      await service.activateForOrder('rental-pm');
+
+      expect(pmResolverMock.ensureCustomerDefault).toHaveBeenCalledWith('cus_abc');
+      const params = mockStripeInstance.subscriptions.create.mock.calls[0][0] as Record<string, unknown>;
+      expect(params['default_payment_method']).toBe('pm_plan');
+      // Si al terminar el trial no hubiera PM, que Stripe cree la factura (y la
+      // reintente) en vez de dejar la suscripción en pausa silenciosa.
+      expect(params['trial_settings']).toEqual({
+        end_behavior: { missing_payment_method: 'create_invoice' },
+      });
+      // La idempotencia y los params estables no cambian.
+      const opts = mockStripeInstance.subscriptions.create.mock.calls[0][1] as Record<string, unknown>;
+      expect(opts['idempotencyKey']).toBe('rental-setup-rental-pm');
+      expect(params['trial_period_days']).toBe(30);
+    });
+
+    it('sin método de pago resuelto igual crea la suscripción (como antes), omite default_payment_method y avisa', async () => {
+      const user = fakeUser({ stripeCustomerId: 'cus_abc' });
+      const rental = fakeRental({ id: 'rental-nopm', status: RentalStatus.PENDING_SETUP });
+      rentalRepo.findOne.mockResolvedValueOnce(rental);
+      userRepo.findOne.mockResolvedValueOnce(user);
+      rentalRepo.save.mockResolvedValueOnce({ ...rental, status: RentalStatus.ACTIVE });
+      pmResolverMock.ensureCustomerDefault.mockResolvedValueOnce(null);
+      const warn = jest
+        .spyOn((service as unknown as { logger: { warn: () => void } }).logger, 'warn')
+        .mockImplementation(() => undefined);
+
+      const result = await service.activateForOrder('rental-nopm');
+
+      expect(mockStripeInstance.subscriptions.create).toHaveBeenCalledTimes(1);
+      const params = mockStripeInstance.subscriptions.create.mock.calls[0][0] as Record<string, unknown>;
+      expect('default_payment_method' in params).toBe(false);
+      expect(result.status).toBe(RentalStatus.ACTIVE);
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining('rental-nopm'),
+      );
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining('sin método de pago'),
+      );
     });
 
     it('T21: idempotency key is the stable rental-setup-{rentalId} (retry-safe, no dup subs)', async () => {
@@ -1478,6 +1543,34 @@ describe('RentalsService', () => {
       expect(result.subscriptionCanceled).toBe(true);
     });
 
+    it('pasa payment_method al PaymentIntent (sin él no se puede confirmar)', async () => {
+      const rental = fakeRental({ id: 'rental-lf-pm', lateFeeCents: 500, status: RentalStatus.PAST_DUE });
+      rentalRepo.findOne.mockResolvedValueOnce(rental);
+      userRepo.findOne.mockResolvedValueOnce(fakeUser({ stripeCustomerId: 'cus_abc' }));
+      pmResolverMock.resolveForCustomer.mockResolvedValueOnce('pm_card');
+      mockStripeInstance.paymentIntents.create.mockResolvedValueOnce({ id: 'pi_lf' });
+
+      await service.chargeLateFee('rental-lf-pm', false);
+
+      expect(pmResolverMock.resolveForCustomer).toHaveBeenCalledWith('cus_abc');
+      const piCall = mockStripeInstance.paymentIntents.create.mock.calls[0][0] as Record<string, unknown>;
+      expect(piCall['payment_method']).toBe('pm_card');
+    });
+
+    it('sin método de pago → 400 NO_PAYMENT_METHOD y NO llama a Stripe', async () => {
+      const rental = fakeRental({ id: 'rental-lf-nopm', lateFeeCents: 500, status: RentalStatus.PAST_DUE });
+      rentalRepo.findOne.mockResolvedValueOnce(rental);
+      userRepo.findOne.mockResolvedValueOnce(fakeUser({ stripeCustomerId: 'cus_abc' }));
+      pmResolverMock.resolveForCustomer.mockResolvedValueOnce(null);
+
+      await expect(service.chargeLateFee('rental-lf-nopm', false)).rejects.toMatchObject({
+        status: 400,
+        message: 'NO_PAYMENT_METHOD',
+      });
+      expect(mockStripeInstance.paymentIntents.create).not.toHaveBeenCalled();
+      expect(rentalRepo.save).not.toHaveBeenCalled();
+    });
+
     // ─────────────────────────────────────────────────────────────────────────
     // Pair 3 (T37) — chargeLateFee lateFeeCents=0 → 503
     // ─────────────────────────────────────────────────────────────────────────
@@ -1595,6 +1688,33 @@ describe('RentalsService', () => {
 
       expect(result.subscriptionCanceled).toBe(true);
       expect(mockStripeInstance.subscriptions.cancel).toHaveBeenCalledTimes(1);
+    });
+
+    it('pasa payment_method al PaymentIntent de la multa por robo', async () => {
+      const rental = fakeRental({ id: 'rental-t-pm', theftFeeCents: 8000, theftFeeChargedAt: null });
+      rentalRepo.findOne.mockResolvedValueOnce(rental);
+      userRepo.findOne.mockResolvedValueOnce(fakeUser({ stripeCustomerId: 'cus_abc' }));
+      pmResolverMock.resolveForCustomer.mockResolvedValueOnce('pm_card');
+      mockStripeInstance.paymentIntents.create.mockResolvedValueOnce({ id: 'pi_t' });
+
+      await service.chargeTheftFee('rental-t-pm', false);
+
+      const piCall = mockStripeInstance.paymentIntents.create.mock.calls[0][0] as Record<string, unknown>;
+      expect(piCall['payment_method']).toBe('pm_card');
+    });
+
+    it('multa por robo sin método de pago → 400 NO_PAYMENT_METHOD y NO llama a Stripe', async () => {
+      const rental = fakeRental({ id: 'rental-t-nopm', theftFeeCents: 8000, theftFeeChargedAt: null });
+      rentalRepo.findOne.mockResolvedValueOnce(rental);
+      userRepo.findOne.mockResolvedValueOnce(fakeUser({ stripeCustomerId: 'cus_abc' }));
+      pmResolverMock.resolveForCustomer.mockResolvedValueOnce(null);
+
+      await expect(service.chargeTheftFee('rental-t-nopm', false)).rejects.toMatchObject({
+        status: 400,
+        message: 'NO_PAYMENT_METHOD',
+      });
+      expect(mockStripeInstance.paymentIntents.create).not.toHaveBeenCalled();
+      expect(rentalRepo.save).not.toHaveBeenCalled();
     });
 
     it('theftFeeCents=0 → 503 THEFT_FEE_NOT_CONFIGURED, no Stripe call', async () => {
@@ -1757,6 +1877,292 @@ describe('RentalsService', () => {
     });
   });
 
+  // ─────────────────────────────────────────────────────────────────────────
+  // reviveCanceled — el dueño reactiva un alquiler que Stripe canceló por pago
+  // fallido (bug 2026-10-20: suscripciones creadas sin método de pago).
+  // ─────────────────────────────────────────────────────────────────────────
+
+  describe('reviveCanceled', () => {
+    const NOW = Math.floor(Date.now() / 1000);
+
+    function canceledRental(overrides: Partial<Rental> = {}): Rental {
+      return fakeRental({
+        id: 'rental-rv',
+        userId: 'user-1',
+        productId: 'product-1',
+        status: RentalStatus.CANCELED,
+        stripeSubscriptionId: 'sub_old',
+        stripePriceId: 'price_abc',
+        canceledAt: new Date('2026-10-19T10:00:00Z'),
+        pastDueSince: new Date('2026-10-18T10:00:00Z'),
+        product: fakeProduct({ isAvailable: true }),
+        ...overrides,
+      });
+    }
+
+    /** Escenario feliz; cada test rompe UNA regla. */
+    function arrange(rental: Rental = canceledRental()) {
+      rentalRepo.findOne.mockResolvedValueOnce(rental);
+      userRepo.findOne.mockResolvedValueOnce(
+        fakeUser({ id: 'user-1', stripeCustomerId: 'cus_abc' }),
+      );
+      mockStripeInstance.subscriptions.retrieve.mockResolvedValueOnce({
+        id: 'sub_old',
+        status: 'canceled',
+        cancellation_details: { reason: 'payment_failed' },
+      });
+      mockStripeInstance.subscriptions.create.mockResolvedValueOnce({
+        id: 'sub_new',
+        status: 'active',
+        items: {
+          data: [{ current_period_start: NOW, current_period_end: NOW + 30 * 86400 }],
+        },
+      });
+      rentalRepo.save.mockImplementation(async (r: Rental) => r);
+      return rental;
+    }
+
+    it('éxito: crea una suscripción NUEVA sin trial, con el PM resuelto, y deja el alquiler ACTIVE', async () => {
+      const rental = arrange();
+
+      const result = await service.reviveCanceled('rental-rv');
+
+      expect(mockStripeInstance.subscriptions.retrieve).toHaveBeenCalledWith('sub_old');
+      expect(pmResolverMock.ensureCustomerDefault).toHaveBeenCalledWith('cus_abc');
+      expect(mockStripeInstance.subscriptions.create).toHaveBeenCalledTimes(1);
+      const [params, opts] = mockStripeInstance.subscriptions.create.mock.calls[0] as [
+        Record<string, unknown>,
+        Record<string, unknown>,
+      ];
+      expect(params).toEqual({
+        customer: 'cus_abc',
+        items: [{ price: 'price_abc' }],
+        default_payment_method: 'pm_resolved',
+        proration_behavior: 'none',
+        // Sin esto Stripe (allow_incomplete, el default) devuelve 200 con la
+        // suscripción en `incomplete` cuando la tarjeta rebota.
+        payment_behavior: 'error_if_incomplete',
+        off_session: true,
+        metadata: {
+          rentalId: 'rental-rv',
+          userId: 'user-1',
+          productId: 'product-1',
+          revivedFrom: 'sub_old',
+        },
+      });
+      // Sin trial: el cliente ya lo disfrutó, el cobro se retoma ya.
+      expect(params).not.toHaveProperty('trial_period_days');
+      expect(params).not.toHaveProperty('trial_end');
+      expect(opts).toEqual({
+        idempotencyKey: 'rental-revive-rental-rv-sub_old-pm_resolved',
+      });
+
+      const saved = rentalRepo.save.mock.calls[0][0] as Rental;
+      expect(saved).toBe(rental);
+      expect(saved.status).toBe(RentalStatus.ACTIVE);
+      expect(saved.stripeSubscriptionId).toBe('sub_new');
+      expect(saved.canceledAt).toBeNull();
+      expect(saved.pastDueSince).toBeNull();
+      expect(saved.currentPeriodStart).toEqual(new Date(NOW * 1000));
+      expect(saved.currentPeriodEnd).toEqual(new Date((NOW + 30 * 86400) * 1000));
+      expect(result.status).toBe(RentalStatus.ACTIVE);
+      expect(result.stripeSubscriptionId).toBe('sub_new');
+    });
+
+    it('la llamada a Stripe ocurre fuera de cualquier transacción de BD', async () => {
+      arrange();
+      await service.reviveCanceled('rental-rv');
+      expect(dataSource.createQueryRunner).not.toHaveBeenCalled();
+    });
+
+    it('rental inexistente → 404 y sin Stripe', async () => {
+      rentalRepo.findOne.mockResolvedValueOnce(null);
+      await expect(service.reviveCanceled('nope')).rejects.toBeInstanceOf(NotFoundException);
+      expect(mockStripeInstance.subscriptions.create).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ['no está CANCELED', { status: RentalStatus.ACTIVE }],
+      ['no tiene stripeSubscriptionId', { stripeSubscriptionId: null }],
+    ])('rental que %s → 409 RENTAL_NOT_REVIVABLE y sin Stripe', async (_label, overrides) => {
+      rentalRepo.findOne.mockResolvedValueOnce(canceledRental(overrides as Partial<Rental>));
+
+      const err = await service.reviveCanceled('rental-rv').catch((e) => e);
+
+      expect(err).toBeInstanceOf(HttpException);
+      expect(err.getStatus()).toBe(409);
+      expect(err.getResponse()).toMatchObject({ code: 'RENTAL_NOT_REVIVABLE' });
+      expect(mockStripeInstance.subscriptions.retrieve).not.toHaveBeenCalled();
+      expect(mockStripeInstance.subscriptions.create).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ['el cliente la canceló', { status: 'canceled', cancellation_details: { reason: 'cancellation_requested' } }],
+      ['sin cancellation_details (cancelación del admin)', { status: 'canceled' }],
+      ['razón payment_disputed', { status: 'canceled', cancellation_details: { reason: 'payment_disputed' } }],
+      ['Stripe dice que sigue active', { status: 'active', cancellation_details: { reason: 'payment_failed' } }],
+    ])('si %s → 409 RENTAL_NOT_CANCELED_BY_STRIPE y sin crear nada', async (_label, stripeSub) => {
+      rentalRepo.findOne.mockResolvedValueOnce(canceledRental());
+      mockStripeInstance.subscriptions.retrieve.mockResolvedValueOnce({
+        id: 'sub_old',
+        ...stripeSub,
+      });
+
+      const err = await service.reviveCanceled('rental-rv').catch((e) => e);
+
+      expect(err.getStatus()).toBe(409);
+      expect(err.getResponse()).toMatchObject({
+        code: 'RENTAL_NOT_CANCELED_BY_STRIPE',
+        message:
+          'Este alquiler no lo canceló Stripe por pago fallido; si hay que reactivarlo, creá un alquiler nuevo',
+      });
+      expect(mockStripeInstance.subscriptions.create).not.toHaveBeenCalled();
+      expect(rentalRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('si Stripe falla al leer la suscripción vieja → 502 STRIPE_PAYMENT_FAILED', async () => {
+      rentalRepo.findOne.mockResolvedValueOnce(canceledRental());
+      mockStripeInstance.subscriptions.retrieve.mockRejectedValueOnce(new Error('stripe down'));
+
+      const err = await service.reviveCanceled('rental-rv').catch((e) => e);
+
+      expect(err.getStatus()).toBe(502);
+      expect(mockStripeInstance.subscriptions.create).not.toHaveBeenCalled();
+    });
+
+    it('usuario sin plan vigente → 409 USER_NOT_SUBSCRIBER y sin crear nada', async () => {
+      arrange();
+      subscriptionServiceMock.isActiveSubscriber.mockResolvedValueOnce(false);
+
+      const err = await service.reviveCanceled('rental-rv').catch((e) => e);
+
+      expect(subscriptionServiceMock.isActiveSubscriber).toHaveBeenCalledWith('user-1');
+      expect(err.getStatus()).toBe(409);
+      expect(err.getResponse()).toMatchObject({ code: 'USER_NOT_SUBSCRIBER' });
+      expect(mockStripeInstance.subscriptions.create).not.toHaveBeenCalled();
+      expect(rentalRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('producto ya no disponible → 409 PRODUCT_UNAVAILABLE y sin crear nada', async () => {
+      arrange(canceledRental({ product: fakeProduct({ isAvailable: false }) }));
+
+      const err = await service.reviveCanceled('rental-rv').catch((e) => e);
+
+      expect(err.getStatus()).toBe(409);
+      expect(err.getResponse()).toMatchObject({ code: 'PRODUCT_UNAVAILABLE' });
+      expect(mockStripeInstance.subscriptions.create).not.toHaveBeenCalled();
+    });
+
+    it('sin método de pago resoluble → 400 NO_PAYMENT_METHOD y sin crear nada', async () => {
+      arrange();
+      pmResolverMock.ensureCustomerDefault.mockResolvedValueOnce(null);
+
+      const err = await service.reviveCanceled('rental-rv').catch((e) => e);
+
+      expect(err.getStatus()).toBe(400);
+      expect(err.getResponse()).toMatchObject({ code: 'NO_PAYMENT_METHOD' });
+      expect(mockStripeInstance.subscriptions.create).not.toHaveBeenCalled();
+      expect(rentalRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('si Stripe rechaza la tarjeta (402 por error_if_incomplete) → 502 STRIPE_PAYMENT_FAILED en español y el alquiler sigue CANCELED', async () => {
+      const rental = arrange();
+      mockStripeInstance.subscriptions.create.mockReset();
+      mockStripeInstance.subscriptions.create.mockRejectedValueOnce(
+        Object.assign(new Error('Your card was declined.'), {
+          type: 'StripeCardError',
+          statusCode: 402,
+        }),
+      );
+
+      const err = await service.reviveCanceled('rental-rv').catch((e) => e);
+
+      expect(err.getStatus()).toBe(502);
+      expect(err.getResponse()).toMatchObject({
+        code: 'STRIPE_PAYMENT_FAILED',
+        message: expect.stringContaining('tarjeta'),
+      });
+      expect(rentalRepo.save).not.toHaveBeenCalled();
+      expect(rental.status).toBe(RentalStatus.CANCELED);
+      expect(rental.stripeSubscriptionId).toBe('sub_old');
+    });
+
+    it('si Stripe falla por otra cosa (p. ej. precio archivado) → 502 con el motivo de Stripe, sin culpar a la tarjeta', async () => {
+      const rental = arrange();
+      mockStripeInstance.subscriptions.create.mockReset();
+      mockStripeInstance.subscriptions.create.mockRejectedValueOnce(
+        Object.assign(new Error('The price specified is inactive.'), {
+          type: 'StripeInvalidRequestError',
+          statusCode: 400,
+        }),
+      );
+
+      const err = await service.reviveCanceled('rental-rv').catch((e) => e);
+
+      expect(err.getStatus()).toBe(502);
+      const body = err.getResponse() as { code: string; message: string };
+      expect(body.code).toBe('STRIPE_PAYMENT_FAILED');
+      expect(body.message).toContain('The price specified is inactive.');
+      expect(body.message).not.toContain('tarjeta');
+      expect(rentalRepo.save).not.toHaveBeenCalled();
+      expect(rental.status).toBe(RentalStatus.CANCELED);
+    });
+
+    it.each(['incomplete', 'incomplete_expired', 'past_due'])(
+      'si Stripe devuelve la suscripción nueva en %s (no cobró) → 502 y el alquiler NO queda ACTIVE',
+      async (status) => {
+        const rental = arrange();
+        mockStripeInstance.subscriptions.create.mockReset();
+        mockStripeInstance.subscriptions.create.mockResolvedValueOnce({
+          id: 'sub_new',
+          status,
+          items: { data: [{ current_period_start: NOW, current_period_end: NOW + 30 * 86400 }] },
+        });
+
+        const err = await service.reviveCanceled('rental-rv').catch((e) => e);
+
+        expect(err.getStatus()).toBe(502);
+        expect(rentalRepo.save).not.toHaveBeenCalled();
+        expect(rental.status).toBe(RentalStatus.CANCELED);
+        expect(rental.stripeSubscriptionId).toBe('sub_old');
+      },
+    );
+
+    it('otra tarjeta entre intentos → otra clave de idempotencia (un rechazo guardado no bloquea 24 h el reintento)', async () => {
+      arrange();
+      mockStripeInstance.subscriptions.create.mockReset();
+      mockStripeInstance.subscriptions.create.mockRejectedValueOnce(new Error('card_declined'));
+      pmResolverMock.ensureCustomerDefault.mockResolvedValueOnce('pm_old_card');
+      await service.reviveCanceled('rental-rv').catch(() => undefined);
+
+      arrange();
+      pmResolverMock.ensureCustomerDefault.mockResolvedValueOnce('pm_new_card');
+      const result = await service.reviveCanceled('rental-rv');
+
+      const keys = mockStripeInstance.subscriptions.create.mock.calls.map(
+        (c) => (c[1] as { idempotencyKey: string }).idempotencyKey,
+      );
+      expect(keys).toEqual([
+        'rental-revive-rental-rv-sub_old-pm_old_card',
+        'rental-revive-rental-rv-sub_old-pm_new_card',
+      ]);
+      expect(result.status).toBe(RentalStatus.ACTIVE);
+    });
+
+    it('deja un WARN en español con el rental, el usuario y ambas suscripciones', async () => {
+      arrange();
+      const warn = jest.spyOn((service as any).logger, 'warn').mockImplementation(() => undefined);
+
+      await service.reviveCanceled('rental-rv');
+
+      const line = warn.mock.calls.map((c) => String(c[0])).join('\n');
+      expect(line).toContain('rental-rv');
+      expect(line).toContain('user-1');
+      expect(line).toContain('sub_old');
+      expect(line).toContain('sub_new');
+    });
+  });
+
   describe('resetMaintenance', () => {
     it('resets nextMaintenanceAt to ~90 days out for a maintenance rental', async () => {
       const rental = fakeRental({
@@ -1869,6 +2275,90 @@ describe('RentalsService', () => {
       // pastDueSince must NOT be overwritten — must be the original date
       const savedArg = rentalRepo.save.mock.calls[0][0] as Partial<Rental>;
       expect(savedArg.pastDueSince).toEqual(firstPastDueDate);
+    });
+
+    // Bug 2026-10-20: los alquileres que cayeron en past_due porque NOSOTROS
+    // creamos la suscripción sin tarjeta se reparan (cron) y vuelven a active.
+    // Si pastDueSince quedara con la fecha vieja, la PRÓXIMA mora real cobraría
+    // la multa la primera noche, sin los 3 días de gracia (findEligibleForLateFee
+    // compara contra esa fecha). Al recuperarse, el Día 0 se borra.
+    it('T4.4: al volver a ACTIVE se limpia pastDueSince y la próxima mora arranca su gracia de cero', async () => {
+      const oldPastDue = new Date('2026-10-10T03:00:00Z');
+      const rental = fakeRental({
+        id: 'rental-pd-recover',
+        stripeSubscriptionId: 'sub_pd_recover',
+        status: RentalStatus.PAST_DUE,
+        pastDueSince: oldPastDue,
+        planPastDueSince: null,
+      });
+      rentalRepo.findOne.mockResolvedValue(rental);
+      rentalRepo.save.mockImplementation(async (r: Rental) => r);
+      const event = (status: string) => ({
+        type: 'customer.subscription.updated',
+        data: {
+          object: {
+            id: 'sub_pd_recover',
+            status,
+            metadata: { rentalId: 'rental-pd-recover' },
+          },
+        },
+      });
+
+      await service.handleWebhook(event('active'));
+
+      expect(rental.status).toBe(RentalStatus.ACTIVE);
+      expect(rental.pastDueSince).toBeNull();
+
+      // Una mora real posterior: el Día 0 es AHORA, no el 10/10.
+      const before = Date.now();
+      await service.handleWebhook(event('past_due'));
+
+      expect(rental.status).toBe(RentalStatus.PAST_DUE);
+      expect(rental.pastDueSince).toBeInstanceOf(Date);
+      expect((rental.pastDueSince as Date).getTime()).toBeGreaterThanOrEqual(before);
+    });
+
+    it('T4.5: UNPAID → ACTIVE (pagó tarde) también limpia pastDueSince', async () => {
+      const rental = fakeRental({
+        id: 'rental-unpaid-recover',
+        stripeSubscriptionId: 'sub_unpaid_recover',
+        status: RentalStatus.UNPAID,
+        pastDueSince: new Date('2026-10-01T03:00:00Z'),
+      });
+      rentalRepo.findOne.mockResolvedValueOnce(rental);
+      rentalRepo.save.mockImplementation(async (r: Rental) => r);
+
+      await service.handleWebhook({
+        type: 'customer.subscription.updated',
+        data: { object: { id: 'sub_unpaid_recover', status: 'active' } },
+      });
+
+      const savedArg = rentalRepo.save.mock.calls[0][0] as Partial<Rental>;
+      expect(savedArg.status).toBe(RentalStatus.ACTIVE);
+      expect(savedArg.pastDueSince).toBeNull();
+    });
+
+    it('T4.6: si la guarda de mora del PLAN bloquea el ACTIVE, pastDueSince NO se toca (lo restaura PlanDelinquencyListener)', async () => {
+      const planDay0 = new Date('2026-10-12T00:00:00Z');
+      const rental = fakeRental({
+        id: 'rental-plan-guard',
+        stripeSubscriptionId: 'sub_zero_guard',
+        status: RentalStatus.PAST_DUE,
+        monthlyRentCents: 0,
+        planPastDueSince: planDay0,
+        pastDueSince: planDay0,
+      });
+      rentalRepo.findOne.mockResolvedValueOnce(rental);
+      rentalRepo.save.mockImplementation(async (r: Rental) => r);
+
+      await service.handleWebhook({
+        type: 'customer.subscription.updated',
+        data: { object: { id: 'sub_zero_guard', status: 'active' } },
+      });
+
+      const savedArg = rentalRepo.save.mock.calls[0][0] as Partial<Rental>;
+      expect(savedArg.status).toBe(RentalStatus.PAST_DUE);
+      expect(savedArg.pastDueSince).toEqual(planDay0);
     });
 
     it('T4.3: customer.subscription.deleted sets rental.status=CANCELED', async () => {
@@ -2207,6 +2697,31 @@ describe('RentalsService', () => {
 
       await expect(service.handleWebhook(event)).resolves.toBeUndefined();
       expect(rentalRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('T53d: webhook TARDÍO de la suscripción vieja (ya reemplazada por un revive) → ignorado, el alquiler NO se cancela', async () => {
+      // Tras reviveCanceled el alquiler apunta a sub_new. Si llega (tarde o
+      // repetido) el `deleted` de sub_old, cancelar el alquiler dejaría al
+      // cliente sin servicio mientras Stripe le sigue cobrando sub_new.
+      const rental = fakeRental({
+        id: 'rental-revived',
+        stripeSubscriptionId: 'sub_new',
+        status: RentalStatus.ACTIVE,
+      });
+      // Como la BD real: el alquiler se busca POR la id de la suscripción del
+      // evento, así que sub_old ya no encuentra nada (esa es la protección real).
+      rentalRepo.findOne.mockImplementation(
+        async (opts: { where: { stripeSubscriptionId?: string } }) =>
+          opts.where.stripeSubscriptionId === rental.stripeSubscriptionId ? rental : null,
+      );
+
+      await service.handleWebhook({
+        type: 'customer.subscription.deleted',
+        data: { object: { id: 'sub_old', metadata: { rentalId: 'rental-revived' } } },
+      });
+
+      expect(rentalRepo.save).not.toHaveBeenCalled();
+      expect(rental.status).toBe(RentalStatus.ACTIVE);
     });
   });
 

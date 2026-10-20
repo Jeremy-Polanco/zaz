@@ -30,6 +30,13 @@ export interface MockStripe {
     cancel: jest.Mock;
     list: jest.Mock;
   };
+  paymentMethods: {
+    list: jest.Mock;
+  };
+  invoices: {
+    pay: jest.Mock;
+    retrieve: jest.Mock;
+  };
   prices: {
     retrieve: jest.Mock;
     create: jest.Mock;
@@ -83,6 +90,13 @@ export function createMockStripe(): MockStripe {
       search: jest.fn().mockResolvedValue({ data: [] }),
       update: jest.fn().mockResolvedValue({}),
       list: jest.fn().mockResolvedValue({ data: [] }),
+    },
+    paymentMethods: {
+      list: jest.fn().mockResolvedValue({ data: [] }),
+    },
+    invoices: {
+      pay: jest.fn().mockResolvedValue({ id: 'in_test_default', status: 'paid' }),
+      retrieve: jest.fn().mockResolvedValue({ id: 'in_test_default', status: 'open' }),
     },
     prices: {
       retrieve: jest.fn().mockResolvedValue({
@@ -193,6 +207,9 @@ export function resetMockStripe(mock: MockStripe): void {
   mock.customers.search.mockReset().mockImplementation(fresh.customers.search);
   mock.customers.update.mockReset().mockImplementation(fresh.customers.update);
   mock.customers.list.mockReset().mockImplementation(fresh.customers.list);
+  mock.paymentMethods.list.mockReset().mockImplementation(fresh.paymentMethods.list);
+  mock.invoices.pay.mockReset().mockImplementation(fresh.invoices.pay);
+  mock.invoices.retrieve.mockReset().mockImplementation(fresh.invoices.retrieve);
   mock.prices.retrieve.mockReset().mockImplementation(fresh.prices.retrieve);
   mock.prices.create.mockReset().mockImplementation(fresh.prices.create);
   mock.prices.update.mockReset().mockImplementation(fresh.prices.update);

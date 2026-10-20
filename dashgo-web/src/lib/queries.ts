@@ -1613,6 +1613,26 @@ export function useRetryRentalSetup() {
   })
 }
 
+/**
+ * Super-admin: POST /admin/rentals/:id/revive
+ *
+ * Reactiva un alquiler que Stripe canceló por pago fallido (crea una
+ * suscripción nueva y vuelve a cobrar YA). Invalida todo ['admin','rentals']:
+ * la lista (pasa de Cancelado a Activo) y el resumen de KPIs.
+ */
+export function useReviveRental() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (rentalId: string) => {
+      const { data } = await api.post(`/admin/rentals/${rentalId}/revive`)
+      return data
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['admin', 'rentals'] })
+    },
+  })
+}
+
 // ── Push broadcast (super admin → Notificar) ─────────────────────────────────
 
 export type BroadcastAudience = 'all' | 'active' | 'lapsed'
