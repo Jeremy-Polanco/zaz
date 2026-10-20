@@ -7,7 +7,9 @@ import { Product } from '../../entities/product.entity';
 import { Order } from '../../entities/order.entity';
 import { Subscription } from '../../entities/subscription.entity';
 import { RentalsService } from './rentals.service';
+import { StripePaymentMethodResolver } from './stripe-payment-method.resolver';
 import { LateFeeCron } from './late-fee.cron';
+import { RentalPaymentMethodReconcileCron } from './rental-payment-method-reconcile.cron';
 import { PlanDelinquencyListener } from './plan-delinquency.listener';
 import { AdminRentalsController } from './admin-rentals.controller';
 import { MeRentalsController } from './me-rentals.controller';
@@ -44,7 +46,13 @@ import { SubscriptionModule } from '../subscription/subscription.module';
     ConfigModule,
     SubscriptionModule,
   ],
-  providers: [RentalsService, LateFeeCron, PlanDelinquencyListener],
+  providers: [
+    RentalsService,
+    StripePaymentMethodResolver,
+    LateFeeCron,
+    RentalPaymentMethodReconcileCron,
+    PlanDelinquencyListener,
+  ],
   controllers: [AdminRentalsController, MeRentalsController],
   exports: [RentalsService],
 })

@@ -24,6 +24,7 @@ vi.mock('../lib/queries', () => ({
   useChargeTheftFee: vi.fn(),
   useCancelRental: vi.fn(),
   useRetryRentalSetup: vi.fn(),
+  useReviveRental: vi.fn(),
   useResetMaintenance: vi.fn(),
 }))
 
@@ -39,6 +40,7 @@ import {
   useChargeTheftFee,
   useCancelRental,
   useRetryRentalSetup,
+  useReviveRental,
   useResetMaintenance,
 } from '../lib/queries'
 import { SuperRentalsPage } from './super.rentals'
@@ -49,6 +51,7 @@ const mockUseChargeLateFee = vi.mocked(useChargeLateFee)
 const mockUseChargeTheftFee = vi.mocked(useChargeTheftFee)
 const mockUseCancelRental = vi.mocked(useCancelRental)
 const mockUseRetryRentalSetup = vi.mocked(useRetryRentalSetup)
+const mockUseReviveRental = vi.mocked(useReviveRental)
 const mockUseResetMaintenance = vi.mocked(useResetMaintenance)
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -102,6 +105,7 @@ type Mutations = {
   theft?: ReturnType<typeof mutationMock>
   cancel?: ReturnType<typeof mutationMock>
   retry?: ReturnType<typeof mutationMock>
+  revive?: ReturnType<typeof mutationMock>
   resetMaintenance?: ReturnType<typeof mutationMock>
 }
 
@@ -156,6 +160,7 @@ function setup(
   mockUseChargeTheftFee.mockReturnValue(wire(opts.theft))
   mockUseCancelRental.mockReturnValue(wire(opts.cancel))
   mockUseRetryRentalSetup.mockReturnValue(wire(opts.retry))
+  mockUseReviveRental.mockReturnValue(wire(opts.revive))
   mockUseResetMaintenance.mockReturnValue(wire(opts.resetMaintenance))
 }
 
@@ -551,6 +556,51 @@ describe('SuperRentalsPage — which actions each status offers', () => {
     expect(screen.getByRole('button', { name: 'Cancelar' })).toBeInTheDocument()
   })
 
+  // "Reactivar" crea una suscripción NUEVA en Stripe y vuelve a cobrar: sólo
+  // tiene sentido para un alquiler cancelado que TUVO suscripción en Stripe
+  // (el servidor además verifica que la cancelara Stripe por pago fallido).
+  it('offers "Reactivar" only for a canceled rental that has a Stripe subscription', () => {
+    setup({
+      rentals: [
+        makeRental({
+          id: 'r-canceled-sub',
+          userName: 'Con Suscripción',
+          status: 'canceled',
+          lateFeeCents: 0,
+          stripeSubscriptionId: 'sub_old',
+        }),
+        makeRental({
+          id: 'r-canceled-nosub',
+          userName: 'Sin Suscripción',
+          status: 'canceled',
+          lateFeeCents: 0,
+          stripeSubscriptionId: null,
+        }),
+        makeRental({
+          id: 'r-active',
+          userName: 'Activo',
+          status: 'active',
+          lateFeeCents: 0,
+          stripeSubscriptionId: 'sub_live',
+        }),
+        makeRental({
+          id: 'r-pending',
+          userName: 'Pendiente',
+          status: 'pending_setup',
+          lateFeeCents: 0,
+          stripeSubscriptionId: null,
+        }),
+      ],
+    })
+    renderWithProviders(<SuperRentalsPage />)
+
+    const buttons = screen.getAllByRole('button', { name: 'Reactivar' })
+    expect(buttons).toHaveLength(1)
+    // ...y es el de la fila correcta.
+    const row = buttons[0].closest('div.border') as HTMLElement
+    expect(within(row).getByText('Con Suscripción')).toBeInTheDocument()
+  })
+
   // The theft fee is a one-shot charge. Offering it twice would double-bill.
   it('offers "Cobrar robo" when a theft fee is set and not yet charged', () => {
     setup({ rentals: [makeRental({ theftFeeCents: 8000 })] })
@@ -691,6 +741,66 @@ describe('SuperRentalsPage — confirmation modal dispatches the right mutation'
     )
   })
 
+  it('asks for confirmation in-page before reviving, and says billing resumes now', async () => {
+    const revive = mutationMock()
+    setup({
+      rentals: [
+        makeRental({
+          status: 'canceled',
+          lateFeeCents: 0,
+          monthlyRentCents: 699,
+          stripeSubscriptionId: 'sub_old',
+        }),
+      ],
+      revive,
+    })
+    renderWithProviders(<SuperRentalsPage />)
+
+    const dialog = await pressAction('Reactivar')
+
+    // Nada se llamó todavía: es un paso de confirmación, no un window.confirm.
+    expect(revive.mutateAsync).not.toHaveBeenCalled()
+    expect(within(dialog).getByText(/Juan García/)).toBeInTheDocument()
+    expect(within(dialog).getByText(/\$6\.99/)).toBeInTheDocument()
+    expect(within(dialog).getByText(/cobra ya/i)).toBeInTheDocument()
+  })
+
+  it('revives the canceled rental once the operator confirms', async () => {
+    const revive = mutationMock()
+    setup({
+      rentals: [
+        makeRental({ status: 'canceled', lateFeeCents: 0, stripeSubscriptionId: 'sub_old' }),
+      ],
+      revive,
+    })
+    renderWithProviders(<SuperRentalsPage />)
+
+    await pressAction('Reactivar')
+    await confirmModal()
+
+    await waitFor(() =>
+      expect(revive.mutateAsync).toHaveBeenCalledWith('rental-001'),
+    )
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  })
+
+  it('does not revive when the operator backs out of the confirmation', async () => {
+    const revive = mutationMock()
+    setup({
+      rentals: [
+        makeRental({ status: 'canceled', lateFeeCents: 0, stripeSubscriptionId: 'sub_old' }),
+      ],
+      revive,
+    })
+    renderWithProviders(<SuperRentalsPage />)
+
+    const dialog = await pressAction('Reactivar')
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Cancelar' }))
+
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(revive.mutateAsync).not.toHaveBeenCalled()
+  })
+
   it('resets the maintenance timer', async () => {
     const resetMaintenance = mutationMock()
     setup({
@@ -761,6 +871,29 @@ describe('SuperRentalsPage — failures surface to the operator', () => {
       expect(alertSpy).toHaveBeenCalledWith('La tarjeta fue rechazada'),
     )
     // The modal closes either way, so the operator is never stuck.
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  })
+
+  it('shows the server message when reviving is refused (e.g. not canceled by Stripe)', async () => {
+    const message =
+      'Este alquiler no lo canceló Stripe por pago fallido; si hay que reactivarlo, creá un alquiler nuevo'
+    const revive = mutationMock({
+      mutateAsync: vi.fn().mockRejectedValue({
+        response: { data: { code: 'RENTAL_NOT_CANCELED_BY_STRIPE', message } },
+      }),
+    })
+    setup({
+      rentals: [
+        makeRental({ status: 'canceled', lateFeeCents: 0, stripeSubscriptionId: 'sub_old' }),
+      ],
+      revive,
+    })
+    renderWithProviders(<SuperRentalsPage />)
+
+    await pressAction('Reactivar')
+    await confirmModal()
+
+    await waitFor(() => expect(alertSpy).toHaveBeenCalledWith(message))
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
   })
 

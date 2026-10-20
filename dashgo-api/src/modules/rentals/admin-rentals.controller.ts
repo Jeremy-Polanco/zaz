@@ -32,6 +32,7 @@ import { RentalsSummaryResponseDto } from './dto/rentals-summary-response.dto';
  *   POST /admin/rentals/:id/charge-late-fee  — charge late fee off-session
  *   POST /admin/rentals/:id/cancel           — cancel rental + Stripe sub
  *   POST /admin/rentals/:id/retry-setup      — retry Stripe Subscription creation
+ *   POST /admin/rentals/:id/revive           — re-create the Stripe sub of a rental Stripe canceled for non-payment
  *
  * NOTE: static sub-routes GET /admin/rentals/delinquent and /summary MUST be
  * declared before any dynamic :id route (would conflict if GET /:id existed). Currently no such
@@ -149,5 +150,21 @@ export class AdminRentalsController {
     @Param('id', ParseUUIDPipe) id: string,
   ): Promise<AdminRentalResponseDto> {
     return this.rentals.retrySetup(id);
+  }
+
+  /**
+   * POST /admin/rentals/:id/revive
+   * Reactiva un alquiler que Stripe canceló por pago fallido creando una
+   * suscripción NUEVA (sin trial, con el método de pago del cliente). Decisión
+   * manual del dueño: nada automático vuelve a cobrar. 409 si no aplica
+   * (no cancelado por Stripe / no suscriptor / producto no disponible),
+   * 400 si el cliente no tiene tarjeta, 502 si Stripe falla.
+   */
+  @Post(':id/revive')
+  @HttpCode(200)
+  async revive(
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<AdminRentalResponseDto> {
+    return this.rentals.reviveCanceled(id);
   }
 }

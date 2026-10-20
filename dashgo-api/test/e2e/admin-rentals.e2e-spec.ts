@@ -67,6 +67,11 @@ mockStripeInstance = {
     search: jest.fn().mockResolvedValue({ data: [] }),
     update: jest.fn().mockResolvedValue({}),
     list: jest.fn().mockResolvedValue({ data: [] }),
+    // StripePaymentMethodResolver: el cliente ya tiene tarjeta por defecto.
+    retrieve: jest.fn().mockResolvedValue({
+      id: 'cus_admin_rental_test',
+      invoice_settings: { default_payment_method: 'pm_test_late_fee' },
+    }),
   },
   subscriptions: {
     create: jest.fn().mockResolvedValue({
@@ -93,6 +98,10 @@ mockStripeInstance = {
     retrieve: jest.fn().mockResolvedValue({ id: 'pi_late_fee_test', status: 'succeeded' }),
     cancel: jest.fn().mockResolvedValue({}),
     capture: jest.fn().mockResolvedValue({}),
+  },
+  // Fallback 3 del resolver (tarjetas adjuntas): vacío por defecto.
+  paymentMethods: {
+    list: jest.fn().mockResolvedValue({ data: [] }),
   },
   webhooks: {
     constructEvent: jest.fn((rawBody: Buffer) => JSON.parse(rawBody.toString()) as unknown),
@@ -176,6 +185,12 @@ describe('Admin Rentals E2E', () => {
 
   // Clean rentals between tests
   beforeEach(async () => {
+    // Defaults del resolver de método de pago (un test puede sobreescribirlos con *Once).
+    (mockStripeInstance.customers as Record<string, jest.Mock>).retrieve.mockResolvedValue({
+      id: 'cus_admin_rental_test',
+      invoice_settings: { default_payment_method: 'pm_test_late_fee' },
+    });
+    (mockStripeInstance.paymentMethods as Record<string, jest.Mock>).list.mockResolvedValue({ data: [] });
     if (dataSource?.isInitialized) {
       await dataSource.getRepository(Rental).delete({ userId: clientUser.id });
     }
@@ -388,6 +403,47 @@ describe('Admin Rentals E2E', () => {
       expect(res.body).toHaveProperty('chargedCents', 500);
       expect(res.body).toHaveProperty('paymentIntentId');
       expect(res.body).toHaveProperty('subscriptionCanceled', false);
+      expect(piMock.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          amount: 500,
+          payment_method: 'pm_test_late_fee',
+          off_session: true,
+          confirm: true,
+        }),
+        expect.anything(),
+      );
+    });
+
+    it('(l2) sin método de pago resoluble → 400 NO_PAYMENT_METHOD y NO crea el PaymentIntent', async () => {
+      await dataSource.getRepository(User).update(clientUser.id, { stripeCustomerId: 'cus_admin_rental_test' });
+
+      const rental = await dataSource.getRepository(Rental).save({
+        userId: clientUser.id,
+        productId: rentalProduct.id,
+        orderId: null,
+        stripePriceId: 'price_rental_e2e_test',
+        monthlyRentCents: 2000,
+        lateFeeCents: 500,
+        status: RentalStatus.PAST_DUE,
+        stripeSubscriptionId: 'sub_late_fee_no_pm',
+      } as unknown as Rental);
+
+      const piMock = mockStripeInstance.paymentIntents as Record<string, jest.Mock>;
+      piMock.create.mockClear();
+      // Cliente sin default; suscripciones y tarjetas adjuntas vacías.
+      (mockStripeInstance.customers as Record<string, jest.Mock>).retrieve.mockResolvedValueOnce({
+        id: 'cus_admin_rental_test',
+        invoice_settings: { default_payment_method: null },
+      });
+
+      const res = await request(app.getHttpServer())
+        .post(`/admin/rentals/${rental.id}/charge-late-fee`)
+        .set('Authorization', `Bearer ${superToken}`)
+        .send({});
+
+      expect(res.status).toBe(400);
+      expect(JSON.stringify(res.body)).toContain('NO_PAYMENT_METHOD');
+      expect(piMock.create).not.toHaveBeenCalled();
     });
 
     it('(m) lateFeeCents=0 → 503 LATE_FEE_NOT_CONFIGURED', async () => {
