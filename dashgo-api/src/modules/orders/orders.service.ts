@@ -28,6 +28,7 @@ import {
 import { AuthenticatedUser } from '../../common/types/authenticated-user';
 import { TAX_RATE, computeTaxableBase } from '../../common/tax';
 import { todayIsoDay } from '../../common/delivery-day';
+import { buysAsClient } from '../../common/roles';
 import type { TaxableLine } from '../../common/tax';
 import { sortOrdersForDispatch } from './dispatch-sort';
 import type { DispatchBucket } from './dispatch-sort';
@@ -279,7 +280,8 @@ export class OrdersService {
       scheduledDeliveryDate?: string;
     } = {},
   ) {
-    if (user.role !== UserRole.CLIENT && user.role !== UserRole.PROMOTER) {
+    // El asociado crea pedidos igual que un cliente (`buysAsClient`).
+    if (!buysAsClient(user.role) && user.role !== UserRole.PROMOTER) {
       throw new ForbiddenException('Solo clientes pueden crear pedidos');
     }
 
@@ -301,7 +303,8 @@ export class OrdersService {
     // tenga su agua en camino) y, cuando la guarda corre para un pedido del
     // cliente, no cuenta las provisionadas — una visita de mantenimiento abierta
     // por días no puede dejarlo sin poder pedir agua.
-    if (user.role === UserRole.CLIENT && !opts.provisioned) {
+    // El asociado también queda sujeto a la guarda: compra como un cliente.
+    if (buysAsClient(user.role) && !opts.provisioned) {
       const activeCount = await this.orders.count({
         where: {
           customerId: user.id,
@@ -662,7 +665,8 @@ export class OrdersService {
       // T4.3: Acquire pessimistic lock on credit_account EARLY in the TX
       // (before order/items are written), to avoid deadlock ordering issues.
       let creditAppliedCents = 0;
-      if (dto.useCredit && user.role === UserRole.CLIENT) {
+      // El fiado también aplica al asociado: compra como un cliente.
+      if (dto.useCredit && buysAsClient(user.role)) {
         // getAccountWithLock will throw if no account exists; create first if needed
         const creditAccount = await (async () => {
           try {
@@ -942,13 +946,15 @@ export class OrdersService {
     const sellerFilter = sellerId ? 'AND u.seller_id = $1' : '';
     const sellerParams = sellerId ? [sellerId] : [];
 
+    // Los asociados compran como clientes, así que también cuentan como
+    // clientes en estos baldes de actividad.
     const orderedToday: CustomerActivityRow[] = await this.orders.query(
       `
       SELECT u.id, u.full_name AS "fullName", u.phone,
              MAX(o.created_at) AS "lastOrderAt"
       FROM users u
       JOIN orders o ON o.customer_id = u.id AND o.status != 'cancelled'
-      WHERE u.role = 'client'
+      WHERE u.role IN ('client', 'associate')
         ${sellerFilter}
         AND (o.created_at AT TIME ZONE 'America/New_York')::date =
             (now() AT TIME ZONE 'America/New_York')::date
@@ -965,7 +971,7 @@ export class OrdersService {
                MAX(o.created_at) AS "lastOrderAt"
         FROM users u
         LEFT JOIN orders o ON o.customer_id = u.id AND o.status != 'cancelled'
-        WHERE u.role = 'client'
+        WHERE u.role IN ('client', 'associate')
         ${sellerId ? 'AND u.seller_id = $2' : ''}
         GROUP BY u.id, u.full_name, u.phone
         HAVING MAX(o.created_at) IS NULL
@@ -2146,7 +2152,9 @@ export class OrdersService {
     )
       return;
 
-    if (user.role === UserRole.CLIENT || user.role === UserRole.PROMOTER) {
+    // El asociado cancela en los mismos estados que un cliente. Sin incluirlo
+    // aquí salía de esta función sin error y podía ejecutar cualquier transición.
+    if (buysAsClient(user.role) || user.role === UserRole.PROMOTER) {
       const clientCancellable = [
         OrderStatus.PENDING_QUOTE,
         OrderStatus.QUOTED,

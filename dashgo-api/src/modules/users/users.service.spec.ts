@@ -393,6 +393,23 @@ describe('UsersService.updateByAdmin', () => {
     expect(result.role).toBe(UserRole.SELLER);
   });
 
+  it('el super admin asigna el rol de asociado a un cliente', async () => {
+    userRepo.findOne
+      .mockResolvedValueOnce(fakeUser({ id: 'target-1', role: UserRole.CLIENT }))
+      .mockResolvedValueOnce(
+        fakeUser({ id: 'target-1', role: UserRole.ASSOCIATE }),
+      );
+
+    const result = await service.updateByAdmin(admin, 'target-1', {
+      role: UserRole.ASSOCIATE,
+    });
+
+    expect(userRepo.update).toHaveBeenCalledWith('target-1', {
+      role: UserRole.ASSOCIATE,
+    });
+    expect(result.role).toBe(UserRole.ASSOCIATE);
+  });
+
   it('refuses to grant SUPER_ADMIN over HTTP (privilege escalation)', async () => {
     userRepo.findOne.mockResolvedValueOnce(
       fakeUser({ id: 'target-1', role: UserRole.CLIENT }),

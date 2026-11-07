@@ -43,6 +43,7 @@ export class WinBackCron {
   async runDaily(): Promise<{ candidates: number; sent: number }> {
     // Lapsed clients: last non-cancelled order is 8+ days old, phone on file,
     // and not yet reminded for THIS lapse (reminder predates the last order).
+    // Los asociados compran como clientes, así que también reciben el recordatorio.
     const rows: Array<{
       id: string;
       phone: string;
@@ -53,7 +54,7 @@ export class WinBackCron {
       SELECT u.id, u.phone, u.full_name, MAX(o.created_at) AS last_order
       FROM users u
       JOIN orders o ON o.customer_id = u.id AND o.status != 'cancelled'
-      WHERE u.role = 'client'
+      WHERE u.role IN ('client', 'associate')
         AND u.phone IS NOT NULL
       GROUP BY u.id, u.phone, u.full_name, u.last_order_reminder_at
       HAVING MAX(o.created_at) <= now() - ($1 || ' days')::interval

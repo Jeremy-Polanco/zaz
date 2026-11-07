@@ -917,6 +917,77 @@ describe('OrdersService', () => {
       expect(creditService.applyCharge).not.toHaveBeenCalled();
     });
 
+    // El asociado compra como cualquier cliente: mismas reglas de pedido.
+    describe('asociado (compra como un cliente)', () => {
+      function mockSuccessfulTransaction() {
+        const savedOrder = fakeOrder({ creditApplied: '5.00' });
+        (dataSource.transaction as jest.Mock).mockImplementation(
+          async (cb: (mgr: EntityManager) => Promise<unknown>) => {
+            const orderRepo = makeRepoMock<Order>();
+            const itemRepo = makeRepoMock<OrderItem>();
+            orderRepo.create.mockImplementation(
+              (d) => ({ ...d, id: 'order-1' }) as Order,
+            );
+            orderRepo.save.mockResolvedValue(savedOrder);
+            orderRepo.update.mockResolvedValue({ affected: 1 } as never);
+            itemRepo.save.mockResolvedValue({} as never);
+            itemRepo.create.mockImplementation((d) => d as OrderItem);
+            const mgr = {
+              getRepository: (entity: unknown) => {
+                if (entity === Order) return orderRepo;
+                if (entity === OrderItem) return itemRepo;
+                return makeRepoMock();
+              },
+            };
+            return cb(mgr as unknown as EntityManager);
+          },
+        );
+        ordersRepo.findOne.mockResolvedValue(
+          fakeOrder({ customer: fakeUser() as never, items: [] }),
+        );
+      }
+
+      it('puede crear un pedido (no recibe Forbidden)', async () => {
+        ordersRepo.count.mockResolvedValueOnce(0);
+        productsRepo.find.mockResolvedValue([fakeProduct()]);
+        mockSuccessfulTransaction();
+
+        await expect(
+          service.create(fakeUser(UserRole.ASSOCIATE), dto),
+        ).resolves.toBeDefined();
+        expect(productsRepo.find).toHaveBeenCalled();
+      });
+
+      it('lanza 409 ACTIVE_ORDER_EXISTS si ya tiene un pedido en curso', async () => {
+        ordersRepo.count.mockResolvedValueOnce(1);
+
+        await expect(
+          service.create(fakeUser(UserRole.ASSOCIATE), dto),
+        ).rejects.toMatchObject({ response: { code: 'ACTIVE_ORDER_EXISTS' } });
+        expect(productsRepo.find).not.toHaveBeenCalled();
+      });
+
+      it('aplica el fiado con useCredit=true igual que a un cliente', async () => {
+        productsRepo.find.mockResolvedValue([fakeProduct()]);
+        creditService.getAccountWithLock.mockResolvedValue({
+          balanceCents: 500,
+          creditLimitCents: 200,
+          userId: 'user-1',
+        } as never);
+        creditService.applyCharge.mockResolvedValue({
+          amountCents: 500,
+        } as never);
+        mockSuccessfulTransaction();
+
+        await service.create(fakeUser(UserRole.ASSOCIATE), {
+          ...dto,
+          useCredit: true,
+        });
+
+        expect(creditService.getAccountWithLock).toHaveBeenCalled();
+      });
+    });
+
     it('ignores useCredit=true for SUPER_ADMIN_DELIVERY — no credit movement', async () => {
       // SUPER_ADMIN_DELIVERY cannot create orders (ForbiddenException)
       // Only CLIENT and PROMOTER can create orders per the service logic.
@@ -1074,6 +1145,64 @@ describe('OrdersService', () => {
         'order-1',
         expect.anything(), // EntityManager from the TX
       );
+    });
+
+    it('deja cancelar su pedido en PENDING_QUOTE a un asociado, como a un cliente', async () => {
+      const order = fakeOrder({
+        status: OrderStatus.PENDING_QUOTE,
+        creditApplied: '0.00',
+        customer: fakeUser() as never,
+      });
+      const cancelledOrder = fakeOrder({
+        status: OrderStatus.CANCELLED,
+        customer: fakeUser() as never,
+      });
+      ordersRepo.findOne
+        .mockReset()
+        .mockResolvedValueOnce(order)
+        .mockResolvedValueOnce(cancelledOrder);
+      (dataSource.transaction as jest.Mock).mockImplementation(
+        async (cb: (mgr: EntityManager) => Promise<unknown>) => {
+          const orderRepo = makeRepoMock<Order>();
+          orderRepo.update.mockResolvedValue({ affected: 1 } as never);
+          const mgr = {
+            getRepository: (entity: unknown) => {
+              if (entity === Order) return orderRepo;
+              return makeRepoMock();
+            },
+          };
+          return cb(mgr as unknown as EntityManager);
+        },
+      );
+
+      await expect(
+        service.updateStatus(
+          'order-1',
+          { status: OrderStatus.CANCELLED },
+          fakeUser(UserRole.ASSOCIATE),
+        ),
+      ).resolves.toBeDefined();
+    });
+
+    it('NO deja a un asociado ejecutar transiciones de admin (solo cancelar en los estados del cliente)', async () => {
+      // Sin esta guarda un rol desconocido para assertCanTransition salía sin
+      // error y podía, por ejemplo, confirmar su propio pedido.
+      ordersRepo.findOne
+        .mockReset()
+        .mockResolvedValueOnce(
+          fakeOrder({
+            status: OrderStatus.PENDING_VALIDATION,
+            customer: fakeUser() as never,
+          }),
+        );
+
+      await expect(
+        service.updateStatus(
+          'order-1',
+          { status: OrderStatus.CONFIRMED_BY_COLMADO },
+          fakeUser(UserRole.ASSOCIATE),
+        ),
+      ).rejects.toThrow(ForbiddenException);
     });
 
     it('does not call reverseCharge when creditApplied is 0', async () => {
