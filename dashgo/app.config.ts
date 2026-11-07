@@ -101,10 +101,12 @@ function resolveIosBuildNumber(): string {
   // con la mora del plan espejada en el bebedero y el precio del plan en
   // Alquileres. Build 23 (Android versionCode 9) el 2026-09-30, misma 1.0.9
   // (sin página en ASC todavía): pedidos programados fuera de la ruta de hoy
-  // (filtro "Programados").
+  // (filtro "Programados"). La 1.0.9 quedó READY_FOR_SALE, así que build 24
+  // (Android versionCode 10) va en 1.0.10 el 2026-11-07: pool de puntos
+  // repartido entre asociados, el cliente ya no ve puntos.
   const fromEas = process.env.EAS_BUILD_NUMBER
   if (fromEas && fromEas.length > 0) return fromEas
-  return '23'
+  return '24'
 }
 
 function resolveAndroidVersionCode(): number {
@@ -117,7 +119,7 @@ function resolveAndroidVersionCode(): number {
   }
   // appVersionSource is 'local' — BUMP THIS by 1 before each Play upload,
   // same ritual as the iOS buildNumber above.
-  return 9
+  return 10
 }
 
 export default ({ config }: ConfigContext): ExpoConfig => {
@@ -131,7 +133,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     // EAS Update + App Store both require strict semver here. Apple closes a
     // version train once it's approved (error 90186), so every App Store
     // upload after a release MUST carry a higher version than the live one.
-    version: '1.0.9',
+    version: '1.0.10',
     orientation: 'portrait',
     icon: './assets/images/icon.png',
     scheme: 'dashgo',
