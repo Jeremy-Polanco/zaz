@@ -49,7 +49,7 @@ export class AssociateBalanceService {
   ): Promise<void> {
     if (amountCents <= 0) return;
 
-    // Lock de la fila del usuario ANTES de recalcular: dos checkouts a la vez
+    // Lock (ver lockUser) de la fila del usuario ANTES de recalcular: dos checkouts a la vez
     // se serializan acá, y el segundo ve el saldo ya descontado por el primero,
     // así que no se puede gastar dos veces el mismo saldo (ni quedar negativo).
     await this.lockUser(userId, tx);
@@ -101,7 +101,20 @@ export class AssociateBalanceService {
     return amountCents;
   }
 
+  /**
+   * FOR NO KEY UPDATE y no FOR UPDATE: en el checkout la orden se inserta ANTES
+   * de canjear, y ese insert toma FOR KEY SHARE sobre la fila del usuario (FK
+   * orders.customer_id). FOR UPDATE choca con KEY SHARE, así que dos checkouts
+   * del mismo asociado quedaban cada uno con KEY SHARE esperando al otro:
+   * deadlock (40P01) y un 500 aunque el saldo alcanzara para los dos. NO KEY
+   * UPDATE sigue serializando canje contra canje (y reverso contra reverso) y
+   * sigue impidiendo borrar al usuario, pero no choca con KEY SHARE.
+   * La garantía supone READ COMMITTED (el default): el segundo, al despertar,
+   * recalcula el saldo viendo lo que el primero ya commiteó.
+   */
   private async lockUser(userId: string, tx: EntityManager): Promise<void> {
-    await tx.query('SELECT id FROM users WHERE id = $1 FOR UPDATE', [userId]);
+    await tx.query('SELECT id FROM users WHERE id = $1 FOR NO KEY UPDATE', [
+      userId,
+    ]);
   }
 }

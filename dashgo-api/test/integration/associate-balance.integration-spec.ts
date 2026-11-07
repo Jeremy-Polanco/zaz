@@ -29,6 +29,9 @@ describe('AssociateBalanceService', () => {
   let distribution: PoolDistribution;
   let orders: Order[];
   const [orderA, orderB, orderC, orderD] = [0, 1, 2, 3];
+  // Asociados/órdenes de los tests de checkout concurrente; se limpian en afterAll.
+  const extraUserIds: string[] = [];
+  const extraOrderIds: string[] = [];
 
   beforeAll(async () => {
     ds = await getTestDataSource();
@@ -74,6 +77,10 @@ describe('AssociateBalanceService', () => {
   afterAll(async () => {
     // Borrar al usuario arrastra su libro (ON DELETE CASCADE); el reparto
     // sintético se borra después porque el libro lo referencia.
+    if (extraOrderIds.length) {
+      await ds.getRepository(Order).delete(extraOrderIds);
+    }
+    if (extraUserIds.length) await ds.getRepository(User).delete(extraUserIds);
     await ds.getRepository(User).delete(assoc.id);
     await ds.getRepository(Order).delete(orders.map((o) => o.id));
     await ds.getRepository(PoolDistribution).delete(distribution.id);
@@ -153,6 +160,74 @@ describe('AssociateBalanceService', () => {
     expect(allocation?.distribution?.quarter).toBe('1990-Q1');
     const times = history.map((e) => e.createdAt.getTime());
     expect([...times].sort((a, b) => b - a)).toEqual(times);
+  });
+
+  // Imita el checkout real: la orden se INSERTA en la misma transacción antes de
+  // canjear (el FK order_id la exige). Insertar la orden toma FOR KEY SHARE
+  // sobre la fila del usuario (FK orders.customer_id); si el lock del canje
+  // fuera FOR UPDATE, dos checkouts del mismo asociado se bloquearían entre sí
+  // al "subir" el lock y Postgres abortaría uno con 40P01 (deadlock).
+  describe('checkouts concurrentes (orden insertada antes de canjear)', () => {
+    async function freshAssociate(balanceCents: number): Promise<User> {
+      const user = await ds
+        .getRepository(User)
+        .save(
+          ds.getRepository(User).create(makeUser({ role: UserRole.ASSOCIATE })),
+        );
+      extraUserIds.push(user.id);
+      await ds.getRepository(AssociateBalanceEntry).save(
+        ds.getRepository(AssociateBalanceEntry).create({
+          userId: user.id,
+          type: AssociateBalanceEntryType.ALLOCATION,
+          amountCents: balanceCents,
+          distributionId: null,
+        }),
+      );
+      return user;
+    }
+
+    // Dos checkouts en paralelo; la barrera garantiza que AMBOS ya insertaron su
+    // orden (y retienen KEY SHARE) antes de que cualquiera pida el lock.
+    function parallelCheckouts(userId: string, amountCents: number) {
+      let arrived = 0;
+      let release!: () => void;
+      const bothInserted = new Promise<void>((r) => (release = r));
+      const checkout = () =>
+        ds.transaction(async (tx) => {
+          const order = await tx.save(
+            Order,
+            tx.create(
+              Order,
+              makeOrder({ customerId: userId }) as Partial<Order>,
+            ),
+          );
+          extraOrderIds.push(order.id);
+          if (++arrived === 2) release();
+          await bothInserted;
+          await svc.redeem(userId, order.id, amountCents, tx);
+        });
+      return Promise.allSettled([checkout(), checkout()]);
+    }
+
+    it('si el saldo alcanza para ambos, los dos pasan sin deadlock', async () => {
+      const user = await freshAssociate(1000);
+      const results = await parallelCheckouts(user.id, 300);
+      expect(results.map((r) => r.status)).toEqual(['fulfilled', 'fulfilled']);
+      expect(await svc.getBalanceCents(user.id)).toBe(400);
+    });
+
+    it('si el saldo alcanza para uno solo, el otro se rechaza limpio (no 40P01)', async () => {
+      const user = await freshAssociate(500);
+      const results = await parallelCheckouts(user.id, 300);
+      expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+      const rejected = results.find((r) => r.status === 'rejected') as
+        | PromiseRejectedResult
+        | undefined;
+      expect(rejected?.reason).toMatchObject({
+        response: { code: 'INSUFFICIENT_BALANCE' },
+      });
+      expect(await svc.getBalanceCents(user.id)).toBe(200);
+    });
   });
 
   it('borrar al asociado borra su libro', async () => {
