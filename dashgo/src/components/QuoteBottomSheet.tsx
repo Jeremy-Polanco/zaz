@@ -192,7 +192,7 @@ export function QuoteBottomSheet({
           {pointsRedeemedCents > 0 && (
             <View className="flex-row justify-between">
               <Text className="font-sans text-[12px] uppercase tracking-label text-brand">
-                Puntos
+                Saldo aplicado
               </Text>
               <Text
                 className="font-sans text-[13px] text-brand"

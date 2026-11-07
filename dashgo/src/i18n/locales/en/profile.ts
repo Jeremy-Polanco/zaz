@@ -19,7 +19,6 @@ export default {
   myData: 'My info',
   myRentals: 'My rentals',
   myActivity: 'My activity',
-  points: 'Points',
   subscription: 'Subscription',
   language: {
     title: 'Language',

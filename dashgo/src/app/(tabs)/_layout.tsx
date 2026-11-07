@@ -3,7 +3,7 @@ import { Tabs, router } from 'expo-router'
 import { useTranslation } from 'react-i18next'
 import { useCurrentUser } from '../../lib/queries'
 import { MoreSheet, type MoreSheetItem } from '../../components/MoreSheet'
-import { isStaff } from '../../lib/roles'
+import { buysAsClient, isStaff } from '../../lib/roles'
 import {
   TabBarIcon,
   TabBarLabel,
@@ -24,7 +24,6 @@ type MoreItemDef = Omit<MoreSheetItem, 'label'> & { labelKey: string }
 
 // Overflow options for clients — surfaced through the "Más" bottom sheet.
 const CLIENT_MORE_ITEMS: MoreItemDef[] = [
-  { labelKey: 'more.points', icon: { ios: 'star.fill', android: 'star' }, route: '/(tabs)/points' },
   { labelKey: 'more.credit', icon: { ios: 'creditcard.fill', android: 'credit_card' }, route: '/(tabs)/credit' },
   { labelKey: 'more.subscription', icon: { ios: 'crown.fill', android: 'workspace_premium' }, route: '/(tabs)/subscription' },
   { labelKey: 'more.rentals', icon: { ios: 'drop.fill', android: 'water_drop' }, route: '/(tabs)/alquileres' },
@@ -40,7 +39,7 @@ const GUEST_MORE_ITEMS: MoreItemDef[] = [
 export default function TabLayout() {
   const { t } = useTranslation('nav')
   const { data: user, isPending } = useCurrentUser()
-  const isClient = user?.role === 'client'
+  const isClient = buysAsClient(user?.role)
   // Guests share the client tab bar — browse is public, account tabs prompt login.
   const isGuest = !user
   const [moreOpen, setMoreOpen] = useState(false)
@@ -101,7 +100,6 @@ export default function TabLayout() {
         />
 
         {/* Overflow screens — reachable via the "Más" sheet, hidden from the bar. */}
-        <Tabs.Screen name="points" options={{ title: t('tabs.points'), href: null }} />
         <Tabs.Screen name="credit" options={{ title: t('tabs.credit'), href: null }} />
         <Tabs.Screen name="subscription" options={{ title: t('tabs.subscription'), href: null }} />
         <Tabs.Screen name="alquileres" options={{ title: t('tabs.rentals'), href: null }} />

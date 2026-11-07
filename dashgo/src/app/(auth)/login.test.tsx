@@ -148,7 +148,7 @@ jest.mock('../../components/ui', () => {
 // ── imports after mocks ───────────────────────────────────────────────────────
 
 import * as Clipboard from 'expo-clipboard'
-import { useLocalSearchParams } from 'expo-router'
+import { router, useLocalSearchParams } from 'expo-router'
 import {
   useLogin,
   usePromoterByCode,
@@ -696,6 +696,28 @@ describe('LoginScreen — phone-only default flow', () => {
       fullName: undefined,
       referralCode: undefined,
     })
+  })
+
+  it('sends an associate back to the `next` screen just like a client (checkout deep link)', async () => {
+    mockUseLocalSearchParams.mockReturnValue({ next: '/checkout' })
+    const mutateAsync = jest.fn().mockResolvedValue({
+      accessToken: 'a',
+      refreshToken: 'r',
+      user: { role: 'associate' },
+      isNewUser: false,
+    })
+    mockUseLogin.mockReturnValue(
+      makeLoginMock({ mutateAsync }) as unknown as ReturnType<typeof useLogin>,
+    )
+
+    const { getByTestId } = renderWithProviders(<LoginScreen />)
+    await act(async () => {
+      fireEvent.changeText(getByTestId('login-phone-input'), '+18095550000')
+      fireEvent.press(getByTestId('login-submit-btn'))
+    })
+
+    await waitFor(() => expect(router.replace).toHaveBeenCalledWith('/checkout'))
+    mockUseLocalSearchParams.mockReturnValue({})
   })
 
   it('reveals a name field on first login and resubmits with the name', async () => {

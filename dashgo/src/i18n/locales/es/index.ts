@@ -5,7 +5,6 @@ import checkout from './checkout'
 import orders from './orders'
 import profile from './profile'
 import addresses from './addresses'
-import points from './points'
 import credit from './credit'
 import subscription from './subscription'
 import rentals from './rentals'
@@ -21,7 +20,6 @@ export default {
   orders,
   profile,
   addresses,
-  points,
   credit,
   subscription,
   rentals,

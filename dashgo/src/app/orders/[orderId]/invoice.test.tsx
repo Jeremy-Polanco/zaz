@@ -100,3 +100,14 @@ describe('Invoice screen — recargo por distancia', () => {
     expect(queryByText('Recargo por distancia')).toBeNull()
   })
 })
+
+describe('Invoice screen — saldo de asociado (antes "Descuento por puntos")', () => {
+  it('labels the redeemed amount "Saldo aplicado" and never mentions puntos', async () => {
+    mockApiGet.mockResolvedValue({ data: makeInvoice({ pointsRedeemed: '2.00' }) })
+
+    const { findByText, queryByText } = renderWithProviders(<InvoiceScreen />)
+
+    expect(await findByText('Saldo aplicado')).toBeTruthy()
+    expect(queryByText(/puntos/i)).toBeNull()
+  })
+})

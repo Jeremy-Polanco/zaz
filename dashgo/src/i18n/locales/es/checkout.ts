@@ -44,15 +44,15 @@ export default {
     available: 'Disponible',
     use: 'Usar {{amount}} en crédito',
   },
-  points: {
-    title: 'Mis puntos',
-    fullRedeem: 'Canje total',
-    use: 'Usar {{amount}} en puntos',
+  associateBalance: {
+    title: 'Saldo de asociado',
+    use: 'Usar mi saldo de asociado',
+    available: 'Disponible: {{amount}}',
   },
   totals: {
     subtotal: 'Subtotal',
     rentalFirstMonth: 'Primer mes alquiler',
-    pointsDiscount: 'Descuento por puntos',
+    balanceApplied: 'Saldo aplicado',
     creditApplied: 'Crédito aplicado',
     shipping: 'Envío',
     toQuote: 'A cotizar',

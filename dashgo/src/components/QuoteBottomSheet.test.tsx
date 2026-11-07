@@ -270,3 +270,19 @@ describe('QuoteBottomSheet — recargo por distancia y día de entrega', () => {
     ).not.toThrow()
   })
 })
+
+describe('QuoteBottomSheet — saldo de asociado (antes "Puntos")', () => {
+  it('labels the redeemed amount "Saldo aplicado"', () => {
+    mockSetOrderQuote.mockReturnValue({
+      mutateAsync: jest.fn(),
+      isPending: false,
+    } as unknown as ReturnType<typeof useSetOrderQuote>)
+
+    const { getByText, queryByText } = render(
+      <QuoteBottomSheet order={makeOrder({ pointsRedeemed: '2.00' })} onClose={jest.fn()} />,
+    )
+
+    expect(getByText('Saldo aplicado')).toBeTruthy()
+    expect(queryByText('Puntos')).toBeNull()
+  })
+})

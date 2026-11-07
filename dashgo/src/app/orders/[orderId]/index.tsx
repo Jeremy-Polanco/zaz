@@ -460,7 +460,7 @@ export default function OrderDetailScreen() {
             />
             {pointsCents > 0 && (
               <BreakdownRow
-                label={t('summary.points')}
+                label={t('summary.balanceApplied')}
                 value={`−${formatCents(pointsCents)}`}
                 emphasis="positive"
               />

@@ -22,10 +22,23 @@ export function isSeller(role: UserRole | undefined | null): boolean {
   return role === 'seller'
 }
 
+/**
+ * Roles que compran como cliente (checkout, crédito, redirecciones de área).
+ * El asociado sigue siendo un cliente más: solo suma el saldo del pool.
+ */
+export function buysAsClient(role: UserRole | undefined | null): boolean {
+  return role === 'client' || role === 'associate'
+}
+
+export function isAssociate(role: UserRole | undefined | null): boolean {
+  return role === 'associate'
+}
+
 /** Etiqueta del rol para la UI. */
 export function roleLabel(role: UserRole | undefined | null): string {
   if (role === 'super_admin_delivery') return 'Reparto'
   if (role === 'seller') return 'Vendedor'
   if (role === 'promoter') return 'Promotor'
+  if (role === 'associate') return 'Asociado'
   return 'Cliente'
 }

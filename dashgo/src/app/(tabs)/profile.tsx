@@ -19,6 +19,7 @@ import {
   useUpdateMe,
 } from '../../lib/queries'
 import { dobToIso, dobSchema } from '../../lib/schemas'
+import { buysAsClient } from '../../lib/roles'
 import { Button, Eyebrow, Hairline } from '../../components/ui'
 import { DeleteAccountModal } from '../../components/DeleteAccountModal'
 import { setAppLanguage, type AppLanguage } from '../../i18n'
@@ -157,7 +158,7 @@ export default function ProfileTab() {
   const { data: user, isPending } = useCurrentUser()
   const logout = useLogout()
   const deleteAccount = useDeleteAccount()
-  const isClient = user?.role === 'client'
+  const isClient = buysAsClient(user?.role)
 
   const [deleteModalOpen, setDeleteModalOpen] = useState(false)
   const [deleteError, setDeleteError] = useState<string | null>(null)
@@ -262,12 +263,6 @@ export default function ProfileTab() {
             <Hairline className="mt-10" />
             <View className="mt-6">
               <Eyebrow className="mb-1">{t('myActivity')}</Eyebrow>
-              <AccountLink
-                label={t('points')}
-                iosIcon="star.fill"
-                androidIcon="star"
-                href="/(tabs)/points"
-              />
               <AccountLink
                 label={t('subscription')}
                 iosIcon="repeat.circle.fill"
