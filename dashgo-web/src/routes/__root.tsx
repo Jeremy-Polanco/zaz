@@ -10,7 +10,7 @@ import { ReactQueryDevtools } from '@tanstack/react-query-devtools'
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useCurrentUser, useLogout } from '../lib/auth'
-import { useUpdateMe } from '../lib/queries'
+import { useMyAssociateBalance, useUpdateMe } from '../lib/queries'
 import { requestBrowserLocation, reverseGeocode } from '../lib/geo'
 import { Button, UdashMark } from '../components/ui'
 import { NetworkBanner } from '../components/NetworkBanner'
@@ -84,6 +84,10 @@ function RoleNavLinks({
   linkClass: string
   onNavigate?: () => void
 }) {
+  // Mismo query (['pool','me']) que el checkout. Un ex asociado conserva saldo
+  // y tiene que poder llegar a su historial; solo se consulta para quien compra
+  // como cliente (la query ya existe, no se suma otro tipo de request).
+  const { data: poolBalance } = useMyAssociateBalance(buysAsClient(role as UserRole))
   if (role === 'super_admin_delivery') {
     return (
       <>
@@ -184,7 +188,7 @@ function RoleNavLinks({
       <Link to="/subscription" className={linkClass} onClick={onNavigate}>
         Suscripción
       </Link>
-      {isAssociate(role as UserRole) && (
+      {(isAssociate(role as UserRole) || (poolBalance?.balanceCents ?? 0) > 0) && (
         <Link to="/pool" className={linkClass} onClick={onNavigate}>
           Pool de asociados
         </Link>
