@@ -212,6 +212,7 @@ describe('OrdersService', () => {
     poolService = {
       contributeForOrder: jest.fn().mockResolvedValue(0),
       reverseLegacyRedemption: jest.fn().mockResolvedValue(0),
+      withdrawOrderContribution: jest.fn().mockResolvedValue(0),
     } as unknown as jest.Mocked<PoolService>;
 
     associateBalanceService = {
@@ -5971,6 +5972,10 @@ describe('OrdersService', () => {
         expect.anything(),
       );
       expect(poolService.reverseLegacyRedemption).toHaveBeenCalledWith(
+        'order-1',
+        expect.anything(),
+      );
+      expect(poolService.withdrawOrderContribution).toHaveBeenCalledWith(
         'order-1',
         expect.anything(),
       );

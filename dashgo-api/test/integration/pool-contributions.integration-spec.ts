@@ -86,6 +86,7 @@ describe('Aportes al pool (integración)', () => {
   let category: Category;
   let product: Product;
   let distribution: PoolDistribution | null = null;
+  const closedQuarterDistributionIds: string[] = [];
   const userIds: string[] = [];
   const orderIds: string[] = [];
 
@@ -144,6 +145,11 @@ describe('Aportes al pool (integración)', () => {
           [userIds],
         );
         await ds.getRepository(User).delete(userIds);
+      }
+      if (closedQuarterDistributionIds.length) {
+        await ds
+          .getRepository(PoolDistribution)
+          .delete(closedQuarterDistributionIds);
       }
       if (distribution) {
         await ds.getRepository(PoolDistribution).delete(distribution.id);
@@ -411,5 +417,88 @@ describe('Aportes al pool (integración)', () => {
     );
 
     expect(await balance.getBalanceCents(assoc.id)).toBe(1000);
+  });
+  // Se cancela por el camino privado de UNA orden (el mismo que usa
+  // cancelNonRentalOrders por cada candidato) y no por cancelNonRentalOrders:
+  // esa operación cancela TODAS las órdenes no canceladas ni de alquiler de la
+  // base compartida, y aun con un filtro de status podría cancelar órdenes
+  // entregadas de otros specs.
+  const cancelOne = (order: Order) =>
+    (
+      orders as unknown as {
+        cancelOrderWithReversals(o: Order): Promise<void>;
+      }
+    ).cancelOrderWithReversals(order);
+
+  it('cancelar una orden entregada con el trimestre abierto saca su aporte del pool', async () => {
+    const user = await seedUser();
+    const order = await seedOrder(user.id, OrderStatus.IN_DELIVERY_ROUTE);
+    await orders.updateStatus(
+      order.id,
+      { status: OrderStatus.DELIVERED },
+      adminAs(),
+    );
+    const quarter = quarterOf(new Date());
+    const before = await pool.getPoolCents(quarter);
+    expect(await contributionsOf(order.id)).toHaveLength(1);
+
+    await cancelOne(
+      await ds.getRepository(Order).findOneByOrFail({ id: order.id }),
+    );
+
+    expect(await contributionsOf(order.id)).toHaveLength(0);
+    expect(await pool.getPoolCents(quarter)).toBe(before - 200);
+  });
+
+  it('con el trimestre ya repartido el aporte no se toca', async () => {
+    const user = await seedUser();
+    const order = await seedOrder(user.id, OrderStatus.DELIVERED);
+    // Trimestre de los 1990 con reparto ya hecho (el spec de saldo usa 1990-Q1).
+    const closed = await ds.getRepository(PoolDistribution).save(
+      ds.getRepository(PoolDistribution).create({
+        quarter: '1991-Q2',
+        totalCents: 200,
+        associateCount: 1,
+        shareCents: 200,
+        remainderCents: 0,
+      }),
+    );
+    closedQuarterDistributionIds.push(closed.id);
+    await ds.getRepository(PoolContribution).save(
+      ds.getRepository(PoolContribution).create({
+        quarter: '1991-Q2',
+        amountCents: 200,
+        source: PoolContributionSource.ORDER,
+        orderId: order.id,
+        sourceUserId: user.id,
+      }),
+    );
+
+    await cancelOne(
+      await ds.getRepository(Order).findOneByOrFail({ id: order.id }),
+    );
+
+    const rows = await contributionsOf(order.id);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].amountCents).toBe(200);
+    expect(
+      await ds.transaction((tx) => pool.withdrawOrderContribution(order.id, tx)),
+    ).toBe(0);
+  });
+
+  it('cancelar una orden sin aporte no toca el pool ni tira', async () => {
+    const user = await seedUser();
+    const order = await seedOrder(user.id, OrderStatus.PENDING_QUOTE);
+    const quarter = quarterOf(new Date());
+    const before = await pool.getPoolCents(quarter);
+
+    await expect(
+      cancelOne(await ds.getRepository(Order).findOneByOrFail({ id: order.id })),
+    ).resolves.toBeUndefined();
+
+    expect(await pool.getPoolCents(quarter)).toBe(before);
+    expect(
+      await ds.transaction((tx) => pool.withdrawOrderContribution(order.id, tx)),
+    ).toBe(0);
   });
 });

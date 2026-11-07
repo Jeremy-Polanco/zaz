@@ -1826,6 +1826,10 @@ export class OrdersService {
       // cliente ya no puede gastar esos puntos). Cada uno es idempotente.
       await this.associateBalance.reverseForOrder(order.id, cancelTx);
       await this.pool.reverseLegacyRedemption(order.id, cancelTx);
+      // Una venta cancelada no puede financiar el pool de los asociados: si la
+      // orden ya había aportado (cancelación masiva de entregadas) su aporte
+      // sale, salvo que el trimestre ya esté repartido (lo pagado no se toca).
+      await this.pool.withdrawOrderContribution(order.id, cancelTx);
       await this.rentalsService.cancelPendingForOrder(order.id, cancelTx);
       if (wasStockDecremented) {
         const itemRepo = cancelTx.getRepository(OrderItem);

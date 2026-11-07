@@ -9,6 +9,7 @@ import {
   PointsLedgerEntry,
   PoolContribution,
   PoolContributionSource,
+  PoolDistribution,
 } from '../../entities';
 import { quarterOf } from './quarter';
 
@@ -141,6 +142,33 @@ export class PoolService {
       `reverseLegacyRedemption: ${totalCents}c de la orden ${orderId} pasan al pool`,
     );
     return totalCents;
+  }
+
+  /**
+   * Saca del pool el aporte de una orden que se cancela después de entregada
+   * (solo la alcanza la operación masiva cancelNonRentalOrders; updateStatus
+   * bloquea DELIVERED -> CANCELLED). Una venta cancelada no puede financiar el
+   * pool de los asociados, PERO si el trimestre ya se repartió el reparto no se
+   * toca: lo pagado no se reclama, y el pool de un trimestre cerrado ya no se
+   * recalcula. Devuelve los centavos retirados; 0 si no había aporte o el
+   * trimestre está cerrado.
+   */
+  async withdrawOrderContribution(
+    orderId: string,
+    tx: EntityManager,
+  ): Promise<number> {
+    const contribution = await tx.findOne(PoolContribution, {
+      where: { orderId, source: PoolContributionSource.ORDER },
+    });
+    if (!contribution) return 0;
+
+    const closed = await tx.exists(PoolDistribution, {
+      where: { quarter: contribution.quarter },
+    });
+    if (closed) return 0;
+
+    await tx.delete(PoolContribution, { id: contribution.id });
+    return contribution.amountCents;
   }
 
   /** Total recaudado en un trimestre ('YYYY-Qn'): suma de sus aportes. */
