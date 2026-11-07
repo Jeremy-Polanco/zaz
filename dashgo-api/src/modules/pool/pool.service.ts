@@ -15,7 +15,17 @@ import {
   User,
 } from '../../entities';
 import { UserRole } from '../../entities/enums';
-import { nextQuarter, quarterOf } from './quarter';
+import { nextDistributionAt, nextQuarter, quarterOf } from './quarter';
+
+export interface PoolSummary {
+  quarter: string;
+  poolCents: number;
+  /** ISO 8601. */
+  nextDistributionAt: string;
+  associateCount: number;
+  /** floor(pool / n); 0 si no hay asociados. */
+  estimatedShareCents: number;
+}
 
 /**
  * Aportes al pool trimestral de asociados. Los puntos que generan las compras
@@ -312,5 +322,29 @@ export class PoolService {
     return this.dataSource
       .getRepository(PoolDistribution)
       .find({ order: { quarter: 'DESC' } });
+  }
+
+  /**
+   * Resumen del pool en curso para la pantalla de asociados. La parte
+   * estimada es lo que tocaría HOY si se repartiera ya: cambia si entran
+   * aportes o asociados antes del corte, por eso es una estimación y no un
+   * saldo. Con 0 asociados es 0 (no hay división por cero).
+   */
+  async getSummary(now: Date = new Date()): Promise<PoolSummary> {
+    const quarter = quarterOf(now);
+    const [poolCents, associateCount] = await Promise.all([
+      this.getPoolCents(quarter),
+      this.dataSource
+        .getRepository(User)
+        .count({ where: { role: UserRole.ASSOCIATE } }),
+    ]);
+    return {
+      quarter,
+      poolCents,
+      nextDistributionAt: nextDistributionAt(now).toISOString(),
+      associateCount,
+      estimatedShareCents:
+        associateCount > 0 ? Math.floor(poolCents / associateCount) : 0,
+    };
   }
 }

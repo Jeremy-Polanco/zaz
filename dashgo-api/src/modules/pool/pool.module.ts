@@ -11,6 +11,7 @@ import {
 } from '../../entities';
 import { AssociateBalanceService } from './associate-balance.service';
 import { LegacyPointsController } from './legacy-points.controller';
+import { PoolController } from './pool.controller';
 import { PoolCron } from './pool.cron';
 import { PoolService } from './pool.service';
 
@@ -26,7 +27,7 @@ import { PoolService } from './pool.service';
       User,
     ]),
   ],
-  controllers: [LegacyPointsController],
+  controllers: [LegacyPointsController, PoolController],
   providers: [AssociateBalanceService, PoolService, PoolCron],
   exports: [AssociateBalanceService, PoolService],
 })
