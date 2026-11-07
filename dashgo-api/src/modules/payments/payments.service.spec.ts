@@ -470,11 +470,16 @@ describe('PaymentsService', () => {
       ).rejects.toThrow('Monto inválido');
     });
 
-    it('el saldo de asociado se topa por el subtotal: saldo 1000 y subtotal 600 descuenta 600', async () => {
+    it('el saldo de asociado se topa por el subtotal: saldo 1000 y subtotal 600 descuenta solo 600', async () => {
       productsRepo.find.mockResolvedValue([
         makeProduct({ id: 'prod-1', priceToPublic: '6.00' }),
       ]);
       associateBalanceService.getBalanceCents.mockResolvedValueOnce(1000);
+      // Envío fijo real ($5): con envío 0 el tope no se notaría, porque el
+      // monto se clampa en 0 tanto con el canje topado (600) como sin topar (1000).
+      shippingService.computeQuote.mockResolvedValueOnce({
+        shippingCents: 500,
+      } as never);
 
       await service.createIntentForItems({
         userId: 'user-1',
@@ -482,10 +487,15 @@ describe('PaymentsService', () => {
         items: [{ productId: 'prod-1', quantity: 1 }],
       });
 
-      // subtotal 600 − canje 600 = base 0 → el intent no cobra nada de impuesto
-      // ni de producto (no se quema el sobrante de 400 en el cálculo).
-      const [params] = mockStripeInstance.paymentIntents.create.mock.calls[0];
-      expect(params.amount).toBe(0);
+      // subtotal 600 + envío 500 − canje 600 (topado) = 500; todo es 'standard',
+      // así que la base gravable es 500 y el impuesto round(500*0.08887)=44 → 544.
+      // Sin el tope el canje sería 1000: neto 100 + impuesto 9 = 109 (distinto).
+      const expectedAmount = 500 + Math.round(500 * TAX_RATE);
+      expect(expectedAmount).toBe(544);
+      expect(mockStripeInstance.paymentIntents.create).toHaveBeenCalledWith(
+        expect.objectContaining({ amount: expectedAmount }),
+        expect.anything(),
+      );
     });
 
     it('redeems claimable points and reduces the taxable base', async () => {
