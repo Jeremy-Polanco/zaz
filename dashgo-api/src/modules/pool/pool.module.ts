@@ -10,6 +10,7 @@ import {
   User,
 } from '../../entities';
 import { AssociateBalanceService } from './associate-balance.service';
+import { PoolCron } from './pool.cron';
 import { PoolService } from './pool.service';
 
 @Module({
@@ -24,7 +25,7 @@ import { PoolService } from './pool.service';
       User,
     ]),
   ],
-  providers: [AssociateBalanceService, PoolService],
+  providers: [AssociateBalanceService, PoolService, PoolCron],
   exports: [AssociateBalanceService, PoolService],
 })
 export class PoolModule {}

@@ -1,7 +1,9 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { EntityManager, Repository } from 'typeorm';
+import { DataSource, EntityManager, Repository } from 'typeorm';
 import {
+  AssociateBalanceEntry,
+  AssociateBalanceEntryType,
   Order,
   OrderItem,
   PointsEntryStatus,
@@ -10,8 +12,10 @@ import {
   PoolContribution,
   PoolContributionSource,
   PoolDistribution,
+  User,
 } from '../../entities';
-import { quarterOf } from './quarter';
+import { UserRole } from '../../entities/enums';
+import { nextQuarter, quarterOf } from './quarter';
 
 /**
  * Aportes al pool trimestral de asociados. Los puntos que generan las compras
@@ -25,6 +29,7 @@ export class PoolService {
   constructor(
     @InjectRepository(PoolContribution)
     private readonly contributions: Repository<PoolContribution>,
+    private readonly dataSource: DataSource,
   ) {}
 
   /**
@@ -157,8 +162,14 @@ export class PoolService {
     orderId: string,
     tx: EntityManager,
   ): Promise<number> {
+    // Se bloquea la fila del aporte ANTES de mirar si hay reparto. Así una
+    // cancelación que corre justo al cierre del trimestre pasa de una de dos
+    // formas: retira el aporte antes de que el reparto sume (el reparto espera
+    // el lock y después ya no ve la fila), o ve el reparto ya hecho y deja el
+    // aporte. Nunca queda un total repartido distinto del pool.
     const contribution = await tx.findOne(PoolContribution, {
       where: { orderId, source: PoolContributionSource.ORDER },
+      lock: { mode: 'pessimistic_write' },
     });
     if (!contribution) return 0;
 
@@ -180,5 +191,126 @@ export class PoolService {
       .where('c.quarter = :quarter', { quarter })
       .getRawOne<{ sum: string }>();
     return Number(row?.sum ?? 0);
+  }
+
+  /**
+   * Reparte el pool de un trimestre en partes IGUALES entre los usuarios con
+   * rol `associate` en este momento. Cada asociado es dueño de su parte por
+   * igual; lo que no divide exacto (el resto) pasa como aporte `carryover` al
+   * trimestre siguiente para que no se pierda ni un centavo.
+   *
+   * Idempotente y a prueba de dos instancias: lo primero que hace es RECLAMAR
+   * el trimestre insertando su fila en `pool_distributions` con
+   * ON CONFLICT DO NOTHING. Si no devuelve fila, otra corrida ya lo reparte (o
+   * lo repartió) y se devuelve `null` sin escribir nada más; si dos corren a la
+   * vez, la segunda espera en el índice único hasta que la primera commitea y
+   * recién ahí recibe el DO NOTHING. Con el reclamo hecho, hay exactamente un
+   * reparto por trimestre y nadie más suma ni asigna.
+   */
+  async distributeQuarter(quarter: string): Promise<PoolDistribution | null> {
+    return this.dataSource.transaction(async (tx) => {
+      const claim = await tx.query(
+        `INSERT INTO pool_distributions (quarter, total_cents, associate_count, share_cents, remainder_cents)
+         VALUES ($1, 0, 0, 0, 0)
+         ON CONFLICT (quarter) DO NOTHING
+         RETURNING id`,
+        [quarter],
+      );
+      if (claim.length === 0) return null;
+      const distributionId: string = claim[0].id;
+
+      // FOR UPDATE sobre los aportes: una cancelación concurrente
+      // (withdrawOrderContribution) espera a este reparto o lo hace esperar,
+      // así el total repartido es exactamente lo que queda en el pool.
+      const rows: Array<{ amount_cents: number }> = await tx.query(
+        `SELECT amount_cents FROM pool_contributions WHERE quarter = $1 FOR UPDATE`,
+        [quarter],
+      );
+      const totalCents = rows.reduce((sum, r) => sum + Number(r.amount_cents), 0);
+
+      const associates = await tx.find(User, {
+        where: { role: UserRole.ASSOCIATE },
+        select: { id: true },
+        order: { id: 'ASC' },
+      });
+      const n = associates.length;
+      // Sin asociados no hay a quién repartir: todo el pool pasa adelante.
+      const shareCents = n === 0 ? 0 : Math.floor(totalCents / n);
+      const remainderCents = totalCents - shareCents * n;
+
+      await tx.update(PoolDistribution, distributionId, {
+        totalCents,
+        associateCount: n,
+        shareCents,
+        remainderCents,
+      });
+
+      // Con menos centavos que asociados la parte es 0: no se asientan filas
+      // de 0 en el libro.
+      if (shareCents > 0) {
+        await tx.insert(
+          AssociateBalanceEntry,
+          associates.map((a) => ({
+            userId: a.id,
+            type: AssociateBalanceEntryType.ALLOCATION,
+            amountCents: shareCents,
+            distributionId,
+          })),
+        );
+      }
+
+      if (remainderCents > 0) {
+        await tx.insert(PoolContribution, {
+          quarter: nextQuarter(quarter),
+          amountCents: remainderCents,
+          source: PoolContributionSource.CARRYOVER,
+        });
+      }
+
+      this.logger.log(
+        `distributeQuarter ${quarter}: total ${totalCents}c, ${n} asociados, parte ${shareCents}c, arrastre ${remainderCents}c`,
+      );
+      return tx.findOneByOrFail(PoolDistribution, { id: distributionId });
+    });
+  }
+
+  /**
+   * Reparte todos los trimestres vencidos que quedaron sin repartir (la app
+   * estuvo caída el día del corte, un deploy se comió el cron). Va del MÁS
+   * viejo al más nuevo y de a uno: el arrastre de un trimestre cae en el
+   * siguiente, y ese siguiente tiene que repartirse DESPUÉS para que lo
+   * incluya. El trimestre en curso nunca se reparte. Devuelve los trimestres
+   * repartidos por esta corrida, en orden.
+   */
+  async distributeDueQuarters(now: Date = new Date()): Promise<string[]> {
+    const current = quarterOf(now);
+    const done: string[] = [];
+    const tried = new Set<string>();
+
+    for (;;) {
+      const [row] = await this.dataSource.query(
+        `SELECT MIN(c.quarter) AS quarter
+           FROM pool_contributions c
+          WHERE c.quarter < $1
+            AND NOT EXISTS (SELECT 1 FROM pool_distributions d WHERE d.quarter = c.quarter)`,
+        [current],
+      );
+      const quarter: string | null = row?.quarter ?? null;
+      // Defensa: si un trimestre vuelve a salir sin haberse podido repartir,
+      // se corta en vez de girar en falso.
+      if (!quarter || tried.has(quarter)) break;
+      tried.add(quarter);
+
+      const distribution = await this.distributeQuarter(quarter);
+      if (distribution) done.push(quarter);
+    }
+    return done;
+  }
+
+  /** Repartos hechos, del trimestre más reciente al más viejo. */
+  listDistributions(): Promise<PoolDistribution[]> {
+    return this.dataSource
+      .getRepository(PoolDistribution)
+      .find({ order: { quarter: 'DESC' } });
   }
 }
