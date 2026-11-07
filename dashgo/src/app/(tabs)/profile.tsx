@@ -19,7 +19,7 @@ import {
   useUpdateMe,
 } from '../../lib/queries'
 import { dobToIso, dobSchema } from '../../lib/schemas'
-import { buysAsClient } from '../../lib/roles'
+import { buysAsClient, isAssociate } from '../../lib/roles'
 import { Button, Eyebrow, Hairline } from '../../components/ui'
 import { DeleteAccountModal } from '../../components/DeleteAccountModal'
 import { setAppLanguage, type AppLanguage } from '../../i18n'
@@ -159,6 +159,7 @@ export default function ProfileTab() {
   const logout = useLogout()
   const deleteAccount = useDeleteAccount()
   const isClient = buysAsClient(user?.role)
+  const associate = isAssociate(user?.role)
 
   const [deleteModalOpen, setDeleteModalOpen] = useState(false)
   const [deleteError, setDeleteError] = useState<string | null>(null)
@@ -269,6 +270,14 @@ export default function ProfileTab() {
                 androidIcon="autorenew"
                 href="/(tabs)/subscription"
               />
+              {associate && (
+                <AccountLink
+                  label={t('pool')}
+                  iosIcon="person.3.fill"
+                  androidIcon="groups"
+                  href="/(tabs)/pool"
+                />
+              )}
             </View>
           </>
         )}

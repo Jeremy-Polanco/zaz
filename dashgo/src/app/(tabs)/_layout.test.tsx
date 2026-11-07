@@ -35,6 +35,7 @@ jest.mock('react-native-safe-area-context', () => ({
 }))
 
 import { useCurrentUser } from '../../lib/queries'
+import { router } from 'expo-router'
 import TabLayout from './_layout'
 
 const mockUseCurrentUser = useCurrentUser as jest.MockedFunction<typeof useCurrentUser>
@@ -62,5 +63,19 @@ describe('(tabs)/_layout — hoja "Más"', () => {
 
     expect(getByText('Mi cuenta')).toBeTruthy()
     expect(queryByText(/puntos/i)).toBeNull()
+  })
+
+  it('an associate sees the pool entry and it routes to the pool screen', () => {
+    const { getByText } = openMore('associate')
+
+    fireEvent.press(getByText('Pool de asociados'))
+
+    expect(router.navigate).toHaveBeenCalledWith('/(tabs)/pool')
+  })
+
+  it('a client never sees the pool entry', () => {
+    const { queryByText } = openMore('client')
+
+    expect(queryByText('Pool de asociados')).toBeNull()
   })
 })

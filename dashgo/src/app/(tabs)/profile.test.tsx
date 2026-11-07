@@ -91,7 +91,7 @@ const mockUseLogout = useLogout as jest.MockedFunction<typeof useLogout>
 const mockUseDeleteAccount = useDeleteAccount as jest.MockedFunction<typeof useDeleteAccount>
 const mockRouter = router as jest.Mocked<typeof router>
 
-function setupMocks(role: 'client' | 'super_admin_delivery' = 'client') {
+function setupMocks(role: 'client' | 'associate' | 'super_admin_delivery' = 'client') {
   mockUseCurrentUser.mockReturnValue({
     data: {
       id: 'user-1',
@@ -152,5 +152,22 @@ describe('ProfileTab — Eliminar mi cuenta', () => {
     expect(queryByText('DeleteAccountModal')).toBeNull()
     fireEvent.press(getByTestId('delete-account-button'))
     expect(getByText('DeleteAccountModal')).toBeTruthy()
+  })
+})
+
+// ── Pool de asociados — solo para asociados ───────────────────────────────────
+
+describe('ProfileTab — Pool de asociados', () => {
+  it('shows the pool link to an associate and navigates to it', () => {
+    setupMocks('associate')
+    const { getByText } = renderWithProviders(<ProfileTab />)
+    fireEvent.press(getByText('Pool de asociados'))
+    expect(mockRouter.navigate).toHaveBeenCalledWith('/(tabs)/pool')
+  })
+
+  it('hides the pool link from a plain client', () => {
+    setupMocks('client')
+    const { queryByText } = renderWithProviders(<ProfileTab />)
+    expect(queryByText('Pool de asociados')).toBeNull()
   })
 })

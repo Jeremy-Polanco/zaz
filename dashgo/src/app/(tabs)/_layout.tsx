@@ -3,7 +3,7 @@ import { Tabs, router } from 'expo-router'
 import { useTranslation } from 'react-i18next'
 import { useCurrentUser } from '../../lib/queries'
 import { MoreSheet, type MoreSheetItem } from '../../components/MoreSheet'
-import { buysAsClient, isStaff } from '../../lib/roles'
+import { buysAsClient, isAssociate, isStaff } from '../../lib/roles'
 import {
   TabBarIcon,
   TabBarLabel,
@@ -27,6 +27,7 @@ const CLIENT_MORE_ITEMS: MoreItemDef[] = [
   { labelKey: 'more.credit', icon: { ios: 'creditcard.fill', android: 'credit_card' }, route: '/(tabs)/credit' },
   { labelKey: 'more.subscription', icon: { ios: 'crown.fill', android: 'workspace_premium' }, route: '/(tabs)/subscription' },
   { labelKey: 'more.rentals', icon: { ios: 'drop.fill', android: 'water_drop' }, route: '/(tabs)/alquileres' },
+  { labelKey: 'more.pool', icon: { ios: 'person.3.fill', android: 'groups' }, route: '/(tabs)/pool' },
   { labelKey: 'more.myAccount', icon: { ios: 'person.crop.circle.fill', android: 'account_circle' }, route: '/(tabs)/profile' },
 ]
 
@@ -52,9 +53,11 @@ export default function TabLayout() {
     }
   }, [user, isPending])
 
-  const moreItems: MoreSheetItem[] = (isGuest ? GUEST_MORE_ITEMS : CLIENT_MORE_ITEMS).map(
-    ({ labelKey, ...item }) => ({ ...item, label: t(labelKey) }),
-  )
+  // El pool es solo de asociados: la lista es estática y se filtra al renderizar.
+  const associate = isAssociate(user?.role)
+  const moreItems: MoreSheetItem[] = (isGuest ? GUEST_MORE_ITEMS : CLIENT_MORE_ITEMS)
+    .filter(({ labelKey }) => labelKey !== 'more.pool' || associate)
+    .map(({ labelKey, ...item }) => ({ ...item, label: t(labelKey) }))
 
   return (
     <>
@@ -104,6 +107,7 @@ export default function TabLayout() {
         <Tabs.Screen name="subscription" options={{ title: t('tabs.subscription'), href: null }} />
         <Tabs.Screen name="alquileres" options={{ title: t('tabs.rentals'), href: null }} />
         <Tabs.Screen name="profile" options={{ title: t('tabs.account'), href: null }} />
+        <Tabs.Screen name="pool" options={{ title: t('more.pool'), href: null }} />
       </Tabs>
 
       <MoreSheet

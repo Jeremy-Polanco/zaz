@@ -75,7 +75,7 @@ function SubscriptionBadge({ status }: { status: string | null }) {
  * provisiona por bootstrap/consola a propósito, así una sesión de admin robada
  * no puede fabricar otro admin. El backend lo rechaza igual.
  */
-const ASSIGNABLE_ROLES: UserRole[] = ['client', 'seller', 'promoter']
+const ASSIGNABLE_ROLES: UserRole[] = ['client', 'seller', 'promoter', 'associate']
 
 function UserRow({
   item,

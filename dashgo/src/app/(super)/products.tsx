@@ -853,7 +853,7 @@ function ProductForm({
             <SectionHeader
               letter="D"
               title="Visibilidad y comisiones"
-              hint="Si está disponible, qué cobra el promotor, y qué puntos gana el cliente."
+              hint="Si está disponible, qué cobra el promotor, y cuánto aporta al pool de asociados."
             />
 
             <ToggleRow
@@ -958,7 +958,7 @@ function ProductForm({
             </View>
 
             <View>
-              <FieldLabel>Puntos cliente (%)</FieldLabel>
+              <FieldLabel>Aporte al pool de asociados (%)</FieldLabel>
               <TextInput
                 className="h-11 border-b border-ink/25 pb-1 font-sans text-[16px] text-ink"
                 placeholder="1"
@@ -972,7 +972,7 @@ function ProductForm({
               />
               <FieldError message={state.errors.pointsText} />
               <Text className="mt-1 font-sans text-[12px] text-ink-muted">
-                Devolución en puntos al cliente, sobre el precio efectivo.
+                Porcentaje del precio efectivo que suma al pool que se reparte entre los asociados cada trimestre.
               </Text>
             </View>
           </View>

@@ -13,6 +13,7 @@ export default {
     credit: 'Crédito',
     subscription: 'Suscripción',
     rentals: 'Alquileres',
+    pool: 'Pool de asociados',
     myAccount: 'Mi cuenta',
     signIn: 'Iniciar sesión',
   },

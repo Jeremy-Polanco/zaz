@@ -11,6 +11,7 @@ import rentals from './rentals'
 import auth from './auth'
 import nav from './nav'
 import banners from './banners'
+import pool from './pool'
 
 export default {
   common,
@@ -26,4 +27,5 @@ export default {
   auth,
   nav,
   banners,
+  pool,
 }

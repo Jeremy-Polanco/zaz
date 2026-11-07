@@ -210,6 +210,17 @@ describe('SuperUsersScreen (mobile) — asignación de vendedor y promotor', () 
     } as unknown as ReturnType<typeof useDeleteUser>)
   })
 
+  it('ofrece el rol Asociado y lo asigna con role: associate', () => {
+    renderWithProviders(<SuperUsersScreen />)
+
+    fireEvent.press(screen.getByLabelText('Poner a Ana Cliente como Asociado'))
+
+    expect(mockUpdateMutate).toHaveBeenCalledWith({
+      id: 'user-1',
+      role: 'associate',
+    })
+  })
+
   it('asigna un vendedor a un cliente', () => {
     renderWithProviders(<SuperUsersScreen />)
 

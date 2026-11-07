@@ -19,6 +19,7 @@ export default {
   myData: 'Mis datos',
   myRentals: 'Mis alquileres',
   myActivity: 'Mi actividad',
+  pool: 'Pool de asociados',
   subscription: 'Suscripción',
   language: {
     title: 'Idioma',
