@@ -7,6 +7,11 @@ export enum UserRole {
    * vendedor no puede asignarse clientes a sí mismo ni moverlos de cartera.
    */
   SELLER = 'seller',
+  /**
+   * Asociado. Recibe una parte igual del pool trimestral de puntos (los puntos
+   * que antes eran del cliente). El rol lo asigna únicamente el super admin.
+   */
+  ASSOCIATE = 'associate',
   SUPER_ADMIN_DELIVERY = 'super_admin_delivery',
 }
 
