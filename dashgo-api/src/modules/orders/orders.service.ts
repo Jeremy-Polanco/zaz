@@ -35,7 +35,6 @@ import type { DispatchBucket } from './dispatch-sort';
 import { CreateOrderDto, DeliveryAddressDto } from './dto/create-order.dto';
 import { UpdateOrderStatusDto } from './dto/update-order-status.dto';
 import { PaymentsService } from '../payments/payments.service';
-import { PointsService } from '../points/points.service';
 import { PoolService } from '../pool/pool.service';
 import { AssociateBalanceService } from '../pool/associate-balance.service';
 import { InvoicesService } from '../invoices/invoices.service';
@@ -115,7 +114,6 @@ export class OrdersService {
     private readonly deliveryZones: Repository<DeliveryZone>,
     private readonly dataSource: DataSource,
     private readonly payments: PaymentsService,
-    private readonly points: PointsService,
     private readonly pool: PoolService,
     private readonly associateBalance: AssociateBalanceService,
     private readonly invoices: InvoicesService,
@@ -660,9 +658,15 @@ export class OrdersService {
 
       let pointsRedeemedCents = 0;
       if (dto.usePoints) {
-        const balance = await this.points.getBalance(user.id);
-        if (balance.claimableCents > 0) {
-          pointsRedeemedCents = Math.min(balance.claimableCents, subtotalCents);
+        // El saldo gastable es el del ASOCIADO (los clientes ya no tienen
+        // puntos propios: su balance da 0). Se topa por el subtotal y solo se
+        // descuenta lo que la orden cuesta; el resto se queda en el saldo.
+        const balanceCents = await this.associateBalance.getBalanceCents(
+          user.id,
+          tx,
+        );
+        if (balanceCents > 0) {
+          pointsRedeemedCents = Math.min(balanceCents, subtotalCents);
         }
       }
 
@@ -846,7 +850,14 @@ export class OrdersService {
       }
 
       if (pointsRedeemedCents > 0) {
-        await this.points.redeemAllClaimable(user.id, persisted.id, tx);
+        // `redeem` vuelve a validar el saldo bajo lock: un gasto concurrente del
+        // mismo asociado sale como INSUFFICIENT_BALANCE (400), nunca en negativo.
+        await this.associateBalance.redeem(
+          user.id,
+          persisted.id,
+          pointsRedeemedCents,
+          tx,
+        );
       }
 
       return persisted;

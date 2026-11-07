@@ -23,7 +23,6 @@ import { DeliveryZone } from '../../entities/delivery-zone.entity';
 import { OrderStatus, PaymentMethod, UserRole } from '../../entities/enums';
 import { AuthenticatedUser } from '../../common/types/authenticated-user';
 import { PaymentsService } from '../payments/payments.service';
-import { PointsService } from '../points/points.service';
 import { PoolService } from '../pool/pool.service';
 import { AssociateBalanceService } from '../pool/associate-balance.service';
 import { InvoicesService } from '../invoices/invoices.service';
@@ -158,7 +157,6 @@ describe('OrdersService', () => {
   let geocodingService: { reverse: jest.Mock };
   let dataSource: jest.Mocked<DataSource>;
   let paymentsService: jest.Mocked<PaymentsService>;
-  let pointsService: jest.Mocked<PointsService>;
   let poolService: jest.Mocked<PoolService>;
   let associateBalanceService: jest.Mocked<AssociateBalanceService>;
   let invoicesService: jest.Mocked<InvoicesService>;
@@ -204,11 +202,6 @@ describe('OrdersService', () => {
       markAuthorizedByIntentId: jest.fn(),
     } as unknown as jest.Mocked<PaymentsService>;
 
-    pointsService = {
-      getBalance: jest.fn().mockResolvedValue({ claimableCents: 0 }),
-      redeemAllClaimable: jest.fn(),
-    } as unknown as jest.Mocked<PointsService>;
-
     poolService = {
       contributeForOrder: jest.fn().mockResolvedValue(0),
       reverseLegacyRedemption: jest.fn().mockResolvedValue(0),
@@ -216,6 +209,8 @@ describe('OrdersService', () => {
     } as unknown as jest.Mocked<PoolService>;
 
     associateBalanceService = {
+      getBalanceCents: jest.fn().mockResolvedValue(0),
+      redeem: jest.fn().mockResolvedValue(undefined),
       reverseForOrder: jest.fn().mockResolvedValue(0),
     } as unknown as jest.Mocked<AssociateBalanceService>;
 
@@ -314,7 +309,6 @@ describe('OrdersService', () => {
         { provide: GeocodingService, useValue: geocodingService },
         { provide: DataSource, useValue: dataSource },
         { provide: PaymentsService, useValue: paymentsService },
-        { provide: PointsService, useValue: pointsService },
         { provide: PoolService, useValue: poolService },
         {
           provide: AssociateBalanceService,
@@ -5299,13 +5293,15 @@ describe('OrdersService', () => {
 
     function setupCreateTx(savedOverride: Partial<Order> = {}) {
       const savedOrder = fakeOrder({ ...savedOverride });
+      const createdOrders: Array<Partial<Order>> = [];
       (dataSource.transaction as jest.Mock).mockImplementation(
         async (cb: (mgr: EntityManager) => Promise<unknown>) => {
           const orderRepo = makeRepoMock<Order>();
           const itemRepo = makeRepoMock<OrderItem>();
-          orderRepo.create.mockImplementation(
-            (d) => ({ ...d, id: 'order-1' }) as Order,
-          );
+          orderRepo.create.mockImplementation((d) => {
+            createdOrders.push(d as Partial<Order>);
+            return { ...d, id: 'order-1' } as Order;
+          });
           orderRepo.save.mockResolvedValue(savedOrder);
           orderRepo.update.mockResolvedValue({ affected: 1 } as never);
           itemRepo.save.mockResolvedValue({} as never);
@@ -5324,37 +5320,43 @@ describe('OrdersService', () => {
       ordersRepo.findOne.mockResolvedValue(
         fakeOrder({ customer: fakeUser() as never, items: [] }),
       );
+      return { createdOrders };
     }
 
-    it('redeems points when usePoints=true and claimable balance > 0', async () => {
-      productsRepo.find.mockResolvedValue([fakeProduct()]);
-      pointsService.getBalance.mockResolvedValue({
-        claimableCents: 300,
-      } as never);
-      pointsService.redeemAllClaimable.mockResolvedValue(undefined);
-      setupCreateTx();
+    it('usePoints=true con saldo 1000 y subtotal 600 canjea 600 (no todo el saldo)', async () => {
+      productsRepo.find.mockResolvedValue([
+        fakeProduct({ priceToPublic: '6.00' }),
+      ]);
+      associateBalanceService.getBalanceCents.mockResolvedValue(1000);
+      const { createdOrders } = setupCreateTx();
 
       await service.create(fakeUser(UserRole.CLIENT), baseDto);
 
-      // claimableCents (300) < subtotal (500) → 300 redeemed → redeemAllClaimable called
-      expect(pointsService.getBalance).toHaveBeenCalledWith('user-1');
-      expect(pointsService.redeemAllClaimable).toHaveBeenCalledWith(
+      expect(associateBalanceService.getBalanceCents).toHaveBeenCalledWith(
+        'user-1',
+        expect.anything(),
+      );
+      // Tope por subtotal: el sobrante (400) se queda en el saldo.
+      expect(createdOrders[0].pointsRedeemed).toBe('6.00');
+      expect(associateBalanceService.redeem).toHaveBeenCalledWith(
         'user-1',
         'order-1',
+        600,
         expect.anything(),
       );
     });
 
-    it('does NOT redeem points when claimable balance is 0', async () => {
-      productsRepo.find.mockResolvedValue([fakeProduct()]);
-      pointsService.getBalance.mockResolvedValue({
-        claimableCents: 0,
-      } as never);
-      setupCreateTx();
+    it('con saldo 0 no canjea: pointsRedeemed 0.00 y redeem no se llama', async () => {
+      productsRepo.find.mockResolvedValue([
+        fakeProduct({ priceToPublic: '6.00' }),
+      ]);
+      associateBalanceService.getBalanceCents.mockResolvedValue(0);
+      const { createdOrders } = setupCreateTx();
 
       await service.create(fakeUser(UserRole.CLIENT), baseDto);
 
-      expect(pointsService.redeemAllClaimable).not.toHaveBeenCalled();
+      expect(createdOrders[0].pointsRedeemed).toBe('0.00');
+      expect(associateBalanceService.redeem).not.toHaveBeenCalled();
     });
 
     it('silently skips credit when no credit account exists (getAccountWithLock throws)', async () => {

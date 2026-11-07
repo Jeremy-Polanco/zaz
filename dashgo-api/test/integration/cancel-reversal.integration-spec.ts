@@ -208,13 +208,28 @@ describe('OrdersService cancel — full reversal', () => {
     const user = await seedUserWithCredit();
     await seedClaimablePoints(user.id, 200);
 
+    // El checkout ya no canjea puntos de cliente (gasta saldo de asociado), así
+    // que el canje viejo se reproduce como lo dejó el sistema anterior: filas
+    // EARNED `redeemed` ligadas a la orden + la fila negativa del canje. Es el
+    // caso real de una orden en curso al momento del deploy.
     const order = await ordersService.create(clientAs(user.id), {
       items: [{ productId: product.id, quantity: 1 }],
       paymentMethod: PaymentMethod.CASH,
       deliveryAddress: { text: 'Cancel-Rev St', lat: 40.7, lng: -74.0 },
-      usePoints: true,
     });
-    expect(order.pointsRedeemed).toBe('2.00');
+    await dataSource.query(
+      'UPDATE points_ledger_entries SET status = $1, order_id = $2 WHERE user_id = $3 AND type = $4',
+      [PointsEntryStatus.REDEEMED, order.id, user.id, PointsEntryType.EARNED],
+    );
+    await dataSource.getRepository(PointsLedgerEntry).save({
+      userId: user.id,
+      type: PointsEntryType.REDEEMED,
+      status: PointsEntryStatus.REDEEMED,
+      amountCents: -200,
+      orderId: order.id,
+      claimableAt: null,
+      expiresAt: null,
+    } as unknown as PointsLedgerEntry);
 
     const beforeCancel = await dataSource
       .getRepository(PointsLedgerEntry)

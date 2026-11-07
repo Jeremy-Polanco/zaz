@@ -61,7 +61,7 @@ export class PoolService {
       relations: ['product'],
     });
 
-    // Misma cuenta que usaba PointsService.creditForOrder (redondeo por línea),
+    // Misma cuenta que usaba el antiguo servicio de puntos de cliente (redondeo por línea),
     // para que el pool recaude exactamente lo que antes se acreditaba.
     let totalCents = 0;
     for (const item of items) {

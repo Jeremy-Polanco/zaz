@@ -7,7 +7,7 @@ import { PaymentsController } from './payments.controller';
 import { StripeWebhookIdempotencyService } from './stripe-webhook-idempotency.service';
 import { StripeWebhookEventCleanupCron } from './stripe-webhook-event-cleanup.cron';
 import { StripeWebhookEventJanitorCron } from './stripe-webhook-event-janitor.cron';
-import { PointsModule } from '../points/points.module';
+import { PoolModule } from '../pool/pool.module';
 import { ShippingModule } from '../shipping/shipping.module';
 import { CreditModule } from '../credit/credit.module';
 import { SubscriptionModule } from '../subscription/subscription.module';
@@ -19,7 +19,9 @@ import { AddressesModule } from '../addresses/addresses.module';
     // UserAddress: el intent resuelve la tasa por la fila GUARDADA del cliente
     // cuando el checkout manda `deliveryAddressId`, igual que la orden.
     TypeOrmModule.forFeature([Product, Order, StripeWebhookEvent, UserAddress]),
-    PointsModule,
+    // Saldo del asociado para el monto del intent. PoolModule solo importa
+    // entidades, no hay ciclo con PaymentsModule.
+    PoolModule,
     ShippingModule,
     // El intent tiene que cobrar la MISMA tasa que después cotiza la orden.
     // Import directo: AddressesModule no importa nada de la app, no hay ciclo.

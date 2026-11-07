@@ -21,7 +21,7 @@ import { OrdersModule } from './modules/orders/orders.module';
 import { PaymentsModule } from './modules/payments/payments.module';
 import { PromotersModule } from './modules/promoters/promoters.module';
 import { SellersModule } from './modules/sellers/sellers.module';
-import { PointsModule } from './modules/points/points.module';
+import { PoolModule } from './modules/pool/pool.module';
 import { InvoicesModule } from './modules/invoices/invoices.module';
 import { ShippingModule } from './modules/shipping/shipping.module';
 import { CreditModule } from './modules/credit/credit.module';
@@ -57,7 +57,7 @@ import { RequestLoggerMiddleware } from './common/middleware/request-logger.midd
     CategoriesModule,
     OrdersModule,
     PaymentsModule,
-    PointsModule,
+    PoolModule,
     InvoicesModule,
     ShippingModule,
     CreditModule,

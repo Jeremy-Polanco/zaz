@@ -13,7 +13,7 @@ import { Repository } from 'typeorm';
 import { PaymentsService } from './payments.service';
 import { Order, Product } from '../../entities';
 import { OrderStatus, PaymentMethod } from '../../entities/enums';
-import { PointsService } from '../points/points.service';
+import { AssociateBalanceService } from '../pool/associate-balance.service';
 import { ShippingService } from '../shipping/shipping.service';
 import { CreditService } from '../credit/credit.service';
 import { SubscriptionService } from '../subscription/subscription.service';
@@ -108,7 +108,7 @@ describe('PaymentsService', () => {
   let productsRepo: jest.Mocked<Repository<Product>>;
   let creditService: jest.Mocked<CreditService>;
   let configService: jest.Mocked<ConfigService>;
-  let pointsService: jest.Mocked<PointsService>;
+  let associateBalanceService: jest.Mocked<AssociateBalanceService>;
   let shippingService: jest.Mocked<ShippingService>;
   let subscriptionService: jest.Mocked<SubscriptionService>;
   let taxJurisdictionService: { resolveTaxRate: jest.Mock };
@@ -141,9 +141,9 @@ describe('PaymentsService', () => {
       getOrThrow: jest.fn(),
     } as unknown as jest.Mocked<ConfigService>;
 
-    pointsService = {
-      getBalance: jest.fn().mockResolvedValue({ claimableCents: 0 }),
-    } as unknown as jest.Mocked<PointsService>;
+    associateBalanceService = {
+      getBalanceCents: jest.fn().mockResolvedValue(0),
+    } as unknown as jest.Mocked<AssociateBalanceService>;
 
     shippingService = {
       computeQuote: jest.fn().mockResolvedValue({ shippingCents: 0 }),
@@ -167,7 +167,7 @@ describe('PaymentsService', () => {
         { provide: getRepositoryToken(Order), useValue: ordersRepo },
         { provide: getRepositoryToken(Product), useValue: productsRepo },
         { provide: ConfigService, useValue: configService },
-        { provide: PointsService, useValue: pointsService },
+        { provide: AssociateBalanceService, useValue: associateBalanceService },
         { provide: ShippingService, useValue: shippingService },
         { provide: CreditService, useValue: creditService },
         { provide: SubscriptionService, useValue: subscriptionService },
@@ -290,7 +290,7 @@ describe('PaymentsService', () => {
         { provide: getRepositoryToken(Order), useValue: ordersRepo },
         { provide: getRepositoryToken(Product), useValue: productsRepo },
         { provide: ConfigService, useValue: cfg },
-        { provide: PointsService, useValue: pointsService },
+        { provide: AssociateBalanceService, useValue: associateBalanceService },
         { provide: ShippingService, useValue: shippingService },
         { provide: CreditService, useValue: creditService },
         { provide: SubscriptionService, useValue: subscriptionService },
@@ -470,13 +470,29 @@ describe('PaymentsService', () => {
       ).rejects.toThrow('Monto inválido');
     });
 
+    it('el saldo de asociado se topa por el subtotal: saldo 1000 y subtotal 600 descuenta 600', async () => {
+      productsRepo.find.mockResolvedValue([
+        makeProduct({ id: 'prod-1', priceToPublic: '6.00' }),
+      ]);
+      associateBalanceService.getBalanceCents.mockResolvedValueOnce(1000);
+
+      await service.createIntentForItems({
+        userId: 'user-1',
+        usePoints: true,
+        items: [{ productId: 'prod-1', quantity: 1 }],
+      });
+
+      // subtotal 600 − canje 600 = base 0 → el intent no cobra nada de impuesto
+      // ni de producto (no se quema el sobrante de 400 en el cálculo).
+      const [params] = mockStripeInstance.paymentIntents.create.mock.calls[0];
+      expect(params.amount).toBe(0);
+    });
+
     it('redeems claimable points and reduces the taxable base', async () => {
       productsRepo.find.mockResolvedValue([
         makeProduct({ id: 'prod-1', priceToPublic: '10.00' }),
       ]);
-      pointsService.getBalance.mockResolvedValueOnce({
-        claimableCents: 300,
-      } as never);
+      associateBalanceService.getBalanceCents.mockResolvedValueOnce(300);
 
       await service.createIntentForItems({
         userId: 'user-1',

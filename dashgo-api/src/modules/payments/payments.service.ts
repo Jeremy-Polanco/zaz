@@ -14,7 +14,7 @@ import Stripe = require('stripe');
 import { Order, Product } from '../../entities';
 import { OrderStatus } from '../../entities/enums';
 import { getEffectivePrice } from '../products/pricing';
-import { PointsService } from '../points/points.service';
+import { AssociateBalanceService } from '../pool/associate-balance.service';
 import { ShippingService } from '../shipping/shipping.service';
 import { CreditService } from '../credit/credit.service';
 import { SubscriptionService } from '../subscription/subscription.service';
@@ -79,7 +79,7 @@ export class PaymentsService implements OnModuleInit {
     @InjectRepository(Order) private readonly orders: Repository<Order>,
     @InjectRepository(UserAddress)
     private readonly userAddresses: Repository<UserAddress>,
-    private readonly points: PointsService,
+    private readonly associateBalance: AssociateBalanceService,
     private readonly shipping: ShippingService,
     private readonly credit: CreditService,
     @Inject(forwardRef(() => SubscriptionService))
@@ -156,9 +156,13 @@ export class PaymentsService implements OnModuleInit {
 
     let pointsRedeemedCents = 0;
     if (input.usePoints) {
-      const balance = await this.points.getBalance(input.userId);
-      if (balance.claimableCents > 0) {
-        pointsRedeemedCents = Math.min(balance.claimableCents, subtotalCents);
+      // Mismo saldo y mismo tope que OrdersService.create: el intent cobra lo
+      // que la orden va a cobrar un segundo después.
+      const balanceCents = await this.associateBalance.getBalanceCents(
+        input.userId,
+      );
+      if (balanceCents > 0) {
+        pointsRedeemedCents = Math.min(balanceCents, subtotalCents);
       }
     }
 
