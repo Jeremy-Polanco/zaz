@@ -11,7 +11,7 @@ import { useCurrentUser, useDeleteAccount, useLogout } from '../lib/auth'
 import { useUpdateMe } from '../lib/queries'
 import { TOKEN_KEY } from '../lib/api'
 import { serverMessage } from '../lib/utils'
-import { roleLabel as sharedRoleLabel } from '../lib/roles'
+import { buysAsClient, roleLabel as sharedRoleLabel } from '../lib/roles'
 import type { UserRole } from '../lib/types'
 
 export const Route = createFileRoute('/cuenta')({
@@ -61,7 +61,7 @@ function AccountPage() {
     )
   }
 
-  const isClient = user.role === 'client'
+  const isClient = buysAsClient(user.role)
 
   const startEdit = () => {
     setName(user.fullName)
@@ -186,7 +186,6 @@ function AccountPage() {
           <span className="eyebrow">Mis datos</span>
           <nav className="mt-4 flex flex-col divide-y divide-ink/10">
             <AccountLink to="/alquileres" label="Mis alquileres" />
-            <AccountLink to="/points" label="Mis puntos" />
             <AccountLink to="/subscription" label="Suscripción" />
           </nav>
         </Card>

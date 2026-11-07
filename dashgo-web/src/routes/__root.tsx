@@ -16,7 +16,7 @@ import { Button, UdashMark } from '../components/ui'
 import { NetworkBanner } from '../components/NetworkBanner'
 import { MaintenanceBanner } from '../components/MaintenanceBanner'
 import { LocationSelector } from '../components/LocationSelector'
-import { roleLabel } from '../lib/roles'
+import { buysAsClient, roleLabel } from '../lib/roles'
 import type { UserRole } from '../lib/types'
 
 const LOCKOUT_ALLOWLIST = new Set<string>(['/credit/pay', '/login'])
@@ -161,9 +161,6 @@ function RoleNavLinks({
         <Link to="/orders" className={linkClass} onClick={onNavigate}>
           Mis pedidos
         </Link>
-        <Link to="/points" className={linkClass} onClick={onNavigate}>
-          Mis puntos
-        </Link>
         <Link to="/cuenta" className={linkClass} onClick={onNavigate}>
           Mi cuenta
         </Link>
@@ -177,9 +174,6 @@ function RoleNavLinks({
       </Link>
       <Link to="/orders" className={linkClass} onClick={onNavigate}>
         Mis pedidos
-      </Link>
-      <Link to="/points" className={linkClass} onClick={onNavigate}>
-        Mis puntos
       </Link>
       <Link to="/credit" className={linkClass} onClick={onNavigate}>
         Crédito
@@ -464,7 +458,7 @@ function RootLayout() {
           <NavUser />
         </div>
       </header>
-      {user?.role === 'client' && <MaintenanceBanner />}
+      {buysAsClient(user?.role) && <MaintenanceBanner />}
       <main className="flex-1">
         <Outlet />
       </main>

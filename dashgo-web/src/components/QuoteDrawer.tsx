@@ -154,7 +154,7 @@ export function QuoteDrawer({
           </div>
           {pointsRedeemedCents > 0 && (
             <div className="flex justify-between">
-              <span className="text-brand">Puntos</span>
+              <span className="text-brand">Saldo aplicado</span>
               <span className="nums text-brand">
                 −{formatCents(pointsRedeemedCents)}
               </span>

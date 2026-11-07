@@ -134,7 +134,7 @@ function DeleteUserModal({
           <span className="font-medium text-ink">{user.fullName}</span>
           {user.phone ? ` (${user.phone})` : ''}. Esta acción es{' '}
           <span className="font-medium text-bad">irreversible</span>: se
-          borran sus direcciones, suscripción, créditos y puntos. Sus órdenes se
+          borran sus direcciones, suscripción, créditos y saldo. Sus órdenes se
           conservan anonimizadas.
         </p>
 

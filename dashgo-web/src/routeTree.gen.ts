@@ -12,7 +12,6 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as SubscriptionRouteImport } from './routes/subscription'
 import { Route as SoporteRouteImport } from './routes/soporte'
 import { Route as PrivacidadRouteImport } from './routes/privacidad'
-import { Route as PointsRouteImport } from './routes/points'
 import { Route as OrdersRouteImport } from './routes/orders'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as HomeRouteImport } from './routes/home'
@@ -60,11 +59,6 @@ const SoporteRoute = SoporteRouteImport.update({
 const PrivacidadRoute = PrivacidadRouteImport.update({
   id: '/privacidad',
   path: '/privacidad',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const PointsRoute = PointsRouteImport.update({
-  id: '/points',
-  path: '/points',
   getParentRoute: () => rootRouteImport,
 } as any)
 const OrdersRoute = OrdersRouteImport.update({
@@ -243,7 +237,6 @@ export interface FileRoutesByFullPath {
   '/home': typeof HomeRoute
   '/login': typeof LoginRoute
   '/orders': typeof OrdersRouteWithChildren
-  '/points': typeof PointsRoute
   '/privacidad': typeof PrivacidadRoute
   '/soporte': typeof SoporteRoute
   '/subscription': typeof SubscriptionRoute
@@ -281,7 +274,6 @@ export interface FileRoutesByTo {
   '/cuenta': typeof CuentaRoute
   '/home': typeof HomeRoute
   '/login': typeof LoginRoute
-  '/points': typeof PointsRoute
   '/privacidad': typeof PrivacidadRoute
   '/soporte': typeof SoporteRoute
   '/subscription': typeof SubscriptionRoute
@@ -318,7 +310,6 @@ export interface FileRoutesById {
   '/home': typeof HomeRoute
   '/login': typeof LoginRoute
   '/orders': typeof OrdersRouteWithChildren
-  '/points': typeof PointsRoute
   '/privacidad': typeof PrivacidadRoute
   '/soporte': typeof SoporteRoute
   '/subscription': typeof SubscriptionRoute
@@ -359,7 +350,6 @@ export interface FileRouteTypes {
     | '/home'
     | '/login'
     | '/orders'
-    | '/points'
     | '/privacidad'
     | '/soporte'
     | '/subscription'
@@ -397,7 +387,6 @@ export interface FileRouteTypes {
     | '/cuenta'
     | '/home'
     | '/login'
-    | '/points'
     | '/privacidad'
     | '/soporte'
     | '/subscription'
@@ -433,7 +422,6 @@ export interface FileRouteTypes {
     | '/home'
     | '/login'
     | '/orders'
-    | '/points'
     | '/privacidad'
     | '/soporte'
     | '/subscription'
@@ -473,7 +461,6 @@ export interface RootRouteChildren {
   HomeRoute: typeof HomeRoute
   LoginRoute: typeof LoginRoute
   OrdersRoute: typeof OrdersRouteWithChildren
-  PointsRoute: typeof PointsRoute
   PrivacidadRoute: typeof PrivacidadRoute
   SoporteRoute: typeof SoporteRoute
   SubscriptionRoute: typeof SubscriptionRoute
@@ -515,13 +502,6 @@ declare module '@tanstack/react-router' {
       path: '/privacidad'
       fullPath: '/privacidad'
       preLoaderRoute: typeof PrivacidadRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/points': {
-      id: '/points'
-      path: '/points'
-      fullPath: '/points'
-      preLoaderRoute: typeof PointsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/orders': {
@@ -834,7 +814,6 @@ const rootRouteChildren: RootRouteChildren = {
   HomeRoute: HomeRoute,
   LoginRoute: LoginRoute,
   OrdersRoute: OrdersRouteWithChildren,
-  PointsRoute: PointsRoute,
   PrivacidadRoute: PrivacidadRoute,
   SoporteRoute: SoporteRoute,
   SubscriptionRoute: SubscriptionRoute,

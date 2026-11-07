@@ -408,7 +408,7 @@ export function OrderDetailPage() {
           </div>
           {pointsCents > 0 && (
             <div className="flex justify-between">
-              <span className="text-brand">Puntos</span>
+              <span className="text-brand">Saldo aplicado</span>
               <span className="nums text-brand">
                 −{formatCents(pointsCents)}
               </span>

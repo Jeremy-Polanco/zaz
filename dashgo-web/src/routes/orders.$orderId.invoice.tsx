@@ -147,7 +147,7 @@ export function InvoicePage() {
             {parseFloat(invoice.pointsRedeemed) > 0 && (
               <div className="flex justify-between border-b border-ink/10 pb-2">
                 <dt className="text-[0.7rem] uppercase tracking-[0.15em] text-brand">
-                  Descuento por puntos
+                  Saldo aplicado
                 </dt>
                 <dd className="nums text-sm text-brand">
                   −{formatMoney(invoice.pointsRedeemed)}
