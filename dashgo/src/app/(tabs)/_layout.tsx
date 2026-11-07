@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react'
 import { Tabs, router } from 'expo-router'
 import { useTranslation } from 'react-i18next'
-import { useCurrentUser } from '../../lib/queries'
+import { useCurrentUser, useMyAssociateBalance } from '../../lib/queries'
 import { MoreSheet, type MoreSheetItem } from '../../components/MoreSheet'
-import { isStaff } from '../../lib/roles'
+import { buysAsClient, isAssociate, isStaff } from '../../lib/roles'
 import {
   TabBarIcon,
   TabBarLabel,
@@ -24,10 +24,10 @@ type MoreItemDef = Omit<MoreSheetItem, 'label'> & { labelKey: string }
 
 // Overflow options for clients — surfaced through the "Más" bottom sheet.
 const CLIENT_MORE_ITEMS: MoreItemDef[] = [
-  { labelKey: 'more.points', icon: { ios: 'star.fill', android: 'star' }, route: '/(tabs)/points' },
   { labelKey: 'more.credit', icon: { ios: 'creditcard.fill', android: 'credit_card' }, route: '/(tabs)/credit' },
   { labelKey: 'more.subscription', icon: { ios: 'crown.fill', android: 'workspace_premium' }, route: '/(tabs)/subscription' },
   { labelKey: 'more.rentals', icon: { ios: 'drop.fill', android: 'water_drop' }, route: '/(tabs)/alquileres' },
+  { labelKey: 'more.pool', icon: { ios: 'person.3.fill', android: 'groups' }, route: '/(tabs)/pool' },
   { labelKey: 'more.myAccount', icon: { ios: 'person.crop.circle.fill', android: 'account_circle' }, route: '/(tabs)/profile' },
 ]
 
@@ -40,7 +40,7 @@ const GUEST_MORE_ITEMS: MoreItemDef[] = [
 export default function TabLayout() {
   const { t } = useTranslation('nav')
   const { data: user, isPending } = useCurrentUser()
-  const isClient = user?.role === 'client'
+  const isClient = buysAsClient(user?.role)
   // Guests share the client tab bar — browse is public, account tabs prompt login.
   const isGuest = !user
   const [moreOpen, setMoreOpen] = useState(false)
@@ -53,9 +53,13 @@ export default function TabLayout() {
     }
   }, [user, isPending])
 
-  const moreItems: MoreSheetItem[] = (isGuest ? GUEST_MORE_ITEMS : CLIENT_MORE_ITEMS).map(
-    ({ labelKey, ...item }) => ({ ...item, label: t(labelKey) }),
-  )
+  // El pool lo ve el asociado y el ex asociado que conserva saldo (mismo query
+  // ['pool','me'] que el checkout). La lista es estática y se filtra al renderizar.
+  const { data: poolBalance } = useMyAssociateBalance(!!user)
+  const showPool = isAssociate(user?.role) || (poolBalance?.balanceCents ?? 0) > 0
+  const moreItems: MoreSheetItem[] = (isGuest ? GUEST_MORE_ITEMS : CLIENT_MORE_ITEMS)
+    .filter(({ labelKey }) => labelKey !== 'more.pool' || showPool)
+    .map(({ labelKey, ...item }) => ({ ...item, label: t(labelKey) }))
 
   return (
     <>
@@ -101,11 +105,11 @@ export default function TabLayout() {
         />
 
         {/* Overflow screens — reachable via the "Más" sheet, hidden from the bar. */}
-        <Tabs.Screen name="points" options={{ title: t('tabs.points'), href: null }} />
         <Tabs.Screen name="credit" options={{ title: t('tabs.credit'), href: null }} />
         <Tabs.Screen name="subscription" options={{ title: t('tabs.subscription'), href: null }} />
         <Tabs.Screen name="alquileres" options={{ title: t('tabs.rentals'), href: null }} />
         <Tabs.Screen name="profile" options={{ title: t('tabs.account'), href: null }} />
+        <Tabs.Screen name="pool" options={{ title: t('more.pool'), href: null }} />
       </Tabs>
 
       <MoreSheet

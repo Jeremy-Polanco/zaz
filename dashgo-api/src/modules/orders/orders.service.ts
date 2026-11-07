@@ -28,13 +28,15 @@ import {
 import { AuthenticatedUser } from '../../common/types/authenticated-user';
 import { TAX_RATE, computeTaxableBase } from '../../common/tax';
 import { todayIsoDay } from '../../common/delivery-day';
+import { buysAsClient } from '../../common/roles';
 import type { TaxableLine } from '../../common/tax';
 import { sortOrdersForDispatch } from './dispatch-sort';
 import type { DispatchBucket } from './dispatch-sort';
 import { CreateOrderDto, DeliveryAddressDto } from './dto/create-order.dto';
 import { UpdateOrderStatusDto } from './dto/update-order-status.dto';
 import { PaymentsService } from '../payments/payments.service';
-import { PointsService } from '../points/points.service';
+import { PoolService } from '../pool/pool.service';
+import { AssociateBalanceService } from '../pool/associate-balance.service';
 import { InvoicesService } from '../invoices/invoices.service';
 import { PromotersService } from '../promoters/promoters.service';
 import { SellersService } from '../sellers/sellers.service';
@@ -112,7 +114,8 @@ export class OrdersService {
     private readonly deliveryZones: Repository<DeliveryZone>,
     private readonly dataSource: DataSource,
     private readonly payments: PaymentsService,
-    private readonly points: PointsService,
+    private readonly pool: PoolService,
+    private readonly associateBalance: AssociateBalanceService,
     private readonly invoices: InvoicesService,
     private readonly promotersService: PromotersService,
     private readonly sellersService: SellersService,
@@ -279,7 +282,8 @@ export class OrdersService {
       scheduledDeliveryDate?: string;
     } = {},
   ) {
-    if (user.role !== UserRole.CLIENT && user.role !== UserRole.PROMOTER) {
+    // El asociado crea pedidos igual que un cliente (`buysAsClient`).
+    if (!buysAsClient(user.role) && user.role !== UserRole.PROMOTER) {
       throw new ForbiddenException('Solo clientes pueden crear pedidos');
     }
 
@@ -301,7 +305,8 @@ export class OrdersService {
     // tenga su agua en camino) y, cuando la guarda corre para un pedido del
     // cliente, no cuenta las provisionadas — una visita de mantenimiento abierta
     // por días no puede dejarlo sin poder pedir agua.
-    if (user.role === UserRole.CLIENT && !opts.provisioned) {
+    // El asociado también queda sujeto a la guarda: compra como un cliente.
+    if (buysAsClient(user.role) && !opts.provisioned) {
       const activeCount = await this.orders.count({
         where: {
           customerId: user.id,
@@ -653,16 +658,23 @@ export class OrdersService {
 
       let pointsRedeemedCents = 0;
       if (dto.usePoints) {
-        const balance = await this.points.getBalance(user.id);
-        if (balance.claimableCents > 0) {
-          pointsRedeemedCents = Math.min(balance.claimableCents, subtotalCents);
+        // El saldo gastable es el del ASOCIADO (los clientes ya no tienen
+        // puntos propios: su balance da 0). Se topa por el subtotal y solo se
+        // descuenta lo que la orden cuesta; el resto se queda en el saldo.
+        const balanceCents = await this.associateBalance.getBalanceCents(
+          user.id,
+          tx,
+        );
+        if (balanceCents > 0) {
+          pointsRedeemedCents = Math.min(balanceCents, subtotalCents);
         }
       }
 
       // T4.3: Acquire pessimistic lock on credit_account EARLY in the TX
       // (before order/items are written), to avoid deadlock ordering issues.
       let creditAppliedCents = 0;
-      if (dto.useCredit && user.role === UserRole.CLIENT) {
+      // El fiado también aplica al asociado: compra como un cliente.
+      if (dto.useCredit && buysAsClient(user.role)) {
         // getAccountWithLock will throw if no account exists; create first if needed
         const creditAccount = await (async () => {
           try {
@@ -838,7 +850,14 @@ export class OrdersService {
       }
 
       if (pointsRedeemedCents > 0) {
-        await this.points.redeemAllClaimable(user.id, persisted.id, tx);
+        // `redeem` vuelve a validar el saldo bajo lock: un gasto concurrente del
+        // mismo asociado sale como INSUFFICIENT_BALANCE (400), nunca en negativo.
+        await this.associateBalance.redeem(
+          user.id,
+          persisted.id,
+          pointsRedeemedCents,
+          tx,
+        );
       }
 
       return persisted;
@@ -942,13 +961,15 @@ export class OrdersService {
     const sellerFilter = sellerId ? 'AND u.seller_id = $1' : '';
     const sellerParams = sellerId ? [sellerId] : [];
 
+    // Los asociados compran como clientes, así que también cuentan como
+    // clientes en estos baldes de actividad.
     const orderedToday: CustomerActivityRow[] = await this.orders.query(
       `
       SELECT u.id, u.full_name AS "fullName", u.phone,
              MAX(o.created_at) AS "lastOrderAt"
       FROM users u
       JOIN orders o ON o.customer_id = u.id AND o.status != 'cancelled'
-      WHERE u.role = 'client'
+      WHERE u.role IN ('client', 'associate')
         ${sellerFilter}
         AND (o.created_at AT TIME ZONE 'America/New_York')::date =
             (now() AT TIME ZONE 'America/New_York')::date
@@ -965,7 +986,7 @@ export class OrdersService {
                MAX(o.created_at) AS "lastOrderAt"
         FROM users u
         LEFT JOIN orders o ON o.customer_id = u.id AND o.status != 'cancelled'
-        WHERE u.role = 'client'
+        WHERE u.role IN ('client', 'associate')
         ${sellerId ? 'AND u.seller_id = $2' : ''}
         GROUP BY u.id, u.full_name, u.phone
         HAVING MAX(o.created_at) IS NULL
@@ -1793,7 +1814,8 @@ export class OrdersService {
 
   /**
    * Cancel an order and atomically reverse its side-effects: refund applied
-   * credit, restore redeemed points, cancel any pending_setup rentals tied to
+   * credit, give back the associate balance (or pool a legacy points
+   * redemption), cancel any pending_setup rentals tied to
    * it, and re-increment stock if it had been decremented (confirmed/in-route).
    * Shared by the admin status-change path (updateStatus) and the
    * cancel-non-rental-orders one-time op.
@@ -1810,7 +1832,15 @@ export class OrdersService {
       if (parseFloat(order.creditApplied || '0') > 0) {
         await this.credit.reverseCharge(order.id, cancelTx);
       }
-      await this.points.reverseRedemptionForOrder(order.id, cancelTx);
+      // Dos libros, mutuamente excluyentes por orden: el saldo del asociado se
+      // devuelve a él, y un canje VIEJO de puntos del cliente va al pool (el
+      // cliente ya no puede gastar esos puntos). Cada uno es idempotente.
+      await this.associateBalance.reverseForOrder(order.id, cancelTx);
+      await this.pool.reverseLegacyRedemption(order.id, cancelTx);
+      // Una venta cancelada no puede financiar el pool de los asociados: si la
+      // orden ya había aportado (cancelación masiva de entregadas) su aporte
+      // sale, salvo que el trimestre ya esté repartido (lo pagado no se toca).
+      await this.pool.withdrawOrderContribution(order.id, cancelTx);
       await this.rentalsService.cancelPendingForOrder(order.id, cancelTx);
       if (wasStockDecremented) {
         const itemRepo = cancelTx.getRepository(OrderItem);
@@ -2037,7 +2067,7 @@ export class OrdersService {
         await orderRepo.update(orderId, { status: OrderStatus.DELIVERED });
       }
 
-      await this.points.creditForOrder(orderId, tx);
+      await this.pool.contributeForOrder(orderId, tx);
       await this.invoices.createForOrder(orderId, tx);
       await this.promotersService.creditCommissionsForOrder(orderId, tx);
       // Comisión del vendedor de la cartera. Va en la MISMA transacción que la
@@ -2146,7 +2176,9 @@ export class OrdersService {
     )
       return;
 
-    if (user.role === UserRole.CLIENT || user.role === UserRole.PROMOTER) {
+    // El asociado cancela en los mismos estados que un cliente. Sin incluirlo
+    // aquí salía de esta función sin error y podía ejecutar cualquier transición.
+    if (buysAsClient(user.role) || user.role === UserRole.PROMOTER) {
       const clientCancellable = [
         OrderStatus.PENDING_QUOTE,
         OrderStatus.QUOTED,

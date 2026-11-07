@@ -14,13 +14,14 @@ import {
   useMyCredit,
   useMySubscription,
   useOrders,
-  usePointsBalance,
+  useMyAssociateBalance,
   useProducts,
   useShippingRate,
   useUpdateOrderStatus,
 } from '../lib/queries'
 import { userAddressToGeoAddress } from '../lib/address'
 import { formatCents } from '../lib/format'
+import { buysAsClient } from '../lib/roles'
 import { effectivePriceCentsFor, subscriberPriceWins } from '../lib/pricing'
 import {
   computeQuotePreviewCents,
@@ -50,7 +51,9 @@ export default function CheckoutScreen() {
     }
   }, [user, userPending])
   const { data: products } = useProducts()
-  const { data: pointsBalance } = usePointsBalance()
+  // Cualquier usuario logueado: un ex asociado conserva (y puede gastar) el
+  // saldo que ya se le repartió; un cliente común ve 0. Invitado: sin request.
+  const { data: associateBalance } = useMyAssociateBalance(!!user)
   const { data: creditData } = useMyCredit()
   const { data: subscription } = useMySubscription()
   const createOrder = useCreateOrder()
@@ -158,11 +161,14 @@ export default function CheckoutScreen() {
     [lineItems, hasMixedCart],
   )
 
-  const claimableCents = pointsBalance?.claimableCents ?? 0
-  const redeemCents = usePoints ? Math.min(claimableCents, subtotalCents) : 0
+  const associateBalanceCents = associateBalance?.balanceCents ?? 0
+  // El servidor topa la redención en el subtotal (no descuenta envío).
+  const redeemCents = usePoints
+    ? Math.min(associateBalanceCents, subtotalCents)
+    : 0
 
   const creditUsable =
-    user?.role === 'client' &&
+    buysAsClient(user?.role) &&
     creditData &&
     creditData.status !== 'none' &&
     creditData.status !== 'overdue' &&
@@ -751,15 +757,15 @@ export default function CheckoutScreen() {
           </View>
         )}
 
-        {/* Mis puntos */}
-        {claimableCents > 0 && (
+        {/* Saldo de asociado */}
+        {associateBalanceCents > 0 && (
           <View className="mb-8">
             <View className="mb-4 flex-row items-baseline gap-3">
               <Text className="font-sans-italic text-2xl text-brand">
                 {fmtNo(pagoNo + (paymentMethod === 'digital' ? 3 : 2))}
               </Text>
               <Text className="font-sans text-[13px] uppercase tracking-eyebrow text-ink-muted">
-                {t('points.title')}
+                {t('associateBalance.title')}
               </Text>
             </View>
             <Pressable
@@ -775,14 +781,16 @@ export default function CheckoutScreen() {
                       usePoints ? 'text-paper/70' : 'text-ink-muted'
                     }`}
                   >
-                    {t('points.fullRedeem')}
+                    {t('associateBalance.available', {
+                      amount: formatCents(associateBalanceCents),
+                    })}
                   </Text>
                   <Text
                     className={`mt-1 font-sans-semibold text-[18px] ${
                       usePoints ? 'text-paper' : 'text-ink'
                     }`}
                   >
-                    {t('points.use', { amount: formatCents(claimableCents) })}
+                    {t('associateBalance.use')}
                   </Text>
                 </View>
                 <View
@@ -828,7 +836,7 @@ export default function CheckoutScreen() {
           {redeemCents > 0 && (
             <View className="mb-2 flex-row items-baseline justify-between">
               <Text className="font-sans text-[13px] uppercase tracking-label text-brand">
-                {t('totals.pointsDiscount')}
+                {t('totals.balanceApplied')}
               </Text>
               <Text
                 className="font-sans text-[14px] text-brand"

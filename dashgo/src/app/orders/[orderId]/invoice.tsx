@@ -27,7 +27,7 @@ export default function InvoiceScreen() {
       t('invoice.share.subtotal', { amount: formatMoney(invoice.subtotal) }),
       ...(parseFloat(invoice.pointsRedeemed) > 0
         ? [
-            t('invoice.share.pointsDiscount', {
+            t('invoice.share.balanceApplied', {
               amount: formatMoney(invoice.pointsRedeemed),
             }),
           ]
@@ -184,7 +184,7 @@ export default function InvoiceScreen() {
           {parseFloat(invoice.pointsRedeemed) > 0 && (
             <View className="mb-2 flex-row items-baseline justify-between">
               <Text className="font-sans text-[11px] uppercase tracking-label text-brand">
-                {t('invoice.pointsDiscount')}
+                {t('invoice.balanceApplied')}
               </Text>
               <Text
                 className="font-sans text-[14px] text-brand"

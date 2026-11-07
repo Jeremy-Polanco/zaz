@@ -25,6 +25,7 @@ const SUPER_MORE_ITEMS: MoreSheetItem[] = [
   { label: 'Suscripción', icon: { ios: 'crown.fill', android: 'workspace_premium' }, route: '/(super)/subscription' },
   { label: 'Alquileres', icon: { ios: 'drop.fill', android: 'water_drop' }, route: '/(super)/rentals' },
   { label: 'Vendedores', icon: { ios: 'bag.fill', android: 'store' }, route: '/(super)/sellers' },
+  { label: 'Pool', icon: { ios: 'chart.pie.fill', android: 'pie_chart' }, route: '/(super)/pool' },
   { label: 'Reparto', icon: { ios: 'person.crop.circle.fill', android: 'account_circle' }, route: '/(super)/profile' },
 ]
 
@@ -114,6 +115,7 @@ export default function SuperLayout() {
         <Tabs.Screen name="rentals" options={{ title: 'Alquileres', href: null }} />
         <Tabs.Screen name="profile" options={{ title: 'Reparto', href: null }} />
         <Tabs.Screen name="sellers" options={{ title: 'Vendedores', href: null }} />
+        <Tabs.Screen name="pool" options={{ title: 'Pool', href: null }} />
         <Tabs.Screen name="earnings" options={{ title: 'Mis ingresos', href: null }} />
       </Tabs>
 

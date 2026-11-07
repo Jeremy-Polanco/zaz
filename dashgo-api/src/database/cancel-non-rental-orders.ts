@@ -9,7 +9,10 @@ import { OrderStatus } from '../entities/enums';
  * One-time op — soft-delete (cancel) every order that is NOT linked to a rental,
  * keeping the rental-triggering orders. Reuses the production cancel path
  * (OrdersService.cancelNonRentalOrders → cancelOrderWithReversals), so applied
- * credit is refunded, redeemed points restored, and decremented stock put back.
+ * credit is refunded, the associate balance spent on the order is returned
+ * (legacy customer point redemptions go to the pool, and a delivered order's
+ * pool contribution is withdrawn while its quarter is still open), and
+ * decremented stock put back.
  * The "alquiler" (rentals) themselves are a separate entity and are never
  * touched — deleting their originating order only nulls rental.order_id.
  *

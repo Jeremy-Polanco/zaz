@@ -22,7 +22,7 @@ jest.mock('../lib/queries', () => ({
   useCurrentUser: jest.fn(),
   useMyCredit: jest.fn(),
   useMySubscription: jest.fn(),
-  usePointsBalance: jest.fn(),
+  useMyAssociateBalance: jest.fn(),
   useProducts: jest.fn(),
   useMyAddresses: jest.fn(),
   useShippingRate: jest.fn(),
@@ -81,7 +81,7 @@ import {
   useCurrentUser,
   useMyCredit,
   useMySubscription,
-  usePointsBalance,
+  useMyAssociateBalance,
   useProducts,
   useMyAddresses,
   useShippingRate,
@@ -98,7 +98,8 @@ const mockUseOrders = useOrders as jest.MockedFunction<typeof useOrders>
 const mockUseCurrentUser = useCurrentUser as jest.MockedFunction<typeof useCurrentUser>
 const mockUseMyCredit = useMyCredit as jest.MockedFunction<typeof useMyCredit>
 const mockUseMySubscription = useMySubscription as jest.MockedFunction<typeof useMySubscription>
-const mockUsePointsBalance = usePointsBalance as jest.MockedFunction<typeof usePointsBalance>
+const mockUseMyAssociateBalance =
+  useMyAssociateBalance as jest.MockedFunction<typeof useMyAssociateBalance>
 const mockUseProducts = useProducts as jest.MockedFunction<typeof useProducts>
 const mockUseMyAddresses = useMyAddresses as jest.MockedFunction<typeof useMyAddresses>
 const mockUseShippingRate = useShippingRate as jest.MockedFunction<typeof useShippingRate>
@@ -203,7 +204,9 @@ function setupCheckoutMocks(
 
   mockUseMyCredit.mockReturnValue({ data: null } as unknown as ReturnType<typeof useMyCredit>)
   mockUseMySubscription.mockReturnValue({ data: null } as unknown as ReturnType<typeof useMySubscription>)
-  mockUsePointsBalance.mockReturnValue({ data: null } as unknown as ReturnType<typeof usePointsBalance>)
+  mockUseMyAssociateBalance.mockReturnValue({
+    data: { balanceCents: 0, entries: [] },
+  } as unknown as ReturnType<typeof useMyAssociateBalance>)
   mockUseMyAddresses.mockReturnValue({ data: [] } as unknown as ReturnType<typeof useMyAddresses>)
 
   // Default: rate resolved at the $5 default — most tests don't care about
@@ -892,5 +895,83 @@ describe('Checkout — per-zone tax rate (selected address.taxRate)', () => {
     // snapshot ZIP alone is no longer trusted for money (see API contract).
     expect(payload.deliveryAddressId).toBe('addr-1')
     expect(payload.deliveryAddress).toMatchObject({ postalCode: '10451' })
+  })
+})
+
+// ── Saldo de asociado (el cliente ya no ve puntos) ────────────────────────────
+
+function asUser(role: string) {
+  mockUseCurrentUser.mockReturnValue({
+    data: { id: 'user-1', role, addressDefault: null },
+  } as unknown as ReturnType<typeof useCurrentUser>)
+}
+
+function withBalance(balanceCents: number) {
+  mockUseMyAssociateBalance.mockReturnValue({
+    data: { balanceCents, entries: [] },
+  } as unknown as ReturnType<typeof useMyAssociateBalance>)
+}
+
+describe('Checkout — saldo de asociado', () => {
+  it('hides the whole balance section (and any mention of puntos) for a client with 0 balance', () => {
+    setupCheckoutMocks([SINGLE_PRODUCT as unknown as typeof MOCK_PRODUCT], { 'product-single': 1 })
+    asUser('client')
+    withBalance(0)
+
+    const { queryByText } = renderWithProviders(<CheckoutScreen />)
+
+    expect(queryByText(/puntos/i)).toBeNull()
+    expect(queryByText(/saldo de asociado/i)).toBeNull()
+  })
+
+  it('only fires the balance query for a logged-in user (guests must not hit the API)', () => {
+    setupCheckoutMocks([SINGLE_PRODUCT as unknown as typeof MOCK_PRODUCT], { 'product-single': 1 })
+    mockUseCurrentUser.mockReturnValue({
+      data: undefined,
+      isPending: false,
+    } as unknown as ReturnType<typeof useCurrentUser>)
+
+    renderWithProviders(<CheckoutScreen />)
+
+    expect(mockUseMyAssociateBalance).toHaveBeenCalledWith(false)
+  })
+
+  it('shows the toggle to an associate with balance and sends usePoints: true once activated, capped at the subtotal', async () => {
+    setupCheckoutMocks([SINGLE_PRODUCT as unknown as typeof MOCK_PRODUCT], { 'product-single': 1 })
+    asUser('associate')
+    withBalance(1500)
+    alertSpy.mockImplementation(
+      (_title, _msg, buttons: Array<{ text: string; onPress?: () => void }>) => {
+        buttons?.find((b) => b.text === 'Sí, confirmar')?.onPress?.()
+      },
+    )
+
+    const { getByText, queryByText } = renderWithProviders(<CheckoutScreen />)
+
+    expect(queryByText('Saldo aplicado')).toBeNull()
+    fireEvent.press(getByText(/Usar mi saldo de asociado/i))
+    // Subtotal es $5: el saldo de $15 se aplica solo hasta ahí.
+    expect(getByText('Saldo aplicado')).toBeTruthy()
+    expect(getByText('−$5')).toBeTruthy()
+
+    await act(async () => {
+      fireEvent.press(getByText(/Confirmar pedido/i))
+    })
+    await waitFor(() => expect(mockCreateOrderMutateAsync).toHaveBeenCalled())
+    expect(mockCreateOrderMutateAsync.mock.calls[0][0]).toEqual(
+      expect.objectContaining({ usePoints: true }),
+    )
+  })
+
+  it('also shows the toggle to a plain client (ex associate) who still holds balance', () => {
+    setupCheckoutMocks([SINGLE_PRODUCT as unknown as typeof MOCK_PRODUCT], { 'product-single': 1 })
+    asUser('client')
+    withBalance(800)
+
+    const { getByText, queryByText } = renderWithProviders(<CheckoutScreen />)
+
+    expect(getByText(/Usar mi saldo de asociado/i)).toBeTruthy()
+    expect(getByText(/Disponible: \$8/)).toBeTruthy()
+    expect(queryByText(/puntos/i)).toBeNull()
   })
 })

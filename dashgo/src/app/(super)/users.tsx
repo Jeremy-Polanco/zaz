@@ -25,6 +25,7 @@ import { isSuperAdmin } from '../../lib/roles'
 const ROLE_LABELS: Record<UserRole, string> = {
   client: 'Cliente',
   promoter: 'Promotor',
+  associate: 'Asociado',
   seller: 'Vendedor',
   super_admin_delivery: 'Reparto',
 }
@@ -74,7 +75,7 @@ function SubscriptionBadge({ status }: { status: string | null }) {
  * provisiona por bootstrap/consola a propósito, así una sesión de admin robada
  * no puede fabricar otro admin. El backend lo rechaza igual.
  */
-const ASSIGNABLE_ROLES: UserRole[] = ['client', 'seller', 'promoter']
+const ASSIGNABLE_ROLES: UserRole[] = ['client', 'seller', 'promoter', 'associate']
 
 function UserRow({
   item,
@@ -490,7 +491,7 @@ export default function SuperUsersScreen() {
 
       Alert.alert(
         'Eliminar usuario',
-        `Vas a eliminar a ${user.fullName}${user.phone ? ` (${user.phone})` : ''}. Se borran sus direcciones, suscripción, créditos y puntos. Sus pedidos se conservan anonimizados.`,
+        `Vas a eliminar a ${user.fullName}${user.phone ? ` (${user.phone})` : ''}. Se borran sus direcciones, suscripción, créditos y saldo. Sus pedidos se conservan anonimizados.`,
         [
           { text: 'Cancelar', style: 'cancel' },
           {

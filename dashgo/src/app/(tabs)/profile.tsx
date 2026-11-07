@@ -14,11 +14,13 @@ import { SymbolView, type AndroidSymbol } from 'expo-symbols'
 import type { SFSymbol } from 'sf-symbols-typescript'
 import {
   useCurrentUser,
+  useMyAssociateBalance,
   useDeleteAccount,
   useLogout,
   useUpdateMe,
 } from '../../lib/queries'
 import { dobToIso, dobSchema } from '../../lib/schemas'
+import { buysAsClient, isAssociate } from '../../lib/roles'
 import { Button, Eyebrow, Hairline } from '../../components/ui'
 import { DeleteAccountModal } from '../../components/DeleteAccountModal'
 import { setAppLanguage, type AppLanguage } from '../../i18n'
@@ -157,7 +159,11 @@ export default function ProfileTab() {
   const { data: user, isPending } = useCurrentUser()
   const logout = useLogout()
   const deleteAccount = useDeleteAccount()
-  const isClient = user?.role === 'client'
+  const isClient = buysAsClient(user?.role)
+  // Mismo query ['pool','me'] que el checkout: el ex asociado conserva saldo y
+  // tiene que poder llegar a su historial.
+  const { data: poolBalance } = useMyAssociateBalance(!!user)
+  const showPool = isAssociate(user?.role) || (poolBalance?.balanceCents ?? 0) > 0
 
   const [deleteModalOpen, setDeleteModalOpen] = useState(false)
   const [deleteError, setDeleteError] = useState<string | null>(null)
@@ -263,17 +269,19 @@ export default function ProfileTab() {
             <View className="mt-6">
               <Eyebrow className="mb-1">{t('myActivity')}</Eyebrow>
               <AccountLink
-                label={t('points')}
-                iosIcon="star.fill"
-                androidIcon="star"
-                href="/(tabs)/points"
-              />
-              <AccountLink
                 label={t('subscription')}
                 iosIcon="repeat.circle.fill"
                 androidIcon="autorenew"
                 href="/(tabs)/subscription"
               />
+              {showPool && (
+                <AccountLink
+                  label={t('pool')}
+                  iosIcon="person.3.fill"
+                  androidIcon="groups"
+                  href="/(tabs)/pool"
+                />
+              )}
             </View>
           </>
         )}

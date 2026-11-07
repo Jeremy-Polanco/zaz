@@ -160,13 +160,6 @@ export default function PromoterProfileScreen() {
               androidIcon="apps"
               href="/(promoter)/catalog"
             />
-            <AccountLink
-              label="Puntos"
-              hint="Tu balance de puntos"
-              iosIcon="star.fill"
-              androidIcon="star"
-              href="/(promoter)/points"
-            />
           </View>
 
           <Hairline className="mt-8" />

@@ -10,13 +10,13 @@ import { ReactQueryDevtools } from '@tanstack/react-query-devtools'
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useCurrentUser, useLogout } from '../lib/auth'
-import { useUpdateMe } from '../lib/queries'
+import { useMyAssociateBalance, useUpdateMe } from '../lib/queries'
 import { requestBrowserLocation, reverseGeocode } from '../lib/geo'
 import { Button, UdashMark } from '../components/ui'
 import { NetworkBanner } from '../components/NetworkBanner'
 import { MaintenanceBanner } from '../components/MaintenanceBanner'
 import { LocationSelector } from '../components/LocationSelector'
-import { roleLabel } from '../lib/roles'
+import { buysAsClient, isAssociate, roleLabel } from '../lib/roles'
 import type { UserRole } from '../lib/types'
 
 const LOCKOUT_ALLOWLIST = new Set<string>(['/credit/pay', '/login'])
@@ -84,6 +84,10 @@ function RoleNavLinks({
   linkClass: string
   onNavigate?: () => void
 }) {
+  // Mismo query (['pool','me']) que el checkout. Un ex asociado conserva saldo
+  // y tiene que poder llegar a su historial; solo se consulta para quien compra
+  // como cliente (la query ya existe, no se suma otro tipo de request).
+  const { data: poolBalance } = useMyAssociateBalance(buysAsClient(role as UserRole))
   if (role === 'super_admin_delivery') {
     return (
       <>
@@ -118,6 +122,9 @@ function RoleNavLinks({
         </Link>
         <Link to="/super/rentals" className={linkClass} onClick={onNavigate}>
           Alquileres
+        </Link>
+        <Link to="/super/pool" className={linkClass} onClick={onNavigate}>
+          Pool
         </Link>
         <Link to="/super/notifications" className={linkClass} onClick={onNavigate}>
           Notificar
@@ -161,9 +168,6 @@ function RoleNavLinks({
         <Link to="/orders" className={linkClass} onClick={onNavigate}>
           Mis pedidos
         </Link>
-        <Link to="/points" className={linkClass} onClick={onNavigate}>
-          Mis puntos
-        </Link>
         <Link to="/cuenta" className={linkClass} onClick={onNavigate}>
           Mi cuenta
         </Link>
@@ -178,15 +182,17 @@ function RoleNavLinks({
       <Link to="/orders" className={linkClass} onClick={onNavigate}>
         Mis pedidos
       </Link>
-      <Link to="/points" className={linkClass} onClick={onNavigate}>
-        Mis puntos
-      </Link>
       <Link to="/credit" className={linkClass} onClick={onNavigate}>
         Crédito
       </Link>
       <Link to="/subscription" className={linkClass} onClick={onNavigate}>
         Suscripción
       </Link>
+      {(isAssociate(role as UserRole) || (poolBalance?.balanceCents ?? 0) > 0) && (
+        <Link to="/pool" className={linkClass} onClick={onNavigate}>
+          Pool de asociados
+        </Link>
+      )}
       <Link to="/cuenta" className={linkClass} onClick={onNavigate}>
         Mi cuenta
       </Link>
@@ -464,7 +470,7 @@ function RootLayout() {
           <NavUser />
         </div>
       </header>
-      {user?.role === 'client' && <MaintenanceBanner />}
+      {buysAsClient(user?.role) && <MaintenanceBanner />}
       <main className="flex-1">
         <Outlet />
       </main>

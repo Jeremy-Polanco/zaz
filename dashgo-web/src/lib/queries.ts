@@ -19,8 +19,9 @@ import type {
   MyCreditResponse,
   Order,
   Payout,
-  PointsBalance,
-  PointsEntry,
+  AssociateBalance,
+  PoolDistribution,
+  PoolSummary,
   Product,
   Promoter,
   PromoterCommissionEntryStatus,
@@ -205,7 +206,7 @@ export function useCreateOrder() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['orders'] })
-      qc.invalidateQueries({ queryKey: ['points'] })
+      qc.invalidateQueries({ queryKey: ['pool', 'me'] })
     },
   })
 }
@@ -231,19 +232,31 @@ export function useRequestMaintenance() {
   })
 }
 
-export function usePointsBalance() {
-  return useQuery<PointsBalance>({
-    queryKey: ['points', 'balance'],
-    queryFn: async () =>
-      (await api.get<PointsBalance>('/points/balance')).data,
+/**
+ * Saldo de asociado propio. `enabled` lo decide quien llama: el checkout lo
+ * consulta para cualquier usuario logueado (un ex asociado conserva saldo).
+ */
+export function useMyAssociateBalance(enabled: boolean) {
+  return useQuery<AssociateBalance>({
+    queryKey: ['pool', 'me'],
+    queryFn: async () => (await api.get<AssociateBalance>('/pool/me')).data,
+    enabled,
   })
 }
 
-export function usePointsHistory() {
-  return useQuery<PointsEntry[]>({
-    queryKey: ['points', 'history'],
+export function usePoolSummary(enabled: boolean) {
+  return useQuery<PoolSummary>({
+    queryKey: ['pool', 'summary'],
+    queryFn: async () => (await api.get<PoolSummary>('/pool/summary')).data,
+    enabled,
+  })
+}
+
+export function usePoolDistributions() {
+  return useQuery<PoolDistribution[]>({
+    queryKey: ['pool', 'distributions'],
     queryFn: async () =>
-      (await api.get<PointsEntry[]>('/points/history')).data,
+      (await api.get<PoolDistribution[]>('/pool/distributions')).data,
   })
 }
 

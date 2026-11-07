@@ -5,9 +5,6 @@ import {
   CreditAccount,
   CreditMovement,
   CreditMovementType,
-  PointsEntryStatus,
-  PointsEntryType,
-  PointsLedgerEntry,
   Product,
   CommissionEntry,
   CommissionEntryStatus,
@@ -22,13 +19,12 @@ async function run() {
   await AppDataSource.query('CREATE EXTENSION IF NOT EXISTS pgcrypto');
 
   await AppDataSource.query(
-    'TRUNCATE TABLE credit_movement, credit_account, commission_entries, payouts, invoices, points_ledger_entries, counters, order_items, orders, products, categories, users RESTART IDENTITY CASCADE',
+    'TRUNCATE TABLE credit_movement, credit_account, commission_entries, payouts, invoices, points_ledger_entries, pool_contributions, pool_distributions, associate_balance_entries, counters, order_items, orders, products, categories, users RESTART IDENTITY CASCADE',
   );
 
   const userRepo = AppDataSource.getRepository(User);
   const categoryRepo = AppDataSource.getRepository(Category);
   const productRepo = AppDataSource.getRepository(Product);
-  const ledgerRepo = AppDataSource.getRepository(PointsLedgerEntry);
   const commRepo = AppDataSource.getRepository(CommissionEntry);
   const creditAccountRepo = AppDataSource.getRepository(CreditAccount);
   const creditMovementRepo = AppDataSource.getRepository(CreditMovement);
@@ -268,19 +264,6 @@ async function run() {
     }),
   ]);
 
-  console.log('Seeding puntos históricos CLAIMABLE para cliente demo…');
-  await ledgerRepo.save(
-    ledgerRepo.create({
-      userId: client.id,
-      type: PointsEntryType.EARNED,
-      status: PointsEntryStatus.CLAIMABLE,
-      amountCents: 250,
-      orderId: null,
-      claimableAt: new Date(Date.now() - 24 * 3600 * 1000),
-      expiresAt: new Date(Date.now() + 90 * 24 * 3600 * 1000),
-    }),
-  );
-
   console.log('Seeding comisión claimable demo para promotor…');
   await commRepo.save(
     commRepo.create({
@@ -302,7 +285,6 @@ async function run() {
   console.log('  Cliente       → +15555550004 (referido por DEMO123A) — sin-deuda, límite $50');
   console.log('  Cliente AlDía → +15555550006 (María Pérez) — debe $15, due en 15 días');
   console.log('  Cliente Venc. → +15555550007 (Juan Rodríguez) — debe $25, vencido hace 5 días');
-  console.log('  Cliente tiene $2.50 claimable en puntos.');
   console.log('  Promotor tiene $5.00 claimable en comisiones.');
 
   await AppDataSource.destroy();

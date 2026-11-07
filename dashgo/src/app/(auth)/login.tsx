@@ -23,7 +23,7 @@ import {
 } from '../../lib/queries'
 import type { UserRole } from '../../lib/types'
 import { Button, Eyebrow, FieldLabel, FieldError, PhoneField, DashGoMark, BoltIcon } from '../../components/ui'
-import { isStaff } from '../../lib/roles'
+import { buysAsClient, isStaff } from '../../lib/roles'
 import {
   extractWhatsAppErrorCode,
   SUPPORT_PHONE,
@@ -327,7 +327,7 @@ export default function LoginScreen() {
       ? params.next
       : undefined
   const handleVerified = (role: UserRole) => {
-    if (role === 'client' && next) {
+    if (buysAsClient(role) && next) {
       router.replace(next as Parameters<typeof router.replace>[0])
       return
     }

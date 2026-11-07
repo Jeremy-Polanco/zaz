@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Tabs, router } from 'expo-router'
 import { useCurrentUser } from '../../lib/queries'
 import { MoreSheet, type MoreSheetItem } from '../../components/MoreSheet'
-import { isStaff } from '../../lib/roles'
+import { buysAsClient, isStaff } from '../../lib/roles'
 import {
   TabBarIcon,
   TabBarLabel,
@@ -21,7 +21,6 @@ const ICONS = {
 const PROMOTER_MORE_ITEMS: MoreSheetItem[] = [
   { label: 'Pagos', icon: { ios: 'arrow.down.circle.fill', android: 'download' }, route: '/(promoter)/payouts' },
   { label: 'Pedidos', icon: { ios: 'bag.fill', android: 'shopping_bag' }, route: '/(promoter)/orders' },
-  { label: 'Puntos', icon: { ios: 'star.fill', android: 'star' }, route: '/(promoter)/points' },
   { label: 'Mi cuenta', icon: { ios: 'person.crop.circle.fill', android: 'account_circle' }, route: '/(promoter)/profile' },
 ]
 
@@ -38,7 +37,7 @@ export default function PromoterLayout() {
     }
     if (isStaff(user.role)) {
       router.replace('/(super)')
-    } else if (user.role === 'client') {
+    } else if (buysAsClient(user.role)) {
       router.replace('/(tabs)')
     }
   }, [user, isPending])
@@ -90,7 +89,6 @@ export default function PromoterLayout() {
         {/* Overflow screens — reachable via the "Más" sheet, hidden from the bar. */}
         <Tabs.Screen name="payouts" options={{ title: 'Pagos', href: null }} />
         <Tabs.Screen name="orders" options={{ title: 'Pedidos', href: null }} />
-        <Tabs.Screen name="points" options={{ title: 'Puntos', href: null }} />
         <Tabs.Screen name="profile" options={{ title: 'Cuenta', href: null }} />
       </Tabs>
 

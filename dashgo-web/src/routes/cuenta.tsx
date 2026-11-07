@@ -8,10 +8,10 @@ import {
 import { Button, Card, Input, Label, SectionHeading } from '../components/ui'
 import { DeleteAccountModal } from '../components/DeleteAccountModal'
 import { useCurrentUser, useDeleteAccount, useLogout } from '../lib/auth'
-import { useUpdateMe } from '../lib/queries'
+import { useMyAssociateBalance, useUpdateMe } from '../lib/queries'
 import { TOKEN_KEY } from '../lib/api'
 import { serverMessage } from '../lib/utils'
-import { roleLabel as sharedRoleLabel } from '../lib/roles'
+import { buysAsClient, isAssociate, roleLabel as sharedRoleLabel } from '../lib/roles'
 import type { UserRole } from '../lib/types'
 
 export const Route = createFileRoute('/cuenta')({
@@ -27,8 +27,11 @@ function roleLabel(role: string) {
   return sharedRoleLabel(role as UserRole)
 }
 
-function AccountPage() {
+export function AccountPage() {
   const { data: user, isPending } = useCurrentUser()
+  // Mismo query (['pool','me']) que el checkout: un ex asociado conserva saldo
+  // y tiene que poder llegar a su historial.
+  const { data: poolBalance } = useMyAssociateBalance(!!user)
   const updateMe = useUpdateMe()
   const logout = useLogout()
   const deleteAccount = useDeleteAccount()
@@ -61,7 +64,7 @@ function AccountPage() {
     )
   }
 
-  const isClient = user.role === 'client'
+  const isClient = buysAsClient(user.role)
 
   const startEdit = () => {
     setName(user.fullName)
@@ -186,8 +189,10 @@ function AccountPage() {
           <span className="eyebrow">Mis datos</span>
           <nav className="mt-4 flex flex-col divide-y divide-ink/10">
             <AccountLink to="/alquileres" label="Mis alquileres" />
-            <AccountLink to="/points" label="Mis puntos" />
             <AccountLink to="/subscription" label="Suscripción" />
+            {(isAssociate(user?.role) || (poolBalance?.balanceCents ?? 0) > 0) && (
+              <AccountLink to="/pool" label="Pool de asociados" />
+            )}
           </nav>
         </Card>
       )}

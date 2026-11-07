@@ -1,6 +1,8 @@
 export type UserRole =
   | 'client'
   | 'promoter'
+  /** Asociado: recibe una parte del pool trimestral y la gasta como saldo. */
+  | 'associate'
   /** Vendedor: ve y opera SOLO los pedidos y clientes de su cartera. */
   | 'seller'
   | 'super_admin_delivery'
@@ -250,24 +252,40 @@ export interface LoginResponse {
   user: AuthUser
 }
 
-export interface PointsBalance {
-  pendingCents: number
-  claimableCents: number
-  redeemedCents: number
-  expiredCents: number
-}
+export type AssociateEntryType = 'allocation' | 'redemption' | 'reversal'
 
-export type PointsEntryType = 'earned' | 'redeemed' | 'expired'
-export type PointsEntryStatus = 'pending' | 'claimable' | 'redeemed' | 'expired'
-
-export interface PointsEntry {
+export interface AssociateBalanceEntry {
   id: string
-  type: PointsEntryType
-  status: PointsEntryStatus
+  type: AssociateEntryType
   amountCents: number
   orderId: string | null
-  claimableAt: string | null
-  expiresAt: string | null
+  quarter: string | null
+  createdAt: string
+}
+
+/** Saldo de asociado propio (`GET /pool/me`). Cualquier usuario: un cliente común ve 0. */
+export interface AssociateBalance {
+  balanceCents: number
+  entries: AssociateBalanceEntry[]
+}
+
+/** Pool del trimestre en curso (`GET /pool/summary`). */
+export interface PoolSummary {
+  quarter: string
+  poolCents: number
+  nextDistributionAt: string
+  associateCount: number
+  estimatedShareCents: number
+}
+
+/** Un reparto trimestral ya hecho (`GET /pool/distributions`). */
+export interface PoolDistribution {
+  id: string
+  quarter: string
+  totalCents: number
+  associateCount: number
+  shareCents: number
+  remainderCents: number
   createdAt: string
 }
 

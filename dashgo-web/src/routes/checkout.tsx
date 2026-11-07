@@ -11,7 +11,7 @@ import {
   useMyCredit,
   useMySubscription,
   useOrders,
-  usePointsBalance,
+  useMyAssociateBalance,
   useProducts,
   useShippingRate,
 } from '../lib/queries'
@@ -28,6 +28,7 @@ import {
   computeQuotePreviewCents,
   formatTaxRatePct,
 } from '../lib/tax'
+import { buysAsClient } from '../lib/roles'
 import { effectivePriceCentsFor, subscriberPriceWins } from '../lib/pricing'
 import { TOKEN_KEY } from '../lib/api'
 
@@ -46,7 +47,9 @@ export function CheckoutPage() {
   const { data: user } = useCurrentUser()
   const { items: cart, totalItems } = useCart()
   const { data: products } = useProducts()
-  const { data: balance } = usePointsBalance()
+  // Cualquier usuario logueado: un ex asociado conserva (y puede gastar) el
+  // saldo que ya se le repartió; un cliente común simplemente ve 0.
+  const { data: balance } = useMyAssociateBalance(!!user)
   const createOrder = useCreateOrder()
   const confirmOrder = useConfirmNonStripeOrder()
   const authorize = useAuthorizeOrder()
@@ -140,14 +143,15 @@ export function CheckoutPage() {
     return sum + (p ? effectivePriceCentsFor(p, isActiveSubscriber) * it.quantity : 0)
   }, 0)
 
-  const claimableCents = balance?.claimableCents ?? 0
+  const associateBalanceCents = balance?.balanceCents ?? 0
+  // El servidor topa la redención en el subtotal (no descuenta envío).
   const pointsAppliedCents = usePoints
-    ? Math.min(claimableCents, subtotalCents)
+    ? Math.min(associateBalanceCents, subtotalCents)
     : 0
 
   // Credit applied
   const creditAvailable =
-    user?.role === 'client' &&
+    buysAsClient(user?.role) &&
     creditData &&
     creditData.status !== 'overdue' &&
     creditData.balanceCents !== null &&
@@ -568,21 +572,23 @@ export function CheckoutPage() {
               onToggle={setUseCredit}
             />
 
-            <section>
-              <div className="mb-4 flex items-center gap-3">
-                <span className="text-[0.7rem] uppercase tracking-[0.2em] text-ink-muted">
-                  {myAddresses && myAddresses.length > 0 ? '03 · Puntos' : '02 · Puntos'}
-                </span>
-                <span className="h-px flex-1 bg-ink/15" />
-              </div>
-              <div className="border border-ink/15 bg-paper-deep/30 p-5">
-                <div className="flex items-baseline justify-between">
-                  <span className="eyebrow">Puntos disponibles</span>
-                  <span className="display nums text-2xl font-semibold text-brand">
-                    {formatCents(claimableCents)}
+            {associateBalanceCents > 0 && (
+              <section>
+                <div className="mb-4 flex items-center gap-3">
+                  <span className="text-[0.7rem] uppercase tracking-[0.2em] text-ink-muted">
+                    {myAddresses && myAddresses.length > 0
+                      ? '03 · Saldo de asociado'
+                      : '02 · Saldo de asociado'}
                   </span>
+                  <span className="h-px flex-1 bg-ink/15" />
                 </div>
-                {claimableCents > 0 ? (
+                <div className="border border-ink/15 bg-paper-deep/30 p-5">
+                  <div className="flex items-baseline justify-between">
+                    <span className="eyebrow">Saldo de asociado</span>
+                    <span className="display nums text-2xl font-semibold text-brand">
+                      {formatCents(associateBalanceCents)}
+                    </span>
+                  </div>
                   <label className="mt-4 flex cursor-pointer items-start gap-3 border-t border-ink/10 pt-4">
                     <input
                       type="checkbox"
@@ -592,20 +598,16 @@ export function CheckoutPage() {
                     />
                     <span>
                       <span className="text-sm font-medium text-ink">
-                        Usar todos mis puntos en este pedido
+                        Usar mi saldo de asociado
                       </span>
                       <span className="mt-1 block text-[0.65rem] uppercase tracking-[0.14em] text-ink-muted">
-                        Redención total: {formatCents(claimableCents)} · reduce base imponible
+                        Se descuenta del subtotal, hasta {formatCents(Math.min(associateBalanceCents, subtotalCents))} en este pedido
                       </span>
                     </span>
                   </label>
-                ) : (
-                  <p className="mt-3 text-[0.65rem] uppercase tracking-[0.14em] text-ink-muted">
-                    Todavía no tienes puntos reclamables. Ganá más con tu próximo pedido.
-                  </p>
-                )}
-              </div>
-            </section>
+                </div>
+              </section>
+            )}
 
             <p className="border-l-2 border-ink/15 pl-3 text-[0.7rem] uppercase tracking-[0.14em] text-ink-muted">
               Coordinamos la entrega con vos — no hace falta cargar dirección.
@@ -720,7 +722,7 @@ export function CheckoutPage() {
               {pointsAppliedCents > 0 && (
                 <div className="flex items-baseline justify-between">
                   <span className="text-[0.7rem] uppercase tracking-[0.15em] text-brand">
-                    Descuento por puntos
+                    Saldo aplicado
                   </span>
                   <span className="nums text-sm font-medium text-brand">
                     −{formatCents(pointsAppliedCents)}

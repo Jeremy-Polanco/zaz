@@ -1,21 +1,34 @@
 import 'reflect-metadata';
 import { DataSource } from 'typeorm';
 import {
+  AccountDeletion,
+  AppSetting,
+  AssociateBalanceEntry,
   Category,
+  CommissionEntry,
   Counter,
   CreditAccount,
   CreditMovement,
+  DeliveryZone,
   Invoice,
   Order,
   OrderItem,
   OtpCode,
   Payout,
   PointsLedgerEntry,
+  PoolContribution,
+  PoolDistribution,
   Product,
-  CommissionEntry,
+  PushToken,
+  Rental,
+  SellerProduct,
+  StripeWebhookEvent,
+  Subscription,
+  SubscriptionPlan,
+  TaxJurisdiction,
   User,
+  UserAddress,
 } from '../entities';
-import { Subscription } from '../entities/subscription.entity';
 
 const DB_HOST = process.env.DB_HOST ?? 'localhost';
 const DB_PORT = parseInt(process.env.DB_PORT ?? '5433', 10);
@@ -50,6 +63,8 @@ export function buildTestDataSource(): DataSource {
     username: DB_USER,
     password: DB_PASSWORD,
     database: DB_NAME,
+    // Misma lista que src/database/data-source.ts: TypeORM exige todas las
+    // entidades relacionadas (User → UserAddress → DeliveryZone…) para arrancar.
     entities: [
       User,
       Category,
@@ -64,7 +79,20 @@ export function buildTestDataSource(): DataSource {
       CommissionEntry,
       CreditAccount,
       CreditMovement,
+      Rental,
       Subscription,
+      SubscriptionPlan,
+      UserAddress,
+      AccountDeletion,
+      StripeWebhookEvent,
+      PushToken,
+      AppSetting,
+      SellerProduct,
+      DeliveryZone,
+      TaxJurisdiction,
+      PoolContribution,
+      PoolDistribution,
+      AssociateBalanceEntry,
     ],
     synchronize: false,
     migrationsRun: false,

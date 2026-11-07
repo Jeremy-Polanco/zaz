@@ -20,6 +20,11 @@ export enum PointsEntryStatus {
   CLAIMABLE = 'claimable',
   REDEEMED = 'redeemed',
   EXPIRED = 'expired',
+  /**
+   * El punto ya pasó al pool de asociados (`pool_contributions`). Estado final:
+   * no se canjea ni vence, y deja de contar en el saldo del cliente.
+   */
+  POOLED = 'pooled',
 }
 
 @Entity({ name: 'points_ledger_entries' })

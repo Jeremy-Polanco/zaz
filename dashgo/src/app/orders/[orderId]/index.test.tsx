@@ -217,3 +217,14 @@ describe('Order detail — delivery address', () => {
     expect(queryByText('Dirección de entrega')).toBeNull()
   })
 })
+
+describe('Order detail — saldo de asociado (antes "Puntos")', () => {
+  it('labels the redeemed amount "Saldo aplicado" and never "Puntos"', async () => {
+    mockApiGet.mockResolvedValue({ data: makeOrder({ pointsRedeemed: '2.00' }) })
+
+    const { findByText, queryByText } = renderWithProviders(<OrderDetailScreen />)
+
+    expect(await findByText('Saldo aplicado')).toBeTruthy()
+    expect(queryByText('Puntos')).toBeNull()
+  })
+})

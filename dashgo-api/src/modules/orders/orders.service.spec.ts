@@ -23,7 +23,8 @@ import { DeliveryZone } from '../../entities/delivery-zone.entity';
 import { OrderStatus, PaymentMethod, UserRole } from '../../entities/enums';
 import { AuthenticatedUser } from '../../common/types/authenticated-user';
 import { PaymentsService } from '../payments/payments.service';
-import { PointsService } from '../points/points.service';
+import { PoolService } from '../pool/pool.service';
+import { AssociateBalanceService } from '../pool/associate-balance.service';
 import { InvoicesService } from '../invoices/invoices.service';
 import { PromotersService } from '../promoters/promoters.service';
 import { SellersService } from '../sellers/sellers.service';
@@ -156,7 +157,8 @@ describe('OrdersService', () => {
   let geocodingService: { reverse: jest.Mock };
   let dataSource: jest.Mocked<DataSource>;
   let paymentsService: jest.Mocked<PaymentsService>;
-  let pointsService: jest.Mocked<PointsService>;
+  let poolService: jest.Mocked<PoolService>;
+  let associateBalanceService: jest.Mocked<AssociateBalanceService>;
   let invoicesService: jest.Mocked<InvoicesService>;
   let promotersService: jest.Mocked<PromotersService>;
   let sellersService: jest.Mocked<SellersService>;
@@ -200,12 +202,17 @@ describe('OrdersService', () => {
       markAuthorizedByIntentId: jest.fn(),
     } as unknown as jest.Mocked<PaymentsService>;
 
-    pointsService = {
-      getBalance: jest.fn().mockResolvedValue({ claimableCents: 0 }),
-      redeemAllClaimable: jest.fn(),
-      creditForOrder: jest.fn(),
-      reverseRedemptionForOrder: jest.fn(),
-    } as unknown as jest.Mocked<PointsService>;
+    poolService = {
+      contributeForOrder: jest.fn().mockResolvedValue(0),
+      reverseLegacyRedemption: jest.fn().mockResolvedValue(0),
+      withdrawOrderContribution: jest.fn().mockResolvedValue(0),
+    } as unknown as jest.Mocked<PoolService>;
+
+    associateBalanceService = {
+      getBalanceCents: jest.fn().mockResolvedValue(0),
+      redeem: jest.fn().mockResolvedValue(undefined),
+      reverseForOrder: jest.fn().mockResolvedValue(0),
+    } as unknown as jest.Mocked<AssociateBalanceService>;
 
     invoicesService = {
       createForOrder: jest.fn(),
@@ -302,7 +309,11 @@ describe('OrdersService', () => {
         { provide: GeocodingService, useValue: geocodingService },
         { provide: DataSource, useValue: dataSource },
         { provide: PaymentsService, useValue: paymentsService },
-        { provide: PointsService, useValue: pointsService },
+        { provide: PoolService, useValue: poolService },
+        {
+          provide: AssociateBalanceService,
+          useValue: associateBalanceService,
+        },
         { provide: InvoicesService, useValue: invoicesService },
         { provide: PromotersService, useValue: promotersService },
         { provide: SellersService, useValue: sellersService },
@@ -917,6 +928,77 @@ describe('OrdersService', () => {
       expect(creditService.applyCharge).not.toHaveBeenCalled();
     });
 
+    // El asociado compra como cualquier cliente: mismas reglas de pedido.
+    describe('asociado (compra como un cliente)', () => {
+      function mockSuccessfulTransaction() {
+        const savedOrder = fakeOrder({ creditApplied: '5.00' });
+        (dataSource.transaction as jest.Mock).mockImplementation(
+          async (cb: (mgr: EntityManager) => Promise<unknown>) => {
+            const orderRepo = makeRepoMock<Order>();
+            const itemRepo = makeRepoMock<OrderItem>();
+            orderRepo.create.mockImplementation(
+              (d) => ({ ...d, id: 'order-1' }) as Order,
+            );
+            orderRepo.save.mockResolvedValue(savedOrder);
+            orderRepo.update.mockResolvedValue({ affected: 1 } as never);
+            itemRepo.save.mockResolvedValue({} as never);
+            itemRepo.create.mockImplementation((d) => d as OrderItem);
+            const mgr = {
+              getRepository: (entity: unknown) => {
+                if (entity === Order) return orderRepo;
+                if (entity === OrderItem) return itemRepo;
+                return makeRepoMock();
+              },
+            };
+            return cb(mgr as unknown as EntityManager);
+          },
+        );
+        ordersRepo.findOne.mockResolvedValue(
+          fakeOrder({ customer: fakeUser() as never, items: [] }),
+        );
+      }
+
+      it('puede crear un pedido (no recibe Forbidden)', async () => {
+        ordersRepo.count.mockResolvedValueOnce(0);
+        productsRepo.find.mockResolvedValue([fakeProduct()]);
+        mockSuccessfulTransaction();
+
+        await expect(
+          service.create(fakeUser(UserRole.ASSOCIATE), dto),
+        ).resolves.toBeDefined();
+        expect(productsRepo.find).toHaveBeenCalled();
+      });
+
+      it('lanza 409 ACTIVE_ORDER_EXISTS si ya tiene un pedido en curso', async () => {
+        ordersRepo.count.mockResolvedValueOnce(1);
+
+        await expect(
+          service.create(fakeUser(UserRole.ASSOCIATE), dto),
+        ).rejects.toMatchObject({ response: { code: 'ACTIVE_ORDER_EXISTS' } });
+        expect(productsRepo.find).not.toHaveBeenCalled();
+      });
+
+      it('aplica el fiado con useCredit=true igual que a un cliente', async () => {
+        productsRepo.find.mockResolvedValue([fakeProduct()]);
+        creditService.getAccountWithLock.mockResolvedValue({
+          balanceCents: 500,
+          creditLimitCents: 200,
+          userId: 'user-1',
+        } as never);
+        creditService.applyCharge.mockResolvedValue({
+          amountCents: 500,
+        } as never);
+        mockSuccessfulTransaction();
+
+        await service.create(fakeUser(UserRole.ASSOCIATE), {
+          ...dto,
+          useCredit: true,
+        });
+
+        expect(creditService.getAccountWithLock).toHaveBeenCalled();
+      });
+    });
+
     it('ignores useCredit=true for SUPER_ADMIN_DELIVERY — no credit movement', async () => {
       // SUPER_ADMIN_DELIVERY cannot create orders (ForbiddenException)
       // Only CLIENT and PROMOTER can create orders per the service logic.
@@ -1074,6 +1156,64 @@ describe('OrdersService', () => {
         'order-1',
         expect.anything(), // EntityManager from the TX
       );
+    });
+
+    it('deja cancelar su pedido en PENDING_QUOTE a un asociado, como a un cliente', async () => {
+      const order = fakeOrder({
+        status: OrderStatus.PENDING_QUOTE,
+        creditApplied: '0.00',
+        customer: fakeUser() as never,
+      });
+      const cancelledOrder = fakeOrder({
+        status: OrderStatus.CANCELLED,
+        customer: fakeUser() as never,
+      });
+      ordersRepo.findOne
+        .mockReset()
+        .mockResolvedValueOnce(order)
+        .mockResolvedValueOnce(cancelledOrder);
+      (dataSource.transaction as jest.Mock).mockImplementation(
+        async (cb: (mgr: EntityManager) => Promise<unknown>) => {
+          const orderRepo = makeRepoMock<Order>();
+          orderRepo.update.mockResolvedValue({ affected: 1 } as never);
+          const mgr = {
+            getRepository: (entity: unknown) => {
+              if (entity === Order) return orderRepo;
+              return makeRepoMock();
+            },
+          };
+          return cb(mgr as unknown as EntityManager);
+        },
+      );
+
+      await expect(
+        service.updateStatus(
+          'order-1',
+          { status: OrderStatus.CANCELLED },
+          fakeUser(UserRole.ASSOCIATE),
+        ),
+      ).resolves.toBeDefined();
+    });
+
+    it('NO deja a un asociado ejecutar transiciones de admin (solo cancelar en los estados del cliente)', async () => {
+      // Sin esta guarda un rol desconocido para assertCanTransition salía sin
+      // error y podía, por ejemplo, confirmar su propio pedido.
+      ordersRepo.findOne
+        .mockReset()
+        .mockResolvedValueOnce(
+          fakeOrder({
+            status: OrderStatus.PENDING_VALIDATION,
+            customer: fakeUser() as never,
+          }),
+        );
+
+      await expect(
+        service.updateStatus(
+          'order-1',
+          { status: OrderStatus.CONFIRMED_BY_COLMADO },
+          fakeUser(UserRole.ASSOCIATE),
+        ),
+      ).rejects.toThrow(ForbiddenException);
     });
 
     it('does not call reverseCharge when creditApplied is 0', async () => {
@@ -5153,13 +5293,15 @@ describe('OrdersService', () => {
 
     function setupCreateTx(savedOverride: Partial<Order> = {}) {
       const savedOrder = fakeOrder({ ...savedOverride });
+      const createdOrders: Array<Partial<Order>> = [];
       (dataSource.transaction as jest.Mock).mockImplementation(
         async (cb: (mgr: EntityManager) => Promise<unknown>) => {
           const orderRepo = makeRepoMock<Order>();
           const itemRepo = makeRepoMock<OrderItem>();
-          orderRepo.create.mockImplementation(
-            (d) => ({ ...d, id: 'order-1' }) as Order,
-          );
+          orderRepo.create.mockImplementation((d) => {
+            createdOrders.push(d as Partial<Order>);
+            return { ...d, id: 'order-1' } as Order;
+          });
           orderRepo.save.mockResolvedValue(savedOrder);
           orderRepo.update.mockResolvedValue({ affected: 1 } as never);
           itemRepo.save.mockResolvedValue({} as never);
@@ -5178,37 +5320,43 @@ describe('OrdersService', () => {
       ordersRepo.findOne.mockResolvedValue(
         fakeOrder({ customer: fakeUser() as never, items: [] }),
       );
+      return { createdOrders };
     }
 
-    it('redeems points when usePoints=true and claimable balance > 0', async () => {
-      productsRepo.find.mockResolvedValue([fakeProduct()]);
-      pointsService.getBalance.mockResolvedValue({
-        claimableCents: 300,
-      } as never);
-      pointsService.redeemAllClaimable.mockResolvedValue(undefined);
-      setupCreateTx();
+    it('usePoints=true con saldo 1000 y subtotal 600 canjea 600 (no todo el saldo)', async () => {
+      productsRepo.find.mockResolvedValue([
+        fakeProduct({ priceToPublic: '6.00' }),
+      ]);
+      associateBalanceService.getBalanceCents.mockResolvedValue(1000);
+      const { createdOrders } = setupCreateTx();
 
       await service.create(fakeUser(UserRole.CLIENT), baseDto);
 
-      // claimableCents (300) < subtotal (500) → 300 redeemed → redeemAllClaimable called
-      expect(pointsService.getBalance).toHaveBeenCalledWith('user-1');
-      expect(pointsService.redeemAllClaimable).toHaveBeenCalledWith(
+      expect(associateBalanceService.getBalanceCents).toHaveBeenCalledWith(
+        'user-1',
+        expect.anything(),
+      );
+      // Tope por subtotal: el sobrante (400) se queda en el saldo.
+      expect(createdOrders[0].pointsRedeemed).toBe('6.00');
+      expect(associateBalanceService.redeem).toHaveBeenCalledWith(
         'user-1',
         'order-1',
+        600,
         expect.anything(),
       );
     });
 
-    it('does NOT redeem points when claimable balance is 0', async () => {
-      productsRepo.find.mockResolvedValue([fakeProduct()]);
-      pointsService.getBalance.mockResolvedValue({
-        claimableCents: 0,
-      } as never);
-      setupCreateTx();
+    it('con saldo 0 no canjea: pointsRedeemed 0.00 y redeem no se llama', async () => {
+      productsRepo.find.mockResolvedValue([
+        fakeProduct({ priceToPublic: '6.00' }),
+      ]);
+      associateBalanceService.getBalanceCents.mockResolvedValue(0);
+      const { createdOrders } = setupCreateTx();
 
       await service.create(fakeUser(UserRole.CLIENT), baseDto);
 
-      expect(pointsService.redeemAllClaimable).not.toHaveBeenCalled();
+      expect(createdOrders[0].pointsRedeemed).toBe('0.00');
+      expect(associateBalanceService.redeem).not.toHaveBeenCalled();
     });
 
     it('silently skips credit when no credit account exists (getAccountWithLock throws)', async () => {
@@ -5682,7 +5830,7 @@ describe('OrdersService', () => {
 
       expect(result).toBe(delivered);
       expect(paymentsService.captureIntent).not.toHaveBeenCalled();
-      expect(pointsService.creditForOrder).not.toHaveBeenCalled();
+      expect(poolService.contributeForOrder).not.toHaveBeenCalled();
       expect(invoicesService.createForOrder).not.toHaveBeenCalled();
       expect(promotersService.creditCommissionsForOrder).not.toHaveBeenCalled();
     });
@@ -5820,8 +5968,16 @@ describe('OrdersService', () => {
         { id: 'prod-1', qty: 2 },
         { id: 'prod-2', qty: 3 },
       ]);
-      // points + rental reversals always run on cancel
-      expect(pointsService.reverseRedemptionForOrder).toHaveBeenCalledWith(
+      // associate balance + legacy points + rental reversals always run on cancel
+      expect(associateBalanceService.reverseForOrder).toHaveBeenCalledWith(
+        'order-1',
+        expect.anything(),
+      );
+      expect(poolService.reverseLegacyRedemption).toHaveBeenCalledWith(
+        'order-1',
+        expect.anything(),
+      );
+      expect(poolService.withdrawOrderContribution).toHaveBeenCalledWith(
         'order-1',
         expect.anything(),
       );
@@ -5921,7 +6077,10 @@ describe('OrdersService', () => {
       );
 
       expect(paymentsService.captureIntent).not.toHaveBeenCalled();
-      expect(pointsService.creditForOrder).toHaveBeenCalled();
+      expect(poolService.contributeForOrder).toHaveBeenCalledWith(
+        'order-1',
+        expect.anything(),
+      );
       expect(invoicesService.createForOrder).toHaveBeenCalled();
       expect(promotersService.creditCommissionsForOrder).toHaveBeenCalled();
     });

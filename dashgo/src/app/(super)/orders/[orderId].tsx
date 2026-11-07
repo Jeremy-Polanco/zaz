@@ -452,7 +452,7 @@ export default function SuperOrderDetailScreen() {
           <BreakdownRow label="Subtotal" value={formatMoney(order.subtotal)} />
           {Number(order.pointsRedeemed) > 0 && (
             <BreakdownRow
-              label="Puntos"
+              label="Saldo aplicado"
               value={`−${formatMoney(order.pointsRedeemed)}`}
               emphasis="positive"
             />

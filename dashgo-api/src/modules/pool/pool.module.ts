@@ -1,0 +1,34 @@
+import { Module } from '@nestjs/common';
+import { TypeOrmModule } from '@nestjs/typeorm';
+import {
+  AssociateBalanceEntry,
+  Order,
+  OrderItem,
+  PointsLedgerEntry,
+  PoolContribution,
+  PoolDistribution,
+  User,
+} from '../../entities';
+import { AssociateBalanceService } from './associate-balance.service';
+import { LegacyPointsController } from './legacy-points.controller';
+import { PoolController } from './pool.controller';
+import { PoolCron } from './pool.cron';
+import { PoolService } from './pool.service';
+
+@Module({
+  imports: [
+    TypeOrmModule.forFeature([
+      PoolContribution,
+      PoolDistribution,
+      AssociateBalanceEntry,
+      PointsLedgerEntry,
+      Order,
+      OrderItem,
+      User,
+    ]),
+  ],
+  controllers: [LegacyPointsController, PoolController],
+  providers: [AssociateBalanceService, PoolService, PoolCron],
+  exports: [AssociateBalanceService, PoolService],
+})
+export class PoolModule {}

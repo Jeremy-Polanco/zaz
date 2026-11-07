@@ -41,8 +41,8 @@ vi.mock('../lib/queries', () => ({
   useMyCredit: vi.fn(() => ({ data: undefined })),
   useMySubscription: vi.fn(() => ({ data: null })),
   useOrders: vi.fn(() => ({ data: [] })),
-  usePointsBalance: vi.fn(() => ({
-    data: { pendingCents: 0, claimableCents: 0, redeemedCents: 0, expiredCents: 0 },
+  useMyAssociateBalance: vi.fn(() => ({
+    data: { balanceCents: 0, entries: [] },
   })),
   useProducts: vi.fn(),
   useShippingRate: vi.fn(() => ({ data: { shippingCents: 500 }, isError: false })),
@@ -51,13 +51,17 @@ vi.mock('../lib/queries', () => ({
 import {
   useCreateOrder,
   useMyAddresses,
+  useMyAssociateBalance,
   useProducts,
 } from '../lib/queries'
+import { useCurrentUser } from '../lib/auth'
 import { CheckoutPage } from './checkout'
 
 const mockUseCreateOrder = vi.mocked(useCreateOrder)
 const mockUseMyAddresses = vi.mocked(useMyAddresses)
 const mockUseProducts = vi.mocked(useProducts)
+const mockUseMyAssociateBalance = vi.mocked(useMyAssociateBalance)
+const mockUseCurrentUser = vi.mocked(useCurrentUser)
 
 // requiresQuote: false -> the cart is "skip-cotización", which is the only
 // path that shows a real (non "Al cotizar") tax preview.
@@ -308,5 +312,75 @@ describe('CheckoutPage — tasa de impuesto por dirección', () => {
     await screen.findByText('Resumen')
 
     expect(screen.queryByText(/, NJ|, NY/)).not.toBeInTheDocument()
+  })
+})
+
+function asUser(role: string) {
+  mockUseCurrentUser.mockReturnValue({
+    data: { id: 'u-1', role, fullName: 'Usuario', email: null, phone: null, addressDefault: null, activeLocationId: null, referralCode: null, creditLocked: false },
+  } as unknown as ReturnType<typeof useCurrentUser>)
+}
+
+function withBalance(balanceCents: number) {
+  mockUseMyAssociateBalance.mockReturnValue({
+    data: { balanceCents, entries: [] },
+  } as unknown as ReturnType<typeof useMyAssociateBalance>)
+}
+
+describe('CheckoutPage — saldo de asociado (el cliente ya no ve puntos)', () => {
+  beforeEach(() => {
+    mockUseMyAddresses.mockReturnValue({
+      data: [makeAddress()],
+    } as unknown as ReturnType<typeof useMyAddresses>)
+  })
+
+  it('hides the whole balance section (and any mention of puntos) for a client with 0 balance', async () => {
+    asUser('client')
+    withBalance(0)
+
+    renderWithRouter(CheckoutPage)
+    await screen.findByText('Resumen')
+
+    expect(screen.queryByText(/puntos/i)).toBeNull()
+    expect(screen.queryByText(/saldo de asociado/i)).toBeNull()
+  })
+
+  it('shows the toggle to an associate with balance and sends usePoints: true once activated, capped at the subtotal', async () => {
+    const user = userEvent.setup()
+    asUser('associate')
+    withBalance(1500)
+    const mutateAsync = vi.fn().mockResolvedValue(makeCreatedOrder())
+    mockUseCreateOrder.mockReturnValue({
+      mutateAsync,
+      isPending: false,
+      isError: false,
+      error: null,
+    } as unknown as ReturnType<typeof useCreateOrder>)
+
+    renderWithRouter(CheckoutPage)
+    await screen.findByText('Resumen')
+
+    expect(screen.queryByText('Saldo aplicado')).toBeNull()
+    await user.click(screen.getByLabelText(/usar mi saldo de asociado/i))
+    // Subtotal es $5.00: el saldo de $15.00 se aplica solo hasta ahí.
+    expect(screen.getByText('Saldo aplicado')).toBeInTheDocument()
+    expect(screen.getByText('−$5.00')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: /confirmar pedido/i }))
+
+    expect(mutateAsync).toHaveBeenCalledWith(
+      expect.objectContaining({ usePoints: true }),
+    )
+  })
+
+  it('also shows the toggle to a plain client (ex associate) who still holds balance', async () => {
+    asUser('client')
+    withBalance(800)
+
+    renderWithRouter(CheckoutPage)
+    await screen.findByText('Resumen')
+
+    expect(screen.getByLabelText(/usar mi saldo de asociado/i)).toBeInTheDocument()
+    expect(screen.queryByText(/puntos/i)).toBeNull()
   })
 })

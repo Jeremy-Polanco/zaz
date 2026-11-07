@@ -1,5 +1,6 @@
 import { useMyCredit } from '../lib/queries'
 import { formatCents } from '../lib/utils'
+import { buysAsClient } from '../lib/roles'
 import type { UserRole } from '../lib/types'
 
 interface CheckoutCreditStepProps {
@@ -28,7 +29,7 @@ export function CheckoutCreditStep({
   const { data } = useMyCredit()
 
   // Only visible for CLIENT role with a usable credit account
-  if (userRole !== 'client') return null
+  if (!buysAsClient(userRole)) return null
   if (!data || data.status === 'none' || data.status === 'overdue') return null
   if (data.balanceCents === null || data.creditLimitCents === null) return null
 

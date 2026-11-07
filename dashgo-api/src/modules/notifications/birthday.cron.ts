@@ -49,12 +49,13 @@ export class BirthdayCron {
   }
 
   async runDaily(): Promise<{ birthdays: number; sent: number }> {
+    // Los asociados son clientes para efectos del saludo de cumpleaños.
     const rows: Array<{ id: string; full_name: string | null }> =
       await this.users.query(
         `
         SELECT id, full_name
         FROM users
-        WHERE role = 'client'
+        WHERE role IN ('client', 'associate')
           AND date_of_birth IS NOT NULL
           AND (
             (
@@ -107,6 +108,7 @@ export class BirthdayCron {
    * birthday). Best-effort on both channels; failures only log.
    */
   async runHeadsUp(): Promise<{ upcoming: number; adminsNotified: number }> {
+    // Los asociados son clientes para efectos del aviso de regalo.
     const upcoming: Array<{
       full_name: string | null;
       phone: string | null;
@@ -116,7 +118,7 @@ export class BirthdayCron {
       SELECT full_name, phone,
              to_char(date_of_birth, 'DD/MM') AS birthday_label
       FROM users
-      WHERE role = 'client'
+      WHERE role IN ('client', 'associate')
         AND date_of_birth IS NOT NULL
         AND EXTRACT(MONTH FROM date_of_birth) =
             EXTRACT(MONTH FROM ((now() AT TIME ZONE 'America/New_York') + interval '${HEADS_UP_DAYS} days'))
