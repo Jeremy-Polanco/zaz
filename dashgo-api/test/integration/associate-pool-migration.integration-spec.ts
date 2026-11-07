@@ -8,66 +8,74 @@
  * "legacy" y se llama directo a `moveLegacyPointsToPool`, que además tiene que
  * ser idempotente (un redeploy o un re-run no puede duplicar aportes).
  *
- * Todo se guarda commiteado (no hay rollback por test): la limpieza es manual
- * en `afterAll` y se hace por usuario, porque la base es compartida.
+ * Cada test corre dentro de UNA transacción que siempre se revierte: el helper
+ * actúa sobre TODA la tabla de puntos, así que commitear dejaría pasar a
+ * 'pooled' (y aportar al pool del trimestre actual) cualquier fila viva que
+ * otro spec haya dejado en la base compartida, y los specs que comparen totales
+ * del pool dependerían del orden. En producción el helper también corre dentro
+ * de la transacción de la migración, con un solo `now()`.
  */
-import { DataSource } from 'typeorm';
+import { QueryRunner } from 'typeorm';
 import {
   destroyTestDataSource,
   getTestDataSource,
 } from '../../src/test-utils/db';
-import { makeUser } from '../../src/test-utils/fixtures';
 import { UserRole } from '../../src/entities/enums';
-import { User } from '../../src/entities';
 import { quarterOf } from '../../src/modules/pool/quarter';
 import { moveLegacyPointsToPool } from '../../src/database/helpers/move-legacy-points-to-pool';
 
 describe('AssociatePointsPool migration', () => {
-  let ds: DataSource;
-  let userId: string;
-
-  const insertEntry = (
-    type: string,
-    status: string,
-    amount: number,
-    expiresAt: string | null,
-  ) =>
-    ds.query(
-      `INSERT INTO points_ledger_entries (user_id, type, status, amount_cents, expires_at)
-       VALUES ($1, $2, $3, $4, $5)`,
-      [userId, type, status, amount, expiresAt],
-    );
+  let runner: QueryRunner;
 
   beforeAll(async () => {
-    ds = await getTestDataSource();
-    const user = await ds.getRepository(User).save(makeUser());
-    userId = user.id;
-
-    await insertEntry('earned', 'pending', 100, null);
-    await insertEntry('earned', 'claimable', 250, null);
-    // Vencido por fecha aunque siga 'claimable': no es plata viva, no va al pool.
-    await insertEntry('earned', 'claimable', 70, '2020-01-01T00:00:00Z');
-    await insertEntry('earned', 'redeemed', 30, null);
-    await insertEntry('expired', 'expired', -40, null);
+    const ds = await getTestDataSource();
+    runner = ds.createQueryRunner();
   });
 
   afterAll(async () => {
-    await ds.query(`DELETE FROM pool_contributions WHERE source_user_id = $1`, [
-      userId,
-    ]);
-    await ds.query(`DELETE FROM points_ledger_entries WHERE user_id = $1`, [
-      userId,
-    ]);
-    await ds.query(`DELETE FROM users WHERE id = $1`, [userId]);
+    await runner.release();
     await destroyTestDataSource();
   });
 
-  it('mueve al pool solo los puntos vivos y es idempotente', async () => {
-    const runner = ds.createQueryRunner();
+  // Todo (siembra, acciones y aserciones) pasa por `runner.query` dentro de la
+  // misma transacción, que se revierte siempre.
+  async function inRolledBackTransaction(
+    body: (userId: string) => Promise<void>,
+  ): Promise<void> {
+    await runner.startTransaction();
     try {
+      const [user] = await runner.query(
+        `INSERT INTO users (full_name, role) VALUES ('Pool migration test', 'client') RETURNING id`,
+      );
+      await body(user.id);
+    } finally {
+      await runner.rollbackTransaction();
+    }
+  }
+
+  it('mueve al pool solo los puntos vivos y es idempotente', async () => {
+    await inRolledBackTransaction(async (userId) => {
+      const insertEntry = (
+        type: string,
+        status: string,
+        amount: number,
+        expiresAt: string | null,
+      ) =>
+        runner.query(
+          `INSERT INTO points_ledger_entries (user_id, type, status, amount_cents, expires_at)
+           VALUES ($1, $2, $3, $4, $5)`,
+          [userId, type, status, amount, expiresAt],
+        );
+      await insertEntry('earned', 'pending', 100, null);
+      await insertEntry('earned', 'claimable', 250, null);
+      // Vencido por fecha aunque siga 'claimable': no es plata viva, no va al pool.
+      await insertEntry('earned', 'claimable', 70, '2020-01-01T00:00:00Z');
+      await insertEntry('earned', 'redeemed', 30, null);
+      await insertEntry('expired', 'expired', -40, null);
+
       await moveLegacyPointsToPool(runner);
 
-      const rows = await ds.query(
+      const rows = await runner.query(
         `SELECT amount_cents, source, source_user_id, legacy_points_entry_id, quarter
            FROM pool_contributions WHERE source_user_id = $1 ORDER BY amount_cents`,
         [userId],
@@ -86,7 +94,7 @@ describe('AssociatePointsPool migration', () => {
       ).toBe(true);
       expect(rows[0].quarter).toBe(quarterOf(new Date()));
 
-      const statuses = await ds.query(
+      const statuses = await runner.query(
         `SELECT amount_cents, status FROM points_ledger_entries
           WHERE user_id = $1 ORDER BY amount_cents`,
         [userId],
@@ -100,23 +108,23 @@ describe('AssociatePointsPool migration', () => {
       ]);
 
       await moveLegacyPointsToPool(runner);
-      const again = await ds.query(
+      const again = await runner.query(
         `SELECT 1 FROM pool_contributions WHERE source_user_id = $1`,
         [userId],
       );
       expect(again.length).toBe(2);
-    } finally {
-      await runner.release();
-    }
+    });
   });
 
   it("el enum de roles acepta 'associate'", async () => {
-    await ds.query(`UPDATE users SET role = 'associate' WHERE id = $1`, [
-      userId,
-    ]);
-    const [row] = await ds.query(`SELECT role FROM users WHERE id = $1`, [
-      userId,
-    ]);
-    expect(row.role).toBe(UserRole.ASSOCIATE);
+    await inRolledBackTransaction(async (userId) => {
+      await runner.query(`UPDATE users SET role = 'associate' WHERE id = $1`, [
+        userId,
+      ]);
+      const [row] = await runner.query(`SELECT role FROM users WHERE id = $1`, [
+        userId,
+      ]);
+      expect(row.role).toBe(UserRole.ASSOCIATE);
+    });
   });
 });

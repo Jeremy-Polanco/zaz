@@ -16,7 +16,13 @@ export enum PoolContributionSource {
   ORDER = 'order',
   /** Puntos sin usar que tenían los clientes al activarse el pool. */
   LEGACY_MIGRATION = 'legacy_migration',
-  /** Ajuste negativo cuando se anula un aporte legacy. */
+  /**
+   * Aporte POSITIVO por el monto completo cuando se cancela una orden creada
+   * ANTES del pool que había canjeado puntos del cliente. Esos puntos
+   * reembolsados ya no son del cliente (pasaron al pool al activarse la
+   * función), así que no se le devuelven: van al pool, porque el cliente ya no
+   * puede gastarlos. Todos los aportes son > 0 (lo exige un CHECK).
+   */
   LEGACY_REVERSAL = 'legacy_reversal',
   /** Resto del trimestre anterior que no se pudo repartir en partes iguales. */
   CARRYOVER = 'carryover',
