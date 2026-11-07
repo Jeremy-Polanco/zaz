@@ -57,7 +57,7 @@ export default function PoolTab() {
   const locale = i18n.language.startsWith('en') ? 'en' : 'es'
   const { data: me } = useCurrentUser()
   const associate = isAssociate(me?.role)
-  const { data: balance, isPending: balancePending } = useMyAssociateBalance(true)
+  const { data: balance, isPending: balancePending } = useMyAssociateBalance(!!me)
   const { data: summary } = usePoolSummary(associate)
 
   return (

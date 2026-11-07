@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Tabs, router } from 'expo-router'
 import { useTranslation } from 'react-i18next'
-import { useCurrentUser } from '../../lib/queries'
+import { useCurrentUser, useMyAssociateBalance } from '../../lib/queries'
 import { MoreSheet, type MoreSheetItem } from '../../components/MoreSheet'
 import { buysAsClient, isAssociate, isStaff } from '../../lib/roles'
 import {
@@ -53,10 +53,12 @@ export default function TabLayout() {
     }
   }, [user, isPending])
 
-  // El pool es solo de asociados: la lista es estática y se filtra al renderizar.
-  const associate = isAssociate(user?.role)
+  // El pool lo ve el asociado y el ex asociado que conserva saldo (mismo query
+  // ['pool','me'] que el checkout). La lista es estática y se filtra al renderizar.
+  const { data: poolBalance } = useMyAssociateBalance(!!user)
+  const showPool = isAssociate(user?.role) || (poolBalance?.balanceCents ?? 0) > 0
   const moreItems: MoreSheetItem[] = (isGuest ? GUEST_MORE_ITEMS : CLIENT_MORE_ITEMS)
-    .filter(({ labelKey }) => labelKey !== 'more.pool' || associate)
+    .filter(({ labelKey }) => labelKey !== 'more.pool' || showPool)
     .map(({ labelKey, ...item }) => ({ ...item, label: t(labelKey) }))
 
   return (

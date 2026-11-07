@@ -120,6 +120,24 @@ describe('(tabs)/pool — asociado', () => {
     expect(queryByText(/Se aplica solo/)).toBeNull()
   })
 
+  it('un invitado (sin sesión) no dispara /pool/me: la consulta va deshabilitada', () => {
+    mockUseCurrentUser.mockReturnValue({
+      data: null,
+    } as unknown as ReturnType<typeof useCurrentUser>)
+    mockUseBalance.mockReturnValue({
+      data: undefined,
+      isPending: true,
+    } as unknown as ReturnType<typeof useMyAssociateBalance>)
+    mockUseSummary.mockReturnValue({
+      data: undefined,
+      isPending: false,
+    } as unknown as ReturnType<typeof usePoolSummary>)
+    renderWithProviders(<PoolTab />)
+
+    expect(mockUseBalance).toHaveBeenCalledWith(false)
+    expect(mockUseBalance).not.toHaveBeenCalledWith(true)
+  })
+
   it('sin movimientos lo dice', () => {
     setup('client', { balanceCents: 0, entries: [] })
     const { getByText } = renderWithProviders(<PoolTab />)

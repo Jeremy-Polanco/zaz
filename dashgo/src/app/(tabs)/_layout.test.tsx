@@ -8,6 +8,7 @@ import { renderWithProviders } from '../../test/test-utils'
 
 jest.mock('../../lib/queries', () => ({
   useCurrentUser: jest.fn(),
+  useMyAssociateBalance: jest.fn(),
 }))
 
 // Tabs real needs a navigator; render each Screen's tabPress listener as a
@@ -34,17 +35,22 @@ jest.mock('react-native-safe-area-context', () => ({
   useSafeAreaInsets: jest.fn(() => ({ top: 0, bottom: 0, left: 0, right: 0 })),
 }))
 
-import { useCurrentUser } from '../../lib/queries'
+import { useCurrentUser, useMyAssociateBalance } from '../../lib/queries'
 import { router } from 'expo-router'
 import TabLayout from './_layout'
 
 const mockUseCurrentUser = useCurrentUser as jest.MockedFunction<typeof useCurrentUser>
+const mockUseBalance = useMyAssociateBalance as jest.MockedFunction<typeof useMyAssociateBalance>
 
-function openMore(role: string) {
+function openMore(role: string, balanceCents = 0) {
   mockUseCurrentUser.mockReturnValue({
     data: { id: 'u-1', role },
     isPending: false,
   } as unknown as ReturnType<typeof useCurrentUser>)
+  mockUseBalance.mockReturnValue({
+    data: { balanceCents, entries: [] },
+    isPending: false,
+  } as unknown as ReturnType<typeof useMyAssociateBalance>)
   const utils = renderWithProviders(<TabLayout />)
   fireEvent.press(utils.getByTestId('tab-more'))
   return utils
@@ -73,9 +79,18 @@ describe('(tabs)/_layout — hoja "Más"', () => {
     expect(router.navigate).toHaveBeenCalledWith('/(tabs)/pool')
   })
 
-  it('a client never sees the pool entry', () => {
-    const { queryByText } = openMore('client')
+  it('a client without balance never sees the pool entry', () => {
+    const { queryByText } = openMore('client', 0)
 
     expect(queryByText('Pool de asociados')).toBeNull()
+  })
+
+  it('an ex-associate (client with balance) still reaches the pool screen', () => {
+    const { getByText } = openMore('client', 800)
+
+    fireEvent.press(getByText('Pool de asociados'))
+
+    expect(router.navigate).toHaveBeenCalledWith('/(tabs)/pool')
+    expect(mockUseBalance).toHaveBeenCalledWith(true)
   })
 })

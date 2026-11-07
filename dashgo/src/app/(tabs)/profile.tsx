@@ -14,6 +14,7 @@ import { SymbolView, type AndroidSymbol } from 'expo-symbols'
 import type { SFSymbol } from 'sf-symbols-typescript'
 import {
   useCurrentUser,
+  useMyAssociateBalance,
   useDeleteAccount,
   useLogout,
   useUpdateMe,
@@ -159,7 +160,10 @@ export default function ProfileTab() {
   const logout = useLogout()
   const deleteAccount = useDeleteAccount()
   const isClient = buysAsClient(user?.role)
-  const associate = isAssociate(user?.role)
+  // Mismo query ['pool','me'] que el checkout: el ex asociado conserva saldo y
+  // tiene que poder llegar a su historial.
+  const { data: poolBalance } = useMyAssociateBalance(!!user)
+  const showPool = isAssociate(user?.role) || (poolBalance?.balanceCents ?? 0) > 0
 
   const [deleteModalOpen, setDeleteModalOpen] = useState(false)
   const [deleteError, setDeleteError] = useState<string | null>(null)
@@ -270,7 +274,7 @@ export default function ProfileTab() {
                 androidIcon="autorenew"
                 href="/(tabs)/subscription"
               />
-              {associate && (
+              {showPool && (
                 <AccountLink
                   label={t('pool')}
                   iosIcon="person.3.fill"

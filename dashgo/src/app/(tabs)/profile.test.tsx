@@ -15,6 +15,7 @@ jest.mock('../../lib/queries', () => ({
   useCurrentUser: jest.fn(),
   useLogout: jest.fn(),
   useDeleteAccount: jest.fn(),
+  useMyAssociateBalance: jest.fn(),
   useUpdateMe: jest.fn(() => ({
     mutateAsync: jest.fn(),
     isPending: false,
@@ -80,7 +81,12 @@ jest.mock('../../components/DeleteAccountModal', () => {
 
 // ── imports after mocks ───────────────────────────────────────────────────────
 
-import { useCurrentUser, useDeleteAccount, useLogout } from '../../lib/queries'
+import {
+  useCurrentUser,
+  useDeleteAccount,
+  useLogout,
+  useMyAssociateBalance,
+} from '../../lib/queries'
 import { router } from 'expo-router'
 import ProfileTab from './profile'
 
@@ -89,9 +95,18 @@ import ProfileTab from './profile'
 const mockUseCurrentUser = useCurrentUser as jest.MockedFunction<typeof useCurrentUser>
 const mockUseLogout = useLogout as jest.MockedFunction<typeof useLogout>
 const mockUseDeleteAccount = useDeleteAccount as jest.MockedFunction<typeof useDeleteAccount>
+const mockUseBalance = useMyAssociateBalance as jest.MockedFunction<typeof useMyAssociateBalance>
 const mockRouter = router as jest.Mocked<typeof router>
 
-function setupMocks(role: 'client' | 'associate' | 'super_admin_delivery' = 'client') {
+function setupMocks(
+  role: 'client' | 'associate' | 'super_admin_delivery' = 'client',
+  balanceCents = 0,
+) {
+  mockUseBalance.mockReturnValue({
+    data: { balanceCents, entries: [] },
+    isPending: false,
+  } as unknown as ReturnType<typeof useMyAssociateBalance>)
+
   mockUseCurrentUser.mockReturnValue({
     data: {
       id: 'user-1',
@@ -165,9 +180,17 @@ describe('ProfileTab — Pool de asociados', () => {
     expect(mockRouter.navigate).toHaveBeenCalledWith('/(tabs)/pool')
   })
 
-  it('hides the pool link from a plain client', () => {
-    setupMocks('client')
+  it('hides the pool link from a plain client without balance', () => {
+    setupMocks('client', 0)
     const { queryByText } = renderWithProviders(<ProfileTab />)
     expect(queryByText('Pool de asociados')).toBeNull()
+  })
+
+  it('shows the pool link to an ex-associate (client with balance)', () => {
+    setupMocks('client', 800)
+    const { getByText } = renderWithProviders(<ProfileTab />)
+    fireEvent.press(getByText('Pool de asociados'))
+    expect(mockRouter.navigate).toHaveBeenCalledWith('/(tabs)/pool')
+    expect(mockUseBalance).toHaveBeenCalledWith(true)
   })
 })
