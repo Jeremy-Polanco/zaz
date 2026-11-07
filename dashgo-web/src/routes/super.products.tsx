@@ -1131,7 +1131,7 @@ export function ProductForm({
                   <SectionHeader
                     letter="D"
                     title="Visibilidad y comisiones"
-                    hint="Si está disponible, qué cobra el promotor, y qué puntos gana el cliente."
+                    hint="Si está disponible, qué cobra el promotor, y cuánto aporta al pool de asociados."
                   />
 
                   <ToggleRow
@@ -1260,7 +1260,7 @@ export function ProductForm({
                   </div>
 
                   <div>
-                    <Label htmlFor="points">Puntos cliente (%)</Label>
+                    <Label htmlFor="points">Aporte al pool de asociados (%)</Label>
                     <Input
                       id="points"
                       type="number"
@@ -1275,7 +1275,7 @@ export function ProductForm({
                     />
                     <FieldError message={state.errors.pointsText} />
                     <p className="mt-1 text-[0.65rem] text-ink-muted">
-                      Devolución en puntos al cliente, sobre el precio efectivo.
+                      Porcentaje del precio efectivo que suma al pool que se reparte entre los asociados cada trimestre.
                     </p>
                   </div>
                 </div>
@@ -1368,7 +1368,7 @@ export function ProductForm({
                 value={`${state.promoterCommissionText || '0'}%`}
               />
               <SumLine
-                label="Puntos"
+                label="Aporte al pool"
                 value={`${state.pointsText || '0'}%`}
               />
             </div>
@@ -1611,7 +1611,7 @@ function SortableProductRow({
           <span>Stock: {p.stock}</span>
           <span>Orden: {p.displayOrder ?? 0}</span>
           <span>Comisión: {parseFloat(p.promoterCommissionPct).toFixed(2)}%</span>
-          <span>Puntos: {parseFloat(p.pointsPct).toFixed(2)}%</span>
+          <span>Aporte al pool: {parseFloat(p.pointsPct).toFixed(2)}%</span>
         </div>
       </div>
       <div className="flex flex-wrap items-center gap-2">

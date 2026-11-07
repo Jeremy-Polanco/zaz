@@ -43,7 +43,7 @@ vi.mock('../components/UserAddressesPanel', () => ({
 }))
 
 import { api } from '../lib/api'
-import { useAdminUsers, useCurrentUser } from '../lib/queries'
+import { useAdminUsers, useCurrentUser, useUpdateUserAdmin } from '../lib/queries'
 import {
   PromoterCell,
   RoleCell,
@@ -238,6 +238,18 @@ describe('RoleCell', () => {
     expect(onChange).toHaveBeenCalledWith('seller')
   })
 
+  it('offers "Asociado" and picking it sends role associate', async () => {
+    const onChange = vi.fn()
+    renderWithProviders(
+      <RoleCell user={mkUser()} canEdit onChange={onChange} pending={false} />,
+    )
+    await userEvent.selectOptions(
+      screen.getByLabelText('Rol de Cliente Uno'),
+      'Asociado',
+    )
+    expect(onChange).toHaveBeenCalledWith('associate')
+  })
+
   it('never offers super admin — that role is not grantable from the panel', () => {
     renderWithProviders(
       <RoleCell user={mkUser()} canEdit onChange={vi.fn()} pending={false} />,
@@ -245,7 +257,7 @@ describe('RoleCell', () => {
     const options = screen
       .getAllByRole('option')
       .map((o) => (o as HTMLOptionElement).value)
-    expect(options).toEqual(['client', 'seller', 'promoter'])
+    expect(options).toEqual(['client', 'seller', 'promoter', 'associate'])
     expect(options).not.toContain('super_admin_delivery')
   })
 
@@ -271,6 +283,40 @@ describe('RoleCell', () => {
   })
 })
 
+
+describe('SuperUsersPage — rol Asociado', () => {
+  it('elegir "Asociado" en la fila llama a updateUser.mutate({ id, role: "associate" })', async () => {
+    const mutate = vi.fn()
+    vi.mocked(useUpdateUserAdmin).mockReturnValue({
+      mutate,
+      isPending: false,
+    } as unknown as ReturnType<typeof useUpdateUserAdmin>)
+    mockUseCurrentUser.mockReturnValue({
+      data: {
+        id: 'admin-1',
+        email: null,
+        fullName: 'Admin',
+        phone: null,
+        role: 'super_admin_delivery',
+        addressDefault: null,
+        activeLocationId: null,
+        referralCode: null,
+        creditLocked: false,
+      },
+    } as unknown as ReturnType<typeof useCurrentUser>)
+    mockUseAdminUsers.mockReturnValue({
+      data: [mkUser({ id: 'c-9', fullName: 'Cliente Nueve' })],
+      isPending: false,
+    } as unknown as ReturnType<typeof useAdminUsers>)
+
+    renderWithProviders(<SuperUsersPage />)
+    await userEvent.selectOptions(
+      screen.getByLabelText('Rol de Cliente Nueve'),
+      'Asociado',
+    )
+    expect(mutate).toHaveBeenCalledWith({ id: 'c-9', role: 'associate' })
+  })
+})
 
 describe('PromoterCell', () => {
   it('shows the assigned promoter name to a non-admin viewer', () => {

@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as SubscriptionRouteImport } from './routes/subscription'
 import { Route as SoporteRouteImport } from './routes/soporte'
 import { Route as PrivacidadRouteImport } from './routes/privacidad'
+import { Route as PoolRouteImport } from './routes/pool'
 import { Route as OrdersRouteImport } from './routes/orders'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as HomeRouteImport } from './routes/home'
@@ -29,6 +30,7 @@ import { Route as SuperSellersRouteImport } from './routes/super.sellers'
 import { Route as SuperRentalsRouteImport } from './routes/super.rentals'
 import { Route as SuperPromotersRouteImport } from './routes/super.promoters'
 import { Route as SuperProductsRouteImport } from './routes/super.products'
+import { Route as SuperPoolRouteImport } from './routes/super.pool'
 import { Route as SuperOrdersRouteImport } from './routes/super.orders'
 import { Route as SuperNotificationsRouteImport } from './routes/super.notifications'
 import { Route as SuperCreditRouteImport } from './routes/super.credit'
@@ -59,6 +61,11 @@ const SoporteRoute = SoporteRouteImport.update({
 const PrivacidadRoute = PrivacidadRouteImport.update({
   id: '/privacidad',
   path: '/privacidad',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PoolRoute = PoolRouteImport.update({
+  id: '/pool',
+  path: '/pool',
   getParentRoute: () => rootRouteImport,
 } as any)
 const OrdersRoute = OrdersRouteImport.update({
@@ -144,6 +151,11 @@ const SuperPromotersRoute = SuperPromotersRouteImport.update({
 const SuperProductsRoute = SuperProductsRouteImport.update({
   id: '/super/products',
   path: '/super/products',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SuperPoolRoute = SuperPoolRouteImport.update({
+  id: '/super/pool',
+  path: '/super/pool',
   getParentRoute: () => rootRouteImport,
 } as any)
 const SuperOrdersRoute = SuperOrdersRouteImport.update({
@@ -237,6 +249,7 @@ export interface FileRoutesByFullPath {
   '/home': typeof HomeRoute
   '/login': typeof LoginRoute
   '/orders': typeof OrdersRouteWithChildren
+  '/pool': typeof PoolRoute
   '/privacidad': typeof PrivacidadRoute
   '/soporte': typeof SoporteRoute
   '/subscription': typeof SubscriptionRoute
@@ -250,6 +263,7 @@ export interface FileRoutesByFullPath {
   '/super/credit': typeof SuperCreditRouteWithChildren
   '/super/notifications': typeof SuperNotificationsRoute
   '/super/orders': typeof SuperOrdersRoute
+  '/super/pool': typeof SuperPoolRoute
   '/super/products': typeof SuperProductsRoute
   '/super/promoters': typeof SuperPromotersRouteWithChildren
   '/super/rentals': typeof SuperRentalsRoute
@@ -274,6 +288,7 @@ export interface FileRoutesByTo {
   '/cuenta': typeof CuentaRoute
   '/home': typeof HomeRoute
   '/login': typeof LoginRoute
+  '/pool': typeof PoolRoute
   '/privacidad': typeof PrivacidadRoute
   '/soporte': typeof SoporteRoute
   '/subscription': typeof SubscriptionRoute
@@ -285,6 +300,7 @@ export interface FileRoutesByTo {
   '/super/categories': typeof SuperCategoriesRoute
   '/super/notifications': typeof SuperNotificationsRoute
   '/super/orders': typeof SuperOrdersRoute
+  '/super/pool': typeof SuperPoolRoute
   '/super/products': typeof SuperProductsRoute
   '/super/rentals': typeof SuperRentalsRoute
   '/super/sellers': typeof SuperSellersRoute
@@ -310,6 +326,7 @@ export interface FileRoutesById {
   '/home': typeof HomeRoute
   '/login': typeof LoginRoute
   '/orders': typeof OrdersRouteWithChildren
+  '/pool': typeof PoolRoute
   '/privacidad': typeof PrivacidadRoute
   '/soporte': typeof SoporteRoute
   '/subscription': typeof SubscriptionRoute
@@ -323,6 +340,7 @@ export interface FileRoutesById {
   '/super/credit': typeof SuperCreditRouteWithChildren
   '/super/notifications': typeof SuperNotificationsRoute
   '/super/orders': typeof SuperOrdersRoute
+  '/super/pool': typeof SuperPoolRoute
   '/super/products': typeof SuperProductsRoute
   '/super/promoters': typeof SuperPromotersRouteWithChildren
   '/super/rentals': typeof SuperRentalsRoute
@@ -350,6 +368,7 @@ export interface FileRouteTypes {
     | '/home'
     | '/login'
     | '/orders'
+    | '/pool'
     | '/privacidad'
     | '/soporte'
     | '/subscription'
@@ -363,6 +382,7 @@ export interface FileRouteTypes {
     | '/super/credit'
     | '/super/notifications'
     | '/super/orders'
+    | '/super/pool'
     | '/super/products'
     | '/super/promoters'
     | '/super/rentals'
@@ -387,6 +407,7 @@ export interface FileRouteTypes {
     | '/cuenta'
     | '/home'
     | '/login'
+    | '/pool'
     | '/privacidad'
     | '/soporte'
     | '/subscription'
@@ -398,6 +419,7 @@ export interface FileRouteTypes {
     | '/super/categories'
     | '/super/notifications'
     | '/super/orders'
+    | '/super/pool'
     | '/super/products'
     | '/super/rentals'
     | '/super/sellers'
@@ -422,6 +444,7 @@ export interface FileRouteTypes {
     | '/home'
     | '/login'
     | '/orders'
+    | '/pool'
     | '/privacidad'
     | '/soporte'
     | '/subscription'
@@ -435,6 +458,7 @@ export interface FileRouteTypes {
     | '/super/credit'
     | '/super/notifications'
     | '/super/orders'
+    | '/super/pool'
     | '/super/products'
     | '/super/promoters'
     | '/super/rentals'
@@ -461,6 +485,7 @@ export interface RootRouteChildren {
   HomeRoute: typeof HomeRoute
   LoginRoute: typeof LoginRoute
   OrdersRoute: typeof OrdersRouteWithChildren
+  PoolRoute: typeof PoolRoute
   PrivacidadRoute: typeof PrivacidadRoute
   SoporteRoute: typeof SoporteRoute
   SubscriptionRoute: typeof SubscriptionRoute
@@ -472,6 +497,7 @@ export interface RootRouteChildren {
   SuperCreditRoute: typeof SuperCreditRouteWithChildren
   SuperNotificationsRoute: typeof SuperNotificationsRoute
   SuperOrdersRoute: typeof SuperOrdersRoute
+  SuperPoolRoute: typeof SuperPoolRoute
   SuperProductsRoute: typeof SuperProductsRoute
   SuperPromotersRoute: typeof SuperPromotersRouteWithChildren
   SuperRentalsRoute: typeof SuperRentalsRoute
@@ -502,6 +528,13 @@ declare module '@tanstack/react-router' {
       path: '/privacidad'
       fullPath: '/privacidad'
       preLoaderRoute: typeof PrivacidadRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/pool': {
+      id: '/pool'
+      path: '/pool'
+      fullPath: '/pool'
+      preLoaderRoute: typeof PoolRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/orders': {
@@ -621,6 +654,13 @@ declare module '@tanstack/react-router' {
       path: '/super/products'
       fullPath: '/super/products'
       preLoaderRoute: typeof SuperProductsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/super/pool': {
+      id: '/super/pool'
+      path: '/super/pool'
+      fullPath: '/super/pool'
+      preLoaderRoute: typeof SuperPoolRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/super/orders': {
@@ -814,6 +854,7 @@ const rootRouteChildren: RootRouteChildren = {
   HomeRoute: HomeRoute,
   LoginRoute: LoginRoute,
   OrdersRoute: OrdersRouteWithChildren,
+  PoolRoute: PoolRoute,
   PrivacidadRoute: PrivacidadRoute,
   SoporteRoute: SoporteRoute,
   SubscriptionRoute: SubscriptionRoute,
@@ -825,6 +866,7 @@ const rootRouteChildren: RootRouteChildren = {
   SuperCreditRoute: SuperCreditRouteWithChildren,
   SuperNotificationsRoute: SuperNotificationsRoute,
   SuperOrdersRoute: SuperOrdersRoute,
+  SuperPoolRoute: SuperPoolRoute,
   SuperProductsRoute: SuperProductsRoute,
   SuperPromotersRoute: SuperPromotersRouteWithChildren,
   SuperRentalsRoute: SuperRentalsRoute,

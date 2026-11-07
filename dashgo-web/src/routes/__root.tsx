@@ -16,7 +16,7 @@ import { Button, UdashMark } from '../components/ui'
 import { NetworkBanner } from '../components/NetworkBanner'
 import { MaintenanceBanner } from '../components/MaintenanceBanner'
 import { LocationSelector } from '../components/LocationSelector'
-import { buysAsClient, roleLabel } from '../lib/roles'
+import { buysAsClient, isAssociate, roleLabel } from '../lib/roles'
 import type { UserRole } from '../lib/types'
 
 const LOCKOUT_ALLOWLIST = new Set<string>(['/credit/pay', '/login'])
@@ -119,6 +119,9 @@ function RoleNavLinks({
         <Link to="/super/rentals" className={linkClass} onClick={onNavigate}>
           Alquileres
         </Link>
+        <Link to="/super/pool" className={linkClass} onClick={onNavigate}>
+          Pool
+        </Link>
         <Link to="/super/notifications" className={linkClass} onClick={onNavigate}>
           Notificar
         </Link>
@@ -181,6 +184,11 @@ function RoleNavLinks({
       <Link to="/subscription" className={linkClass} onClick={onNavigate}>
         Suscripción
       </Link>
+      {isAssociate(role as UserRole) && (
+        <Link to="/pool" className={linkClass} onClick={onNavigate}>
+          Pool de asociados
+        </Link>
+      )}
       <Link to="/cuenta" className={linkClass} onClick={onNavigate}>
         Mi cuenta
       </Link>

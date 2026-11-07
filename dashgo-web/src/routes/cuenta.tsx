@@ -11,7 +11,7 @@ import { useCurrentUser, useDeleteAccount, useLogout } from '../lib/auth'
 import { useUpdateMe } from '../lib/queries'
 import { TOKEN_KEY } from '../lib/api'
 import { serverMessage } from '../lib/utils'
-import { buysAsClient, roleLabel as sharedRoleLabel } from '../lib/roles'
+import { buysAsClient, isAssociate, roleLabel as sharedRoleLabel } from '../lib/roles'
 import type { UserRole } from '../lib/types'
 
 export const Route = createFileRoute('/cuenta')({
@@ -187,6 +187,9 @@ function AccountPage() {
           <nav className="mt-4 flex flex-col divide-y divide-ink/10">
             <AccountLink to="/alquileres" label="Mis alquileres" />
             <AccountLink to="/subscription" label="Suscripción" />
+            {isAssociate(user?.role) && (
+              <AccountLink to="/pool" label="Pool de asociados" />
+            )}
           </nav>
         </Card>
       )}

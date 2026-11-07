@@ -176,6 +176,7 @@ const ASSIGNABLE_ROLES: { value: UserRole; label: string }[] = [
   { value: 'client', label: 'Cliente' },
   { value: 'seller', label: 'Vendedor' },
   { value: 'promoter', label: 'Promotor' },
+  { value: 'associate', label: 'Asociado' },
 ]
 
 /**
