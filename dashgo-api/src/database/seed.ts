@@ -285,7 +285,6 @@ async function run() {
   console.log('  Cliente       → +15555550004 (referido por DEMO123A) — sin-deuda, límite $50');
   console.log('  Cliente AlDía → +15555550006 (María Pérez) — debe $15, due en 15 días');
   console.log('  Cliente Venc. → +15555550007 (Juan Rodríguez) — debe $25, vencido hace 5 días');
-  console.log('  Cliente tiene $2.50 claimable en puntos.');
   console.log('  Promotor tiene $5.00 claimable en comisiones.');
 
   await AppDataSource.destroy();

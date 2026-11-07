@@ -66,6 +66,8 @@ import { OrderStatus, UserRole } from '../../src/entities/enums';
 
 // Todos los trimestres que este spec toca o a los que arrastra (carryover).
 const QUARTERS = [
+  '1950-Q1',
+  '1950-Q2',
   '1960-Q2',
   '1965-Q3',
   '1965-Q4',
@@ -342,7 +344,10 @@ describe('Reparto trimestral del pool (integración)', () => {
     const q3 = split(10001, n);
     const q4 = split(500 + q3.remainder, n);
 
-    const done = await pool.distributeDueQuarters(quarterStart('1966-Q1'));
+    // 6 min después del corte: ya pasó la gracia de 5 min.
+    const done = await pool.distributeDueQuarters(
+      new Date(quarterStart('1966-Q1').getTime() + 6 * 60_000),
+    );
 
     // Otro spec podría haber dejado un trimestre viejo sin repartir: se asierta
     // pertenencia y orden, no igualdad exacta de la lista.
@@ -374,6 +379,25 @@ describe('Reparto trimestral del pool (integración)', () => {
       // Se retira para que no lo recoja el catch-up de otros tests/specs.
       await ds.getRepository(PoolContribution).delete({ quarter: '1960-Q2' });
     }
+  });
+
+  it('un trimestre solo vence 5 minutos después de terminar (gracia)', async () => {
+    // Un aporte calculado justo antes de la medianoche que commitea justo
+    // después no debe caer en un trimestre cuyo reparto ya empezó.
+    await seedContribution('1950-Q1', 300);
+    const end = quarterStart('1950-Q2').getTime();
+
+    const early = await pool.distributeDueQuarters(new Date(end + 60_000));
+    expect(early).not.toContain('1950-Q1');
+    expect(
+      await ds.getRepository(PoolDistribution).count({ where: { quarter: '1950-Q1' } }),
+    ).toBe(0);
+
+    const late = await pool.distributeDueQuarters(new Date(end + 6 * 60_000));
+    expect(late).toContain('1950-Q1');
+    expect(
+      await ds.getRepository(PoolDistribution).count({ where: { quarter: '1950-Q1' } }),
+    ).toBe(1);
   });
 
   it('listDistributions devuelve los repartos por trimestre descendente', async () => {

@@ -293,7 +293,13 @@ export class PoolService {
    * repartidos por esta corrida, en orden.
    */
   async distributeDueQuarters(now: Date = new Date()): Promise<string[]> {
-    const current = quarterOf(now);
+    // Gracia de 5 minutos: una entrega que calculó su trimestre justo antes de
+    // la medianoche de NY y commitea justo después no puede caer en un
+    // trimestre cuyo reparto ya empezó, porque su aporte quedaría varado en un
+    // trimestre cerrado (centavos perdidos). El cron diario de las 00:10 NY ya
+    // pasó la gracia; el pase de arranque 20 s después de un deploy a las
+    // 00:00 no.
+    const current = quarterOf(new Date(now.getTime() - 5 * 60_000));
     const done: string[] = [];
     const tried = new Set<string>();
 

@@ -1,3 +1,7 @@
+// CONGELADO: esta migración ya está aplicada. Este archivo lo importa la
+// migración 1814000000000, así que cambiarlo cambia lo que esa migración hace
+// en cualquier base nueva. Tratalo como congelado: el comportamiento nuevo va
+// en un helper o una migración nueva.
 /**
  * Mueve al pool los puntos sin usar de los clientes (paso 4 de la migración
  * AssociatePointsPool1814000000000).
