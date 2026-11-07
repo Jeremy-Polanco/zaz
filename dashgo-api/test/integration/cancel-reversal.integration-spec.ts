@@ -4,7 +4,9 @@
  * Verifies the OrdersService.updateStatus(CANCELLED) TX reverses every
  * side effect that earlier transitions caused:
  *  - Credit: refund applied credit (covered partially by orders spec)
- *  - Points: restore claimable status of redeemed entries (FIX-5)
+ *  - Points: a legacy redemption is NOT restored to the customer anymore: the
+ *    redeemed entries become `pooled` and the full amount goes to the pool as
+ *    a `legacy_reversal` contribution
  *  - Stock: re-increment items when the order had been confirmed (FIX-5)
  *  - Rentals: cancel any pending_setup rentals tied to the order (FIX-5)
  *
@@ -61,6 +63,10 @@ import {
   PointsEntryType,
   PointsEntryStatus,
 } from '../../src/entities/points-ledger-entry.entity';
+import {
+  PoolContribution,
+  PoolContributionSource,
+} from '../../src/entities/pool-contribution.entity';
 import { Rental, RentalStatus } from '../../src/entities/rental.entity';
 import {
   UserRole,
@@ -97,6 +103,11 @@ describe('OrdersService cancel — full reversal', () => {
   afterAll(async () => {
     if (dataSource?.isInitialized) {
       for (const userId of createdUserIds) {
+        // Los aportes sobreviven al usuario (SET NULL): borrarlos por origen.
+        await dataSource.query(
+          'DELETE FROM pool_contributions WHERE source_user_id = $1',
+          [userId],
+        );
         await dataSource.query('DELETE FROM rentals WHERE user_id = $1', [userId]);
         await dataSource.query(
           'DELETE FROM points_ledger_entries WHERE user_id = $1',
@@ -191,7 +202,7 @@ describe('OrdersService cancel — full reversal', () => {
     } as unknown as PointsLedgerEntry);
   }
 
-  it('cancel restores points to claimable when an order used usePoints=true', async () => {
+  it('cancel pools the legacy redemption instead of restoring it to the customer', async () => {
     const cat = await seedCategory();
     const product = await seedProduct(cat);
     const user = await seedUserWithCredit();
@@ -224,24 +235,34 @@ describe('OrdersService cancel — full reversal', () => {
     const after = await dataSource
       .getRepository(PointsLedgerEntry)
       .find({ where: { userId: user.id } });
-    const stillRedeemed = after.filter(
-      (e) =>
-        e.type === PointsEntryType.EARNED &&
-        e.status === PointsEntryStatus.REDEEMED,
-    );
-    expect(stillRedeemed.length).toBe(0);
-    const claimable = after
+    // Ya no vuelven a ser del cliente: pasan a `pooled` (estado final).
+    expect(
+      after.filter((e) => e.status === PointsEntryStatus.CLAIMABLE).length,
+    ).toBe(0);
+    expect(
+      after.filter((e) => e.status === PointsEntryStatus.REDEEMED).length,
+    ).toBe(0);
+    const pooled = after
       .filter(
         (e) =>
           e.type === PointsEntryType.EARNED &&
-          e.status === PointsEntryStatus.CLAIMABLE,
+          e.status === PointsEntryStatus.POOLED,
       )
       .reduce((sum, e) => sum + e.amountCents, 0);
-    expect(claimable).toBe(200);
+    expect(pooled).toBe(200);
     const redemptionRows = after.filter(
       (e) => e.type === PointsEntryType.REDEEMED,
     );
     expect(redemptionRows.length).toBe(0);
+
+    const contributions = await dataSource
+      .getRepository(PoolContribution)
+      .find({ where: { sourceUserId: user.id } });
+    expect(contributions).toHaveLength(1);
+    expect(contributions[0]).toMatchObject({
+      source: PoolContributionSource.LEGACY_REVERSAL,
+      amountCents: 200,
+    });
   });
 
   it('cancel restores stock when the order was already confirmed (decremented)', async () => {

@@ -16,6 +16,7 @@ import { WhatsAppModule } from '../whatsapp/whatsapp.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { PaymentsModule } from '../payments/payments.module';
 import { PointsModule } from '../points/points.module';
+import { PoolModule } from '../pool/pool.module';
 import { InvoicesModule } from '../invoices/invoices.module';
 import { PromotersModule } from '../promoters/promoters.module';
 import { SellersModule } from '../sellers/sellers.module';
@@ -42,6 +43,9 @@ import { AddressesModule } from '../addresses/addresses.module';
     NotificationsModule,
     PaymentsModule,
     PointsModule,
+    // Aportes al pool y saldo del asociado. PoolModule no importa módulos de la
+    // app (solo entidades), así que no hay ciclo con OrdersModule.
+    PoolModule,
     InvoicesModule,
     PromotersModule,
     SellersModule,

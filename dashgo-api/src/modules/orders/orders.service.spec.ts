@@ -24,6 +24,8 @@ import { OrderStatus, PaymentMethod, UserRole } from '../../entities/enums';
 import { AuthenticatedUser } from '../../common/types/authenticated-user';
 import { PaymentsService } from '../payments/payments.service';
 import { PointsService } from '../points/points.service';
+import { PoolService } from '../pool/pool.service';
+import { AssociateBalanceService } from '../pool/associate-balance.service';
 import { InvoicesService } from '../invoices/invoices.service';
 import { PromotersService } from '../promoters/promoters.service';
 import { SellersService } from '../sellers/sellers.service';
@@ -157,6 +159,8 @@ describe('OrdersService', () => {
   let dataSource: jest.Mocked<DataSource>;
   let paymentsService: jest.Mocked<PaymentsService>;
   let pointsService: jest.Mocked<PointsService>;
+  let poolService: jest.Mocked<PoolService>;
+  let associateBalanceService: jest.Mocked<AssociateBalanceService>;
   let invoicesService: jest.Mocked<InvoicesService>;
   let promotersService: jest.Mocked<PromotersService>;
   let sellersService: jest.Mocked<SellersService>;
@@ -203,9 +207,16 @@ describe('OrdersService', () => {
     pointsService = {
       getBalance: jest.fn().mockResolvedValue({ claimableCents: 0 }),
       redeemAllClaimable: jest.fn(),
-      creditForOrder: jest.fn(),
-      reverseRedemptionForOrder: jest.fn(),
     } as unknown as jest.Mocked<PointsService>;
+
+    poolService = {
+      contributeForOrder: jest.fn().mockResolvedValue(0),
+      reverseLegacyRedemption: jest.fn().mockResolvedValue(0),
+    } as unknown as jest.Mocked<PoolService>;
+
+    associateBalanceService = {
+      reverseForOrder: jest.fn().mockResolvedValue(0),
+    } as unknown as jest.Mocked<AssociateBalanceService>;
 
     invoicesService = {
       createForOrder: jest.fn(),
@@ -303,6 +314,11 @@ describe('OrdersService', () => {
         { provide: DataSource, useValue: dataSource },
         { provide: PaymentsService, useValue: paymentsService },
         { provide: PointsService, useValue: pointsService },
+        { provide: PoolService, useValue: poolService },
+        {
+          provide: AssociateBalanceService,
+          useValue: associateBalanceService,
+        },
         { provide: InvoicesService, useValue: invoicesService },
         { provide: PromotersService, useValue: promotersService },
         { provide: SellersService, useValue: sellersService },
@@ -5811,7 +5827,7 @@ describe('OrdersService', () => {
 
       expect(result).toBe(delivered);
       expect(paymentsService.captureIntent).not.toHaveBeenCalled();
-      expect(pointsService.creditForOrder).not.toHaveBeenCalled();
+      expect(poolService.contributeForOrder).not.toHaveBeenCalled();
       expect(invoicesService.createForOrder).not.toHaveBeenCalled();
       expect(promotersService.creditCommissionsForOrder).not.toHaveBeenCalled();
     });
@@ -5949,8 +5965,12 @@ describe('OrdersService', () => {
         { id: 'prod-1', qty: 2 },
         { id: 'prod-2', qty: 3 },
       ]);
-      // points + rental reversals always run on cancel
-      expect(pointsService.reverseRedemptionForOrder).toHaveBeenCalledWith(
+      // associate balance + legacy points + rental reversals always run on cancel
+      expect(associateBalanceService.reverseForOrder).toHaveBeenCalledWith(
+        'order-1',
+        expect.anything(),
+      );
+      expect(poolService.reverseLegacyRedemption).toHaveBeenCalledWith(
         'order-1',
         expect.anything(),
       );
@@ -6050,7 +6070,10 @@ describe('OrdersService', () => {
       );
 
       expect(paymentsService.captureIntent).not.toHaveBeenCalled();
-      expect(pointsService.creditForOrder).toHaveBeenCalled();
+      expect(poolService.contributeForOrder).toHaveBeenCalledWith(
+        'order-1',
+        expect.anything(),
+      );
       expect(invoicesService.createForOrder).toHaveBeenCalled();
       expect(promotersService.creditCommissionsForOrder).toHaveBeenCalled();
     });

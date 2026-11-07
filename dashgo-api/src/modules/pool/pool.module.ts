@@ -10,6 +10,7 @@ import {
   User,
 } from '../../entities';
 import { AssociateBalanceService } from './associate-balance.service';
+import { PoolService } from './pool.service';
 
 @Module({
   imports: [
@@ -23,7 +24,7 @@ import { AssociateBalanceService } from './associate-balance.service';
       User,
     ]),
   ],
-  providers: [AssociateBalanceService],
-  exports: [AssociateBalanceService],
+  providers: [AssociateBalanceService, PoolService],
+  exports: [AssociateBalanceService, PoolService],
 })
 export class PoolModule {}

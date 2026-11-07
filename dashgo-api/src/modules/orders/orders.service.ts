@@ -36,6 +36,8 @@ import { CreateOrderDto, DeliveryAddressDto } from './dto/create-order.dto';
 import { UpdateOrderStatusDto } from './dto/update-order-status.dto';
 import { PaymentsService } from '../payments/payments.service';
 import { PointsService } from '../points/points.service';
+import { PoolService } from '../pool/pool.service';
+import { AssociateBalanceService } from '../pool/associate-balance.service';
 import { InvoicesService } from '../invoices/invoices.service';
 import { PromotersService } from '../promoters/promoters.service';
 import { SellersService } from '../sellers/sellers.service';
@@ -114,6 +116,8 @@ export class OrdersService {
     private readonly dataSource: DataSource,
     private readonly payments: PaymentsService,
     private readonly points: PointsService,
+    private readonly pool: PoolService,
+    private readonly associateBalance: AssociateBalanceService,
     private readonly invoices: InvoicesService,
     private readonly promotersService: PromotersService,
     private readonly sellersService: SellersService,
@@ -1799,7 +1803,8 @@ export class OrdersService {
 
   /**
    * Cancel an order and atomically reverse its side-effects: refund applied
-   * credit, restore redeemed points, cancel any pending_setup rentals tied to
+   * credit, give back the associate balance (or pool a legacy points
+   * redemption), cancel any pending_setup rentals tied to
    * it, and re-increment stock if it had been decremented (confirmed/in-route).
    * Shared by the admin status-change path (updateStatus) and the
    * cancel-non-rental-orders one-time op.
@@ -1816,7 +1821,11 @@ export class OrdersService {
       if (parseFloat(order.creditApplied || '0') > 0) {
         await this.credit.reverseCharge(order.id, cancelTx);
       }
-      await this.points.reverseRedemptionForOrder(order.id, cancelTx);
+      // Dos libros, mutuamente excluyentes por orden: el saldo del asociado se
+      // devuelve a él, y un canje VIEJO de puntos del cliente va al pool (el
+      // cliente ya no puede gastar esos puntos). Cada uno es idempotente.
+      await this.associateBalance.reverseForOrder(order.id, cancelTx);
+      await this.pool.reverseLegacyRedemption(order.id, cancelTx);
       await this.rentalsService.cancelPendingForOrder(order.id, cancelTx);
       if (wasStockDecremented) {
         const itemRepo = cancelTx.getRepository(OrderItem);
@@ -2043,7 +2052,7 @@ export class OrdersService {
         await orderRepo.update(orderId, { status: OrderStatus.DELIVERED });
       }
 
-      await this.points.creditForOrder(orderId, tx);
+      await this.pool.contributeForOrder(orderId, tx);
       await this.invoices.createForOrder(orderId, tx);
       await this.promotersService.creditCommissionsForOrder(orderId, tx);
       // Comisión del vendedor de la cartera. Va en la MISMA transacción que la
