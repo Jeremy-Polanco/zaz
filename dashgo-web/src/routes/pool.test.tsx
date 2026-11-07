@@ -124,6 +124,18 @@ describe('PoolPage', () => {
     expect(screen.getByText('-$5.00')).toBeInTheDocument()
   })
 
+  it('explica que el saldo es opcional al pagar (toggle) y no se aplica solo', () => {
+    setup('client', { balanceCents: 800, entries: [] })
+    renderWithProviders(<PoolPage />)
+
+    expect(
+      screen.getByText(
+        'Puedes usarlo al pagar un pedido, activando «Usar mi saldo de asociado». No vence.',
+      ),
+    ).toBeInTheDocument()
+    expect(screen.queryByText(/Se aplica solo/)).not.toBeInTheDocument()
+  })
+
   it('sin movimientos lo dice', () => {
     setup('client', { balanceCents: 0, entries: [] })
     renderWithProviders(<PoolPage />)

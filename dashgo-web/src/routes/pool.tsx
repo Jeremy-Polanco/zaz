@@ -103,7 +103,7 @@ export function PoolPage() {
           {balancePending || !balance ? '…' : formatCents(balance.balanceCents)}
         </p>
         <p className="mt-2 text-sm text-ink-muted">
-          Se aplica solo al pagar un pedido.
+          Puedes usarlo al pagar un pedido, activando «Usar mi saldo de asociado». No vence.
         </p>
       </Card>
 
