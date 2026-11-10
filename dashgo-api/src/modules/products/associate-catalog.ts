@@ -44,6 +44,10 @@ export function assertAssociateCart(
  * El precio mayorista solo lo ve el super admin. Quita `associatePriceCents`
  * del producto embebido en cada ítem de la(s) orden(es) que se devuelven a
  * cualquier otro rol (cliente, asociado, vendedor, promotor).
+ *
+ * MUTA en el lugar. Lo que devuelve `OrdersService.findOne/findAll` es, por lo
+ * tanto, una forma de RESPUESTA: nunca se debe usar para (re)calcular precios
+ * con `isAssociate` (el precio mayorista ya no está en el producto embebido).
  */
 export function hideAssociatePrice(
   orders: Order | Order[],

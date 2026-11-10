@@ -678,6 +678,19 @@ describe('ProductsService', () => {
       );
     });
 
+    it('findAllForAdmin conserva associatePriceCents (el formulario admin lo reenvía al guardar; si faltara, cada guardado borraría el precio mayorista)', async () => {
+      productsRepo.find.mockResolvedValueOnce([
+        fakeProduct({ id: 'p-assoc', associatePriceCents: 600 }),
+        fakeProduct({ id: 'p-none', associatePriceCents: null }),
+      ]);
+
+      const result = await service.findAllForAdmin(superAdmin);
+
+      expect(result).toHaveLength(2);
+      expect(result[0].associatePriceCents).toBe(600);
+      expect(result[1]).toHaveProperty('associatePriceCents', null);
+    });
+
     it('create persists a provided displayOrder and defaults to 0', async () => {
       const captured = fakeProduct({ id: 'new-3', displayOrder: 5 });
       productsRepo.create.mockReturnValueOnce(captured);

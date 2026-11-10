@@ -183,10 +183,13 @@ export class PaymentsService implements OnModuleInit {
       }
     }
 
-    // Envío FIJO, de la misma fuente que OrdersService.create: la orden registra
-    // ese envío y `capture(intentId)` captura el monto AUTORIZADO acá, así que si
-    // el intent cotizara por distancia (base + millas) cobraría distinto que la
-    // orden. Este intent nunca es de una orden provisionada, no hay rama de $0.
+    // Envío FIJO, de la misma fuente que OrdersService.create (consistencia).
+    // OJO: hoy ningún cliente llama a este endpoint. Las órdenes se cobran con
+    // POST /orders y luego POST /orders/:id/authorize, que arma el intent desde
+    // order.totalAmount − creditApplied (lo que luego captura `capture`). La
+    // tarifa fija se mantiene acá solo para que ambos caminos coincidan si
+    // algún cliente lo usa. Este intent nunca es de una orden provisionada, no
+    // hay rama de $0.
     const shippingCents = await this.shippingRate.getFlatShippingCents();
 
     // El DESTINO se resuelve con EL MISMO helper que usa OrdersService.create

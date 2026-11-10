@@ -256,6 +256,10 @@ export class OrdersService {
     });
     if (!order)
       throw new NotFoundException('Pedido no encontrado o sin acceso');
+    // Forma de respuesta: hideAssociatePrice borra associatePriceCents del
+    // producto embebido. Los llamadores internos (setQuote, authorize,
+    // updateStatus) NO deben usar este resultado para (re)calcular precios con
+    // `isAssociate`; el precio vigente ya quedó congelado en la orden.
     hideAssociatePrice(order, user.role);
     return order;
   }
