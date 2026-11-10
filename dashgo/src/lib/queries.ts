@@ -693,6 +693,8 @@ export type CreateProductInput = {
   offerEndsAt?: string | null
   requiresMaintenance?: boolean
   isMaintenanceService?: boolean
+  /** Precio para asociados en cents (> 0) o null = no se ofrece a asociados. */
+  associatePriceCents?: number | null
 }
 
 export function useCreateProduct() {

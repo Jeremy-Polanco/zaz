@@ -113,6 +113,11 @@ export interface Product {
    */
   subscriberPriceCents?: number | null
   /**
+   * Precio mayorista (en cents) para asociados. null = el producto no se
+   * ofrece a asociados. Solo productos de pago único; comparar con `!= null`.
+   */
+  associatePriceCents?: number | null
+  /**
    * Categoría fiscal. 'standard' (default) paga impuesto, 'exempt' no —
    * el agua embotellada es el caso. Ver dashgo-api/src/common/tax.ts.
    */
