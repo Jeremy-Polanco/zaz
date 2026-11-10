@@ -60,6 +60,10 @@ export class PoolService {
   ): Promise<number> {
     const order = await tx.findOne(Order, { where: { id: orderId } });
     if (!order) return 0;
+    // Una compra a precio mayorista no alimenta el pool: el asociado ya recibe
+    // su ganancia por la diferencia de precio. El flag se congela al crear la
+    // orden, así un cambio de rol posterior no reescribe el pasado.
+    if (order.associatePricing) return 0;
 
     const already = await tx.exists(PoolContribution, {
       where: { orderId: order.id, source: PoolContributionSource.ORDER },

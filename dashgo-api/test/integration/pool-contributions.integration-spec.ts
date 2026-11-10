@@ -174,11 +174,12 @@ describe('Aportes al pool (integración)', () => {
     lines: Array<{ price: string; qty: number; productId?: string }> = [
       { price: '20.00', qty: 1 },
     ],
+    overrides: Partial<Order> = {},
   ): Promise<Order> {
     const order = await ds.getRepository(Order).save(
       ds
         .getRepository(Order)
-        .create(makeOrder({ customerId, status }) as Partial<Order>),
+        .create(makeOrder({ customerId, status, ...overrides }) as Partial<Order>),
     );
     orderIds.push(order.id);
     for (const l of lines) {
@@ -232,6 +233,43 @@ describe('Aportes al pool (integración)', () => {
     expect(again).toBe(0);
     expect(await contributionsOf(order.id)).toHaveLength(1);
     expect(await pool.getPoolCents(quarter)).toBe(before + 200);
+  });
+
+  it('una orden vendida a precio de asociado no aporta al pool', async () => {
+    const associate = await seedUser(UserRole.ASSOCIATE);
+    const wholesale = await seedOrder(
+      associate.id,
+      OrderStatus.IN_DELIVERY_ROUTE,
+      [{ price: '20.00', qty: 1 }],
+      { associatePricing: true },
+    );
+    const retail = await seedOrder(
+      associate.id,
+      OrderStatus.IN_DELIVERY_ROUTE,
+      [{ price: '20.00', qty: 1 }],
+      { associatePricing: false },
+    );
+    const quarter = quarterOf(new Date());
+    const before = await pool.getPoolCents(quarter);
+
+    await orders.updateStatus(
+      wholesale.id,
+      { status: OrderStatus.DELIVERED },
+      adminAs(),
+    );
+
+    expect(await contributionsOf(wholesale.id)).toHaveLength(0);
+    expect(await pool.getPoolCents(quarter)).toBe(before);
+    expect(
+      await ds.transaction((tx) => pool.contributeForOrder(wholesale.id, tx)),
+    ).toBe(0);
+    expect(await contributionsOf(wholesale.id)).toHaveLength(0);
+
+    // Gemela: la misma orden a precio normal sí aporta.
+    expect(
+      await ds.transaction((tx) => pool.contributeForOrder(retail.id, tx)),
+    ).toBe(200);
+    expect(await contributionsOf(retail.id)).toHaveLength(1);
   });
 
   it('suma las líneas en UNA fila con el redondeo de hoy (por línea)', async () => {
