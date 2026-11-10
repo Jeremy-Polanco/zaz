@@ -6,13 +6,12 @@ import type { GeocodedPlace } from '../geocoding/nominatim';
 import type { TaxRateQuery } from './tax-jurisdiction.service';
 
 /**
- * "¿A dónde se entrega esto?", contestado UNA sola vez para todos los caminos
- * que cobran: la orden (`OrdersService.create`) y el intent de Stripe
- * (`PaymentsService.createIntentForItems`).
+ * "¿A dónde se entrega esto?", contestado UNA sola vez para el camino que
+ * cobra: la orden (`OrdersService.create`).
  *
- * Vive acá y no adentro de un servicio porque los dos caminos tienen que
- * resolver IDÉNTICO. Si el intent cobra 8.887% y la orden cotiza 6.625%, el
- * cliente ve un precio y paga otro — y la diferencia la pone la caja.
+ * Vive acá y no adentro de un servicio para que cualquier camino futuro que
+ * cotice resuelva IDÉNTICO. Si dos caminos resuelven distinto (8.887% vs
+ * 6.625%), el cliente ve un precio y paga otro — y la diferencia la pone la caja.
  *
  * El orden de confianza, de más a menos:
  *   1. La FILA GUARDADA del cliente (`deliveryAddressId`, leída con el userId

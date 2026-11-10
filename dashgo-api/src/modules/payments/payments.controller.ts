@@ -1,5 +1,4 @@
 import {
-  Body,
   Controller,
   Headers,
   HttpCode,
@@ -8,16 +7,11 @@ import {
   Logger,
   Post,
   Req,
-  UseGuards,
 } from '@nestjs/common';
 import type { RawBodyRequest } from '@nestjs/common';
 import { ModuleRef } from '@nestjs/core';
 import type { Request } from 'express';
-import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
-import { CurrentUser } from '../../common/decorators/current-user.decorator';
-import type { AuthenticatedUser } from '../../common/types/authenticated-user';
 import { PaymentsService } from './payments.service';
-import { CreatePaymentIntentDto } from './dto/create-payment-intent.dto';
 import { SubscriptionService } from '../subscription/subscription.service';
 import { CreditService } from '../credit/credit.service';
 import { RentalsService } from '../rentals/rentals.service';
@@ -56,24 +50,6 @@ export class PaymentsController {
     // bootstrap even with forwardRef because the cycle runs through CreditModule.
     private readonly moduleRef: ModuleRef,
   ) {}
-
-  @UseGuards(JwtAuthGuard)
-  @Post('intent')
-  createIntent(
-    @CurrentUser() user: AuthenticatedUser,
-    @Body() dto: CreatePaymentIntentDto,
-  ) {
-    return this.payments.createIntentForItems({
-      userId: user.id,
-      role: user.role,
-      items: dto.items,
-      usePoints: dto.usePoints,
-      deliveryAddress: dto.deliveryAddress,
-      // La fila guardada del cliente le gana al ZIP posteado para fijar la
-      // tasa — exactamente igual que en POST /orders.
-      deliveryAddressId: dto.deliveryAddressId,
-    });
-  }
 
   @HttpCode(HttpStatus.OK)
   @Post('webhook')
