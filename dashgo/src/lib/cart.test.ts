@@ -115,3 +115,29 @@ describe('cart — signal pattern', () => {
     })
   })
 })
+
+describe('cart.prune', () => {
+  it('quita las líneas fuera de la lista y devuelve los ids quitados', () => {
+    cart.update('keep', 2)
+    cart.update('ghost', 1)
+
+    const removed = cart.prune(new Set(['keep']))
+
+    expect(removed).toEqual(['ghost'])
+    expect(cart.get().items).toEqual({ keep: 2 })
+  })
+
+  it('no emite ni reemplaza el estado cuando no hay nada que quitar', () => {
+    cart.update('keep', 2)
+    const before = cart.get()
+    const listener = jest.fn()
+    const unsubscribe = cart.subscribe(listener)
+
+    const removed = cart.prune(new Set(['keep']))
+
+    expect(removed).toEqual([])
+    expect(cart.get()).toBe(before)
+    expect(listener).not.toHaveBeenCalled()
+    unsubscribe()
+  })
+})

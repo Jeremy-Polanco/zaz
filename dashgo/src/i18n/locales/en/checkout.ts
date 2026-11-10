@@ -5,6 +5,7 @@ export default {
     subtitle: 'Add products from the catalog to continue.',
     back: 'Go back →',
   },
+  prunedNotice: 'We removed items from your cart that are no longer available.',
   activeOrder: {
     eyebrow: 'Order in progress',
     title: 'You already have one on the way.',

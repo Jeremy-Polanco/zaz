@@ -94,3 +94,18 @@ export function useCart() {
 export function clearCart() {
   writeRaw(null)
 }
+
+/**
+ * Quita del carrito toda línea cuyo productId no esté en `keepIds` y devuelve
+ * los ids quitados. Sin cambios no escribe ni emite evento.
+ */
+export function pruneCart(keepIds: ReadonlySet<string>): string[] {
+  const stored = readRaw()
+  if (!stored) return []
+  const removed = stored.items
+    .filter((it) => !keepIds.has(it.productId))
+    .map((it) => it.productId)
+  if (removed.length === 0) return []
+  writeRaw({ items: stored.items.filter((it) => keepIds.has(it.productId)) })
+  return removed
+}

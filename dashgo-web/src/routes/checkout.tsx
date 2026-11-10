@@ -18,7 +18,7 @@ import {
 import { CheckoutCreditStep } from '../components/CheckoutCreditStep'
 import { CardAuthForm } from '../components/CardAuthForm'
 import { useCurrentUser } from '../lib/auth'
-import { useCart, clearCart } from '../lib/cart'
+import { useCart, clearCart, pruneCart } from '../lib/cart'
 import { Button, SectionHeading } from '../components/ui'
 import { userAddressToGeoAddress, formatResolvedPlace } from '../lib/address'
 import { cn, formatCents } from '../lib/utils'
@@ -46,7 +46,18 @@ export function CheckoutPage() {
   const router = useRouter()
   const { data: user } = useCurrentUser()
   const { items: cart, totalItems } = useCart()
-  const { data: products } = useProducts()
+  const { data: products, isSuccess: productsLoaded } = useProducts()
+  // Aviso de una sola vez cuando se quitan del carrito productos que ya no
+  // están en la lista del rol (invitado que luego entra como asociado, o el
+  // admin los quitó a mitad de sesión).
+  const [prunedNotice, setPrunedNotice] = useState(false)
+  useEffect(() => {
+    // Solo con la lista cargada con éxito: pendiente o con error NO poda, para
+    // que una falla de red no vacíe el carrito.
+    if (!productsLoaded || !products) return
+    const removed = pruneCart(new Set(products.map((p) => p.id)))
+    if (removed.length > 0) setPrunedNotice(true)
+  }, [productsLoaded, products, cart])
   // Cualquier usuario logueado: un ex asociado conserva (y puede gastar) el
   // saldo que ya se le repartió; un cliente común simplemente ve 0.
   const { data: balance } = useMyAssociateBalance(!!user)
@@ -239,6 +250,11 @@ export function CheckoutPage() {
         <p className="display text-4xl leading-tight">
           Todavía no elegiste nada.
         </p>
+        {prunedNotice && (
+          <p role="status" className="border border-ink/15 bg-paper px-4 py-3 text-sm text-ink">
+            Quitamos de tu carrito productos que ya no están disponibles.
+          </p>
+        )}
         <Link to="/catalog">
           <Button variant="accent">Ver catálogo →</Button>
         </Link>
@@ -364,6 +380,12 @@ export function CheckoutPage() {
           <span className="italic text-brand">tu pedido.</span>
         </h1>
       </header>
+
+      {prunedNotice && (
+        <p role="status" className="border border-ink/15 bg-paper px-4 py-3 text-sm text-ink">
+          Quitamos de tu carrito productos que ya no están disponibles.
+        </p>
+      )}
 
       <div className="grid grid-cols-1 gap-12 lg:grid-cols-12">
         <div className="lg:col-span-7">
