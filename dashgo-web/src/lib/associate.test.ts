@@ -27,6 +27,25 @@ describe('parseAssociatePrice', () => {
     expect(parseAssociatePrice('-3')).toEqual({ cents: null, error: err })
     expect(parseAssociatePrice('abc').error).toBe(err)
   })
+
+  it('rejects prices that round to zero cents', () => {
+    expect(parseAssociatePrice('0.004')).toEqual({
+      cents: null,
+      error: 'Ingresa un precio mayor a 0',
+    })
+  })
+
+  it('rejects exponent, hex and thousands-separator notation', () => {
+    const err = 'Ingresa un precio mayor a 0'
+    expect(parseAssociatePrice('1e2')).toEqual({ cents: null, error: err })
+    expect(parseAssociatePrice('0x10').error).toBe(err)
+    expect(parseAssociatePrice('1.234,56')).toEqual({ cents: null, error: err })
+  })
+
+  it('accepts a comma decimal and surrounding whitespace', () => {
+    expect(parseAssociatePrice('4,5')).toEqual({ cents: 450, error: null })
+    expect(parseAssociatePrice(' 4.50 ')).toEqual({ cents: 450, error: null })
+  })
 })
 
 describe('canCarryAssociatePrice', () => {

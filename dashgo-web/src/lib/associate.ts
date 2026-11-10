@@ -3,7 +3,9 @@ import type { UserRole } from './types'
 /**
  * Parsea el precio para asociados que escribe el admin. Vacío = sin precio
  * (null). Acepta "," o "." como separador decimal: `parseFloat('4,50')` daría
- * 4 y guardaría $4.00 en silencio.
+ * 4 y guardaría $4.00 en silencio. Solo decimales planos (nada de `1e2`,
+ * `0x10` ni separador de miles) y el precio tiene que redondear a al menos
+ * 1 centavo.
  */
 export function parseAssociatePrice(text: string): {
   cents: number | null
@@ -11,11 +13,11 @@ export function parseAssociatePrice(text: string): {
 } {
   const trimmed = text.trim()
   if (trimmed === '') return { cents: null, error: null }
-  const value = Number(trimmed.replace(',', '.'))
-  if (!Number.isFinite(value) || value <= 0) {
-    return { cents: null, error: 'Ingresa un precio mayor a 0' }
-  }
-  return { cents: Math.round(value * 100), error: null }
+  const error = { cents: null, error: 'Ingresa un precio mayor a 0' }
+  if (!/^\d+(?:[.,]\d+)?$/.test(trimmed)) return error
+  const cents = Math.round(Number(trimmed.replace(',', '.')) * 100)
+  if (!Number.isFinite(cents) || cents <= 0) return error
+  return { cents, error: null }
 }
 
 /**
