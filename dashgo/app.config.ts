@@ -103,10 +103,12 @@ function resolveIosBuildNumber(): string {
   // (sin página en ASC todavía): pedidos programados fuera de la ruta de hoy
   // (filtro "Programados"). La 1.0.9 quedó READY_FOR_SALE, así que build 24
   // (Android versionCode 10) va en 1.0.10 el 2026-11-07: pool de puntos
-  // repartido entre asociados, el cliente ya no ve puntos.
+  // repartido entre asociados, el cliente ya no ve puntos. Build 25 (Android
+  // versionCode 11) el 2026-11-10, misma 1.0.10 (su página en ASC seguía en
+  // PREPARE_FOR_SUBMISSION, tren abierto): catálogo mayorista para asociados.
   const fromEas = process.env.EAS_BUILD_NUMBER
   if (fromEas && fromEas.length > 0) return fromEas
-  return '24'
+  return '25'
 }
 
 function resolveAndroidVersionCode(): number {
@@ -119,7 +121,7 @@ function resolveAndroidVersionCode(): number {
   }
   // appVersionSource is 'local' — BUMP THIS by 1 before each Play upload,
   // same ritual as the iOS buildNumber above.
-  return 10
+  return 11
 }
 
 export default ({ config }: ConfigContext): ExpoConfig => {
