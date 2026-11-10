@@ -127,6 +127,17 @@ export class Product {
   subscriberPriceCents!: number | null;
 
   /**
+   * Precio mayorista fijo para usuarios con rol `associate`, en centavos.
+   * NULL = el producto no se ofrece a asociados (no lo ven ni lo compran).
+   *
+   * Cuando está definido, el asociado paga exactamente este precio: ni la
+   * oferta ni el precio de suscriptor se evalúan. Solo aplica a productos de
+   * pago único. Chequear siempre `!= null`, nunca truthiness.
+   */
+  @Column({ name: 'associate_price_cents', type: 'integer', nullable: true })
+  associatePriceCents!: number | null;
+
+  /**
    * Categoría fiscal del producto. 'standard' (default) paga TAX_RATE;
    * 'exempt' no paga impuesto — el caso que lo motivó es el agua embotellada,
    * exenta en NJ.

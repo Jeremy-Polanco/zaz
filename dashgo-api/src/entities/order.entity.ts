@@ -260,6 +260,14 @@ export class Order {
   @Column({ name: 'provisioned', type: 'boolean', default: false })
   provisioned!: boolean;
 
+  /**
+   * True cuando la orden se vendió a precio mayorista de asociado. Congela la
+   * decisión al crearla: estas órdenes no alimentan el pool de puntos, aunque
+   * el rol del usuario cambie después.
+   */
+  @Column({ name: 'associate_pricing', type: 'boolean', default: false })
+  associatePricing!: boolean;
+
   @CreateDateColumn({ name: 'created_at' })
   createdAt!: Date;
 

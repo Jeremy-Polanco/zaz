@@ -15,6 +15,11 @@ export interface EffectivePriceOptions {
    * server-side against the subscription — never taken from the client.
    */
   isSubscriber?: boolean;
+  /**
+   * Whether the buyer has the associate role. Resolved server-side from the
+   * user's role — never taken from the client.
+   */
+  isAssociate?: boolean;
 }
 
 export function getEffectivePrice(
@@ -22,6 +27,18 @@ export function getEffectivePrice(
   now: Date = new Date(),
   opts: EffectivePriceOptions = {},
 ): EffectivePrice {
+  // 0) El asociado paga su precio mayorista fijo: ni oferta ni precio de
+  // suscriptor. `!= null` a propósito (nullable; nunca truthiness).
+  if (opts.isAssociate && product.associatePriceCents != null) {
+    return {
+      priceCents: product.associatePriceCents,
+      basePriceCents: product.associatePriceCents,
+      discountPct: null,
+      offerActive: false,
+      subscriberPriceApplied: false,
+    };
+  }
+
   const base = parseFloat(product.priceToPublic);
   const basePriceCents = Math.round(base * 100);
 
@@ -199,8 +216,9 @@ export type ProductWithPricing = Product & {
 export function decorateProduct(
   product: Product,
   now: Date = new Date(),
+  opts: EffectivePriceOptions = {},
 ): ProductWithPricing {
-  const ep = getEffectivePrice(product, now);
+  const ep = getEffectivePrice(product, now, opts);
   return Object.assign(product, {
     effectivePriceCents: ep.priceCents,
     basePriceCents: ep.basePriceCents,

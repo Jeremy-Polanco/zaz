@@ -291,3 +291,37 @@ describe('getEffectivePrice', () => {
     });
   });
 });
+
+describe('getEffectivePrice (associate)', () => {
+  it('associate pays the fixed associate price, ignoring an active offer and the subscriber price', () => {
+    const p = mkProduct({
+      priceToPublic: '10.00',
+      offerDiscountPct: '50',
+      offerStartsAt: null,
+      offerEndsAt: null,
+      subscriberPriceCents: 300,
+      associatePriceCents: 650,
+    });
+    expect(
+      getEffectivePrice(p, new Date(), { isAssociate: true, isSubscriber: true }),
+    ).toEqual({
+      priceCents: 650,
+      basePriceCents: 650,
+      discountPct: null,
+      offerActive: false,
+      subscriberPriceApplied: false,
+    });
+  });
+
+  it('non-associate never gets the associate price', () => {
+    const p = mkProduct({ priceToPublic: '10.00', associatePriceCents: 650 });
+    expect(getEffectivePrice(p, new Date(), {}).priceCents).toBe(1000);
+  });
+
+  it('associate flag without an associate price falls back to the public rules', () => {
+    const p = mkProduct({ priceToPublic: '10.00', associatePriceCents: null });
+    expect(
+      getEffectivePrice(p, new Date(), { isAssociate: true }).priceCents,
+    ).toBe(1000);
+  });
+});
