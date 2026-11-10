@@ -42,6 +42,7 @@ export default {
     searchBody: 'No results. Try a different word.',
     categoryBody: 'No products in this category.',
     catalogBody: 'No products available right now.',
+    associateBody: 'There are no products available for associates yet.',
   },
   cartBar: {
     inCart: 'In cart',

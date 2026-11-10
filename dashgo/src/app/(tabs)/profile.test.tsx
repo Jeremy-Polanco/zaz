@@ -16,6 +16,8 @@ jest.mock('../../lib/queries', () => ({
   useLogout: jest.fn(),
   useDeleteAccount: jest.fn(),
   useMyAssociateBalance: jest.fn(),
+  useMySubscription: jest.fn(),
+  useMyRentals: jest.fn(),
   useUpdateMe: jest.fn(() => ({
     mutateAsync: jest.fn(),
     isPending: false,
@@ -86,6 +88,8 @@ import {
   useDeleteAccount,
   useLogout,
   useMyAssociateBalance,
+  useMyRentals,
+  useMySubscription,
 } from '../../lib/queries'
 import { router } from 'expo-router'
 import ProfileTab from './profile'
@@ -96,12 +100,21 @@ const mockUseCurrentUser = useCurrentUser as jest.MockedFunction<typeof useCurre
 const mockUseLogout = useLogout as jest.MockedFunction<typeof useLogout>
 const mockUseDeleteAccount = useDeleteAccount as jest.MockedFunction<typeof useDeleteAccount>
 const mockUseBalance = useMyAssociateBalance as jest.MockedFunction<typeof useMyAssociateBalance>
+const mockUseSubscription = useMySubscription as jest.MockedFunction<typeof useMySubscription>
+const mockUseRentals = useMyRentals as jest.MockedFunction<typeof useMyRentals>
 const mockRouter = router as jest.Mocked<typeof router>
 
 function setupMocks(
   role: 'client' | 'associate' | 'super_admin_delivery' = 'client',
   balanceCents = 0,
+  { subscription = null, rentals = [] }: { subscription?: object | null; rentals?: object[] } = {},
 ) {
+  mockUseSubscription.mockReturnValue({
+    data: subscription,
+  } as unknown as ReturnType<typeof useMySubscription>)
+  mockUseRentals.mockReturnValue({
+    data: rentals,
+  } as unknown as ReturnType<typeof useMyRentals>)
   mockUseBalance.mockReturnValue({
     data: { balanceCents, entries: [] },
     isPending: false,
@@ -192,5 +205,49 @@ describe('ProfileTab — Pool de asociados', () => {
     fireEvent.press(getByText('Pool de asociados'))
     expect(mockRouter.navigate).toHaveBeenCalledWith('/(tabs)/pool')
     expect(mockUseBalance).toHaveBeenCalledWith(true)
+  })
+})
+
+// ── Asociado: sin ofertas de bebedero salvo que ya las tenga ──────────────────
+
+describe('ProfileTab — enlaces de suscripción y alquileres del asociado', () => {
+  it('an associate without subscription or rentals sees neither link', () => {
+    setupMocks('associate')
+    const { queryByText } = renderWithProviders(<ProfileTab />)
+    expect(queryByText('Suscripción')).toBeNull()
+    expect(queryByText('Mis alquileres')).toBeNull()
+  })
+
+  it('an associate with a subscription (even canceled) sees the Suscripción link', () => {
+    setupMocks('associate', 0, { subscription: { id: 's-1', status: 'canceled' } })
+    const { getByText, queryByText } = renderWithProviders(<ProfileTab />)
+    expect(getByText('Suscripción')).toBeTruthy()
+    expect(queryByText('Mis alquileres')).toBeNull()
+  })
+
+  it('an associate with a rental sees the Mis alquileres link', () => {
+    setupMocks('associate', 0, { rentals: [{ id: 'r-1' }] })
+    const { getByText, queryByText } = renderWithProviders(<ProfileTab />)
+    expect(getByText('Mis alquileres')).toBeTruthy()
+    expect(queryByText('Suscripción')).toBeNull()
+  })
+
+  it('a client always sees both links', () => {
+    setupMocks('client')
+    const { getByText } = renderWithProviders(<ProfileTab />)
+    expect(getByText('Suscripción')).toBeTruthy()
+    expect(getByText('Mis alquileres')).toBeTruthy()
+  })
+
+  it('only an associate fetches the subscription and rentals for these gates', () => {
+    setupMocks('client')
+    renderWithProviders(<ProfileTab />)
+    expect(mockUseSubscription).toHaveBeenCalledWith(false)
+    expect(mockUseRentals).toHaveBeenCalledWith(false)
+
+    setupMocks('associate')
+    renderWithProviders(<ProfileTab />)
+    expect(mockUseSubscription).toHaveBeenCalledWith(true)
+    expect(mockUseRentals).toHaveBeenCalledWith(true)
   })
 })

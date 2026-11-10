@@ -9,6 +9,8 @@ import { renderWithProviders } from '../../test/test-utils'
 jest.mock('../../lib/queries', () => ({
   useCurrentUser: jest.fn(),
   useMyAssociateBalance: jest.fn(),
+  useMySubscription: jest.fn(),
+  useMyRentals: jest.fn(),
 }))
 
 // Tabs real needs a navigator; render each Screen's tabPress listener as a
@@ -35,14 +37,32 @@ jest.mock('react-native-safe-area-context', () => ({
   useSafeAreaInsets: jest.fn(() => ({ top: 0, bottom: 0, left: 0, right: 0 })),
 }))
 
-import { useCurrentUser, useMyAssociateBalance } from '../../lib/queries'
+import {
+  useCurrentUser,
+  useMyAssociateBalance,
+  useMyRentals,
+  useMySubscription,
+} from '../../lib/queries'
 import { router } from 'expo-router'
 import TabLayout from './_layout'
 
 const mockUseCurrentUser = useCurrentUser as jest.MockedFunction<typeof useCurrentUser>
 const mockUseBalance = useMyAssociateBalance as jest.MockedFunction<typeof useMyAssociateBalance>
 
-function openMore(role: string, balanceCents = 0) {
+const mockUseSubscription = useMySubscription as jest.MockedFunction<typeof useMySubscription>
+const mockUseRentals = useMyRentals as jest.MockedFunction<typeof useMyRentals>
+
+function openMore(
+  role: string,
+  balanceCents = 0,
+  { subscription = null, rentals = [] }: { subscription?: object | null; rentals?: object[] } = {},
+) {
+  mockUseSubscription.mockReturnValue({
+    data: subscription,
+  } as unknown as ReturnType<typeof useMySubscription>)
+  mockUseRentals.mockReturnValue({
+    data: rentals,
+  } as unknown as ReturnType<typeof useMyRentals>)
   mockUseCurrentUser.mockReturnValue({
     data: { id: 'u-1', role },
     isPending: false,
@@ -92,5 +112,40 @@ describe('(tabs)/_layout — hoja "Más"', () => {
 
     expect(router.navigate).toHaveBeenCalledWith('/(tabs)/pool')
     expect(mockUseBalance).toHaveBeenCalledWith(true)
+  })
+})
+
+describe('(tabs)/_layout — hoja "Más" del asociado sin ofertas de bebedero', () => {
+  it('an associate without subscription or rentals does not see either entry', () => {
+    const { getByText, queryByText } = openMore('associate')
+
+    expect(getByText('Mi cuenta')).toBeTruthy()
+    expect(queryByText('Suscripción')).toBeNull()
+    expect(queryByText('Alquileres')).toBeNull()
+  })
+
+  it('an associate with a subscription keeps the subscription entry only', () => {
+    const { getByText, queryByText } = openMore('associate', 0, {
+      subscription: { id: 's-1', status: 'canceled' },
+    })
+
+    expect(getByText('Suscripción')).toBeTruthy()
+    expect(queryByText('Alquileres')).toBeNull()
+  })
+
+  it('an associate with a rental keeps the rentals entry only', () => {
+    const { getByText, queryByText } = openMore('associate', 0, { rentals: [{ id: 'r-1' }] })
+
+    expect(getByText('Alquileres')).toBeTruthy()
+    expect(queryByText('Suscripción')).toBeNull()
+  })
+
+  it('a client always sees both entries and does not fetch for the gate', () => {
+    const { getByText } = openMore('client')
+
+    expect(getByText('Suscripción')).toBeTruthy()
+    expect(getByText('Alquileres')).toBeTruthy()
+    expect(mockUseSubscription).toHaveBeenCalledWith(false)
+    expect(mockUseRentals).toHaveBeenCalledWith(false)
   })
 })

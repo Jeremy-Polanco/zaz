@@ -15,12 +15,15 @@ import type { SFSymbol } from 'sf-symbols-typescript'
 import {
   useCurrentUser,
   useMyAssociateBalance,
+  useMyRentals,
+  useMySubscription,
   useDeleteAccount,
   useLogout,
   useUpdateMe,
 } from '../../lib/queries'
 import { dobToIso, dobSchema } from '../../lib/schemas'
 import { buysAsClient, isAssociate } from '../../lib/roles'
+import { showsRentalsEntry, showsSubscriptionEntry } from '../../lib/associate'
 import { Button, Eyebrow, Hairline } from '../../components/ui'
 import { DeleteAccountModal } from '../../components/DeleteAccountModal'
 import { setAppLanguage, type AppLanguage } from '../../i18n'
@@ -164,6 +167,13 @@ export default function ProfileTab() {
   // tiene que poder llegar a su historial.
   const { data: poolBalance } = useMyAssociateBalance(!!user)
   const showPool = isAssociate(user?.role) || (poolBalance?.balanceCents ?? 0) > 0
+  // El asociado no ve suscripción ni alquileres (ofertas de bebedero) salvo que
+  // ya tenga alguno; solo él pide estos datos.
+  const associate = isAssociate(user?.role)
+  const { data: subscription } = useMySubscription(associate)
+  const { data: rentals } = useMyRentals(associate)
+  const showRentals = showsRentalsEntry(user?.role, (rentals?.length ?? 0) > 0)
+  const showSubscription = showsSubscriptionEntry(user?.role, !!subscription)
 
   const [deleteModalOpen, setDeleteModalOpen] = useState(false)
   const [deleteError, setDeleteError] = useState<string | null>(null)
@@ -248,7 +258,7 @@ export default function ProfileTab() {
 
         {isClient && <BirthdayRow dateOfBirth={user?.dateOfBirth} />}
 
-        {isClient && (
+        {isClient && showRentals && (
           <>
             <Hairline className="mt-10" />
             <View className="mt-6">
@@ -263,17 +273,19 @@ export default function ProfileTab() {
           </>
         )}
 
-        {isClient && (
+        {isClient && (showSubscription || showPool) && (
           <>
             <Hairline className="mt-10" />
             <View className="mt-6">
               <Eyebrow className="mb-1">{t('myActivity')}</Eyebrow>
-              <AccountLink
-                label={t('subscription')}
-                iosIcon="repeat.circle.fill"
-                androidIcon="autorenew"
-                href="/(tabs)/subscription"
-              />
+              {showSubscription && (
+                <AccountLink
+                  label={t('subscription')}
+                  iosIcon="repeat.circle.fill"
+                  androidIcon="autorenew"
+                  href="/(tabs)/subscription"
+                />
+              )}
               {showPool && (
                 <AccountLink
                   label={t('pool')}

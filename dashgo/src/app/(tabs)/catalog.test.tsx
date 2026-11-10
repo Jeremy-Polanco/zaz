@@ -213,3 +213,27 @@ describe('CatalogTab — rental badge', () => {
     expect(queryByText(/Alquiler/)).toBeNull()
   })
 })
+
+describe('CatalogTab — catálogo vacío', () => {
+  function setupEmpty(role: 'client' | 'associate') {
+    setupMocks([])
+    mockUseCurrentUser.mockReturnValue({
+      data: { id: 'u-1', role, fullName: 'Ana Pérez' },
+      isPending: false,
+    } as unknown as ReturnType<typeof useCurrentUser>)
+  }
+
+  it('el asociado con su lista vacía ve el mensaje de asociados', () => {
+    setupEmpty('associate')
+    const { getByText, queryByText } = renderWithProviders(<CatalogTab />)
+    expect(getByText('Todavía no hay productos disponibles para asociados.')).toBeTruthy()
+    expect(queryByText('No hay productos disponibles ahora mismo.')).toBeNull()
+  })
+
+  it('el cliente con el catálogo vacío sigue viendo el mensaje de siempre', () => {
+    setupEmpty('client')
+    const { getByText, queryByText } = renderWithProviders(<CatalogTab />)
+    expect(getByText('No hay productos disponibles ahora mismo.')).toBeTruthy()
+    expect(queryByText('Todavía no hay productos disponibles para asociados.')).toBeNull()
+  })
+})

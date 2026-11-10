@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, clearSession, setSession } from './api'
 import { unregisterPushToken } from './push'
 import { getAccessToken } from './token-storage'
+import { productsQueryKey } from './associate'
 import type {
   AdminCreditDetail,
   AdminPlanResponse,
@@ -183,10 +184,22 @@ export function useDeleteAccount() {
   })
 }
 
+/**
+ * Catálogo público, con clave por rol: el del asociado (solo su lista, a precio
+ * mayorista) difiere del del cliente, y compartir la clave mostraría el
+ * equivocado al iniciar sesión. No pide nada hasta saber quién es el usuario.
+ *
+ * Invitado (Apple 5.1.1): `useCurrentUser` nunca se deshabilita — sin token
+ * resuelve `null` — así que esperar su `isPending` no deja al invitado sin
+ * catálogo (una query deshabilitada quedaría en `isPending` para siempre).
+ * `['products']` sigue alcanzando esta clave por prefijo al invalidar.
+ */
 export function useProducts() {
+  const { data: user, isPending: userPending } = useCurrentUser()
   return useQuery<Product[]>({
-    queryKey: ['products'],
+    queryKey: productsQueryKey(user?.role),
     queryFn: async () => (await api.get<Product[]>('/products')).data,
+    enabled: !userPending,
   })
 }
 
@@ -1256,14 +1269,15 @@ export function useUpdateUserAdmin() {
 // ── Subscription hooks ────────────────────────────────────────────────────────
 
 /** Client: GET /me/subscription — current subscription or null */
-export function useMySubscription() {
-  // Account-only — disabled for guests.
+export function useMySubscription(enabled = true) {
+  // Account-only — disabled for guests. `enabled` lets a caller that only needs
+  // it for one role (the associate's menu gate) skip the request for the rest.
   const { data: user } = useCurrentUser()
   return useQuery<Subscription | null>({
     queryKey: ['me', 'subscription'],
     queryFn: async () => (await api.get<Subscription | null>('/me/subscription')).data,
     staleTime: 30_000,
-    enabled: !!user,
+    enabled: enabled && !!user,
   })
 }
 
@@ -1463,7 +1477,7 @@ export function useSetActiveLocation() {
 // ── Rentals ───────────────────────────────────────────────────────────────────
 
 /** Client: GET /me/rentals — list the authenticated user's rentals */
-export function useMyRentals() {
+export function useMyRentals(enabled = true) {
   // Account-only — disabled for guests (MaintenanceBanner renders on the
   // public home screen).
   const { data: user } = useCurrentUser()
@@ -1471,7 +1485,7 @@ export function useMyRentals() {
     queryKey: ['me', 'rentals'],
     queryFn: async () => (await api.get<Rental[]>('/me/rentals')).data,
     staleTime: 30_000,
-    enabled: !!user,
+    enabled: enabled && !!user,
   })
 }
 
