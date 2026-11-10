@@ -11,7 +11,7 @@ import {
   useCancelSubscription,
   useReactivateSubscription,
 } from '../lib/queries'
-import { formatDate } from '../lib/utils'
+import { formatDate, serverMessage } from '../lib/utils'
 import { TOKEN_KEY } from '../lib/api'
 
 /**
@@ -81,6 +81,15 @@ export function SubscriptionPage() {
             {`¡Suscripción activada! ${SUBSCRIPTION_PERKS}`}
           </p>
         </div>
+      )}
+
+      {checkout.isError && (
+        <p
+          role="alert"
+          className="mb-6 border-l-2 border-bad pl-3 text-sm font-medium text-bad"
+        >
+          {serverMessage(checkout.error, 'No pudimos iniciar la suscripción')}
+        </p>
       )}
 
       {sub === null || sub === undefined ? (

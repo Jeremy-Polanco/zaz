@@ -384,3 +384,35 @@ describe('CheckoutPage — saldo de asociado (el cliente ya no ve puntos)', () =
     expect(screen.queryByText(/puntos/i)).toBeNull()
   })
 })
+
+describe('CheckoutPage — carrito rechazado para un asociado', () => {
+  // Un carrito guardado en el navegador puede traer un producto que ya no está
+  // en la lista del asociado. La API lo rechaza con 400 y el checkout tiene que
+  // mostrar ese texto, no un error genérico.
+  it('muestra el mensaje de la API cuando el producto no está disponible para asociados', async () => {
+    mockUseMyAddresses.mockReturnValue({
+      data: [makeAddress()],
+    } as unknown as ReturnType<typeof useMyAddresses>)
+    mockUseCreateOrder.mockReturnValue({
+      mutateAsync: vi.fn(),
+      isPending: false,
+      isError: true,
+      error: Object.assign(new Error('Request failed with status code 400'), {
+        response: {
+          status: 400,
+          data: {
+            code: 'PRODUCT_NOT_AVAILABLE_FOR_ASSOCIATES',
+            message: 'Este producto no está disponible para asociados',
+          },
+        },
+      }),
+    } as unknown as ReturnType<typeof useCreateOrder>)
+
+    renderWithRouter(CheckoutPage)
+
+    expect(
+      await screen.findByText('Este producto no está disponible para asociados'),
+    ).toBeInTheDocument()
+    expect(screen.queryByText('No se pudo crear el pedido')).not.toBeInTheDocument()
+  })
+})

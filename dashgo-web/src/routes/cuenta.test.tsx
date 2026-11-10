@@ -27,14 +27,18 @@ vi.mock('../lib/auth', () => ({
 vi.mock('../lib/queries', () => ({
   useUpdateMe: vi.fn(() => ({ mutateAsync: vi.fn(), isPending: false })),
   useMyAssociateBalance: vi.fn(),
+  useMySubscription: vi.fn(() => ({ data: null })),
+  useMyRentals: vi.fn(() => ({ data: [] })),
 }))
 
 import { useCurrentUser } from '../lib/auth'
-import { useMyAssociateBalance } from '../lib/queries'
+import { useMyAssociateBalance, useMySubscription, useMyRentals } from '../lib/queries'
 import { AccountPage } from './cuenta'
 
 const mockUseCurrentUser = vi.mocked(useCurrentUser)
 const mockUseBalance = vi.mocked(useMyAssociateBalance)
+const mockUseSubscription = vi.mocked(useMySubscription)
+const mockUseRentals = vi.mocked(useMyRentals)
 
 function mkMe(role: AuthUser['role']): AuthUser {
   return {
@@ -84,5 +88,52 @@ describe('AccountPage — enlace al pool', () => {
     renderWithRouter(AccountPage)
     await screen.findByText('Suscripción')
     expect(screen.queryByText('Pool de asociados')).not.toBeInTheDocument()
+  })
+})
+
+describe('AccountPage — atajos de bebedero según el rol', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockUseSubscription.mockReturnValue({ data: null } as unknown as ReturnType<
+      typeof useMySubscription
+    >)
+    mockUseRentals.mockReturnValue({ data: [] } as unknown as ReturnType<
+      typeof useMyRentals
+    >)
+  })
+
+  it('un cliente ve Mis alquileres y Suscripción', async () => {
+    setup('client', { balanceCents: 0, entries: [] })
+    renderWithRouter(AccountPage)
+    expect(await screen.findByText('Mis alquileres')).toBeInTheDocument()
+    expect(screen.getByText('Suscripción')).toBeInTheDocument()
+  })
+
+  it('un asociado sin suscripción ni alquileres no ve ninguno de los dos', async () => {
+    setup('associate', { balanceCents: 0, entries: [] })
+    renderWithRouter(AccountPage)
+    await screen.findByText('Pool de asociados')
+    expect(screen.queryByText('Mis alquileres')).not.toBeInTheDocument()
+    expect(screen.queryByText('Suscripción')).not.toBeInTheDocument()
+  })
+
+  it('un asociado con suscripción sigue viendo Suscripción', async () => {
+    setup('associate', { balanceCents: 0, entries: [] })
+    mockUseSubscription.mockReturnValue({
+      data: { id: 's1', status: 'active' },
+    } as unknown as ReturnType<typeof useMySubscription>)
+    renderWithRouter(AccountPage)
+    expect(await screen.findByText('Suscripción')).toBeInTheDocument()
+    expect(screen.queryByText('Mis alquileres')).not.toBeInTheDocument()
+  })
+
+  it('un asociado con un alquiler sigue viendo Mis alquileres', async () => {
+    setup('associate', { balanceCents: 0, entries: [] })
+    mockUseRentals.mockReturnValue({
+      data: [{ id: 'r1' }],
+    } as unknown as ReturnType<typeof useMyRentals>)
+    renderWithRouter(AccountPage)
+    expect(await screen.findByText('Mis alquileres')).toBeInTheDocument()
+    expect(screen.queryByText('Suscripción')).not.toBeInTheDocument()
   })
 })

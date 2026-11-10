@@ -69,11 +69,13 @@ function makeSub(overrides: Partial<Subscription> = {}): Subscription {
   }
 }
 
-function mutationMock(isPending = false) {
+function mutationMock(isPending = false, error: unknown = null) {
   return {
     mutate: vi.fn(),
     mutateAsync: vi.fn().mockResolvedValue({}),
     isPending,
+    isError: error !== null,
+    error,
     reset: vi.fn(),
   }
 }
@@ -185,6 +187,37 @@ describe('SubscriptionPage — no subscription', () => {
     renderWithProviders(<SubscriptionPage />)
 
     expect(screen.getByRole('button', { name: 'Redirigiendo…' })).toBeDisabled()
+  })
+})
+
+describe('SubscriptionPage — asociado abre /subscription directo', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  // Marcador o enlace viejo: el asociado llega a la pantalla y la API le
+  // rechaza el checkout (403). La página tiene que mostrar el motivo.
+  it('muestra el mensaje de la API cuando rechaza la suscripción', () => {
+    const rejected = Object.assign(new Error('Request failed with status code 403'), {
+      response: {
+        status: 403,
+        data: {
+          code: 'ASSOCIATE_CANNOT_SUBSCRIBE',
+          message: 'Los asociados no pueden contratar la suscripción',
+        },
+      },
+    })
+    setup({ sub: null, checkout: mutationMock(false, rejected) })
+    renderWithProviders(<SubscriptionPage />)
+
+    expect(
+      screen.getByText('Los asociados no pueden contratar la suscripción'),
+    ).toBeInTheDocument()
+  })
+
+  it('sin error no muestra ningún mensaje de rechazo', () => {
+    setup({ sub: null })
+    renderWithProviders(<SubscriptionPage />)
+
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
   })
 })
 

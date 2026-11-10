@@ -13,7 +13,7 @@ import {
 import { formatCents } from '../lib/utils'
 import { TOKEN_KEY, api } from '../lib/api'
 import type { AuthUser, Product } from '../lib/types'
-import { isStaff } from '../lib/roles'
+import { isAssociate, isStaff } from '../lib/roles'
 
 const catalogSearchSchema = z.object({
   cat: z.string().optional(),
@@ -48,7 +48,7 @@ export const Route = createFileRoute('/catalog')({
   component: CatalogPage,
 })
 
-function CatalogPage() {
+export function CatalogPage() {
   const { data: products, isPending } = useProducts()
   const { data: categories } = useCategories()
   const { data: user } = useCurrentUser()
@@ -64,6 +64,12 @@ function CatalogPage() {
   const q = query.trim().toLowerCase()
   const firstName = user?.fullName?.split(' ')[0] ?? ''
   const showPicker = shouldShowCategoryPicker(cat, query)
+  // Al asociado el servidor le devuelve solo su lista: vacía no significa "sin
+  // stock" sino "todavía no le asignaron productos".
+  const catalogEmpty = (products ?? []).length === 0
+  const emptyCatalogMessage = isAssociate(user?.role)
+    ? 'Todavía no hay productos disponibles para asociados.'
+    : 'No hay productos disponibles ahora mismo.'
 
   const productCountBySlug = useMemo(() => {
     const map = new Map<string, number>()
@@ -175,7 +181,12 @@ function CatalogPage() {
         ) : null}
       </div>
 
-      {showPicker ? (
+      {showPicker && catalogEmpty ? (
+        <div className="mt-4 flex flex-col items-center gap-3 border border-dashed border-ink/15 px-8 py-20 text-center">
+          <span className="eyebrow">Catálogo vacío</span>
+          <p className="text-base text-ink-muted">{emptyCatalogMessage}</p>
+        </div>
+      ) : showPicker ? (
         /* Category-first picker — shown on arrival, no products dumped */
         <div className="mt-4">
           <div className="mb-6 flex flex-col gap-1">
@@ -247,9 +258,11 @@ function CatalogPage() {
               <p className="text-base text-ink-muted">
                 {q
                   ? 'Sin resultados. Prueba con otra palabra.'
-                  : cat
-                    ? 'No hay productos en esta categoría.'
-                    : 'No hay productos disponibles ahora mismo.'}
+                  : catalogEmpty
+                    ? emptyCatalogMessage
+                    : cat
+                      ? 'No hay productos en esta categoría.'
+                      : emptyCatalogMessage}
               </p>
             </div>
           )}
