@@ -14,6 +14,7 @@
  *   7. success=1 param → toast visible + refetch called
  */
 import React from 'react'
+import { fireEvent, waitFor } from '@testing-library/react-native'
 import { renderWithProviders } from '../../test/test-utils'
 
 // ── module mocks (hoisted) ────────────────────────────────────────────────────
@@ -284,5 +285,60 @@ describe('SubscriptionTab — deep-link return (success=1)', () => {
     setupMocks({ data: makeSub({ status: 'active' }) }, {})
     const { queryByText } = renderWithProviders(<SubscriptionTab />)
     expect(queryByText(/¡Suscripción activada!/)).toBeNull()
+  })
+})
+
+describe('SubscriptionTab — checkout rechazado por la API', () => {
+  it('muestra el mensaje de la API cuando un asociado intenta suscribirse (403)', async () => {
+    setupMocks({ data: null })
+    const mutateAsync = jest.fn().mockRejectedValue(
+      Object.assign(new Error('Request failed with status code 403'), {
+        response: {
+          status: 403,
+          data: {
+            code: 'ASSOCIATE_CANNOT_SUBSCRIBE',
+            message: 'Los asociados no pueden contratar la suscripción',
+          },
+        },
+      }),
+    )
+    mockUseCreateCheckoutSession.mockReturnValue({
+      mutate: jest.fn(),
+      mutateAsync,
+      isPending: false,
+    } as unknown as ReturnType<typeof useCreateCheckoutSession>)
+
+    const { getByText } = renderWithProviders(<SubscriptionTab />)
+    fireEvent.press(getByText('Suscribirme'))
+
+    expect(
+      await waitFor(() =>
+        getByText('Los asociados no pueden contratar la suscripción'),
+      ),
+    ).toBeTruthy()
+  })
+
+  it('cae a un texto genérico cuando el error no trae mensaje', async () => {
+    setupMocks({ data: null })
+    mockUseCreateCheckoutSession.mockReturnValue({
+      mutate: jest.fn(),
+      mutateAsync: jest.fn().mockRejectedValue(new Error('Network Error')),
+      isPending: false,
+    } as unknown as ReturnType<typeof useCreateCheckoutSession>)
+
+    const { getByText } = renderWithProviders(<SubscriptionTab />)
+    fireEvent.press(getByText('Suscribirme'))
+
+    await waitFor(() => getByText('No pudimos iniciar la suscripción'))
+  })
+
+  it('no muestra error cuando el checkout sale bien', async () => {
+    setupMocks({ data: null })
+    const { getByText, queryByText } = renderWithProviders(<SubscriptionTab />)
+    fireEvent.press(getByText('Suscribirme'))
+
+    await waitFor(() => {
+      expect(queryByText('No pudimos iniciar la suscripción')).toBeNull()
+    })
   })
 })

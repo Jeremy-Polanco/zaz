@@ -8,6 +8,7 @@ export default {
   toast: {
     activated: 'Subscription activated! {{perks}}',
   },
+  checkoutError: "We couldn't start the subscription",
   redirecting: 'Redirecting…',
   managePortal: 'Manage subscription',
   none: {
