@@ -371,6 +371,51 @@ describe('Catálogo mayorista del asociado por HTTP (integración)', () => {
     });
   });
 
+  describe('cobro real: POST /orders → POST /orders/:id/authorize', () => {
+    // Los clientes NO usan POST /payments/intent: crean la orden y la autorizan.
+    // El intent sale de order.totalAmount − creditApplied, así que lo que Stripe
+    // retiene es exactamente lo que la orden mayorista registra.
+    it('el intent de /authorize cobra el total mayorista de la orden (saldo del pool incluido)', async () => {
+      const assoc = await seedAssociate(200);
+      const auth = await bearer(assoc);
+
+      const orderRes = await request(app.getHttpServer())
+        .post('/orders')
+        .set('Authorization', auth)
+        .send({
+          items: [{ productId: listed.id, quantity: 2 }],
+          usePoints: true,
+          paymentMethod: PaymentMethod.DIGITAL,
+          deliveryAddress: address,
+        })
+        .expect(201);
+      expect(mockStripe.paymentIntents.create).not.toHaveBeenCalled();
+
+      await request(app.getHttpServer())
+        .post(`/orders/${orderRes.body.id}/authorize`)
+        .set('Authorization', auth)
+        .expect(201);
+
+      expect(mockStripe.paymentIntents.create).toHaveBeenCalledTimes(1);
+      const stripeAmount = (
+        mockStripe.paymentIntents.create.mock.calls[0][0] as { amount: number }
+      ).amount;
+
+      const row = await ds
+        .getRepository(Order)
+        .findOneByOrFail({ id: orderRes.body.id });
+      expect(row.associatePricing).toBe(true);
+      expect(row.subtotal).toBe('12.00'); // 2 × 6.00 mayorista, no 2 × 10.00
+      expect(row.pointsRedeemed).toBe('2.00');
+      expect(row.creditApplied).toBe('0.00');
+
+      const totalCents = Math.round(parseFloat(row.totalAmount) * 100);
+      const creditCents = Math.round(parseFloat(row.creditApplied) * 100);
+      expect(stripeAmount).toBe(totalCents - creditCents);
+      expect(row.stripePaymentIntentId).toBeTruthy();
+    });
+  });
+
   describe('POST /subscription/checkout-session', () => {
     it('un asociado recibe 403 ASSOCIATE_CANNOT_SUBSCRIBE y no se toca Stripe', async () => {
       const assoc = await seedAssociate(0);
@@ -414,6 +459,14 @@ describe('Catálogo mayorista del asociado por HTTP (integración)', () => {
         items: Array<{ product?: { associatePriceCents?: number } }>;
       };
 
+      // La respuesta del propio POST /orders tampoco filtra el precio mayorista.
+      const createdBody = created.body as OrderBody;
+      expect(createdBody.items.length).toBeGreaterThan(0);
+      for (const item of createdBody.items) {
+        expect(item.product).toBeDefined();
+        expect(item.product).not.toHaveProperty('associatePriceCents');
+      }
+
       // El cliente paga el precio público: el producto listado no le cambia nada.
       const row = await ds
         .getRepository(Order)
@@ -440,6 +493,7 @@ describe('Catálogo mayorista del asociado por HTTP (integración)', () => {
         .expect(200);
       const mine = (list.body as OrderBody[]).find((o) => o.id === orderId);
       expect(mine).toBeDefined();
+      expect(mine!.items.length).toBeGreaterThan(0);
       for (const item of mine!.items) {
         expect(item.product).not.toHaveProperty('associatePriceCents');
       }
@@ -450,6 +504,7 @@ describe('Catálogo mayorista del asociado por HTTP (integración)', () => {
         .get(`/orders/${orderId}`)
         .set('Authorization', adminAuth)
         .expect(200);
+      expect((adminDetail.body as OrderBody).items.length).toBeGreaterThan(0);
       for (const item of (adminDetail.body as OrderBody).items) {
         expect(item.product?.associatePriceCents).toBe(LISTED_ASSOCIATE_CENTS);
       }
@@ -462,6 +517,7 @@ describe('Catálogo mayorista del asociado por HTTP (integración)', () => {
         (o) => o.id === orderId,
       );
       expect(seen).toBeDefined();
+      expect(seen!.items.length).toBeGreaterThan(0);
       for (const item of seen!.items) {
         expect(item.product?.associatePriceCents).toBe(LISTED_ASSOCIATE_CENTS);
       }
