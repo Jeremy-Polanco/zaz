@@ -961,7 +961,9 @@ describe('OrdersService', () => {
 
       it('puede crear un pedido (no recibe Forbidden)', async () => {
         ordersRepo.count.mockResolvedValueOnce(0);
-        productsRepo.find.mockResolvedValue([fakeProduct()]);
+        productsRepo.find.mockResolvedValue([
+          fakeProduct({ associatePriceCents: 500 }),
+        ]);
         mockSuccessfulTransaction();
 
         await expect(
@@ -980,7 +982,9 @@ describe('OrdersService', () => {
       });
 
       it('aplica el fiado con useCredit=true igual que a un cliente', async () => {
-        productsRepo.find.mockResolvedValue([fakeProduct()]);
+        productsRepo.find.mockResolvedValue([
+          fakeProduct({ associatePriceCents: 500 }),
+        ]);
         creditService.getAccountWithLock.mockResolvedValue({
           balanceCents: 500,
           creditLimitCents: 200,
@@ -3138,6 +3142,201 @@ describe('OrdersService', () => {
       expect(savedOrderArg?.tax).toBe('0.37');
       expect(savedOrderArg?.taxableSubtotal).toBe('4.15');
       expect(savedOrderArg?.totalAmount).toBe('18.37');
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Precio mayorista del asociado — fijo, y solo su lista
+  // ─────────────────────────────────────────────────────────────────────────
+
+  describe('create — associate wholesale price', () => {
+    const cart = {
+      items: [{ productId: 'prod-w', quantity: 3 }],
+      deliveryAddress: { text: '123 Test', lat: 18.4861, lng: -69.9312 },
+      paymentMethod: PaymentMethod.CASH,
+      usePoints: false,
+      useCredit: false,
+    } as import('./dto/create-order.dto').CreateOrderDto;
+
+    // $10.00 con 50% de oferta ($5.00 al público) y $6.50 para asociados.
+    const wholesale = () =>
+      fakeProduct({
+        id: 'prod-w',
+        priceToPublic: '10.00',
+        offerDiscountPct: '50',
+        associatePriceCents: 650,
+      });
+
+    let savedOrderArg: Partial<Order> | undefined;
+    let savedItems: Partial<OrderItem>[] = [];
+
+    function setupTx() {
+      savedOrderArg = undefined;
+      savedItems = [];
+      (dataSource.transaction as jest.Mock).mockImplementation(
+        async (cb: (mgr: EntityManager) => Promise<unknown>) => {
+          const orderRepo = makeRepoMock<Order>();
+          const itemRepo = makeRepoMock<OrderItem>();
+          orderRepo.create.mockImplementation((d) => {
+            savedOrderArg = d as Partial<Order>;
+            return { ...d, id: 'order-w-1' } as Order;
+          });
+          orderRepo.save.mockResolvedValue(fakeOrder({ id: 'order-w-1' }));
+          orderRepo.update.mockResolvedValue({ affected: 1 } as never);
+          itemRepo.create.mockImplementation((d) => {
+            savedItems.push(d as Partial<OrderItem>);
+            return d as OrderItem;
+          });
+          itemRepo.save.mockResolvedValue({} as never);
+          const mgr = {
+            getRepository: (entity: unknown) => {
+              if (entity === Order) return orderRepo;
+              if (entity === OrderItem) return itemRepo;
+              return makeRepoMock();
+            },
+          } as unknown as EntityManager;
+          return cb(mgr);
+        },
+      );
+      ordersRepo.findOne.mockResolvedValue(
+        fakeOrder({
+          id: 'order-w-1',
+          customer: fakeUser() as never,
+          items: [],
+        }),
+      );
+    }
+
+    it('rejects an associate cart with a product outside the list, writing nothing', async () => {
+      productsRepo.find.mockResolvedValue([
+        fakeProduct({ id: 'p1', associatePriceCents: 500 }),
+        fakeProduct({ id: 'p2', associatePriceCents: null }),
+      ]);
+      setupTx();
+
+      await expect(
+        service.create(fakeUser(UserRole.ASSOCIATE), {
+          ...cart,
+          items: [
+            { productId: 'p1', quantity: 1 },
+            { productId: 'p2', quantity: 1 },
+          ],
+        }),
+      ).rejects.toMatchObject({
+        response: { code: 'PRODUCT_NOT_AVAILABLE_FOR_ASSOCIATES' },
+      });
+      expect(dataSource.transaction).not.toHaveBeenCalled();
+    });
+
+    it('charges the associate price and freezes associate_pricing', async () => {
+      productsRepo.find.mockResolvedValue([wholesale()]);
+      setupTx();
+
+      await service.create(fakeUser(UserRole.ASSOCIATE), cart);
+
+      // 650 × 3 = 1950; la oferta del 50% no lo toca.
+      expect(savedItems[0]?.priceAtOrder).toBe('6.50');
+      expect(savedOrderArg?.subtotal).toBe('19.50');
+      expect(savedOrderArg?.associatePricing).toBe(true);
+    });
+
+    it('a client buying the same product pays the offer and associate_pricing is false', async () => {
+      productsRepo.find.mockResolvedValue([wholesale()]);
+      setupTx();
+
+      await service.create(fakeUser(UserRole.CLIENT), cart);
+
+      expect(savedItems[0]?.priceAtOrder).toBe('5.00');
+      expect(savedOrderArg?.associatePricing).toBe(false);
+    });
+
+    it('a provisioned system order for an associate is not restricted', async () => {
+      productsRepo.find.mockResolvedValue([
+        fakeProduct({ id: 'prod-w', associatePriceCents: null }),
+      ]);
+      setupTx();
+
+      await expect(
+        service.create(fakeUser(UserRole.ASSOCIATE), cart, {
+          provisioned: true,
+        }),
+      ).resolves.toBeDefined();
+      expect(savedOrderArg?.associatePricing).toBe(false);
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // El precio mayorista no sale en ninguna respuesta salvo para el super admin
+  // ─────────────────────────────────────────────────────────────────────────
+
+  describe('order responses hide items[].product.associatePriceCents', () => {
+    const orderWithProduct = () =>
+      fakeOrder({
+        id: 'o-1',
+        customer: fakeUser() as never,
+        items: [
+          {
+            id: 'i-1',
+            productId: 'prod-w',
+            quantity: 1,
+            priceAtOrder: '5.00',
+            product: fakeProduct({ id: 'prod-w', associatePriceCents: 650 }),
+          } as unknown as OrderItem,
+        ],
+      });
+
+    it('findAll as client omits items[].product.associatePriceCents', async () => {
+      ordersRepo.find.mockResolvedValue([orderWithProduct()]);
+
+      const { orders } = await service.findAll(fakeUser(UserRole.CLIENT));
+
+      expect(orders[0].items[0].product).not.toHaveProperty(
+        'associatePriceCents',
+      );
+      expect(orders[0].items[0].product.name).toBe('Test Product');
+    });
+
+    it('findAll as super admin keeps it', async () => {
+      ordersRepo.find.mockResolvedValue([orderWithProduct()]);
+      (shippingService.getOriginForUser as jest.Mock).mockResolvedValue(null);
+      (shippingService.getOrigin as jest.Mock).mockResolvedValue(null);
+
+      const { orders } = await service.findAll(
+        fakeUser(UserRole.SUPER_ADMIN_DELIVERY),
+      );
+
+      expect(orders[0].items[0].product.associatePriceCents).toBe(650);
+    });
+
+    it('findAll as seller omits it', async () => {
+      ordersRepo.find.mockResolvedValue([orderWithProduct()]);
+      (shippingService.getOriginForUser as jest.Mock).mockResolvedValue(null);
+      (shippingService.getOrigin as jest.Mock).mockResolvedValue(null);
+
+      const { orders } = await service.findAll(fakeUser(UserRole.SELLER));
+
+      expect(orders[0].items[0].product).not.toHaveProperty(
+        'associatePriceCents',
+      );
+    });
+
+    it('findOne as client omits it', async () => {
+      ordersRepo.findOne.mockResolvedValue(orderWithProduct());
+
+      const order = await service.findOne('o-1', fakeUser(UserRole.CLIENT));
+
+      expect(order.items[0].product).not.toHaveProperty('associatePriceCents');
+    });
+
+    it('findOne as super admin keeps it', async () => {
+      ordersRepo.findOne.mockResolvedValue(orderWithProduct());
+
+      const order = await service.findOne(
+        'o-1',
+        fakeUser(UserRole.SUPER_ADMIN_DELIVERY),
+      );
+
+      expect(order.items[0].product.associatePriceCents).toBe(650);
     });
   });
 

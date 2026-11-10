@@ -1,5 +1,6 @@
 import { BadRequestException } from '@nestjs/common';
-import { Product } from '../../entities';
+import { Order, Product } from '../../entities';
+import { UserRole } from '../../entities/enums';
 
 /**
  * Solo un producto de pago único "normal" puede tener precio mayorista: las
@@ -36,5 +37,23 @@ export function assertAssociateCart(
       code: 'PRODUCT_NOT_AVAILABLE_FOR_ASSOCIATES',
       message: 'Este producto no está disponible para asociados',
     });
+  }
+}
+
+/**
+ * El precio mayorista solo lo ve el super admin. Quita `associatePriceCents`
+ * del producto embebido en cada ítem de la(s) orden(es) que se devuelven a
+ * cualquier otro rol (cliente, asociado, vendedor, promotor).
+ */
+export function hideAssociatePrice(
+  orders: Order | Order[],
+  role: UserRole | null | undefined,
+): void {
+  if (role === UserRole.SUPER_ADMIN_DELIVERY) return;
+  for (const order of Array.isArray(orders) ? orders : [orders]) {
+    for (const item of order.items ?? []) {
+      if (item.product)
+        Reflect.deleteProperty(item.product, 'associatePriceCents');
+    }
   }
 }

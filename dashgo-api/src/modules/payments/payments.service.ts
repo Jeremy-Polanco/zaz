@@ -12,8 +12,10 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { In, IsNull, Repository } from 'typeorm';
 import Stripe = require('stripe');
 import { Order, Product } from '../../entities';
-import { OrderStatus } from '../../entities/enums';
+import { OrderStatus, UserRole } from '../../entities/enums';
+import { isAssociate } from '../../common/roles';
 import { getEffectivePrice } from '../products/pricing';
+import { assertAssociateCart } from '../products/associate-catalog';
 import { AssociateBalanceService } from '../pool/associate-balance.service';
 import { ShippingService } from '../shipping/shipping.service';
 import { CreditService } from '../credit/credit.service';
@@ -30,6 +32,12 @@ type StripeClient = InstanceType<typeof Stripe>;
 
 export interface CreateIntentInput {
   userId: string;
+  /**
+   * Rol de quien paga: el asociado cobra el precio mayorista y solo puede
+   * comprar su lista, igual que en OrdersService.create. Obligatorio para que
+   * ningún caller pueda olvidarlo y cobrar a precio de cliente.
+   */
+  role: UserRole;
   items: { productId: string; quantity: number }[];
   usePoints?: boolean;
   deliveryAddress?: {
@@ -133,6 +141,8 @@ export class PaymentsService implements OnModuleInit {
       ? await this.subscription.isActiveSubscriber(input.userId)
       : false;
 
+    const buyerIsAssociate = isAssociate(input.role);
+
     let subtotalCents = 0;
     const taxLines: TaxableLine[] = [];
     for (const item of input.items) {
@@ -145,10 +155,17 @@ export class PaymentsService implements OnModuleInit {
           `El producto "${product.name}" no está disponible`,
         );
       }
-      const effective = getEffectivePrice(product, now, { isSubscriber });
+      const effective = getEffectivePrice(product, now, {
+        isSubscriber,
+        isAssociate: buyerIsAssociate,
+      });
       const lineCents = effective.priceCents * item.quantity;
       subtotalCents += lineCents;
       taxLines.push({ lineCents, taxCategory: product.taxCategory });
+    }
+    // Mismo rechazo que OrdersService.create, y antes de tocar Stripe.
+    if (buyerIsAssociate) {
+      assertAssociateCart(input.items.map((i) => byId.get(i.productId)!));
     }
     if (subtotalCents <= 0) {
       throw new BadRequestException('Monto inválido');

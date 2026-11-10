@@ -65,6 +65,7 @@ export class PaymentsController {
   ) {
     return this.payments.createIntentForItems({
       userId: user.id,
+      role: user.role,
       items: dto.items,
       usePoints: dto.usePoints,
       deliveryAddress: dto.deliveryAddress,
