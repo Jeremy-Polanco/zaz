@@ -9,3 +9,8 @@ import { UserRole } from '../entities/enums';
 export function buysAsClient(role: UserRole): boolean {
   return role === UserRole.CLIENT || role === UserRole.ASSOCIATE;
 }
+
+/** El rol de asociado (revendedor): catálogo y precio mayorista propios. */
+export function isAssociate(role: UserRole | null | undefined): boolean {
+  return role === UserRole.ASSOCIATE;
+}

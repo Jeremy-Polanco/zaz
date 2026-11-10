@@ -91,6 +91,9 @@ describe('Checkout con saldo de asociado (integración)', () => {
       ds.getRepository(Product).create({
         name: `assoc-checkout-prod-${stamp}`,
         priceToPublic: '6.00',
+        // El asociado solo compra lo que tiene precio mayorista; $6.00 igual
+        // que al público para que los montos del spec no cambien.
+        associatePriceCents: 600,
         stock: 100,
         categoryId: category.id,
       } as Partial<Product>),

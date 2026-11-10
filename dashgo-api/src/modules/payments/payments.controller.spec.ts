@@ -457,7 +457,11 @@ describe('PaymentsController — webhook rental dispatch (T49/T50)', () => {
       const intentResult = { clientSecret: 'cs_123', paymentIntentId: 'pi_1' };
       mockPaymentsService.createIntentForItems.mockReturnValueOnce(intentResult);
 
-      const user = { id: 'user-42', email: 'u@example.com' } as never;
+      const user = {
+        id: 'user-42',
+        email: 'u@example.com',
+        role: 'associate',
+      } as never;
       const dto = {
         items: [{ productId: 'prod-1', quantity: 2 }],
         usePoints: true,
@@ -469,6 +473,7 @@ describe('PaymentsController — webhook rental dispatch (T49/T50)', () => {
       expect(result).toBe(intentResult);
       expect(mockPaymentsService.createIntentForItems).toHaveBeenCalledWith({
         userId: 'user-42',
+        role: 'associate',
         items: [{ productId: 'prod-1', quantity: 2 }],
         usePoints: true,
         deliveryAddress: { text: '123 Main St', lat: 1, lng: 2 },
@@ -480,13 +485,14 @@ describe('PaymentsController — webhook rental dispatch (T49/T50)', () => {
         clientSecret: 'cs_x',
       });
 
-      const user = { id: 'user-7' } as never;
+      const user = { id: 'user-7', role: 'client' } as never;
       const dto = { items: [{ productId: 'p', quantity: 1 }] } as never;
 
       controller.createIntent(user, dto);
 
       expect(mockPaymentsService.createIntentForItems).toHaveBeenCalledWith({
         userId: 'user-7',
+        role: 'client',
         items: [{ productId: 'p', quantity: 1 }],
         usePoints: undefined,
         deliveryAddress: undefined,

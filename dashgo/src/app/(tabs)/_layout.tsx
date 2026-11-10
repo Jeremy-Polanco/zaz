@@ -1,7 +1,13 @@
 import { useEffect, useState } from 'react'
 import { Tabs, router } from 'expo-router'
 import { useTranslation } from 'react-i18next'
-import { useCurrentUser, useMyAssociateBalance } from '../../lib/queries'
+import {
+  useCurrentUser,
+  useMyAssociateBalance,
+  useMyRentals,
+  useMySubscription,
+} from '../../lib/queries'
+import { showsRentalsEntry, showsSubscriptionEntry } from '../../lib/associate'
 import { MoreSheet, type MoreSheetItem } from '../../components/MoreSheet'
 import { buysAsClient, isAssociate, isStaff } from '../../lib/roles'
 import {
@@ -57,8 +63,17 @@ export default function TabLayout() {
   // ['pool','me'] que el checkout). La lista es estática y se filtra al renderizar.
   const { data: poolBalance } = useMyAssociateBalance(!!user)
   const showPool = isAssociate(user?.role) || (poolBalance?.balanceCents ?? 0) > 0
+  // El asociado no ve suscripción ni alquileres (ofertas de bebedero) salvo que
+  // ya tenga alguno. Solo él los pide: el resto no hace requests de más.
+  const associate = isAssociate(user?.role)
+  const { data: subscription } = useMySubscription(associate)
+  const { data: rentals } = useMyRentals(associate)
+  const showSubscription = showsSubscriptionEntry(user?.role, !!subscription)
+  const showRentals = showsRentalsEntry(user?.role, (rentals?.length ?? 0) > 0)
   const moreItems: MoreSheetItem[] = (isGuest ? GUEST_MORE_ITEMS : CLIENT_MORE_ITEMS)
     .filter(({ labelKey }) => labelKey !== 'more.pool' || showPool)
+    .filter(({ labelKey }) => labelKey !== 'more.subscription' || showSubscription)
+    .filter(({ labelKey }) => labelKey !== 'more.rentals' || showRentals)
     .map(({ labelKey, ...item }) => ({ ...item, label: t(labelKey) }))
 
   return (

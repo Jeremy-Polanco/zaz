@@ -18,6 +18,7 @@ import {
   useUpdateInventory,
   useUpdateProduct,
 } from '../../lib/queries'
+import { canCarryAssociatePrice, parseAssociatePrice } from '../../lib/associate'
 import type { Product } from '../../lib/types'
 import {
   BoltIcon,
@@ -62,6 +63,8 @@ type FormState = {
   offerOpen: boolean
   /** Precio para suscriptores, en dólares. Vacío = sin precio de suscriptor. */
   subscriberPriceText: string
+  /** Precio para asociados, en dólares. Vacío = no se ofrece a asociados. */
+  associatePriceText: string
   /** true = producto exento de impuesto (agua). false = paga TAX_RATE. */
   taxExempt: boolean
   errors: {
@@ -72,6 +75,7 @@ type FormState = {
     pointsText?: string
     displayOrderText?: string
     subscriberPriceText?: string
+    associatePriceText?: string
     offerDiscountText?: string
     offerStartsAt?: string
     offerEndsAt?: string
@@ -99,6 +103,7 @@ const emptyForm: FormState = {
   offerEndsAt: '',
   offerOpen: false,
   subscriberPriceText: '',
+  associatePriceText: '',
   taxExempt: false,
   errors: {},
 }
@@ -171,11 +176,23 @@ function ProductForm({
         editing.subscriberPriceCents != null
           ? (editing.subscriberPriceCents / 100).toFixed(2)
           : '',
+      associatePriceText:
+        editing.associatePriceCents != null
+          ? (editing.associatePriceCents / 100).toFixed(2)
+          : '',
       taxExempt: editing.taxCategory === 'exempt',
       errors: {},
     }
   })
   const pending = create.isPending || update.isPending
+  // La pantalla no edita pricingMode ni el flag del bebedero por defecto: salen
+  // del producto que se edita (uno nuevo es de pago único).
+  const carriesAssociatePrice = canCarryAssociatePrice({
+    pricingMode: editing?.pricingMode ?? 'single_payment',
+    isMaintenanceService: state.isMaintenanceService,
+    isDefaultSubscriberBebedero: editing?.isDefaultSubscriberBebedero ?? false,
+    isPremiumSubscriberProduct: state.isPremiumSubscriberProduct,
+  })
 
   const onSubmit = async () => {
     const errors: FormState['errors'] = {}
@@ -239,6 +256,16 @@ function ProductForm({
       }
     }
 
+    // Precio para asociados. Solo un producto de pago único "normal" puede
+    // tenerlo: si no aplica se manda null para limpiarlo (la API rechaza el
+    // campo en alquileres con ASSOCIATE_PRICE_NOT_ALLOWED).
+    let associatePriceCents: number | null = null
+    if (carriesAssociatePrice) {
+      const parsed = parseAssociatePrice(state.associatePriceText)
+      if (parsed.error) errors.associatePriceText = parsed.error
+      associatePriceCents = parsed.cents
+    }
+
     if (Object.keys(errors).length > 0) {
       setState((s) => ({ ...s, errors }))
       return
@@ -262,6 +289,7 @@ function ProductForm({
       offerStartsAt: state.offerOpen ? (offerStartsIso ?? null) : null,
       offerEndsAt: state.offerOpen ? (offerEndsIso ?? null) : null,
       subscriberPriceCents,
+      associatePriceCents,
       taxCategory: state.taxExempt ? ('exempt' as const) : ('standard' as const),
     }
 
@@ -604,6 +632,34 @@ function ProductForm({
                 vacío para que no haya precio de suscriptor.
               </Text>
             </View>
+
+            {carriesAssociatePrice ? (
+              <View>
+                <FieldLabel>Precio para asociados (opcional)</FieldLabel>
+                <View className="mt-1 flex-row items-center border-b border-ink/25">
+                  <Text className="pr-2 font-sans text-[16px] text-ink-muted">$</Text>
+                  <TextInput
+                    className="flex-1 h-11 pb-1 font-sans text-[16px] text-ink"
+                    placeholder="Vacío = no se ofrece a asociados"
+                    placeholderTextColor="#6B6488"
+                    keyboardType="decimal-pad"
+                    value={state.associatePriceText}
+                    onChangeText={(t) =>
+                      setState((s) => ({ ...s, associatePriceText: t }))
+                    }
+                    style={{ fontVariant: ['tabular-nums'] }}
+                  />
+                  <Text className="font-sans text-[10px] uppercase tracking-label text-ink-muted">
+                    USD
+                  </Text>
+                </View>
+                <FieldError message={state.errors.associatePriceText} />
+                <Text className="mt-1.5 font-sans text-[11px] leading-snug text-ink-muted">
+                  Precio mayorista fijo. Los asociados solo ven los productos que
+                  tienen este precio.
+                </Text>
+              </View>
+            ) : null}
 
             <Pressable
               onPress={() => setState((s) => ({ ...s, taxExempt: !s.taxExempt }))}
@@ -1194,6 +1250,11 @@ function ProductRow({
             <Text className="font-sans text-[10px] uppercase tracking-label text-ink-muted">
               · Pts {product.pointsPct}%
             </Text>
+            {product.associatePriceCents != null ? (
+              <Text className="font-sans text-[10px] uppercase tracking-label text-ink-muted">
+                · Asociados {formatCents(product.associatePriceCents)}
+              </Text>
+            ) : null}
           </View>
 
           {product.description && (

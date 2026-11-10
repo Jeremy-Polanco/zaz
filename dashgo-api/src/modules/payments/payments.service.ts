@@ -12,10 +12,12 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { In, IsNull, Repository } from 'typeorm';
 import Stripe = require('stripe');
 import { Order, Product } from '../../entities';
-import { OrderStatus } from '../../entities/enums';
+import { OrderStatus, UserRole } from '../../entities/enums';
+import { isAssociate } from '../../common/roles';
 import { getEffectivePrice } from '../products/pricing';
+import { assertAssociateCart } from '../products/associate-catalog';
 import { AssociateBalanceService } from '../pool/associate-balance.service';
-import { ShippingService } from '../shipping/shipping.service';
+import { ShippingRateService } from '../shipping/shipping-rate.service';
 import { CreditService } from '../credit/credit.service';
 import { SubscriptionService } from '../subscription/subscription.service';
 import { assertStripeProductionConfig } from '../../common/stripe/stripe-runtime-guard';
@@ -30,6 +32,12 @@ type StripeClient = InstanceType<typeof Stripe>;
 
 export interface CreateIntentInput {
   userId: string;
+  /**
+   * Rol de quien paga: el asociado cobra el precio mayorista y solo puede
+   * comprar su lista, igual que en OrdersService.create. Obligatorio para que
+   * ningún caller pueda olvidarlo y cobrar a precio de cliente.
+   */
+  role: UserRole;
   items: { productId: string; quantity: number }[];
   usePoints?: boolean;
   deliveryAddress?: {
@@ -80,7 +88,7 @@ export class PaymentsService implements OnModuleInit {
     @InjectRepository(UserAddress)
     private readonly userAddresses: Repository<UserAddress>,
     private readonly associateBalance: AssociateBalanceService,
-    private readonly shipping: ShippingService,
+    private readonly shippingRate: ShippingRateService,
     private readonly credit: CreditService,
     @Inject(forwardRef(() => SubscriptionService))
     private readonly subscription: SubscriptionService,
@@ -133,6 +141,8 @@ export class PaymentsService implements OnModuleInit {
       ? await this.subscription.isActiveSubscriber(input.userId)
       : false;
 
+    const buyerIsAssociate = isAssociate(input.role);
+
     let subtotalCents = 0;
     const taxLines: TaxableLine[] = [];
     for (const item of input.items) {
@@ -145,10 +155,17 @@ export class PaymentsService implements OnModuleInit {
           `El producto "${product.name}" no está disponible`,
         );
       }
-      const effective = getEffectivePrice(product, now, { isSubscriber });
+      const effective = getEffectivePrice(product, now, {
+        isSubscriber,
+        isAssociate: buyerIsAssociate,
+      });
       const lineCents = effective.priceCents * item.quantity;
       subtotalCents += lineCents;
       taxLines.push({ lineCents, taxCategory: product.taxCategory });
+    }
+    // Mismo rechazo que OrdersService.create, y antes de tocar Stripe.
+    if (buyerIsAssociate) {
+      assertAssociateCart(input.items.map((i) => byId.get(i.productId)!));
     }
     if (subtotalCents <= 0) {
       throw new BadRequestException('Monto inválido');
@@ -166,11 +183,14 @@ export class PaymentsService implements OnModuleInit {
       }
     }
 
-    const quote = await this.shipping.computeQuote({
-      lat: input.deliveryAddress?.lat,
-      lng: input.deliveryAddress?.lng,
-    });
-    const shippingCents = quote.shippingCents;
+    // Envío FIJO, de la misma fuente que OrdersService.create (consistencia).
+    // OJO: hoy ningún cliente llama a este endpoint. Las órdenes se cobran con
+    // POST /orders y luego POST /orders/:id/authorize, que arma el intent desde
+    // order.totalAmount − creditApplied (lo que luego captura `capture`). La
+    // tarifa fija se mantiene acá solo para que ambos caminos coincidan si
+    // algún cliente lo usa. Este intent nunca es de una orden provisionada, no
+    // hay rama de $0.
+    const shippingCents = await this.shippingRate.getFlatShippingCents();
 
     // El DESTINO se resuelve con EL MISMO helper que usa OrdersService.create
     // (addresses/destination.ts): fila guardada del cliente → geocodificación

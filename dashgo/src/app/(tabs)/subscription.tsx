@@ -46,6 +46,7 @@ export default function SubscriptionTab() {
   const cancel = useCancelSubscription()
   const reactivate = useReactivateSubscription()
   const [toastVisible, setToastVisible] = useState(false)
+  const [checkoutError, setCheckoutError] = useState<string | null>(null)
 
   // Refetch on screen focus; show toast on success deep-link return
   useFocusEffect(
@@ -59,14 +60,27 @@ export default function SubscriptionTab() {
   )
 
   const openCheckout = async (tier?: SubscriptionTier) => {
-    const result = await checkout.mutateAsync({
-      successUrl: SUCCESS_URL,
-      cancelUrl: CANCEL_URL,
-      tier,
-    })
-    if (result?.url) {
-      await WebBrowser.openAuthSessionAsync(result.url, SUCCESS_URL)
-      void refetch()
+    setCheckoutError(null)
+    try {
+      const result = await checkout.mutateAsync({
+        successUrl: SUCCESS_URL,
+        cancelUrl: CANCEL_URL,
+        tier,
+      })
+      if (result?.url) {
+        await WebBrowser.openAuthSessionAsync(result.url, SUCCESS_URL)
+        void refetch()
+      }
+    } catch (e) {
+      // Se muestra el mensaje de la API (p. ej. 403 ASSOCIATE_CANNOT_SUBSCRIBE:
+      // «Los asociados no pueden contratar la suscripción»), como hace la web.
+      const message = (e as { response?: { data?: { message?: unknown } } })
+        ?.response?.data?.message
+      setCheckoutError(
+        typeof message === 'string' && message.trim() !== ''
+          ? message
+          : t('checkoutError'),
+      )
     }
   }
 
@@ -124,6 +138,17 @@ export default function SubscriptionTab() {
             </Text>
           </View>
         )}
+
+        {checkoutError ? (
+          <View className="mt-4 border-l-2 border-bad pl-3">
+            <Text
+              accessibilityRole="alert"
+              className="font-sans-medium text-[14px] text-bad"
+            >
+              {checkoutError}
+            </Text>
+          </View>
+        ) : null}
 
         <Hairline className="my-6" />
 

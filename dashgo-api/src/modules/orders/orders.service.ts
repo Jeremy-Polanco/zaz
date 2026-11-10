@@ -28,7 +28,11 @@ import {
 import { AuthenticatedUser } from '../../common/types/authenticated-user';
 import { TAX_RATE, computeTaxableBase } from '../../common/tax';
 import { todayIsoDay } from '../../common/delivery-day';
-import { buysAsClient } from '../../common/roles';
+import { buysAsClient, isAssociate } from '../../common/roles';
+import {
+  assertAssociateCart,
+  hideAssociatePrice,
+} from '../products/associate-catalog';
 import type { TaxableLine } from '../../common/tax';
 import { sortOrdersForDispatch } from './dispatch-sort';
 import type { DispatchBucket } from './dispatch-sort';
@@ -216,6 +220,8 @@ export class OrdersService {
       order: { createdAt: 'DESC' },
     });
 
+    hideAssociatePrice(orders, user.role);
+
     const isStaff =
       user.role === UserRole.SUPER_ADMIN_DELIVERY ||
       user.role === UserRole.SELLER;
@@ -250,6 +256,11 @@ export class OrdersService {
     });
     if (!order)
       throw new NotFoundException('Pedido no encontrado o sin acceso');
+    // Forma de respuesta: hideAssociatePrice borra associatePriceCents del
+    // producto embebido. Los llamadores internos (setQuote, authorize,
+    // updateStatus) NO deben usar este resultado para (re)calcular precios con
+    // `isAssociate`; el precio vigente ya quedó congelado en la orden.
+    hideAssociatePrice(order, user.role);
     return order;
   }
 
@@ -326,6 +337,10 @@ export class OrdersService {
     // T4.2: Global overdue gate — runs BEFORE any products fetch or TX
     await this.credit.assertNotOverdue(user.id);
 
+    // Las órdenes del sistema (bebedero gratis, mantenimiento) no son una
+    // compra del asociado: ni se restringen a su lista ni llevan precio mayorista.
+    const buyerIsAssociate = isAssociate(user.role) && !opts.provisioned;
+
     const productIds = dto.items.map((i) => i.productId);
     const products = await this.products.find({
       where: { id: In(productIds) },
@@ -347,6 +362,12 @@ export class OrdersService {
           `Stock insuficiente para "${product.name}" (disponible: ${product.stock})`,
         );
       }
+    }
+
+    // El asociado solo compra lo que el admin le puso precio. Va antes de
+    // cualquier transacción: un carrito fuera de su lista no escribe nada.
+    if (buyerIsAssociate) {
+      assertAssociateCart(dto.items.map((i) => byId.get(i.productId)!));
     }
 
     // Una visita de mantenimiento a la vez. La que genera MaintenanceCron es
@@ -566,7 +587,10 @@ export class OrdersService {
         lineCents = 0;
         priceAtOrder = '0.00';
       } else {
-        const effective = getEffectivePrice(product, now, { isSubscriber });
+        const effective = getEffectivePrice(product, now, {
+          isSubscriber,
+          isAssociate: buyerIsAssociate,
+        });
         lineCents = effective.priceCents * input.quantity;
         priceAtOrder = (effective.priceCents / 100).toFixed(2);
       }
@@ -785,6 +809,8 @@ export class OrdersService {
         skipQuote,
         // Persistido para distinguirla después (ver la guarda de arriba).
         provisioned: opts.provisioned === true,
+        // Congelado: el pedido siempre dice si se cobró a precio mayorista.
+        associatePricing: buyerIsAssociate,
         // Sólo se escribe cuando viene: sin el opt la columna queda en NULL
         // (sin programar), exactamente como antes.
         ...(opts.scheduledDeliveryDate

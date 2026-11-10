@@ -1,5 +1,6 @@
 import {
   ConflictException,
+  ForbiddenException,
   HttpException,
   HttpStatus,
   Injectable,
@@ -23,6 +24,7 @@ import {
   SubscriptionStatus,
 } from '../../entities/subscription.entity';
 import { User } from '../../entities/user.entity';
+import { isAssociate } from '../../common/roles';
 import {
   SubscriptionPlan,
   SubscriptionTier,
@@ -216,6 +218,18 @@ export class SubscriptionService implements OnModuleInit {
     tier: SubscriptionTier = SubscriptionTier.STANDARD,
   ): Promise<{ url: string }> {
     const stripe = this.requireStripe();
+
+    // La suscripción es la oferta del bebedero, que no se le vende al asociado.
+    // Solo bloquea CONTRATAR: portal, cancelar y reactivar no se tocan para que
+    // quien ya tenía algo lo pueda seguir manejando.
+    const buyer = await this.users.findOne({ where: { id: userId } });
+    if (buyer && isAssociate(buyer.role)) {
+      throw new ForbiddenException({
+        statusCode: HttpStatus.FORBIDDEN,
+        code: 'ASSOCIATE_CANNOT_SUBSCRIBE',
+        message: 'Los asociados no pueden contratar la suscripción',
+      });
+    }
 
     // Validate redirect URLs against allowlist
     if (!SUBSCRIPTION_ALLOWLIST.includes(successUrl)) {

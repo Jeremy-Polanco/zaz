@@ -40,6 +40,19 @@ export const cart = {
     state = { items: {} }
     emit()
   },
+  /**
+   * Quita toda línea cuyo productId no esté en `keepIds` y devuelve los ids
+   * quitados. Sin cambios no reemplaza el estado ni emite.
+   */
+  prune(keepIds: ReadonlySet<string>): string[] {
+    const removed = Object.keys(state.items).filter((id) => !keepIds.has(id))
+    if (removed.length === 0) return removed
+    const next = { ...state.items }
+    for (const id of removed) delete next[id]
+    state = { items: next }
+    emit()
+    return removed
+  },
 }
 
 export function useCart() {

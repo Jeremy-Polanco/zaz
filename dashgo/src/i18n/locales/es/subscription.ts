@@ -10,6 +10,7 @@ export default {
   toast: {
     activated: '¡Suscripción activada! {{perks}}',
   },
+  checkoutError: 'No pudimos iniciar la suscripción',
   redirecting: 'Redirigiendo…',
   managePortal: 'Gestionar suscripción',
   none: {

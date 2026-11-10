@@ -8,7 +8,13 @@ import {
 import { Button, Card, Input, Label, SectionHeading } from '../components/ui'
 import { DeleteAccountModal } from '../components/DeleteAccountModal'
 import { useCurrentUser, useDeleteAccount, useLogout } from '../lib/auth'
-import { useMyAssociateBalance, useUpdateMe } from '../lib/queries'
+import {
+  useMyAssociateBalance,
+  useMyRentals,
+  useMySubscription,
+  useUpdateMe,
+} from '../lib/queries'
+import { showsRentalsEntry, showsSubscriptionEntry } from '../lib/associate'
 import { TOKEN_KEY } from '../lib/api'
 import { serverMessage } from '../lib/utils'
 import { buysAsClient, isAssociate, roleLabel as sharedRoleLabel } from '../lib/roles'
@@ -32,6 +38,11 @@ export function AccountPage() {
   // Mismo query (['pool','me']) que el checkout: un ex asociado conserva saldo
   // y tiene que poder llegar a su historial.
   const { data: poolBalance } = useMyAssociateBalance(!!user)
+  // El asociado ve Suscripción / Mis alquileres solo si ya tiene alguno; solo
+  // se consultan para él (al cliente no le cambia nada).
+  const associate = isAssociate(user?.role)
+  const { data: subscription } = useMySubscription(associate)
+  const { data: rentals } = useMyRentals(associate)
   const updateMe = useUpdateMe()
   const logout = useLogout()
   const deleteAccount = useDeleteAccount()
@@ -188,8 +199,12 @@ export function AccountPage() {
         <Card className="mb-6">
           <span className="eyebrow">Mis datos</span>
           <nav className="mt-4 flex flex-col divide-y divide-ink/10">
-            <AccountLink to="/alquileres" label="Mis alquileres" />
-            <AccountLink to="/subscription" label="Suscripción" />
+            {showsRentalsEntry(user?.role, (rentals?.length ?? 0) > 0) && (
+              <AccountLink to="/alquileres" label="Mis alquileres" />
+            )}
+            {showsSubscriptionEntry(user?.role, !!subscription) && (
+              <AccountLink to="/subscription" label="Suscripción" />
+            )}
             {(isAssociate(user?.role) || (poolBalance?.balanceCents ?? 0) > 0) && (
               <AccountLink to="/pool" label="Pool de asociados" />
             )}

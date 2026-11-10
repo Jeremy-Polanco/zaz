@@ -1,5 +1,7 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from './api'
+import { useCurrentUser as useAuthUser } from './auth'
+import { productsQueryKey } from './associate'
 import type {
   AdminPlanResponse,
   AdminRentalResponse,
@@ -55,10 +57,22 @@ import type {
   RecordPaymentInput,
 } from './schemas'
 
+/**
+ * Catálogo público. El servidor responde distinto según el rol: el asociado
+ * recibe solo su lista a precio mayorista. La clave lleva el rol para que un
+ * catálogo cacheado de un cliente (o invitado) nunca se sirva a un asociado que
+ * inicia sesión en el mismo navegador. Sigue colgando de ['products'], así que
+ * las mutaciones que invalidan ese prefijo la alcanzan.
+ *
+ * No pide nada hasta saber quién es el usuario: pedirlo antes traería el
+ * catálogo equivocado.
+ */
 export function useProducts() {
+  const { data: user, isPending: userPending } = useAuthUser()
   return useQuery<Product[]>({
-    queryKey: ['products'],
+    queryKey: productsQueryKey(user?.role),
     queryFn: async () => (await api.get<Product[]>('/products')).data,
+    enabled: !userPending,
   })
 }
 
@@ -562,6 +576,7 @@ export type CreateProductInput = {
   offerEndsAt?: string | null
   /** Precio en cents para suscriptores activos. null = sin precio de suscriptor. */
   subscriberPriceCents?: number | null
+  associatePriceCents?: number | null
   /** 'standard' paga impuesto, 'exempt' no (agua embotellada en NJ). */
   taxCategory?: 'standard' | 'exempt'
   pricingMode?: 'single_payment' | 'rental'
@@ -1155,11 +1170,12 @@ export function useCreateCreditAccount(userId: string) {
 // ── Subscription hooks ────────────────────────────────────────────────────────
 
 /** Client: GET /me/subscription — current subscription or null */
-export function useMySubscription() {
+export function useMySubscription(enabled = true) {
   return useQuery<Subscription | null>({
     queryKey: ['me', 'subscription'],
     queryFn: async () => (await api.get<Subscription | null>('/me/subscription')).data,
     staleTime: 30_000,
+    enabled,
   })
 }
 
@@ -1350,11 +1366,12 @@ export function useSetActiveLocation() {
 // ── My rentals (customer) ────────────────────────────────────────────────────
 
 /** GET /me/rentals — the caller's own rentals. */
-export function useMyRentals() {
+export function useMyRentals(enabled = true) {
   return useQuery<Rental[]>({
     queryKey: ['me', 'rentals'],
     queryFn: async () => (await api.get<Rental[]>('/me/rentals')).data,
     staleTime: 30_000,
+    enabled,
   })
 }
 

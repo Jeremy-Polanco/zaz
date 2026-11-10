@@ -69,7 +69,7 @@ jest.mock('../lib/api', () => ({
 // Cart
 jest.mock('../lib/cart', () => ({
   useCart: jest.fn(() => ({ items: { 'product-1': 2 } })),
-  cart: { clear: jest.fn() },
+  cart: { clear: jest.fn(), prune: jest.fn(() => []) },
 }))
 
 // ── imports after mocks ───────────────────────────────────────────────────────
@@ -973,5 +973,61 @@ describe('Checkout — saldo de asociado', () => {
     expect(getByText(/Usar mi saldo de asociado/i)).toBeTruthy()
     expect(getByText(/Disponible: \$8/)).toBeTruthy()
     expect(queryByText(/puntos/i)).toBeNull()
+  })
+})
+
+// ── Carrito con productos que ya no están en la lista del rol ─────────────────
+
+describe('Checkout — poda del carrito con la lista de productos del rol', () => {
+  const NOTICE = 'Quitamos de tu carrito productos que ya no están disponibles.'
+
+  function mockProductsState(state: Record<string, unknown>) {
+    mockUseProducts.mockReturnValue(
+      state as unknown as ReturnType<typeof useProducts>,
+    )
+  }
+
+  it('quita del carrito lo que no está en la lista cargada y avisa una vez', () => {
+    const { cart } = require('../lib/cart')
+    setupCheckoutMocks([MOCK_PRODUCT], { 'product-1': 1, ghost: 2 })
+    mockProductsState({ data: [MOCK_PRODUCT], isSuccess: true })
+    cart.prune.mockReturnValueOnce(['ghost'])
+
+    const { getByText } = renderWithProviders(<CheckoutScreen />)
+
+    expect(cart.prune).toHaveBeenCalledTimes(1)
+    const keep = cart.prune.mock.calls[0][0] as Set<string>
+    expect(keep.has('product-1')).toBe(true)
+    expect(keep.has('ghost')).toBe(false)
+    expect(getByText(NOTICE)).toBeTruthy()
+  })
+
+  it('no avisa cuando no había nada que quitar', () => {
+    const { cart } = require('../lib/cart')
+    setupCheckoutMocks([MOCK_PRODUCT], { 'product-1': 1 })
+    mockProductsState({ data: [MOCK_PRODUCT], isSuccess: true })
+
+    const { queryByText } = renderWithProviders(<CheckoutScreen />)
+
+    expect(cart.prune).toHaveBeenCalled()
+    expect(queryByText(NOTICE)).toBeNull()
+  })
+
+  it.each([
+    ['pendiente', { data: undefined, isPending: true, isSuccess: false }],
+    ['con error', { data: undefined, isError: true, isSuccess: false }],
+    [
+      'con error y datos viejos en caché',
+      { data: [MOCK_PRODUCT], isError: true, isSuccess: false },
+    ],
+  ])('no poda nada mientras la lista está %s', (_label, state) => {
+    const { cart } = require('../lib/cart')
+    setupCheckoutMocks([MOCK_PRODUCT], { 'product-1': 1, ghost: 2 })
+    mockProductsState(state)
+
+    const { queryByText } = renderWithProviders(<CheckoutScreen />)
+
+    expect(cart.prune).not.toHaveBeenCalled()
+    expect(queryByText(NOTICE)).toBeNull()
   })
 })

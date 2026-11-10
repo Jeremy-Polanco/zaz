@@ -12,9 +12,9 @@ import { ConfigService } from '@nestjs/config';
 import { Repository } from 'typeorm';
 import { PaymentsService } from './payments.service';
 import { Order, Product } from '../../entities';
-import { OrderStatus, PaymentMethod } from '../../entities/enums';
+import { OrderStatus, PaymentMethod, UserRole } from '../../entities/enums';
 import { AssociateBalanceService } from '../pool/associate-balance.service';
-import { ShippingService } from '../shipping/shipping.service';
+import { ShippingRateService } from '../shipping/shipping-rate.service';
 import { CreditService } from '../credit/credit.service';
 import { SubscriptionService } from '../subscription/subscription.service';
 import { TaxJurisdictionService } from '../addresses/tax-jurisdiction.service';
@@ -78,6 +78,7 @@ function fakeOrder(overrides: Partial<Order> = {}): Order {
     wasSubscriberAtQuote: false,
     skipQuote: false,
     provisioned: false,
+    associatePricing: false,
     createdAt: new Date(),
     items: [],
     customer: {} as never,
@@ -109,7 +110,7 @@ describe('PaymentsService', () => {
   let creditService: jest.Mocked<CreditService>;
   let configService: jest.Mocked<ConfigService>;
   let associateBalanceService: jest.Mocked<AssociateBalanceService>;
-  let shippingService: jest.Mocked<ShippingService>;
+  let shippingRate: jest.Mocked<ShippingRateService>;
   let subscriptionService: jest.Mocked<SubscriptionService>;
   let taxJurisdictionService: { resolveTaxRate: jest.Mock };
   let userAddressesRepo: jest.Mocked<Repository<UserAddress>>;
@@ -145,9 +146,11 @@ describe('PaymentsService', () => {
       getBalanceCents: jest.fn().mockResolvedValue(0),
     } as unknown as jest.Mocked<AssociateBalanceService>;
 
-    shippingService = {
-      computeQuote: jest.fn().mockResolvedValue({ shippingCents: 0 }),
-    } as unknown as jest.Mocked<ShippingService>;
+    // Envío fijo vigente (el mismo que registra la orden). Por defecto 0 para no
+    // mover los montos de los tests que no hablan de envío; los que sí, lo fijan.
+    shippingRate = {
+      getFlatShippingCents: jest.fn().mockResolvedValue(0),
+    } as unknown as jest.Mocked<ShippingRateService>;
 
     subscriptionService = {
       isActiveSubscriber: jest.fn().mockResolvedValue(false),
@@ -168,7 +171,7 @@ describe('PaymentsService', () => {
         { provide: getRepositoryToken(Product), useValue: productsRepo },
         { provide: ConfigService, useValue: configService },
         { provide: AssociateBalanceService, useValue: associateBalanceService },
-        { provide: ShippingService, useValue: shippingService },
+        { provide: ShippingRateService, useValue: shippingRate },
         { provide: CreditService, useValue: creditService },
         { provide: SubscriptionService, useValue: subscriptionService },
         { provide: TaxJurisdictionService, useValue: taxJurisdictionService },
@@ -291,7 +294,7 @@ describe('PaymentsService', () => {
         { provide: getRepositoryToken(Product), useValue: productsRepo },
         { provide: ConfigService, useValue: cfg },
         { provide: AssociateBalanceService, useValue: associateBalanceService },
-        { provide: ShippingService, useValue: shippingService },
+        { provide: ShippingRateService, useValue: shippingRate },
         { provide: CreditService, useValue: creditService },
         { provide: SubscriptionService, useValue: subscriptionService },
         { provide: TaxJurisdictionService, useValue: taxJurisdictionService },
@@ -344,6 +347,7 @@ describe('PaymentsService', () => {
 
       const result = await service.createIntentForItems({
         userId: 'user-1',
+        role: UserRole.CLIENT,
         items: [{ productId: 'prod-1', quantity: 2 }],
       });
 
@@ -378,6 +382,7 @@ describe('PaymentsService', () => {
 
       await service.createIntentForItems({
         userId: 'user-1',
+        role: UserRole.CLIENT,
         items: [{ productId: 'prod-1', quantity: 2 }],
       });
 
@@ -386,6 +391,84 @@ describe('PaymentsService', () => {
       // one price and pays another.
       expect(mockStripeInstance.paymentIntents.create).toHaveBeenCalledWith(
         expect.objectContaining({ amount: 762 }),
+        expect.anything(),
+      );
+    });
+
+    it('associate intent uses the associate price', async () => {
+      productsRepo.find.mockResolvedValue([
+        makeProduct({
+          id: 'prod-1',
+          priceToPublic: '10.00',
+          offerDiscountPct: '50',
+          associatePriceCents: 650,
+        }),
+      ]);
+      mockStripeInstance.paymentIntents.create.mockResolvedValueOnce({
+        id: 'pi_assoc',
+        client_secret: 'secret_assoc',
+        amount: 1416,
+        currency: 'usd',
+      });
+
+      await service.createIntentForItems({
+        userId: 'user-1',
+        role: UserRole.ASSOCIATE,
+        items: [{ productId: 'prod-1', quantity: 2 }],
+      });
+
+      // subtotal 1300 (650 × 2, fijo: la oferta no lo toca), shipping 0,
+      // tax round(1300 * 0.08887) = 116, total 1416 — lo mismo que cobra la orden.
+      expect(mockStripeInstance.paymentIntents.create).toHaveBeenCalledWith(
+        expect.objectContaining({ amount: 1416 }),
+        expect.anything(),
+      );
+    });
+
+    it('associate intent with a product outside the list is rejected before Stripe', async () => {
+      productsRepo.find.mockResolvedValue([
+        makeProduct({ id: 'prod-1', associatePriceCents: 650 }),
+        makeProduct({ id: 'prod-2', associatePriceCents: null }),
+      ]);
+
+      await expect(
+        service.createIntentForItems({
+          userId: 'user-1',
+          role: UserRole.ASSOCIATE,
+          items: [
+            { productId: 'prod-1', quantity: 1 },
+            { productId: 'prod-2', quantity: 1 },
+          ],
+        }),
+      ).rejects.toMatchObject({
+        response: { code: 'PRODUCT_NOT_AVAILABLE_FOR_ASSOCIATES' },
+      });
+      expect(mockStripeInstance.paymentIntents.create).not.toHaveBeenCalled();
+    });
+
+    it('a client is charged the public price even when the product has an associate price', async () => {
+      productsRepo.find.mockResolvedValue([
+        makeProduct({
+          id: 'prod-1',
+          priceToPublic: '5.00',
+          associatePriceCents: 650,
+        }),
+      ]);
+      mockStripeInstance.paymentIntents.create.mockResolvedValueOnce({
+        id: 'pi_c',
+        client_secret: 's',
+        amount: 1089,
+        currency: 'usd',
+      });
+
+      await service.createIntentForItems({
+        userId: 'user-1',
+        role: UserRole.CLIENT,
+        items: [{ productId: 'prod-1', quantity: 2 }],
+      });
+
+      expect(mockStripeInstance.paymentIntents.create).toHaveBeenCalledWith(
+        expect.objectContaining({ amount: 1089 }),
         expect.anything(),
       );
     });
@@ -408,6 +491,7 @@ describe('PaymentsService', () => {
 
       await service.createIntentForItems({
         userId: 'user-1',
+        role: UserRole.CLIENT,
         items: [{ productId: 'prod-1', quantity: 2 }],
       });
 
@@ -430,6 +514,7 @@ describe('PaymentsService', () => {
 
       await service.createIntentForItems({
         userId: 'user-1',
+        role: UserRole.CLIENT,
         items: [{ productId: 'prod-1', quantity: 2 }],
       });
 
@@ -441,6 +526,7 @@ describe('PaymentsService', () => {
       await expect(
         service.createIntentForItems({
           userId: 'u',
+          role: UserRole.CLIENT,
           items: [{ productId: 'missing', quantity: 1 }],
         }),
       ).rejects.toThrow('Uno o más productos no existen');
@@ -453,6 +539,7 @@ describe('PaymentsService', () => {
       await expect(
         service.createIntentForItems({
           userId: 'u',
+          role: UserRole.CLIENT,
           items: [{ productId: 'prod-1', quantity: 1 }],
         }),
       ).rejects.toThrow('no está disponible');
@@ -465,6 +552,7 @@ describe('PaymentsService', () => {
       await expect(
         service.createIntentForItems({
           userId: 'u',
+          role: UserRole.CLIENT,
           items: [{ productId: 'prod-1', quantity: 1 }],
         }),
       ).rejects.toThrow('Monto inválido');
@@ -477,12 +565,11 @@ describe('PaymentsService', () => {
       associateBalanceService.getBalanceCents.mockResolvedValueOnce(1000);
       // Envío fijo real ($5): con envío 0 el tope no se notaría, porque el
       // monto se clampa en 0 tanto con el canje topado (600) como sin topar (1000).
-      shippingService.computeQuote.mockResolvedValueOnce({
-        shippingCents: 500,
-      } as never);
+      shippingRate.getFlatShippingCents.mockResolvedValueOnce(500);
 
       await service.createIntentForItems({
         userId: 'user-1',
+        role: UserRole.CLIENT,
         usePoints: true,
         items: [{ productId: 'prod-1', quantity: 1 }],
       });
@@ -506,6 +593,7 @@ describe('PaymentsService', () => {
 
       await service.createIntentForItems({
         userId: 'user-1',
+        role: UserRole.CLIENT,
         usePoints: true,
         items: [{ productId: 'prod-1', quantity: 1 }],
       });
@@ -517,13 +605,35 @@ describe('PaymentsService', () => {
       );
     });
 
+    it('intent shipping is the flat rate regardless of distance', async () => {
+      productsRepo.find.mockResolvedValue([
+        makeProduct({ id: 'prod-1', priceToPublic: '10.00' }),
+      ]);
+      shippingRate.getFlatShippingCents.mockResolvedValue(500);
+      // La dirección está lejos a propósito: el envío no depende de la distancia
+      // (el servicio ni siquiera recibe ShippingService), igual que en la orden.
+
+      await service.createIntentForItems({
+        userId: 'user-1',
+        role: UserRole.CLIENT,
+        items: [{ productId: 'prod-1', quantity: 1 }],
+        deliveryAddress: { text: 'lejos', lat: 41.9, lng: -73.1 },
+      });
+
+      // subtotal 1000 + envío fijo 500 = 1500, impuesto round(1500*0.08887)=133.
+      const expectedAmount = 1500 + Math.round(1500 * TAX_RATE);
+      expect(expectedAmount).toBe(1633);
+      expect(mockStripeInstance.paymentIntents.create).toHaveBeenCalledWith(
+        expect.objectContaining({ amount: expectedAmount }),
+        expect.anything(),
+      );
+    });
+
     it('includes shipping in the taxable base and maps null client_secret to ""', async () => {
       productsRepo.find.mockResolvedValue([
         makeProduct({ id: 'prod-1', priceToPublic: '5.00' }),
       ]);
-      shippingService.computeQuote.mockResolvedValueOnce({
-        shippingCents: 200,
-      } as never);
+      shippingRate.getFlatShippingCents.mockResolvedValueOnce(200);
       mockStripeInstance.paymentIntents.create.mockResolvedValueOnce({
         id: 'pi_ship',
         client_secret: null,
@@ -533,6 +643,7 @@ describe('PaymentsService', () => {
 
       const result = await service.createIntentForItems({
         userId: 'u',
+        role: UserRole.CLIENT,
         items: [{ productId: 'prod-1', quantity: 1 }],
         deliveryAddress: { text: 'x', lat: 1, lng: 2 },
       });
@@ -866,6 +977,7 @@ describe('PaymentsService', () => {
     it('resuelve la tasa con el código postal del destino', async () => {
       await service.createIntentForItems({
         userId: 'user-1',
+        role: UserRole.CLIENT,
         items: [{ productId: 'prod-1', quantity: 2 }],
         deliveryAddress: { text: '1 Elizabeth Ave', postalCode: '07201' },
       });
@@ -883,6 +995,7 @@ describe('PaymentsService', () => {
 
       await service.createIntentForItems({
         userId: 'user-1',
+        role: UserRole.CLIENT,
         items: [{ productId: 'prod-1', quantity: 2 }],
         deliveryAddress: { text: '1 Elizabeth Ave', postalCode: '07201' },
       });
@@ -898,6 +1011,7 @@ describe('PaymentsService', () => {
     it('sin código postal cobra el fallback histórico', async () => {
       await service.createIntentForItems({
         userId: 'user-1',
+        role: UserRole.CLIENT,
         items: [{ productId: 'prod-1', quantity: 2 }],
       });
 
@@ -942,6 +1056,7 @@ describe('PaymentsService', () => {
 
       await service.createIntentForItems({
         userId: 'user-1',
+        role: UserRole.CLIENT,
         items: [{ productId: 'prod-1', quantity: 2 }],
         deliveryAddressId: 'addr-bronx',
         deliveryAddress: {
@@ -971,6 +1086,7 @@ describe('PaymentsService', () => {
 
       await service.createIntentForItems({
         userId: 'user-1',
+        role: UserRole.CLIENT,
         items: [{ productId: 'prod-1', quantity: 2 }],
         deliveryAddress: {
           text: '1728 Williamsbridge Rd',
@@ -996,6 +1112,7 @@ describe('PaymentsService', () => {
 
       await service.createIntentForItems({
         userId: 'user-1',
+        role: UserRole.CLIENT,
         items: [{ productId: 'prod-1', quantity: 2 }],
         deliveryAddressId: '00000000-0000-4000-8000-000000000000',
         deliveryAddress: {
@@ -1015,6 +1132,7 @@ describe('PaymentsService', () => {
     it('sin chincheta no se geocodifica nada: queda el ZIP posteado', async () => {
       await service.createIntentForItems({
         userId: 'user-1',
+        role: UserRole.CLIENT,
         items: [{ productId: 'prod-1', quantity: 2 }],
         deliveryAddress: { text: '1 Elizabeth Ave', postalCode: '07201' },
       });

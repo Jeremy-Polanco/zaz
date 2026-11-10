@@ -42,6 +42,7 @@ export default {
     searchBody: 'Sin resultados. Prueba con otra palabra.',
     categoryBody: 'No hay productos en esta categoría.',
     catalogBody: 'No hay productos disponibles ahora mismo.',
+    associateBody: 'Todavía no hay productos disponibles para asociados.',
   },
   cartBar: {
     inCart: 'En carrito',

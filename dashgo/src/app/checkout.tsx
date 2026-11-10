@@ -50,7 +50,18 @@ export default function CheckoutScreen() {
       router.replace({ pathname: '/(auth)/login', params: { next: '/checkout' } })
     }
   }, [user, userPending])
-  const { data: products } = useProducts()
+  const { data: products, isSuccess: productsLoaded } = useProducts()
+  // Aviso de una sola vez cuando se quitan del carrito productos que ya no
+  // están en la lista del rol (invitado que luego entra como asociado, o el
+  // admin los quitó a mitad de sesión).
+  const [prunedNotice, setPrunedNotice] = useState(false)
+  useEffect(() => {
+    // Solo con la lista cargada con éxito: pendiente o con error NO poda, para
+    // que una falla de red no vacíe el carrito.
+    if (!productsLoaded || !products) return
+    const removed = cart.prune(new Set(products.map((p) => p.id)))
+    if (removed.length > 0) setPrunedNotice(true)
+  }, [productsLoaded, products, cartState])
   // Cualquier usuario logueado: un ex asociado conserva (y puede gastar) el
   // saldo que ya se le repartió; un cliente común ve 0. Invitado: sin request.
   const { data: associateBalance } = useMyAssociateBalance(!!user)
@@ -395,6 +406,14 @@ export default function CheckoutScreen() {
           <Text className="mt-2 text-center text-[14px] text-ink-soft">
             {t('emptyCart.subtitle')}
           </Text>
+          {prunedNotice ? (
+            <Text
+              accessibilityRole="alert"
+              className="mt-4 text-center text-[13px] text-ink"
+            >
+              {t('prunedNotice')}
+            </Text>
+          ) : null}
           <View className="mt-8 w-full max-w-[240px]">
             <Button variant="ink" size="lg" onPress={() => router.back()}>
               {t('emptyCart.back')}
@@ -447,6 +466,14 @@ export default function CheckoutScreen() {
         <Text className="mt-2 text-[14px] leading-[20px] text-ink-soft">
           {t('header.itemCount', { count: itemCount })}
         </Text>
+        {prunedNotice ? (
+          <Text
+            accessibilityRole="alert"
+            className="mt-3 text-[13px] leading-[18px] text-ink"
+          >
+            {t('prunedNotice')}
+          </Text>
+        ) : null}
 
         <Hairline className="my-8" />
 

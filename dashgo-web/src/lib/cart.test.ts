@@ -102,4 +102,29 @@ describe('cart (sessionStorage-backed signal)', () => {
     clearCart()
     expect(window.sessionStorage.getItem('dashgo.pendingCart')).toBeNull()
   })
+
+  it('pruneCart quita las líneas fuera de la lista y devuelve los ids quitados', async () => {
+    window.sessionStorage.setItem(
+      'dashgo.pendingCart',
+      JSON.stringify({ items: [{ productId: 'keep', quantity: 2 }, { productId: 'ghost', quantity: 1 }] }),
+    )
+    const { pruneCart } = await import('./cart')
+
+    expect(pruneCart(new Set(['keep']))).toEqual(['ghost'])
+    expect(JSON.parse(window.sessionStorage.getItem('dashgo.pendingCart')!)).toEqual({
+      items: [{ productId: 'keep', quantity: 2 }],
+    })
+  })
+
+  it('pruneCart vacía el almacenamiento cuando no queda nada y no escribe si no hay cambios', async () => {
+    window.sessionStorage.setItem(
+      'dashgo.pendingCart',
+      JSON.stringify({ items: [{ productId: 'ghost', quantity: 1 }] }),
+    )
+    const { pruneCart } = await import('./cart')
+
+    expect(pruneCart(new Set(['otro']))).toEqual(['ghost'])
+    expect(window.sessionStorage.getItem('dashgo.pendingCart')).toBeNull()
+    expect(pruneCart(new Set(['otro']))).toEqual([])
+  })
 })

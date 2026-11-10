@@ -678,6 +678,19 @@ describe('ProductsService', () => {
       );
     });
 
+    it('findAllForAdmin conserva associatePriceCents (el formulario admin lo reenvía al guardar; si faltara, cada guardado borraría el precio mayorista)', async () => {
+      productsRepo.find.mockResolvedValueOnce([
+        fakeProduct({ id: 'p-assoc', associatePriceCents: 600 }),
+        fakeProduct({ id: 'p-none', associatePriceCents: null }),
+      ]);
+
+      const result = await service.findAllForAdmin(superAdmin);
+
+      expect(result).toHaveLength(2);
+      expect(result[0].associatePriceCents).toBe(600);
+      expect(result[1]).toHaveProperty('associatePriceCents', null);
+    });
+
     it('create persists a provided displayOrder and defaults to 0', async () => {
       const captured = fakeProduct({ id: 'new-3', displayOrder: 5 });
       productsRepo.create.mockReturnValueOnce(captured);
@@ -791,6 +804,233 @@ describe('ProductsService', () => {
       await expect(service.reorder(regularUser, { items })).rejects.toThrow(
         ForbiddenException,
       );
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Catálogo mayorista para asociados
+  // -------------------------------------------------------------------------
+
+  describe('associate catalog', () => {
+    const associateViewer = (sellerId: string | null = null) =>
+      ({
+        id: 'u-assoc',
+        role: UserRole.ASSOCIATE,
+        email: null,
+        sellerId,
+      }) as never;
+
+    it('findAllPublic as guest and as client never includes associatePriceCents', async () => {
+      const rows = () => [
+        fakeProduct({ id: 'p-1', associatePriceCents: 650 }),
+        fakeProduct({ id: 'p-2', associatePriceCents: null }),
+      ];
+
+      productsRepo.find.mockResolvedValueOnce(rows());
+      const asGuest = await service.findAllPublic(null);
+
+      productsRepo.find.mockResolvedValueOnce(rows());
+      const asClient = await service.findAllPublic({
+        id: 'u-1',
+        role: UserRole.CLIENT,
+        email: null,
+        sellerId: null,
+      } as never);
+
+      expect(asGuest.map((p) => p.id)).toEqual(['p-1', 'p-2']);
+      expect(asClient.map((p) => p.id)).toEqual(['p-1', 'p-2']);
+      for (const item of [...asGuest, ...asClient]) {
+        expect(item).not.toHaveProperty('associatePriceCents');
+      }
+    });
+
+    it('associate sees only products with an associate price, priced at it', async () => {
+      productsRepo.find.mockResolvedValueOnce([
+        fakeProduct({
+          id: 'A',
+          priceToPublic: '10.00',
+          offerLabel: 'Promo',
+          offerDiscountPct: '50',
+          offerStartsAt: new Date(Date.now() - 86400000),
+          offerEndsAt: new Date(Date.now() + 86400000),
+          subscriberPriceCents: 300,
+          associatePriceCents: 650,
+        }),
+        fakeProduct({ id: 'B', associatePriceCents: null }),
+      ]);
+
+      const result = await service.findAllPublic(associateViewer());
+
+      expect(result.map((p) => p.id)).toEqual(['A']);
+      expect(result[0]).toMatchObject({
+        effectivePriceCents: 650,
+        basePriceCents: 650,
+        offerActive: false,
+        subscriberPriceCents: null,
+        offerLabel: null,
+        offerDiscountPct: null,
+        offerStartsAt: null,
+        offerEndsAt: null,
+      });
+      expect(result[0]).not.toHaveProperty('associatePriceCents');
+    });
+
+    it('associate with a seller ignores the seller catalog', async () => {
+      productsRepo.find.mockResolvedValueOnce([
+        fakeProduct({ id: 'A', associatePriceCents: 650 }),
+        fakeProduct({ id: 'B', associatePriceCents: null }),
+      ]);
+      sellerProductsRepo.find.mockResolvedValue([{ productId: 'B' }]);
+
+      const result = await service.findAllPublic(associateViewer('seller-1'));
+
+      expect(result.map((p) => p.id)).toEqual(['A']);
+      expect(sellerProductsRepo.find).not.toHaveBeenCalled();
+    });
+
+    it('associate with an empty list gets an empty catalog', async () => {
+      productsRepo.find.mockResolvedValueOnce([
+        fakeProduct({ id: 'A', associatePriceCents: null }),
+        fakeProduct({ id: 'B', associatePriceCents: null }),
+      ]);
+
+      await expect(service.findAllPublic(associateViewer())).resolves.toEqual(
+        [],
+      );
+    });
+
+    describe('create validation', () => {
+      it.each([
+        ['a rental', { pricingMode: 'rental' }],
+        ['a maintenance service', { isMaintenanceService: true }],
+        ['the default subscriber bebedero', { isDefaultSubscriberBebedero: true }],
+        ['the premium subscriber product', { isPremiumSubscriberProduct: true }],
+      ])('create rejects an associate price on %s', async (_label, extra) => {
+        await expect(
+          service.create(superAdmin, {
+            name: 'X',
+            priceToPublic: 5,
+            associatePriceCents: 500,
+            ...extra,
+          } as never),
+        ).rejects.toMatchObject({
+          response: expect.objectContaining({
+            code: 'ASSOCIATE_PRICE_NOT_ALLOWED',
+          }),
+        });
+        expect(productsRepo.save).not.toHaveBeenCalled();
+      });
+
+      it('create rejects with a BadRequestException', async () => {
+        await expect(
+          service.create(superAdmin, {
+            name: 'X',
+            priceToPublic: 5,
+            pricingMode: 'rental',
+            associatePriceCents: 500,
+          } as never),
+        ).rejects.toBeInstanceOf(BadRequestException);
+      });
+
+      it('create persists the associate price on a single-payment product', async () => {
+        const saved = fakeProduct({ id: 'new-1', associatePriceCents: 500 });
+        productsRepo.save.mockResolvedValueOnce(saved);
+        productsRepo.findOne.mockResolvedValueOnce(saved);
+
+        await service.create(superAdmin, {
+          name: 'X',
+          priceToPublic: 5,
+          associatePriceCents: 500,
+        } as never);
+
+        expect(productsRepo.create).toHaveBeenCalledWith(
+          expect.objectContaining({ associatePriceCents: 500 }),
+        );
+      });
+
+      it('create defaults the associate price to null', async () => {
+        const saved = fakeProduct({ id: 'new-1' });
+        productsRepo.save.mockResolvedValueOnce(saved);
+        productsRepo.findOne.mockResolvedValueOnce(saved);
+
+        await service.create(superAdmin, {
+          name: 'X',
+          priceToPublic: 5,
+        } as never);
+
+        expect(productsRepo.create).toHaveBeenCalledWith(
+          expect.objectContaining({ associatePriceCents: null }),
+        );
+      });
+    });
+
+    describe('update', () => {
+      const arrangeUpdate = (existing: Product) => {
+        productsRepo.findOne
+          .mockResolvedValueOnce(existing)
+          .mockResolvedValueOnce(existing);
+        productsRepo.update.mockResolvedValue({
+          affected: 1,
+          raw: [],
+          generatedMaps: [],
+        });
+      };
+
+      it('update sets and clears the associate price', async () => {
+        arrangeUpdate(fakeProduct());
+        await service.update('product-1', superAdmin, {
+          associatePriceCents: 450,
+        });
+        expect(productsRepo.update).toHaveBeenLastCalledWith(
+          'product-1',
+          expect.objectContaining({ associatePriceCents: 450 }),
+        );
+
+        arrangeUpdate(fakeProduct({ associatePriceCents: 450 }));
+        await service.update('product-1', superAdmin, {
+          associatePriceCents: null,
+        });
+        expect(productsRepo.update).toHaveBeenLastCalledWith(
+          'product-1',
+          expect.objectContaining({ associatePriceCents: null }),
+        );
+      });
+
+      it('update leaves the associate price alone when omitted', async () => {
+        arrangeUpdate(fakeProduct({ associatePriceCents: 450 }));
+        await service.update('product-1', superAdmin, { stock: 3 });
+        const patch = productsRepo.update.mock.calls.at(-1)![1] as object;
+        expect(patch).not.toHaveProperty('associatePriceCents');
+      });
+
+      it('update rejects a final state that is a rental with an associate price', async () => {
+        arrangeUpdate(fakeProduct({ associatePriceCents: 500 }));
+        await expect(
+          service.update('product-1', superAdmin, { pricingMode: 'rental' }),
+        ).rejects.toMatchObject({
+          response: expect.objectContaining({
+            code: 'ASSOCIATE_PRICE_NOT_ALLOWED',
+          }),
+        });
+        expect(productsRepo.update).not.toHaveBeenCalled();
+      });
+
+      it('update allows converting to rental when the associate price is cleared in the same request', async () => {
+        arrangeUpdate(fakeProduct({ associatePriceCents: 500 }));
+        await expect(
+          service.update('product-1', superAdmin, {
+            pricingMode: 'rental',
+            associatePriceCents: null,
+          }),
+        ).resolves.toBeDefined();
+        expect(productsRepo.update).toHaveBeenCalledWith(
+          'product-1',
+          expect.objectContaining({
+            pricingMode: 'rental',
+            associatePriceCents: null,
+          }),
+        );
+      });
     });
   });
 });

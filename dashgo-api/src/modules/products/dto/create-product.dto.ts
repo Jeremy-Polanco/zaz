@@ -81,6 +81,14 @@ export class CreateProductDto {
   @Max(1000000)
   subscriberPriceCents?: number | null;
 
+  // Precio mayorista fijo (en cents) para asociados. null = no se ofrece a
+  // asociados. Solo productos de pago único; 0 no es válido (mínimo 1).
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(1000000)
+  associatePriceCents?: number | null;
+
   // Categoría fiscal: 'standard' (default) paga impuesto, 'exempt' no. El caso
   // que lo motiva es el agua embotellada, exenta en NJ. Ver common/tax.ts.
   @IsOptional()

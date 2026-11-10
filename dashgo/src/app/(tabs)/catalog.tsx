@@ -26,6 +26,7 @@ import {
   subscriberPriceWins,
 } from '../../lib/pricing'
 import { cart, useCart } from '../../lib/cart'
+import { isAssociate } from '../../lib/roles'
 import { productImageUrl } from '../../lib/api'
 import { formatCents } from '../../lib/format'
 import type { Product } from '../../lib/types'
@@ -572,6 +573,12 @@ export default function CatalogTab() {
   }, [pendingSlug])
 
   const firstName = user?.fullName?.split(' ')[0] ?? ''
+  // Al asociado el servidor le devuelve solo su lista: vacía no significa "sin
+  // stock" sino "todavía no le asignaron productos".
+  const catalogEmpty = (products ?? []).length === 0
+  const emptyCatalogBody = isAssociate(user?.role)
+    ? t('empty.associateBody')
+    : t('empty.catalogBody')
 
   const totalCents = useMemo(() => {
     if (!products) return 0
@@ -764,7 +771,7 @@ export default function CatalogTab() {
   return (
     <SafeAreaView edges={['top']} className="flex-1 bg-paper">
       {renderSearchBar()}
-      {showPicker ? (
+      {showPicker && !catalogEmpty ? (
         renderPicker()
       ) : (
         <FlatList
@@ -809,7 +816,7 @@ export default function CatalogTab() {
                 ? t('empty.searchBody')
                 : activeSlug
                   ? t('empty.categoryBody')
-                  : t('empty.catalogBody')}
+                  : emptyCatalogBody}
             </Text>
           </View>
         }

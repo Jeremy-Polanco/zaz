@@ -384,3 +384,109 @@ describe('CheckoutPage — saldo de asociado (el cliente ya no ve puntos)', () =
     expect(screen.queryByText(/puntos/i)).toBeNull()
   })
 })
+
+describe('CheckoutPage — carrito rechazado para un asociado', () => {
+  // Un carrito guardado en el navegador puede traer un producto que ya no está
+  // en la lista del asociado. La API lo rechaza con 400 y el checkout tiene que
+  // mostrar ese texto, no un error genérico.
+  it('muestra el mensaje de la API cuando el producto no está disponible para asociados', async () => {
+    mockUseMyAddresses.mockReturnValue({
+      data: [makeAddress()],
+    } as unknown as ReturnType<typeof useMyAddresses>)
+    mockUseCreateOrder.mockReturnValue({
+      mutateAsync: vi.fn(),
+      isPending: false,
+      isError: true,
+      error: Object.assign(new Error('Request failed with status code 400'), {
+        response: {
+          status: 400,
+          data: {
+            code: 'PRODUCT_NOT_AVAILABLE_FOR_ASSOCIATES',
+            message: 'Este producto no está disponible para asociados',
+          },
+        },
+      }),
+    } as unknown as ReturnType<typeof useCreateOrder>)
+
+    renderWithRouter(CheckoutPage)
+
+    expect(
+      await screen.findByText('Este producto no está disponible para asociados'),
+    ).toBeInTheDocument()
+    expect(screen.queryByText('No se pudo crear el pedido')).not.toBeInTheDocument()
+  })
+})
+
+describe('CheckoutPage — poda del carrito con la lista de productos del rol', () => {
+  const GHOST = '9b2d6c1e-3f4a-4b5c-8d7e-1a2b3c4d5e6f'
+  const KEEP = 'f47ac10b-58cc-4372-a567-0e02b2c3d479'
+  const NOTICE = 'Quitamos de tu carrito productos que ya no están disponibles.'
+
+  function seedCart() {
+    sessionStorage.setItem(
+      'dashgo.pendingCart',
+      JSON.stringify({
+        items: [
+          { productId: KEEP, quantity: 1 },
+          { productId: GHOST, quantity: 2 },
+        ],
+      }),
+    )
+  }
+  const storedIds = () =>
+    (JSON.parse(sessionStorage.getItem('dashgo.pendingCart') ?? '{"items":[]}')
+      .items as { productId: string }[]).map((i) => i.productId)
+
+  beforeEach(() => {
+    mockUseMyAddresses.mockReturnValue({
+      data: [makeAddress()],
+    } as unknown as ReturnType<typeof useMyAddresses>)
+  })
+
+  it('quita del carrito lo que no está en la lista cargada y avisa', async () => {
+    seedCart()
+    mockUseProducts.mockReturnValue({
+      data: [makeProduct({ id: KEEP })],
+      isSuccess: true,
+    } as unknown as ReturnType<typeof useProducts>)
+
+    renderWithRouter(CheckoutPage)
+
+    expect(await screen.findByText(NOTICE)).toBeInTheDocument()
+    expect(storedIds()).toEqual([KEEP])
+  })
+
+  it('no avisa ni toca el carrito si todo está en la lista', async () => {
+    mockUseProducts.mockReturnValue({
+      data: [makeProduct({ id: KEEP })],
+      isSuccess: true,
+    } as unknown as ReturnType<typeof useProducts>)
+
+    renderWithRouter(CheckoutPage)
+    await screen.findByText('Resumen')
+
+    expect(screen.queryByText(NOTICE)).not.toBeInTheDocument()
+    expect(storedIds()).toEqual([KEEP])
+  })
+
+  it.each([
+    ['pendiente', { data: undefined, isPending: true, isSuccess: false }],
+    ['con error', { data: undefined, isError: true, isSuccess: false }],
+    [
+      'con error y datos viejos en caché',
+      { data: [makeProduct({ id: KEEP })], isError: true, isSuccess: false },
+    ],
+  ])('no poda nada mientras la lista está %s', async (_label, state) => {
+    seedCart()
+    mockUseProducts.mockReturnValue(
+      state as unknown as ReturnType<typeof useProducts>,
+    )
+
+    renderWithRouter(CheckoutPage)
+    // Con el checkout ya pintado (y sus efectos corridos) nada debe haber cambiado.
+    await screen.findByText('Resumen')
+
+    expect(screen.queryByText(NOTICE)).not.toBeInTheDocument()
+    expect(storedIds()).toEqual([KEEP, GHOST])
+  })
+})

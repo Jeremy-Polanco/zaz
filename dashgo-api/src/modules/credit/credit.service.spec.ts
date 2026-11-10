@@ -89,6 +89,7 @@ function fakeOrder(
     wasSubscriberAtQuote: false,
     skipQuote: false,
     provisioned: false,
+    associatePricing: false,
     createdAt: new Date(),
     items: [],
     customer: {} as never,

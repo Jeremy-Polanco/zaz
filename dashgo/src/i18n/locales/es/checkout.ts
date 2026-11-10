@@ -5,6 +5,7 @@ export default {
     subtitle: 'Agrega productos desde el catálogo para continuar.',
     back: 'Volver →',
   },
+  prunedNotice: 'Quitamos de tu carrito productos que ya no están disponibles.',
   activeOrder: {
     eyebrow: 'Pedido en curso',
     title: 'Ya tenés uno en camino.',

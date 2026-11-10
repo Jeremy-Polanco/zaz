@@ -24,6 +24,8 @@ import { ReorderProductsDto } from './dto/reorder-products.dto';
 import { SetSellerCatalogDto } from './dto/set-seller-catalog.dto';
 import { decorateProduct, ProductWithPricing } from './pricing';
 import { applyCatalogScope } from './catalog-scope';
+import { canCarryAssociatePrice } from './associate-catalog';
+import { isAssociate } from '../../common/roles';
 
 type StripeClient = InstanceType<typeof Stripe>;
 
@@ -67,12 +69,48 @@ export class ProductsService implements OnModuleInit {
    */
   async findAllPublic(
     viewer?: AuthenticatedUser | null,
-  ): Promise<Omit<ProductForClient, 'promoterCommissionPct' | 'pointsPct'>[]> {
+  ): Promise<
+    Omit<
+      ProductForClient,
+      'promoterCommissionPct' | 'pointsPct' | 'associatePriceCents'
+    >[]
+  > {
     const rows = await this.products.find({
       where: { isAvailable: true },
       relations: ['category'],
       order: { displayOrder: 'ASC', createdAt: 'DESC' },
     });
+
+    const now = new Date();
+
+    // Un asociado ve SOLO los productos con precio para asociados, a ese
+    // precio. Lista vacía = catálogo vacío (no falla hacia "ve todo"), y el
+    // catálogo de su vendedor no aplica.
+    if (isAssociate(viewer?.role)) {
+      return rows
+        .filter((p) => p.associatePriceCents != null)
+        .map((p) => {
+          const client = this.toClient(p, now, { isAssociate: true });
+          const {
+            promoterCommissionPct,
+            pointsPct,
+            associatePriceCents,
+            ...pub
+          } = client;
+          void promoterCommissionPct;
+          void pointsPct;
+          void associatePriceCents;
+          // Su precio es fijo: ni oferta ni precio de suscriptor se filtran.
+          return {
+            ...pub,
+            subscriberPriceCents: null,
+            offerLabel: null,
+            offerDiscountPct: null,
+            offerStartsAt: null,
+            offerEndsAt: null,
+          };
+        });
+    }
 
     // Un cliente con vendedor asignado ve SOLO el catálogo de su vendedor.
     // Invitado, cliente sin vendedor, o vendedor sin catálogo cargado → ve
@@ -84,14 +122,16 @@ export class ProductsService implements OnModuleInit {
         )
       : rows;
 
-    const now = new Date();
     return scoped.map((p) => {
-      const { promoterCommissionPct, pointsPct, ...pub } = this.toClient(
-        p,
-        now,
-      );
+      const {
+        promoterCommissionPct,
+        pointsPct,
+        associatePriceCents,
+        ...pub
+      } = this.toClient(p, now);
       void promoterCommissionPct;
       void pointsPct;
+      void associatePriceCents;
       return pub;
     });
   }
@@ -205,6 +245,14 @@ export class ProductsService implements OnModuleInit {
     dto: CreateProductDto,
   ): Promise<ProductForClient> {
     this.assertSuperAdmin(user);
+    if (dto.associatePriceCents != null) {
+      this.assertAssociatePriceAllowed({
+        pricingMode: dto.pricingMode ?? 'single_payment',
+        isMaintenanceService: dto.isMaintenanceService ?? false,
+        isDefaultSubscriberBebedero: dto.isDefaultSubscriberBebedero ?? false,
+        isPremiumSubscriberProduct: dto.isPremiumSubscriberProduct ?? false,
+      });
+    }
     const product = this.products.create({
       name: dto.name,
       description: dto.description ?? null,
@@ -224,6 +272,7 @@ export class ProductsService implements OnModuleInit {
       offerStartsAt: dto.offerStartsAt ? new Date(dto.offerStartsAt) : null,
       offerEndsAt: dto.offerEndsAt ? new Date(dto.offerEndsAt) : null,
       subscriberPriceCents: dto.subscriberPriceCents ?? null,
+      associatePriceCents: dto.associatePriceCents ?? null,
       taxCategory: dto.taxCategory ?? 'standard',
       pricingMode: dto.pricingMode ?? 'single_payment',
       monthlyRentCents: dto.monthlyRentCents ?? 0,
@@ -302,6 +351,9 @@ export class ProductsService implements OnModuleInit {
     if (dto.subscriberPriceCents !== undefined) {
       patch.subscriberPriceCents = dto.subscriberPriceCents ?? null;
     }
+    if (dto.associatePriceCents !== undefined) {
+      patch.associatePriceCents = dto.associatePriceCents ?? null;
+    }
     if (dto.taxCategory !== undefined) patch.taxCategory = dto.taxCategory;
 
     // Rental pricing fields
@@ -329,6 +381,15 @@ export class ProductsService implements OnModuleInit {
     if (dto.isPremiumSubscriberProduct !== undefined)
       patch.isPremiumSubscriberProduct = dto.isPremiumSubscriberProduct;
     if (dto.displayOrder !== undefined) patch.displayOrder = dto.displayOrder;
+
+    // El estado FINAL (producto actual + cambios) es el que se valida: pasar a
+    // renta con precio de asociado se rechaza, pero limpiarlo en el mismo
+    // request lo permite.
+    const finalState = { ...p, ...patch };
+    if (finalState.associatePriceCents != null) {
+      this.assertAssociatePriceAllowed(finalState);
+    }
+
     const adminProvidedStripeIds =
       typeof dto.stripeProductId === 'string' &&
       dto.stripeProductId.length > 0 &&
@@ -563,8 +624,24 @@ export class ProductsService implements OnModuleInit {
     return { stripeProductId, stripePriceId: newPrice.id };
   }
 
-  private toClient(p: Product, now: Date = new Date()): ProductForClient {
-    const decorated = decorateProduct(p, now);
+  private assertAssociatePriceAllowed(
+    p: Parameters<typeof canCarryAssociatePrice>[0],
+  ): void {
+    if (!canCarryAssociatePrice(p)) {
+      throw new BadRequestException({
+        code: 'ASSOCIATE_PRICE_NOT_ALLOWED',
+        message:
+          'Solo los productos de pago único pueden tener precio para asociados',
+      });
+    }
+  }
+
+  private toClient(
+    p: Product,
+    now: Date = new Date(),
+    opts?: Parameters<typeof decorateProduct>[2],
+  ): ProductForClient {
+    const decorated = decorateProduct(p, now, opts);
     const { imageBytes, ...rest } = decorated;
     void imageBytes;
     return rest;

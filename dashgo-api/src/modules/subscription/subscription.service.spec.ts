@@ -5,7 +5,7 @@
  * injected as jest mocks. No real DB or Stripe connection.
  */
 
-import { ConflictException, HttpException, HttpStatus, Logger, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
+import { ConflictException, ForbiddenException, HttpException, HttpStatus, Logger, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { ConfigService } from '@nestjs/config';
@@ -20,6 +20,7 @@ import {
 import { Subscription, SubscriptionStatus } from '../../entities/subscription.entity';
 import { SubscriptionTier } from '../../entities/subscription-plan.entity';
 import { User } from '../../entities/user.entity';
+import { UserRole } from '../../entities/enums';
 import { SubscriptionPlan } from '../../entities/subscription-plan.entity';
 import { createMockStripe, MockStripe } from '../../test-utils/stripe';
 import { computeGrossCents } from '../../common/tax';
@@ -1279,6 +1280,54 @@ describe('SubscriptionService — createCheckoutSession plan source (T23)', () =
     ).rejects.toThrow(ServiceUnavailableException);
 
     expect(mockStripeInstance.checkout.sessions.create).not.toHaveBeenCalled();
+  });
+
+  it('rechaza a un asociado con ASSOCIATE_CANNOT_SUBSCRIBE y no toca Stripe', async () => {
+    usersRepo.findOne.mockResolvedValue({
+      id: 'user-1',
+      email: 'test@example.com',
+      fullName: 'Test User',
+      role: UserRole.ASSOCIATE,
+      stripeCustomerId: 'cus_test_1',
+    } as unknown as User);
+
+    const attempt = service.createCheckoutSession(
+      'user-1',
+      'https://www.dashgo.dev/subscription?session=success',
+      'https://www.dashgo.dev/subscription?session=canceled',
+    );
+
+    await expect(attempt).rejects.toThrow(ForbiddenException);
+    await expect(attempt).rejects.toMatchObject({
+      response: {
+        code: 'ASSOCIATE_CANNOT_SUBSCRIBE',
+        message: 'Los asociados no pueden contratar la suscripción',
+      },
+    });
+    expect(mockStripeInstance.checkout.sessions.create).not.toHaveBeenCalled();
+    expect(mockStripeInstance.customers.create).not.toHaveBeenCalled();
+  });
+
+  it('un cliente sí obtiene su sesión de checkout', async () => {
+    usersRepo.findOne.mockResolvedValue({
+      id: 'user-1',
+      email: 'test@example.com',
+      fullName: 'Test User',
+      role: UserRole.CLIENT,
+      stripeCustomerId: 'cus_test_1',
+    } as unknown as User);
+    mockStripeInstance.checkout.sessions.create.mockResolvedValue({
+      url: 'https://checkout.stripe.test/s',
+    });
+
+    const res = await service.createCheckoutSession(
+      'user-1',
+      'https://www.dashgo.dev/subscription?session=success',
+      'https://www.dashgo.dev/subscription?session=canceled',
+    );
+
+    expect(res).toEqual({ url: 'https://checkout.stripe.test/s' });
+    expect(mockStripeInstance.checkout.sessions.create).toHaveBeenCalledTimes(1);
   });
 });
 

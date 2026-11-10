@@ -119,6 +119,8 @@ export interface Product {
    * decide el backend al crear la orden, contra la suscripción real.
    */
   subscriberPriceCents?: number | null
+  /** Precio mayorista fijo para asociados. null = no se ofrece a asociados. */
+  associatePriceCents?: number | null
   /**
    * Categoría fiscal. 'standard' (default) paga impuesto, 'exempt' no —
    * el agua embotellada es el caso. Ver dashgo-api/src/common/tax.ts.

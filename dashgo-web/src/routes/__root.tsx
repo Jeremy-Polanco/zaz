@@ -10,13 +10,18 @@ import { ReactQueryDevtools } from '@tanstack/react-query-devtools'
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useCurrentUser, useLogout } from '../lib/auth'
-import { useMyAssociateBalance, useUpdateMe } from '../lib/queries'
+import {
+  useMyAssociateBalance,
+  useMySubscription,
+  useUpdateMe,
+} from '../lib/queries'
 import { requestBrowserLocation, reverseGeocode } from '../lib/geo'
 import { Button, UdashMark } from '../components/ui'
 import { NetworkBanner } from '../components/NetworkBanner'
 import { MaintenanceBanner } from '../components/MaintenanceBanner'
 import { LocationSelector } from '../components/LocationSelector'
 import { buysAsClient, isAssociate, roleLabel } from '../lib/roles'
+import { showsSubscriptionEntry } from '../lib/associate'
 import type { UserRole } from '../lib/types'
 
 const LOCKOUT_ALLOWLIST = new Set<string>(['/credit/pay', '/login'])
@@ -75,7 +80,7 @@ const mobileLinkClass =
 // Role → nav links, rendered as literal <Link>s so TanStack Router keeps its
 // type-safe `to`/`search`. Shared by the desktop nav and the mobile sheet; the
 // caller decides the layout (className) and whether a tap should close a menu.
-function RoleNavLinks({
+export function RoleNavLinks({
   role,
   linkClass,
   onNavigate,
@@ -88,6 +93,10 @@ function RoleNavLinks({
   // y tiene que poder llegar a su historial; solo se consulta para quien compra
   // como cliente (la query ya existe, no se suma otro tipo de request).
   const { data: poolBalance } = useMyAssociateBalance(buysAsClient(role as UserRole))
+  // El asociado no ve la oferta de suscripción salvo que ya tenga una. Solo se
+  // consulta para el asociado: al cliente no le cambia nada.
+  const associate = isAssociate(role as UserRole)
+  const { data: subscription } = useMySubscription(associate)
   if (role === 'super_admin_delivery') {
     return (
       <>
@@ -185,9 +194,11 @@ function RoleNavLinks({
       <Link to="/credit" className={linkClass} onClick={onNavigate}>
         Crédito
       </Link>
-      <Link to="/subscription" className={linkClass} onClick={onNavigate}>
-        Suscripción
-      </Link>
+      {showsSubscriptionEntry(role as UserRole, !!subscription) && (
+        <Link to="/subscription" className={linkClass} onClick={onNavigate}>
+          Suscripción
+        </Link>
+      )}
       {(isAssociate(role as UserRole) || (poolBalance?.balanceCents ?? 0) > 0) && (
         <Link to="/pool" className={linkClass} onClick={onNavigate}>
           Pool de asociados
