@@ -58,8 +58,6 @@ import {
   User,
 } from '../../src/entities';
 import { PaymentMethod, UserRole } from '../../src/entities/enums';
-import { computeTaxableBase } from '../../src/common/tax';
-import { ShippingService } from '../../src/modules/shipping/shipping.service';
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const request = require('supertest') as typeof import('supertest');
@@ -174,33 +172,6 @@ describe('Catálogo mayorista del asociado por HTTP (integración)', () => {
 
   const bearer = async (user: User) =>
     `Bearer ${await issueTestToken(app, user.id, user.role)}`;
-
-  /**
-   * Total que cobra el pipeline (neto + impuesto) para un carrito de UNA línea
-   * estándar, con el mismo helper de impuesto que usan intent y orden. Recibe
-   * el envío como parámetro: ver NOTA en la sección de paridad.
-   */
-  const expectedTotalCents = (opts: {
-    subtotalCents: number;
-    shippingCents: number;
-    pointsCents: number;
-    taxRate: number;
-  }) => {
-    const { taxCents } = computeTaxableBase(
-      [{ lineCents: opts.subtotalCents, taxCategory: 'standard' }],
-      {
-        shippingCents: opts.shippingCents,
-        pointsRedeemedCents: opts.pointsCents,
-        taxRate: opts.taxRate,
-      },
-    );
-    return (
-      Math.max(
-        0,
-        opts.subtotalCents + opts.shippingCents - opts.pointsCents,
-      ) + taxCents
-    );
-  };
 
   type CatalogItem = {
     id: string;
@@ -320,17 +291,8 @@ describe('Catálogo mayorista del asociado por HTTP (integración)', () => {
     });
   });
 
-  /**
-   * NOTA (envío): hoy el intent suma `ShippingService.computeQuote` (base +
-   * millas) y la orden suma el envío fijo (`ShippingRateService`, $5.00), así
-   * que para el MISMO carrito los dos totales difieren por la diferencia de
-   * envío (más su impuesto) aunque el precio sea idéntico — también para un
-   * cliente común. No es del catálogo mayorista y este spec no lo arregla: para
-   * probar que subtotal mayorista y saldo cuadran en ambos caminos se compara
-   * cada total contra el esperado con SU propio envío.
-   */
   describe('paridad intent ↔ orden con saldo de asociado', () => {
-    it('intent y orden parten del mismo subtotal mayorista y del mismo saldo; la orden queda con associate_pricing', async () => {
+    it('el monto del intent de Stripe es igual al total de la orden y la orden queda con associate_pricing', async () => {
       // Saldo (200) menor que el subtotal mayorista (2 × 600 = 1200): se gasta
       // todo el saldo y el resto lo cobra la tarjeta.
       const assoc = await seedAssociate(200);
@@ -369,26 +331,8 @@ describe('Catálogo mayorista del asociado por HTTP (integración)', () => {
       expect(row.subtotal).toBe('12.00'); // 2 × 6.00 mayorista, no 2 × 10.00
       expect(row.pointsRedeemed).toBe('2.00');
 
-      const taxRate = parseFloat(row.taxRate);
-      const quote = await app.get(ShippingService).computeQuote(address);
-      const orderShippingCents = Math.round(parseFloat(row.shipping) * 100);
-      // Mismo subtotal mayorista (1200) y mismo saldo (200) en los dos caminos.
-      expect(stripeAmount).toBe(
-        expectedTotalCents({
-          subtotalCents: 1200,
-          shippingCents: quote.shippingCents,
-          pointsCents: 200,
-          taxRate,
-        }),
-      );
-      expect(Math.round(parseFloat(row.totalAmount) * 100)).toBe(
-        expectedTotalCents({
-          subtotalCents: 1200,
-          shippingCents: orderShippingCents,
-          pointsCents: 200,
-          taxRate,
-        }),
-      );
+      // El Stripe mock recibió EXACTAMENTE lo que la orden registra.
+      expect(Math.round(parseFloat(row.totalAmount) * 100)).toBe(stripeAmount);
     });
 
     it('el saldo no se cobra de más: con saldo mayor al subtotal solo se gasta el subtotal', async () => {
@@ -423,26 +367,7 @@ describe('Catálogo mayorista del asociado por HTTP (integración)', () => {
       expect(row.associatePricing).toBe(true);
       expect(row.pointsRedeemed).toBe('6.00');
 
-      const taxRate = parseFloat(row.taxRate);
-      const quote = await app.get(ShippingService).computeQuote(address);
-      const orderShippingCents = Math.round(parseFloat(row.shipping) * 100);
-      // Saldo 5000 > subtotal 600: se canjea min(saldo, subtotal) = 600.
-      expect(stripeAmount).toBe(
-        expectedTotalCents({
-          subtotalCents: 600,
-          shippingCents: quote.shippingCents,
-          pointsCents: 600,
-          taxRate,
-        }),
-      );
-      expect(Math.round(parseFloat(row.totalAmount) * 100)).toBe(
-        expectedTotalCents({
-          subtotalCents: 600,
-          shippingCents: orderShippingCents,
-          pointsCents: 600,
-          taxRate,
-        }),
-      );
+      expect(Math.round(parseFloat(row.totalAmount) * 100)).toBe(stripeAmount);
     });
   });
 

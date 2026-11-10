@@ -14,7 +14,7 @@ import { PaymentsService } from './payments.service';
 import { Order, Product } from '../../entities';
 import { OrderStatus, PaymentMethod, UserRole } from '../../entities/enums';
 import { AssociateBalanceService } from '../pool/associate-balance.service';
-import { ShippingService } from '../shipping/shipping.service';
+import { ShippingRateService } from '../shipping/shipping-rate.service';
 import { CreditService } from '../credit/credit.service';
 import { SubscriptionService } from '../subscription/subscription.service';
 import { TaxJurisdictionService } from '../addresses/tax-jurisdiction.service';
@@ -110,7 +110,7 @@ describe('PaymentsService', () => {
   let creditService: jest.Mocked<CreditService>;
   let configService: jest.Mocked<ConfigService>;
   let associateBalanceService: jest.Mocked<AssociateBalanceService>;
-  let shippingService: jest.Mocked<ShippingService>;
+  let shippingRate: jest.Mocked<ShippingRateService>;
   let subscriptionService: jest.Mocked<SubscriptionService>;
   let taxJurisdictionService: { resolveTaxRate: jest.Mock };
   let userAddressesRepo: jest.Mocked<Repository<UserAddress>>;
@@ -146,9 +146,11 @@ describe('PaymentsService', () => {
       getBalanceCents: jest.fn().mockResolvedValue(0),
     } as unknown as jest.Mocked<AssociateBalanceService>;
 
-    shippingService = {
-      computeQuote: jest.fn().mockResolvedValue({ shippingCents: 0 }),
-    } as unknown as jest.Mocked<ShippingService>;
+    // Envío fijo vigente (el mismo que registra la orden). Por defecto 0 para no
+    // mover los montos de los tests que no hablan de envío; los que sí, lo fijan.
+    shippingRate = {
+      getFlatShippingCents: jest.fn().mockResolvedValue(0),
+    } as unknown as jest.Mocked<ShippingRateService>;
 
     subscriptionService = {
       isActiveSubscriber: jest.fn().mockResolvedValue(false),
@@ -169,7 +171,7 @@ describe('PaymentsService', () => {
         { provide: getRepositoryToken(Product), useValue: productsRepo },
         { provide: ConfigService, useValue: configService },
         { provide: AssociateBalanceService, useValue: associateBalanceService },
-        { provide: ShippingService, useValue: shippingService },
+        { provide: ShippingRateService, useValue: shippingRate },
         { provide: CreditService, useValue: creditService },
         { provide: SubscriptionService, useValue: subscriptionService },
         { provide: TaxJurisdictionService, useValue: taxJurisdictionService },
@@ -292,7 +294,7 @@ describe('PaymentsService', () => {
         { provide: getRepositoryToken(Product), useValue: productsRepo },
         { provide: ConfigService, useValue: cfg },
         { provide: AssociateBalanceService, useValue: associateBalanceService },
-        { provide: ShippingService, useValue: shippingService },
+        { provide: ShippingRateService, useValue: shippingRate },
         { provide: CreditService, useValue: creditService },
         { provide: SubscriptionService, useValue: subscriptionService },
         { provide: TaxJurisdictionService, useValue: taxJurisdictionService },
@@ -563,9 +565,7 @@ describe('PaymentsService', () => {
       associateBalanceService.getBalanceCents.mockResolvedValueOnce(1000);
       // Envío fijo real ($5): con envío 0 el tope no se notaría, porque el
       // monto se clampa en 0 tanto con el canje topado (600) como sin topar (1000).
-      shippingService.computeQuote.mockResolvedValueOnce({
-        shippingCents: 500,
-      } as never);
+      shippingRate.getFlatShippingCents.mockResolvedValueOnce(500);
 
       await service.createIntentForItems({
         userId: 'user-1',
@@ -605,13 +605,35 @@ describe('PaymentsService', () => {
       );
     });
 
+    it('intent shipping is the flat rate regardless of distance', async () => {
+      productsRepo.find.mockResolvedValue([
+        makeProduct({ id: 'prod-1', priceToPublic: '10.00' }),
+      ]);
+      shippingRate.getFlatShippingCents.mockResolvedValue(500);
+      // La dirección está lejos a propósito: el envío no depende de la distancia
+      // (el servicio ni siquiera recibe ShippingService), igual que en la orden.
+
+      await service.createIntentForItems({
+        userId: 'user-1',
+        role: UserRole.CLIENT,
+        items: [{ productId: 'prod-1', quantity: 1 }],
+        deliveryAddress: { text: 'lejos', lat: 41.9, lng: -73.1 },
+      });
+
+      // subtotal 1000 + envío fijo 500 = 1500, impuesto round(1500*0.08887)=133.
+      const expectedAmount = 1500 + Math.round(1500 * TAX_RATE);
+      expect(expectedAmount).toBe(1633);
+      expect(mockStripeInstance.paymentIntents.create).toHaveBeenCalledWith(
+        expect.objectContaining({ amount: expectedAmount }),
+        expect.anything(),
+      );
+    });
+
     it('includes shipping in the taxable base and maps null client_secret to ""', async () => {
       productsRepo.find.mockResolvedValue([
         makeProduct({ id: 'prod-1', priceToPublic: '5.00' }),
       ]);
-      shippingService.computeQuote.mockResolvedValueOnce({
-        shippingCents: 200,
-      } as never);
+      shippingRate.getFlatShippingCents.mockResolvedValueOnce(200);
       mockStripeInstance.paymentIntents.create.mockResolvedValueOnce({
         id: 'pi_ship',
         client_secret: null,

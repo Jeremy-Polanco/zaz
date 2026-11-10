@@ -17,7 +17,7 @@ import { isAssociate } from '../../common/roles';
 import { getEffectivePrice } from '../products/pricing';
 import { assertAssociateCart } from '../products/associate-catalog';
 import { AssociateBalanceService } from '../pool/associate-balance.service';
-import { ShippingService } from '../shipping/shipping.service';
+import { ShippingRateService } from '../shipping/shipping-rate.service';
 import { CreditService } from '../credit/credit.service';
 import { SubscriptionService } from '../subscription/subscription.service';
 import { assertStripeProductionConfig } from '../../common/stripe/stripe-runtime-guard';
@@ -88,7 +88,7 @@ export class PaymentsService implements OnModuleInit {
     @InjectRepository(UserAddress)
     private readonly userAddresses: Repository<UserAddress>,
     private readonly associateBalance: AssociateBalanceService,
-    private readonly shipping: ShippingService,
+    private readonly shippingRate: ShippingRateService,
     private readonly credit: CreditService,
     @Inject(forwardRef(() => SubscriptionService))
     private readonly subscription: SubscriptionService,
@@ -183,11 +183,11 @@ export class PaymentsService implements OnModuleInit {
       }
     }
 
-    const quote = await this.shipping.computeQuote({
-      lat: input.deliveryAddress?.lat,
-      lng: input.deliveryAddress?.lng,
-    });
-    const shippingCents = quote.shippingCents;
+    // Envío FIJO, de la misma fuente que OrdersService.create: la orden registra
+    // ese envío y `capture(intentId)` captura el monto AUTORIZADO acá, así que si
+    // el intent cotizara por distancia (base + millas) cobraría distinto que la
+    // orden. Este intent nunca es de una orden provisionada, no hay rama de $0.
+    const shippingCents = await this.shippingRate.getFlatShippingCents();
 
     // El DESTINO se resuelve con EL MISMO helper que usa OrdersService.create
     // (addresses/destination.ts): fila guardada del cliente → geocodificación
