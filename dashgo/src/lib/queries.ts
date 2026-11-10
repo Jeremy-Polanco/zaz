@@ -659,37 +659,6 @@ export function useConfirmNonStripeOrder() {
   })
 }
 
-export interface PaymentIntentResponse {
-  paymentIntentId: string
-  clientSecret: string
-  amount: number
-  currency: string
-}
-
-export function useCreatePaymentIntent() {
-  return useMutation({
-    mutationFn: async (input: {
-      items: { productId: string; quantity: number }[]
-      usePoints?: boolean
-      // postalCode habilita al backend a resolver la zona fiscal (tax/rate
-      // por zona) desde el intent, igual que en el payload de creación de
-      // orden — ver userAddressToGeoAddress en lib/address.ts.
-      deliveryAddress?: {
-        text: string
-        lat?: number
-        lng?: number
-        postalCode?: string
-      }
-    }) => {
-      const { data } = await api.post<PaymentIntentResponse>(
-        '/payments/intent',
-        input,
-      )
-      return data
-    },
-  })
-}
-
 export type CreateProductInput = {
   name: string
   description?: string

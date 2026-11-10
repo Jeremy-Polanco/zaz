@@ -273,90 +273,20 @@ describe('Catálogo mayorista del asociado por HTTP (integración)', () => {
         await ds.getRepository(Order).count({ where: { customerId: assoc.id } }),
       ).toBe(0);
     });
-
-    it('POST /payments/intent con un producto sin precio también responde 400 antes de tocar Stripe', async () => {
-      const assoc = await seedAssociate(0);
-
-      const res = await request(app.getHttpServer())
-        .post('/payments/intent')
-        .set('Authorization', await bearer(assoc))
-        .send({
-          items: [{ productId: unlisted.id, quantity: 1 }],
-          deliveryAddress: address,
-        })
-        .expect(400);
-
-      expect(res.body.code).toBe('PRODUCT_NOT_AVAILABLE_FOR_ASSOCIATES');
-      expect(mockStripe.paymentIntents.create).not.toHaveBeenCalled();
-    });
   });
 
-  describe('paridad intent ↔ orden con saldo de asociado', () => {
-    it('el monto del intent de Stripe es igual al total de la orden y la orden queda con associate_pricing', async () => {
-      // Saldo (200) menor que el subtotal mayorista (2 × 600 = 1200): se gasta
-      // todo el saldo y el resto lo cobra la tarjeta.
-      const assoc = await seedAssociate(200);
-      const auth = await bearer(assoc);
-      const items = [{ productId: listed.id, quantity: 2 }];
-
-      const intentRes = await request(app.getHttpServer())
-        .post('/payments/intent')
-        .set('Authorization', auth)
-        .send({ items, usePoints: true, deliveryAddress: address })
-        .expect(201);
-
-      expect(mockStripe.paymentIntents.create).toHaveBeenCalledTimes(1);
-      const stripeAmount = (
-        mockStripe.paymentIntents.create.mock.calls[0][0] as { amount: number }
-      ).amount;
-      expect(intentRes.body.amount).toBe(stripeAmount);
-
-      const orderRes = await request(app.getHttpServer())
-        .post('/orders')
-        .set('Authorization', auth)
-        .send({
-          items,
-          usePoints: true,
-          paymentMethod: PaymentMethod.DIGITAL,
-          stripePaymentIntentId: intentRes.body.paymentIntentId,
-          deliveryAddress: address,
-        })
-        .expect(201);
-
-      const row = await ds
-        .getRepository(Order)
-        .findOneByOrFail({ id: orderRes.body.id });
-      expect(row.customerId).toBe(assoc.id);
-      expect(row.associatePricing).toBe(true);
-      expect(row.subtotal).toBe('12.00'); // 2 × 6.00 mayorista, no 2 × 10.00
-      expect(row.pointsRedeemed).toBe('2.00');
-
-      // El Stripe mock recibió EXACTAMENTE lo que la orden registra.
-      expect(Math.round(parseFloat(row.totalAmount) * 100)).toBe(stripeAmount);
-    });
-
+  describe('saldo de asociado en la orden', () => {
     it('el saldo no se cobra de más: con saldo mayor al subtotal solo se gasta el subtotal', async () => {
       const assoc = await seedAssociate(5000);
       const auth = await bearer(assoc);
-      const items = [{ productId: listed.id, quantity: 1 }];
-
-      const intentRes = await request(app.getHttpServer())
-        .post('/payments/intent')
-        .set('Authorization', auth)
-        .send({ items, usePoints: true, deliveryAddress: address })
-        .expect(201);
-      const stripeAmount = (
-        mockStripe.paymentIntents.create.mock.calls[0][0] as { amount: number }
-      ).amount;
 
       const orderRes = await request(app.getHttpServer())
         .post('/orders')
         .set('Authorization', auth)
         .send({
-          items,
+          items: [{ productId: listed.id, quantity: 1 }],
           usePoints: true,
           paymentMethod: PaymentMethod.DIGITAL,
-          stripePaymentIntentId: intentRes.body.paymentIntentId,
           deliveryAddress: address,
         })
         .expect(201);
@@ -366,13 +296,11 @@ describe('Catálogo mayorista del asociado por HTTP (integración)', () => {
         .findOneByOrFail({ id: orderRes.body.id });
       expect(row.associatePricing).toBe(true);
       expect(row.pointsRedeemed).toBe('6.00');
-
-      expect(Math.round(parseFloat(row.totalAmount) * 100)).toBe(stripeAmount);
     });
   });
 
   describe('cobro real: POST /orders → POST /orders/:id/authorize', () => {
-    // Los clientes NO usan POST /payments/intent: crean la orden y la autorizan.
+    // Los clientes crean la orden y la autorizan.
     // El intent sale de order.totalAmount − creditApplied, así que lo que Stripe
     // retiene es exactamente lo que la orden mayorista registra.
     it('el intent de /authorize cobra el total mayorista de la orden (saldo del pool incluido)', async () => {
