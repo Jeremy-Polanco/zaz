@@ -30,6 +30,7 @@ import {
   type CreateProductInput,
 } from '../lib/queries'
 import { formatCents } from '../lib/utils'
+import { canCarryAssociatePrice, parseAssociatePrice } from '../lib/associate'
 import type { Category, Product } from '../lib/types'
 import { TOKEN_KEY, api, productImageUrl } from '../lib/api'
 import type { AuthUser } from '../lib/types'
@@ -77,6 +78,8 @@ type FormState = {
   offerEndsAt: string
   /** Precio para suscriptores, en dólares. Vacío = sin precio de suscriptor. */
   subscriberPriceText: string
+  /** Precio mayorista para asociados, en dólares. Vacío = no se ofrece. */
+  associatePriceText: string
   /** true = producto exento de impuesto (agua). false = paga TAX_RATE. */
   taxExempt: boolean
   // Rental pricing
@@ -95,6 +98,7 @@ type FormState = {
     pointsText?: string
     offerDiscountText?: string
     subscriberPriceText?: string
+    associatePriceText?: string
     image?: string
     monthlyRentText?: string
     lateFeeText?: string
@@ -123,6 +127,7 @@ const emptyForm: FormState = {
   offerStartsAt: '',
   offerEndsAt: '',
   subscriberPriceText: '',
+  associatePriceText: '',
   taxExempt: false,
   pricingMode: 'single_payment',
   monthlyRentText: '',
@@ -241,6 +246,10 @@ export function ProductForm({
         editing.subscriberPriceCents != null
           ? (editing.subscriberPriceCents / 100).toFixed(2)
           : '',
+      associatePriceText:
+        editing.associatePriceCents != null
+          ? (editing.associatePriceCents / 100).toFixed(2)
+          : '',
       taxExempt: editing.taxCategory === 'exempt',
       pricingMode: editing.pricingMode ?? 'single_payment',
       monthlyRentText: editing.monthlyRentCents ? String(editing.monthlyRentCents / 100) : '',
@@ -333,6 +342,16 @@ export function ProductForm({
       }
     }
 
+    // Precio para asociados. Solo un producto de pago único normal puede
+    // llevarlo; al convertirlo en renta (o marcarlo como bebedero/mantenimiento)
+    // se limpia en vez de bloquear el guardado — la API lo rechazaría.
+    let associatePriceCents: number | null = null
+    if (canCarryAssociatePrice(state)) {
+      const parsed = parseAssociatePrice(state.associatePriceText)
+      if (parsed.error) errors.associatePriceText = parsed.error
+      associatePriceCents = parsed.cents
+    }
+
     let offerDiscount: number | null = null
     if (showOffer && state.offerDiscountText.trim() !== '') {
       offerDiscount = parseFloat(state.offerDiscountText)
@@ -369,6 +388,7 @@ export function ProductForm({
       offerStartsAt: showOffer ? fromDateInput(state.offerStartsAt) : null,
       offerEndsAt: showOffer ? fromDateInput(state.offerEndsAt) : null,
       subscriberPriceCents,
+      associatePriceCents,
       taxCategory: state.taxExempt ? ('exempt' as const) : ('standard' as const),
       pricingMode: state.pricingMode,
       ...(state.pricingMode === 'rental'
@@ -898,6 +918,39 @@ export function ProductForm({
                       suscriptor.
                     </p>
                   </div>
+
+                  {canCarryAssociatePrice(state) ? (
+                    <div>
+                      <Label htmlFor="associatePrice">
+                        Precio para asociados (opcional)
+                      </Label>
+                      <div className="flex items-center border border-ink/15 bg-paper focus-within:border-ink">
+                        <span className="px-3 py-2.5 text-sm text-ink-muted">$</span>
+                        <Input
+                          id="associatePrice"
+                          type="text"
+                          inputMode="decimal"
+                          value={state.associatePriceText}
+                          onChange={(e) =>
+                            setState((s) => ({
+                              ...s,
+                              associatePriceText: e.target.value,
+                            }))
+                          }
+                          className="nums flex-1 border-0 bg-transparent px-3 py-2.5 text-sm text-ink outline-none"
+                          placeholder="Vacío = no se ofrece a asociados"
+                        />
+                        <span className="px-3 py-2.5 text-[0.65rem] uppercase tracking-[0.10em] text-ink-muted">
+                          USD
+                        </span>
+                      </div>
+                      <FieldError message={state.errors.associatePriceText} />
+                      <p className="mt-1.5 text-[0.7rem] text-ink-muted">
+                        Precio mayorista fijo. Los asociados solo ven los
+                        productos que tienen este precio.
+                      </p>
+                    </div>
+                  ) : null}
 
                   <button
                     type="button"
@@ -1608,6 +1661,9 @@ function SortableProductRow({
               formatCents(p.effectivePriceCents)
             )}
           </span>
+          {p.associatePriceCents != null ? (
+            <span>Asociados {formatCents(p.associatePriceCents)}</span>
+          ) : null}
           <span>Stock: {p.stock}</span>
           <span>Orden: {p.displayOrder ?? 0}</span>
           <span>Comisión: {parseFloat(p.promoterCommissionPct).toFixed(2)}%</span>

@@ -562,6 +562,7 @@ export type CreateProductInput = {
   offerEndsAt?: string | null
   /** Precio en cents para suscriptores activos. null = sin precio de suscriptor. */
   subscriberPriceCents?: number | null
+  associatePriceCents?: number | null
   /** 'standard' paga impuesto, 'exempt' no (agua embotellada en NJ). */
   taxCategory?: 'standard' | 'exempt'
   pricingMode?: 'single_payment' | 'rental'

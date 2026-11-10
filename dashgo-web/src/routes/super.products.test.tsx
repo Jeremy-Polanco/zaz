@@ -316,6 +316,83 @@ describe('ProductForm — saving a rental', () => {
   })
 })
 
+describe('ProductForm — associate price', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    setupProductFormMocks()
+  })
+
+  const saveable = (overrides: Partial<Product> = {}) =>
+    makeSinglePaymentProduct({ categoryId: 'cat-1', ...overrides })
+
+  it('saves the associate price in cents, accepting a Spanish comma', async () => {
+    const update = vi.fn().mockResolvedValue({ id: 'prod-001' })
+    setupProductFormMocks({ updateAsync: update })
+    await openPricingTab(saveable())
+
+    await userEvent.type(screen.getByLabelText(/Precio para asociados/), '4,50')
+    await userEvent.click(screen.getByRole('button', { name: /Guardar/ }))
+
+    await waitFor(() =>
+      expect(update).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 'prod-001', associatePriceCents: 450 }),
+      ),
+    )
+  })
+
+  it('prefills the field from the product, in dollars', async () => {
+    await openPricingTab(saveable({ associatePriceCents: 450 }))
+
+    expect(screen.getByLabelText(/Precio para asociados/)).toHaveValue('4.50')
+  })
+
+  it('clearing the associate price sends null', async () => {
+    const update = vi.fn().mockResolvedValue({ id: 'prod-001' })
+    setupProductFormMocks({ updateAsync: update })
+    await openPricingTab(saveable({ associatePriceCents: 450 }))
+
+    await userEvent.clear(screen.getByLabelText(/Precio para asociados/))
+    await userEvent.click(screen.getByRole('button', { name: /Guardar/ }))
+
+    await waitFor(() =>
+      expect(update).toHaveBeenCalledWith(
+        expect.objectContaining({ associatePriceCents: null }),
+      ),
+    )
+  })
+
+  it('zero shows the error and does not save', async () => {
+    const update = vi.fn().mockResolvedValue({ id: 'prod-001' })
+    setupProductFormMocks({ updateAsync: update })
+    await openPricingTab(saveable())
+
+    await userEvent.type(screen.getByLabelText(/Precio para asociados/), '0')
+    await userEvent.click(screen.getByRole('button', { name: /Guardar/ }))
+
+    expect(await screen.findByText('Ingresa un precio mayor a 0')).toBeInTheDocument()
+    expect(update).not.toHaveBeenCalled()
+  })
+
+  it('a rental hides the field and saves associatePriceCents null', async () => {
+    const update = vi.fn().mockResolvedValue({ id: 'prod-001' })
+    setupProductFormMocks({ updateAsync: update })
+    await openPricingTab(saveable({ associatePriceCents: 500, monthlyRentCents: 2000, lateFeeCents: 500 }))
+    expect(screen.getByLabelText(/Precio para asociados/)).toBeInTheDocument()
+
+    await userEvent.click(screen.getByTestId('pricing-mode-rental'))
+    expect(screen.queryByLabelText(/Precio para asociados/)).not.toBeInTheDocument()
+
+    await userEvent.type(screen.getByTestId('monthly-rent-input'), '20')
+    await userEvent.click(screen.getByRole('button', { name: /Guardar/ }))
+
+    await waitFor(() =>
+      expect(update).toHaveBeenCalledWith(
+        expect.objectContaining({ pricingMode: 'rental', associatePriceCents: null }),
+      ),
+    )
+  })
+})
+
 describe('super.products — isStockValid (pure function)', () => {
   // The bug: with "Manejar stock" OFF and an empty stock field, save was
   // blocked — the operator had to type a number then toggle back. Stock should
